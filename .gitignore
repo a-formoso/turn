@@ -1,0 +1,23 @@
+# Local tooling / session state (Claude Code, runtime)
+.claude/
+.image-slots.state.json
+
+# Heavy runtime / dev assets the app doesn't need to function
+uploads/
+screenshots/
+
+# OS / editor junk
+.DS_Store
+**/.DS_Store
+*.swp
+*~
+
+# Dependencies / build (none today, future-proofing)
+node_modules/
+dist/
+build/
+
+# Secrets (none in repo today — the only key is the public Supabase anon key — but never commit these)
+.env
+.env.*
+*.local
