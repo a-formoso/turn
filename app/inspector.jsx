@@ -2,7 +2,6 @@
 
 const KIND_OPTS = [["normal","Scene"],["incite","Inciting Incident"],["act-climax","Act Climax"],
   ["midpoint","Mid-Act Climax"],["crisis","Crisis"],["story-climax","Story Climax"],["resolution","Resolution"]];
-const DRIVER_OPTS = [["neo","Neo"],["morpheus","Morpheus"],["trinity","Trinity"],["smith","Agent Smith"],["cypher","Cypher"],["tank","Tank"],["oracle","The Oracle"]];
 
 /* inline editable text — local state so the cursor never jumps */
 function EditText({ value, onCommit, className, placeholder, multiline, autoFocus }){
@@ -242,7 +241,9 @@ function Inspector({ scene, beats, onCharge, onUpdate, characters, scenes, onAdd
     const list = (characters||[]).map(c=>[c.id, c.name]);
     if(scene && scene.driver && !list.some(o=>o[0]===scene.driver))
       list.push([scene.driver, scene.driver.charAt(0).toUpperCase()+scene.driver.slice(1)]);
-    return list.length ? list : DRIVER_OPTS;
+    // no fallback to sample names — an empty cast means no driver options yet (add
+    // cast first), never the Matrix sample's characters.
+    return list;
   })();
   if(!scene) return React.createElement("div",{className:"inspector"},
     React.createElement("div",{style:{display:"flex",justifyContent:"flex-end",padding:"10px 12px 0"}},

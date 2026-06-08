@@ -34,14 +34,18 @@ function sceneTransition(prev, cur){
   return { type:"HARD CUT", cls:"", gloss:`New location \u2014 ${b.place}.` };
 }
 
-/* the story-state carried across the cut into this scene */
-function sceneCarry(prev, cur){
+/* the story-state carried across the cut into this scene.
+   "Serves spine" is the film's controlling idea \u2014 derived from THIS project, never
+   hardcoded (it used to leak the Matrix sample's spine into every story). */
+function sceneCarry(prev, cur, project){
   const b = parseSlug(cur.loc);
+  const ci = (project && project.controllingIdea) || {};
+  const spine = (ci.value||"").trim() || ((project && (project.logline||project.premise))||"").trim();
   const cells = [
     { lab:"Location", val:b.place },
     { lab:"Time", val:b.time || "\u2014" },
-    { lab:"Serves spine", val:"Neo \u2014 break the lie, become free" },
   ];
+  if(spine) cells.push({ lab:"Serves spine", val: spine.length>72 ? spine.slice(0,71)+"\u2026" : spine });
   if(prev) cells.push({
     lab:"Emotional carry",
     node:React.createElement(React.Fragment,null,
@@ -181,7 +185,7 @@ function ContinuityReport({ report, onJump, onClose, currentId }){
 }
 
 function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, onDraftAll, onPolish, drafting, total,
-                     history, labelOf, onRevert, onRedo, continuityMap }){
+                     history, labelOf, onRevert, onRedo, continuityMap, project }){
   const CONT = continuityMap || (window.TURN_DATA||{}).CONTINUITY || {};
   const FACTS = (window.TURN_DATA||{}).FACTS || {};
   const live = typeof aiAvailable==="function" && aiAvailable();
@@ -207,7 +211,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
 
   const transIn = sceneTransition(prevScene, scene);
   const transOut = nextScene ? sceneTransition(scene, nextScene) : null;
-  const carry = sceneCarry(prevScene, scene);
+  const carry = sceneCarry(prevScene, scene, project);
 
   const report = continuityReport(scenes, CONT, FACTS);
   const sceneConflicts = report.conflicts.filter(c=>c.sceneId===scene.id);
