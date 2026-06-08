@@ -85,12 +85,33 @@ function TurnAudit({ scenes, selId, onSelect }){
 function Board({ scenes, selId, onSelect }){
   const acts=[1,2,3].map(a=>({act:a,scenes:scenes.filter(s=>s.act===a)}));
   const titles={1:"Act I · Setup",2:"Act II · Complication",3:"Act III · Resolution"};
+  // per-act fold state (persisted) — collapse an act column to a narrow strip to
+  // focus on the act you're working in.
+  const [collapsed,setCollapsed]=React.useState(()=>{ try{ return JSON.parse(localStorage.getItem("turn_board_collapsed")||"{}")||{}; }catch(e){ return {}; } });
+  React.useEffect(()=>{ try{ localStorage.setItem("turn_board_collapsed",JSON.stringify(collapsed)); }catch(e){} },[collapsed]);
+  const toggle=(act)=> setCollapsed(c=>({...c,[act]:!c[act]}));
   return React.createElement(DragScroll,{className:"canvas-scroll board-pan",style:{padding:"18px 22px 40px"}},
     React.createElement("div",{style:{display:"flex",gap:14,minWidth:"max-content"}},
-      acts.map(a=>
-        React.createElement("div",{key:a.act,style:{width:300,flex:"0 0 300px"}},
+      acts.map(a=>{
+        const roman=["I","II","III"][a.act-1];
+        // collapsed → a slim, clickable vertical strip
+        if(collapsed[a.act]) return React.createElement("div",{key:a.act,className:"board-act-strip",
+          onClick:()=>toggle(a.act),title:`Expand ${titles[a.act]}`,
+          style:{width:46,flex:"0 0 46px",alignSelf:"flex-start",cursor:"pointer",
+            display:"flex",flexDirection:"column",alignItems:"center",gap:12,padding:"10px 0",
+            border:"1px solid var(--line)",borderRadius:"var(--r-m)",background:"var(--bg-1)"}},
+          React.createElement(Icon.chevR,{s:14}),
+          React.createElement("span",{className:"tree-act-no"},roman),
+          React.createElement("span",{style:{writingMode:"vertical-rl",fontFamily:"var(--f-display)",fontSize:12,
+            fontWeight:500,color:"var(--txt-2)",letterSpacing:".02em"}},titles[a.act].split("· ")[1]),
+          React.createElement("span",{style:{fontFamily:"var(--f-mono)",fontSize:10,color:"var(--txt-3)"}},a.scenes.length));
+        return React.createElement("div",{key:a.act,style:{width:300,flex:"0 0 300px"}},
           React.createElement("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"0 2px"}},
-            React.createElement("span",{className:"tree-act-no"},["I","II","III"][a.act-1]),
+            React.createElement("button",{className:"board-act-fold",onClick:()=>toggle(a.act),
+              title:`Collapse ${titles[a.act]}`,
+              style:{display:"flex",border:0,background:"transparent",cursor:"pointer",color:"var(--txt-2)",padding:2}},
+              React.createElement(Icon.chevD,{s:13})),
+            React.createElement("span",{className:"tree-act-no"},roman),
             React.createElement("span",{style:{fontFamily:"var(--f-display)",fontSize:13,fontWeight:500}},titles[a.act].split("· ")[1]),
             React.createElement("span",{style:{fontFamily:"var(--f-mono)",fontSize:10,color:"var(--txt-3)",marginLeft:"auto"}},a.scenes.length)),
           React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:8}},
@@ -112,7 +133,7 @@ function Board({ scenes, selId, onSelect }){
                   React.createElement("span",{className:"chip-arrow"},React.createElement(Icon.arrowSmall,{s:11})),
                   React.createElement(ChargeChip,{value:s.closeCharge}),
                   flagged&&React.createElement("span",{className:"tree-flag",style:{marginLeft:"auto"}},React.createElement(Icon.alert,{s:13}))));
-            })))))); 
+            })));})));
 }
 
 /* viewport mode — drives responsive layout (mobile drawers vs desktop columns) */
@@ -663,24 +684,58 @@ function App(){
     if(locations.length){ setLocsSeeded(true); return; }
     if(typeof scriptHasLocations==="function" && scriptHasLocations(scenes)) pullLocationsFromScript();
   },[room, artView, locsSeeded, locations.length, scenes, pullLocationsFromScript, hydrationTick]);
-  // read the whole film and assign each scene a Style Bible preset
+  // read the whole film, design a BESPOKE per-film palette and color-script it
+  // along the value-charge spine (see aiAssignSceneStyles).
   const assignSceneStyles = async ()=>{
     if(assigningStyles || !(typeof aiAssignSceneStyles==="function")) return;
     setAssigningStyles(true);
     try{
-      const presets = (typeof styleBibleOf==="function") ? styleBibleOf(project).presets : (window.STYLE_PRESETS_DEFAULT||[]);
-      const res = await aiAssignSceneStyles(scenes, presets, drafts, project);
+      const seed = (typeof styleBibleOf==="function") ? styleBibleOf(project).presets : (window.STYLE_PRESETS_DEFAULT||[]);
+      const res = await aiAssignSceneStyles(scenes, seed, drafts, project);
       if(res){
         setProject(p=>{
           const sb = (p.styleBible)||{};
-          const mergedPresets = [...presets];
-          (res.newPresets||[]).forEach(np=>{ if(!mergedPresets.find(x=>x.id===np.id)) mergedPresets.push(np); });
-          return {...p, styleBible:{ presets:mergedPresets, sceneStyles:{...(sb.sceneStyles||{}), ...(res.sceneStyles||{})} }};
+          // A bespoke per-film palette REPLACES the generic starter set (deduped by
+          // id) so each film looks unique; fall back to the existing/seed presets if
+          // the model returned none.
+          const bespoke = (res.presets&&res.presets.length) ? res.presets : null;
+          let presets, sceneStyles;
+          if(bespoke){
+            const byId = {}; bespoke.forEach(p=>{ byId[p.id]=p; });
+            presets = Object.values(byId);
+            // drop any prior assignment whose preset no longer exists, then overlay
+            // the fresh color-script.
+            const validIds = new Set(presets.map(p=>p.id));
+            const kept = {}; Object.entries(sb.sceneStyles||{}).forEach(([sid,pid])=>{ if(validIds.has(pid)) kept[sid]=pid; });
+            sceneStyles = {...kept, ...(res.sceneStyles||{})};
+          } else {
+            presets = (sb.presets&&sb.presets.length) ? sb.presets : seed;
+            sceneStyles = {...(sb.sceneStyles||{}), ...(res.sceneStyles||{})};
+          }
+          // preserve any other styleBible fields (e.g. the user's visual refs).
+          return {...p, styleBible:{ ...sb, presets, sceneStyles }};
         });
       }
     }catch(e){}
     setAssigningStyles(false);
   };
+  // the user's free-text visual references that steer bespoke palette design
+  const setStyleRefs = (refs)=> setProject(p=>({ ...p, styleBible:{ ...((p.styleBible)||{}), refs:String(refs||"") } }));
+  // uploaded reference images (palette sampled client-side); capped to keep state light
+  const addStyleRefImages = (imgs)=> setProject(p=>{ const sb=(p.styleBible)||{};
+    return { ...p, styleBible:{ ...sb, refImages:[...(sb.refImages||[]), ...(imgs||[])].slice(0,8) } }; });
+  const removeStyleRefImage = (id)=> setProject(p=>{ const sb=(p.styleBible)||{};
+    return { ...p, styleBible:{ ...sb, refImages:(sb.refImages||[]).filter(r=>r.id!==id) } }; });
+  // project-wide film-stock / capture look, applied to shot frames
+  const setFilmStock = (id)=> setProject(p=>({ ...p, styleBible:{ ...((p.styleBible)||{}), filmStock:String(id||"none") } }));
+  // manual per-scene preset override (presetId null = unassign). Note: re-running
+  // "Assign from script" re-color-scripts every scene and will overwrite these.
+  const setScenePreset = (sceneId, presetId)=> setProject(p=>{
+    const sb = (p.styleBible)||{};
+    const sceneStyles = {...(sb.sceneStyles||{})};
+    if(presetId) sceneStyles[sceneId] = presetId; else delete sceneStyles[sceneId];
+    return {...p, styleBible:{ ...sb, sceneStyles }};
+  });
 
   // ---- Art Room: SHOT LIST ----
   // A shot = one beat. "Draft all shots" derives the shot breakdown for every scene
@@ -1067,6 +1122,10 @@ function App(){
       onToggleRail:toggleRail,
       onToggleInsp:toggleInsp}),
 
+    // the room's view tabs, moved out of the top bar to a full-width bar beneath it
+    React.createElement(ViewNav,{room,view,setView,artView,setArtView,
+      railOpen,inspOpen,onToggleRail:toggleRail,onToggleInsp:toggleInsp}),
+
     authOpen && React.createElement(AuthModal,{ initialMode:authMode, plan:intendedPlan,
       onClose:()=>setAuthOpen(false),
       onAuthed:(s)=>{ if(s) setSession(s); }}),
@@ -1088,7 +1147,8 @@ function App(){
             locations,onUpdateLocation:updateLocation,onDraftLocation:draftLocationVisuals,onDraftAllLocs:draftAllLocations,
             onAddLocation:addLocation,onDeleteLocation:deleteLocation,draftingLocId,draftingAllLocs,
             onPullFromScript:pullLocationsFromScript,scriptHasLocs:(typeof scriptHasLocations==="function" && scriptHasLocations(scenes)),
-            onAssignStyles:assignSceneStyles,assigningStyles,
+            onAssignStyles:assignSceneStyles,assigningStyles,onSetStyleRefs:setStyleRefs,onSetScenePreset:setScenePreset,
+            onAddStyleRefImages:addStyleRefImages,onRemoveStyleRefImage:removeStyleRefImage,onSetFilmStock:setFilmStock,
             onDraftStaging:draftLocationStaging,draftingStageId,
             shots,beatsMap,onUpdateShot:updateShot,onAddShot:addShot,onDeleteShot:deleteShot,
             onDraftSceneShots:draftSceneShots,draftingSceneShots,onDraftAllShots:draftAllShots,draftingAllShots}))
@@ -1142,7 +1202,7 @@ function App(){
           drafts, scenes, onSelectScene:selectScene, onPolish:polishScene,
           onDraftOne:draftOne, onDraftAll:draftAll, drafting, total:scenes.length,
           history: sel ? (history[sel.id]||{back:[],fwd:[]}) : {back:[],fwd:[]},
-          labelOf, onRevert:revertVersion, onRedo:redoVersion, continuityMap}),
+          labelOf, onRevert:revertVersion, onRedo:redoVersion, continuityMap, project}),
 
         // Floating Writers' Room (Agents) launcher — the agents refine an existing
         // story, so it only appears once a story exists (scenes > 0).
@@ -1166,9 +1226,6 @@ function App(){
             : React.createElement(CollapsedStrip,{side:"right",label:"Inspector",icon:Icon.panelRight,
                 onExpand:()=>setInspOpen(true)}));
       })())),
-
-    // compact primary nav — bottom tab bar for tablet + mobile (frees the top bar)
-    vp!=="desktop" && React.createElement(BottomNav,{room,view,setView,artView,setArtView}),
 
     // Agents — Writers' Room modal
     agentsOpen && React.createElement(AgentsPanel,{

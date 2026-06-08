@@ -101,22 +101,28 @@ function OverflowMenu({ onNewStory, project, scenes, drafts, onReset }){
 }
 window.OverflowMenu = OverflowMenu;
 
-/* BottomNav — mobile-only primary view tabs, anchored where the thumb lives.
-   Mirrors the top segmented control; empties the crowded center of the bar. */
-function BottomNav({ room, view, setView, artView, setArtView }){
+/* ViewNav — the room's view tabs (Writers' Spine/Audit/Board/Script, or the Art
+   Room tabs) as a full-width bar directly beneath the top bar, at every screen
+   size. Moved out of the top bar to free its space; the panel toggles ride along
+   at the edges (Writers' Room only). Replaces the old mobile-only bottom bar. */
+function ViewNav({ room, view, setView, artView, setArtView, railOpen, inspOpen, onToggleRail, onToggleInsp }){
   const writersNav = [["spine","Spine",Icon.graph],["beats","Audit",Icon.grid],["board","Board",Icon.board],["script","Script",Icon.script]];
   const artNav = (window.ART_TABS||[]).map(t=>[t.id,t.label,Icon[t.icon]||Icon.user]);
   const inArt = room==="art";
   const nav = inArt ? artNav : writersNav;
   const cur = inArt ? artView : view;
   const setCur = inArt ? setArtView : setView;
-  return React.createElement("nav",{className:"bottom-nav","aria-label":"Views"},
-    nav.map(([id,lab,Ic])=>
-      React.createElement("button",{key:id,className:`bn-tab ${cur===id?"on":""}`,onClick:()=>setCur(id)},
-        React.createElement(Ic,{s:19}),
-        React.createElement("span",{className:"bn-lab"},lab))));
+  return React.createElement("div",{className:"viewnav","aria-label":"Views"},
+    !inArt && React.createElement("button",{className:`tb-icon ${railOpen?"on":""}`,onClick:onToggleRail,title:"Toggle story panel"},
+      React.createElement(Icon.panelLeft,{s:16})),
+    React.createElement("div",{className:"segmented"},
+      nav.map(([id,lab,Ic])=>
+        React.createElement("button",{key:id,className:`seg ${cur===id?"on":""}`,onClick:()=>setCur(id),title:lab},
+          React.createElement(Ic,{s:14}),React.createElement("span",{className:"seg-lab"},lab)))),
+    !inArt && React.createElement("button",{className:`tb-icon ${inspOpen?"on":""}`,onClick:onToggleInsp,title:"Toggle inspector"},
+      React.createElement(Icon.panelRight,{s:16})));
 }
-window.BottomNav = BottomNav;
+window.ViewNav = ViewNav;
 
 const ROOMS = [
   { id:"writers", label:"Writers\u2019 Room", phase:"Development", icon:"script", live:true },
@@ -171,32 +177,17 @@ function ThemeToggle({ theme, onTheme }){
 }
 window.ThemeToggle = ThemeToggle;
 
-function TopBar({ view, setView, room, setRoom, artView, setArtView, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, theme, onTheme, railOpen, inspOpen, onToggleRail, onToggleInsp, authSlot, projectSlot }){
-  const writersNav = [["spine","Spine",Icon.graph],["beats","Audit",Icon.grid],["board","Board",Icon.board],["script","Script",Icon.script]];
-  const artNav = (window.ART_TABS||[]).map(t=>[t.id,t.label,Icon[t.icon]||Icon.user]);
-  const inArt = room==="art";
-  const nav = inArt ? artNav : writersNav;
-  const cur = inArt ? artView : view;
-  const setCur = inArt ? setArtView : setView;
+function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, theme, onTheme, authSlot, projectSlot }){
   return React.createElement("div",{className:"topbar"},
     React.createElement("div",{className:"tb-left"},
       React.createElement("div",{className:"brand"},
         React.createElement(BrandMark,null),
         React.createElement("span",{className:"brand-name"},"T",React.createElement("b",null,"U"),"RN")),
       React.createElement("div",{className:"topbar-divider"}),
+      // project title first, then the department (room) switcher
       React.createElement("div",{className:"context-group"},
-        React.createElement(RoomSwitcher,{room,setRoom}),
-        projectSlot || null)),
-
-    React.createElement("div",{className:"tb-center"},
-      !inArt && React.createElement("button",{className:`tb-icon ${railOpen?"on":""}`,onClick:onToggleRail,title:"Toggle story panel"},
-        React.createElement(Icon.panelLeft,{s:16})),
-      React.createElement("div",{className:"segmented"},
-        nav.map(([id,lab,Ic])=>
-          React.createElement("button",{key:id,className:`seg ${cur===id?"on":""}`,onClick:()=>setCur(id),title:lab},
-            React.createElement(Ic,{s:14}),React.createElement("span",{className:"seg-lab"},lab)))),
-      !inArt && React.createElement("button",{className:`tb-icon ${inspOpen?"on":""}`,onClick:onToggleInsp,title:"Toggle inspector"},
-        React.createElement(Icon.panelRight,{s:16}))),
+        projectSlot || null,
+        React.createElement(RoomSwitcher,{room,setRoom}))),
 
     React.createElement("div",{className:"tb-right"},
       React.createElement(ThemeToggle,{theme,onTheme}),
@@ -204,7 +195,7 @@ function TopBar({ view, setView, room, setRoom, artView, setArtView, project, sc
         React.createElement(Icon.plus,{s:14}),"New Story"),
       React.createElement(ExportMenu,{project,scenes,drafts,onReset}),
       React.createElement(OverflowMenu,{onNewStory,project,scenes,drafts,onReset}),
-      React.createElement("button",{className:"tb-btn accent",onClick:onAgents,title:"Agents — AI agents + ask MUSE"},
+      room==="writers" && React.createElement("button",{className:"tb-btn accent",onClick:onAgents,title:"Agents — AI agents + ask MUSE"},
         React.createElement(Icon.robot,{s:14}),"Agents"),
       authSlot || React.createElement("div",{className:"avatar"},"MV")),
   );

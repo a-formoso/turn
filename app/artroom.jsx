@@ -474,7 +474,7 @@ window.BatchBar = BatchBar;
 /* SheetDetails — a modal exposing everything about a generated sheet: id, model,
    resolution, aspect, timestamp, grounding, the exact prompt sent, the reference
    images used, and the full version history (preview + restore any prior version). */
-function SheetDetails({ gen, name, noun, onClose, onView }){
+function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
   const [data, setData] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [copiedKey, setCopiedKey] = React.useState(null);
@@ -565,6 +565,9 @@ function SheetDetails({ gen, name, noun, onClose, onView }){
           field("Resolution", meta.size),
           field("Aspect ratio", meta.aspect),
           field("Generated", (meta.date||"")+(meta.time?(" \u00b7 "+meta.time):"")),
+          ...((extraMeta||[]).filter(m=>m&&m.v).map((m,i)=>React.createElement("div",{key:"em"+i,className:"dt-field"},
+            React.createElement("div",{className:"dt-flab"},m.k),
+            React.createElement("div",{className:"dt-fval"},m.v)))),
           field("Version", meta.version ? ("v"+meta.version) : null),
           field("Grounding", meta.grounded ? (meta.groundImages?"Google Search (web + images)":"Google Search") : null),
           field("Prop references", meta.propRefs ? (meta.propRefs+" prop sheet"+(meta.propRefs>1?"s":"")) : null),
@@ -633,7 +636,7 @@ function SheetDetails({ gen, name, noun, onClose, onView }){
 /* SheetFrame — the visual half of any reference-sheet card: generated image (with
    options menu + inline AI edit), or the reference-photo drop slot, then the
    Generate button, error recovery, and the metadata caption. Driven by useImageGen. */
-function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate }){
+function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate, extraMeta }){
   const { genUrl, genMeta, genTier, gening, genErr, retrying, slotHasRef,
     editMode, setEditMode, editText, setEditText, generate, clearGen, relatedClearCount, revertPrevious, layers, allModels } = gen;
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -802,7 +805,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
        containment), which would otherwise make this card the containing block for
        the modal's position:fixed — trapping the overlay inside the card instead of
        covering the viewport (broken/clipped on small screens). */
-    detailsOpen && ReactDOM.createPortal(React.createElement(SheetDetails,{ gen, name, noun,
+    detailsOpen && ReactDOM.createPortal(React.createElement(SheetDetails,{ gen, name, noun, extraMeta,
       onClose:()=>setDetailsOpen(false), onView:(url)=>onView&&onView(url, entity) }), document.body));
 }
 window.SheetFrame = SheetFrame;
@@ -1609,10 +1612,9 @@ function CharacterSheets({ project, characters, scenes, props, onUpdate, onDraft
     React.createElement("div",{className:"art-intro"},
       React.createElement("div",{className:"art-intro-row"},
         React.createElement("div",{style:{flex:1}},
-          React.createElement("div",{className:"art-intro-t"},"Character Sheets"),
-          React.createElement("div",{className:"art-intro-d"},
-            "A canonical visual reference for every character \u2014 the consistency anchor you feed into each shot so they look identical in every frame. ",
-            "Generated stories arrive pre-filled; copy the master grid prompt into your image tool, then drop the result back here.")),
+          React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Character Sheets",
+            React.createElement(window.InfoTip,{label:"About Character Sheets",
+              text:"A canonical visual reference for every character \u2014 the consistency anchor you feed into each shot so they look identical in every frame. Generated stories arrive pre-filled; copy the master grid prompt into your image tool, then drop the result back here."}))),
         React.createElement("div",{className:"art-intro-actions"},
           cameoCount>0 && React.createElement("button",{className:"art-cameo-mgr",onClick:()=>setMgrOpen(true),
             title:"Review & manage locked likenesses"},
@@ -1650,7 +1652,7 @@ function ArtComingSoon({ tab }){
 function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds,
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
-  locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onAssignStyles, assigningStyles, onDraftStaging, draftingStageId,
+  locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onSetFilmStock, onDraftStaging, draftingStageId,
   shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots }){
   const PropSheets = window.PropSheets;
   const LocationSheets = window.LocationSheets;
@@ -1689,7 +1691,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
           onDraftAll:onDraftAllLocs,onAdd:onAddLocation,onDelete:onDeleteLocation,draftingId:draftingLocId,draftingAll:draftingAllLocs,
           onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId})
       : artView==="stylebible" && window.StyleBibleView
-      ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles})
+      ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage,onSetFilmStock})
       : artView==="shots" && window.ShotList
       ? React.createElement(window.ShotList,{project,scenes,characters,props,locations,shots,beatsMap,
           onUpdateShot,onAddShot,onDeleteShot,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots})

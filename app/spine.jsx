@@ -30,27 +30,47 @@ window.ChargeChip = ChargeChip;
 function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddScene }){
   const [dragIdx, setDragIdx] = React.useState(null);
   const [overIdx, setOverIdx] = React.useState(null);
-  const n = scenes.length;
-  const totalW = n * COL_W + (n - 1) * GAP;
+  // per-act fold state (persisted) — collapse an act to a narrow band to focus the arc
+  const [collapsed, setCollapsed] = React.useState(()=>{ try{ return JSON.parse(localStorage.getItem("turn_spine_collapsed")||"{}")||{}; }catch(e){ return {}; } });
+  React.useEffect(()=>{ try{ localStorage.setItem("turn_spine_collapsed", JSON.stringify(collapsed)); }catch(e){} },[collapsed]);
+  const toggle = (act)=> setCollapsed(c=>({...c,[act]:!c[act]}));
+  const COLLAPSED_W = 46;
+  const roman = (a)=> ["I","II","III"][a-1] || String(a);
+  const actNames = { 1:"Setup", 2:"Complication", 3:"Resolution" };
+
   const yFor = (charge) => {
     // charge -3..+3 -> y within graph (PAD_T..GRAPH_H-PAD_B)
     const top = PAD_T, bot = GRAPH_H - PAD_B;
     const t = (3 - charge) / 6; // +3 -> 0, -3 -> 1
     return top + t * (bot - top);
   };
-  const xFor = (i) => i * (COL_W + GAP) + COL_W / 2;
 
-  // act bands
-  const acts = [];
-  scenes.forEach((s, i) => {
-    const last = acts[acts.length - 1];
-    if (!last || last.act !== s.act) acts.push({ act: s.act, from: i, to: i });
-    else last.to = i;
-  });
-  const actNames = { 1:"Setup", 2:"Complication", 3:"Resolution" };
+  // group scenes into consecutive acts, then flatten to COLUMNS — a column is either
+  // one scene, or (for a collapsed act) a single narrow placeholder. The act ruler,
+  // graph and filmstrip all lay out from this shared column model so they stay aligned.
+  const actGroups = [];
+  scenes.forEach((s, i) => { const last = actGroups[actGroups.length - 1];
+    if (!last || last.act !== s.act) actGroups.push({ act:s.act, items:[{s,i}] }); else last.items.push({s,i}); });
+  const columns = [];
+  actGroups.forEach(g => { if(collapsed[g.act]) columns.push({ kind:"act", act:g.act, count:g.items.length });
+    else g.items.forEach(it => columns.push({ kind:"scene", s:it.s, i:it.i })); });
+  const colW = (c)=> c.kind==="scene" ? COL_W : COLLAPSED_W;
+  const lefts = []; let _cur = 0;
+  columns.forEach((c,ci)=>{ if(ci>0) _cur += GAP; lefts[ci] = _cur; _cur += colW(c); });
+  const totalW = _cur || COL_W;
+  const centerOf = (ci)=> lefts[ci] + colW(columns[ci])/2;
 
-  // build spine path (close charge per scene)
-  const pts = scenes.map((s, i) => ({ x: xFor(i), y: yFor(s.closeCharge), s, i }));
+  // one ruler entry per act, with its x-extent across the columns
+  const ruler = [];
+  columns.forEach((c,ci)=>{ const act = c.kind==="act" ? c.act : c.s.act; const last = ruler[ruler.length-1];
+    if(!last || last.act!==act) ruler.push({ act, firstCi:ci, lastCi:ci, collapsed:c.kind==="act", count:c.kind==="act"?c.count:1 });
+    else { last.lastCi = ci; last.count += 1; } });
+  const bandW = (r)=> (lefts[r.lastCi] + colW(columns[r.lastCi])) - lefts[r.firstCi];
+
+  // build spine path from the VISIBLE scene points (collapsed acts are skipped)
+  const pts = [];
+  columns.forEach((c,ci)=>{ if(c.kind==="scene") pts.push({ x:centerOf(ci), y:yFor(c.s.closeCharge), s:c.s, i:c.i, ci }); });
+  const lastPt = pts[pts.length-1];
   const linePath = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
   // smooth catmull-rom variant (premium look) — gentle curve through the same points
   const smoothPath = (()=>{
@@ -68,12 +88,18 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
   return React.createElement("div",{className:"spine-wrap",style:{width:totalW}},
     // ---- act ruler ----
     React.createElement("div",{className:"act-ruler"},
-      acts.map(a => {
-        const w = (a.to - a.from + 1) * COL_W + (a.to - a.from) * GAP;
-        const pct = Math.round(((a.to - a.from + 1) / n) * 100);
-        return React.createElement("div",{key:a.act,className:"act-band",style:{width:w}},
-          React.createElement("span",{className:"no"},`ACT ${["I","II","III"][a.act-1]}`),
-          showFramework && React.createElement("span",{className:"nm"},actNames[a.act]),
+      ruler.map(r => {
+        if(r.collapsed) return React.createElement("div",{key:r.act,className:"act-band collapsed",
+          style:{width:COLLAPSED_W,cursor:"pointer",justifyContent:"center",gap:4,padding:0},
+          onClick:()=>toggle(r.act),title:`Expand Act ${roman(r.act)}`},
+          React.createElement(Icon.chevR,{s:12}),
+          React.createElement("span",{className:"no"},roman(r.act)));
+        const pct = Math.round((r.count / scenes.length) * 100);
+        return React.createElement("div",{key:r.act,className:"act-band",style:{width:bandW(r),cursor:"pointer"},
+          onClick:()=>toggle(r.act),title:`Collapse Act ${roman(r.act)}`},
+          React.createElement("span",{className:"act-fold-ic"},React.createElement(Icon.chevD,{s:11})),
+          React.createElement("span",{className:"no"},`ACT ${roman(r.act)}`),
+          showFramework && React.createElement("span",{className:"nm"},actNames[r.act]),
           React.createElement("span",{className:"pct"},`${pct}%`));
       })),
 
@@ -104,18 +130,27 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
             stroke: zero ? "rgba(255,255,255,.22)" : "rgba(255,255,255,.05)",
             strokeWidth: zero ? 1 : 1, strokeDasharray: zero ? "none" : "2 6"});
         }),
-        // act dividers
-        acts.slice(1).map(a => {
-          const x = a.from * (COL_W + GAP) - GAP/2;
-          return React.createElement("line",{key:"ad"+a.act,x1:x,y1:0,x2:x,y2:GRAPH_H,
+        // act dividers (before each act except the first)
+        ruler.slice(1).map(r => {
+          const x = lefts[r.firstCi] - GAP/2;
+          return React.createElement("line",{key:"ad"+r.act,x1:x,y1:0,x2:x,y2:GRAPH_H,
             stroke:"rgba(255,255,255,.1)",strokeWidth:1,strokeDasharray:"3 4"});
         }),
+        // collapsed-act bands — a subtle dashed region, click to expand
+        ruler.filter(r=>r.collapsed).map(r => {
+          const x = lefts[r.firstCi], w = COLLAPSED_W, cx = x + w/2, cy = GRAPH_H/2;
+          return React.createElement("g",{key:"cb"+r.act,style:{cursor:"pointer"},onClick:()=>toggle(r.act)},
+            React.createElement("rect",{x,y:0,width:w,height:GRAPH_H,fill:"rgba(255,255,255,.03)",
+              stroke:"rgba(255,255,255,.08)",strokeWidth:1,strokeDasharray:"3 4"}),
+            React.createElement("text",{x:cx,y:cy,textAnchor:"middle",fontFamily:"var(--f-mono)",fontSize:9,
+              fill:"var(--txt-3)",transform:`rotate(-90 ${cx} ${cy})`},`ACT ${roman(r.act)} · ${r.count}`));
+        }),
         // area under spine to zero line
-        React.createElement("path",{
-          d:`${linePath} L${pts[n-1].x} ${yFor(0)} L${pts[0].x} ${yFor(0)} Z`,
+        pts.length>=2 && React.createElement("path",{
+          d:`${linePath} L${lastPt.x} ${yFor(0)} L${pts[0].x} ${yFor(0)} Z`,
           fill:"url(#areaFill)",stroke:"none",pointerEvents:"none"}),
         // spine line
-        React.createElement("path",{className:"spine-line",d:smoothPath,fill:"none",stroke:"url(#spineStroke)",
+        pts.length>=2 && React.createElement("path",{className:"spine-line",d:smoothPath,fill:"none",stroke:"url(#spineStroke)",
           strokeWidth:2.5,strokeLinejoin:"round",strokeLinecap:"round",pointerEvents:"none"}),
         // vertical connector from zero to each point (subtle)
         pts.map(p => React.createElement("line",{key:"v"+p.i,x1:p.x,y1:yFor(0),x2:p.x,y2:p.y,
@@ -150,9 +185,9 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
             style: main ? {textTransform:"uppercase"} : null},
             label);
         }),
-        // hit columns — full-height transparent click targets, one per point (on top)
+        // hit columns — full-height transparent click targets, one per visible scene
         pts.map(p => {
-          const colLeft = p.i * (COL_W + GAP) - GAP/2;
+          const colLeft = lefts[p.ci] - GAP/2;
           return React.createElement("rect",{key:"hit"+p.i,
             x:colLeft, y:0, width:COL_W+GAP, height:GRAPH_H,
             fill:"transparent", style:{cursor:"pointer"},
@@ -161,7 +196,18 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
 
     // ---- filmstrip ----
     React.createElement("div",{className:"filmstrip"},
-      scenes.map((s,ci) => {
+      columns.map((c) => {
+        // collapsed act → a slim, clickable strip (mirrors the act ruler / graph band)
+        if(c.kind==="act") return React.createElement("div",{key:"acol"+c.act,className:"spine-act-strip",
+          onClick:()=>toggle(c.act),title:`Expand Act ${roman(c.act)}`,
+          style:{flex:`0 0 ${COLLAPSED_W}px`,width:COLLAPSED_W,cursor:"pointer",display:"flex",
+            flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10,padding:"10px 0",
+            border:"1px solid var(--line)",borderTop:0,borderRadius:"0 0 8px 8px",background:"var(--bg-2)"}},
+          React.createElement(Icon.chevR,{s:14}),
+          React.createElement("span",{className:"tree-act-no"},roman(c.act)),
+          React.createElement("span",{style:{writingMode:"vertical-rl",fontFamily:"var(--f-display)",fontSize:12,fontWeight:500,color:"var(--txt-2)"}},actNames[c.act]),
+          React.createElement("span",{style:{fontFamily:"var(--f-mono)",fontSize:10,color:"var(--txt-3)"}},c.count));
+        const s = c.s, ci = c.i;
         const { flagged } = turnInfo(s);
         const sel = s.id === selId;
         return React.createElement("div",{key:s.id,

@@ -51,6 +51,9 @@ const SHOT_LENSES = [
   { id:"50",  label:"50mm", desc:"normal; human-eye perspective" },
   { id:"85",  label:"85mm", desc:"short telephoto; flattering portrait compression" },
   { id:"135", label:"135mm",desc:"telephoto; strong compression, isolated subject" },
+  { id:"200", label:"200mm",desc:"long telephoto; extreme compression, flattened planes, subject isolated from a soft distant background" },
+  { id:"imax70", label:"70mm / IMAX", desc:"large-format capture; immense clarity and resolution, deep fine detail, sweeping epic grandeur" },
+  { id:"vhs", label:"VHS / CCTV", desc:"lo-fi analog capture; soft low resolution, scanlines, chroma bleed, date-stamp surveillance aesthetic" },
 ];
 window.SHOT_SIZES = SHOT_SIZES; window.SHOT_ANGLES = SHOT_ANGLES;
 window.SHOT_MOVES = SHOT_MOVES; window.SHOT_LENSES = SHOT_LENSES;
@@ -168,6 +171,8 @@ function buildShotPrompt(sh, ctx){
     const preset = scenePreset(ctx.project, scene.id);
     if(preset) s += buildStyleClause(preset);
   }
+  // 5b) the project's film-stock / capture look, layered on top of the grade
+  if(typeof filmStockClause==="function") s += filmStockClause(ctx.project);
   // 6) consistency contract for the reference images
   const refNouns = [];
   if(subjects.length) refNouns.push(subjects.length>1?"character sheets":"character sheet");

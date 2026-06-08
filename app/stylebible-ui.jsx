@@ -106,26 +106,62 @@ function SbMetaRow({ k, v }){
     React.createElement("span",{className:"sb-meta-v"},v));
 }
 
-/* a strip of every scene in story order, each cell tinted by its assigned preset */
-function StyleFilmStrip({ scenes, project, presets }){
+/* a strip of every scene in story order, each cell tinted by its assigned preset,
+   plus a LEGEND naming each preset and the scenes it covers \u2014 the at-a-glance answer
+   to "which preset is set where". Cells use the preset's full 60/30/10 palette as a
+   gradient (its dominant alone is often near-black, so cells would look identical). */
+function StyleFilmStrip({ scenes, project, presets, onSetScenePreset }){
   const { sceneStyles } = styleBibleOf(project);
   const sorted = (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
-  const colorOf = (pid)=>{ const p=presets.find(x=>x.id===pid); return p?((p.palette||[])[0]||"#555"):null; };
-  const nameOf = (pid)=>{ const p=presets.find(x=>x.id===pid); return p?p.name:"Unassigned"; };
+  const presetOf = (pid)=> presets.find(x=>x.id===pid) || null;
+  const swatchOf = (p)=>{ const pal=(p&&p.palette)||[]; return pal.length>=3
+    ? `linear-gradient(135deg, ${pal[0]} 0%, ${pal[1]} 55%, ${pal[2]} 100%)` : (pal[0]||null); };
+  const nameOf = (pid)=>{ const p=presetOf(pid); return p?p.name:"Unassigned"; };
+  const pad = (no)=> String(no).padStart(2,"0");
   const unassigned = sorted.filter(s=>!sceneStyles[s.id]).length;
+  // presets actually in use, each with the scenes it covers \u2014 this IS the colour key
+  const used = presets.map(p=>({ p, scs: sorted.filter(s=>sceneStyles[s.id]===p.id) })).filter(x=>x.scs.length);
+  // manual per-scene override: click a cell to open a preset picker
+  const editable = typeof onSetScenePreset==="function";
+  const [pick, setPick] = React.useState(null);  // sceneId of the open picker
+  React.useEffect(()=>{ if(!pick) return;
+    const close = (e)=>{ if(!e.target.closest || !e.target.closest(".sb-pick")) setPick(null); };
+    document.addEventListener("mousedown", close); return ()=>document.removeEventListener("mousedown", close); },[pick]);
+  const choose = (sid, pid)=>{ onSetScenePreset(sid, pid); setPick(null); };
   return React.createElement("div",{className:"sb-strip-wrap"},
     React.createElement("div",{className:"sb-strip-head"},
-      React.createElement("span",{className:"sb-strip-title"},"Across the film"),
+      React.createElement("span",{className:"sb-strip-title"},"Across the film",
+        editable && React.createElement("span",{className:"sb-strip-hint"}," (click a scene to set its style)")),
       unassigned>0 && React.createElement("span",{className:"sb-strip-warn"},
         React.createElement(Icon.alert,{s:12}), unassigned+" scene"+(unassigned!==1?"s":"")+" with no style yet")),
     React.createElement("div",{className:"sb-strip"},
-      sorted.map(s=>{
-        const pid = sceneStyles[s.id];
-        const c = colorOf(pid);
-        return React.createElement("div",{key:s.id,className:"sb-strip-cell"+(c?"":" none"),
-          style:c?{background:c}:undefined, title:"Scene "+String(s.no).padStart(2,"0")+" \u00b7 "+(s.title||"")+"  \u2014  "+nameOf(pid)},
-          React.createElement("span",{className:"sb-strip-no"},String(s.no).padStart(2,"0")));
-      })));
+      sorted.map((s,idx)=>{
+        const pid = sceneStyles[s.id]; const bg = swatchOf(presetOf(pid));
+        const open = pick===s.id; const alignRight = idx > sorted.length/2;
+        return React.createElement("div",{key:s.id,
+          className:"sb-strip-cell"+(bg?"":" none")+(editable?" editable":"")+(open?" picking":""),
+          style:bg?{background:bg}:undefined,
+          onClick: editable ? ()=>setPick(open?null:s.id) : undefined,
+          title:"Scene "+pad(s.no)+" \u00b7 "+(s.title||"")+"  \u2014  "+nameOf(pid)+(editable?"   \u00b7   click to change":"")},
+          React.createElement("span",{className:"sb-strip-no"},pad(s.no)),
+          open && React.createElement("div",{className:"sb-pick"+(alignRight?" right":""),onClick:(e)=>e.stopPropagation()},
+            React.createElement("div",{className:"sb-pick-h"},"Scene "+pad(s.no)+(s.title?" \u00b7 "+s.title:"")),
+            presets.map(p=>React.createElement("button",{key:p.id,className:"sb-pick-item"+(p.id===pid?" on":""),onClick:()=>choose(s.id,p.id)},
+              React.createElement("span",{className:"sb-pick-sw",style:{background:swatchOf(p)||"#555"}}),
+              React.createElement("span",{className:"sb-pick-nm"},p.name),
+              p.id===pid && React.createElement(Icon.check,{s:13}))),
+            React.createElement("button",{className:"sb-pick-item"+(!pid?" on":""),onClick:()=>choose(s.id,null)},
+              React.createElement("span",{className:"sb-pick-sw none"}),
+              React.createElement("span",{className:"sb-pick-nm"},"Unassigned"),
+              !pid && React.createElement(Icon.check,{s:13}))));
+      })),
+    used.length>0 && React.createElement("div",{className:"sb-strip-legend"},
+      used.map(({p,scs})=>
+        React.createElement("div",{key:p.id,className:"sb-legend-item",
+          title:p.name+" \u2014 scenes "+scs.map(s=>pad(s.no)).join(", ")},
+          React.createElement("span",{className:"sb-legend-sw",style:{background:swatchOf(p)||"#555"}}),
+          React.createElement("span",{className:"sb-legend-nm"},p.name),
+          React.createElement("span",{className:"sb-legend-ct"},scs.length)))));
 }
 
 function StyleBibleModal({ project, scenes, onClose, onAssign, assigning }){
@@ -142,7 +178,7 @@ function StyleBibleModal({ project, scenes, onClose, onAssign, assigning }){
             " \u00b7 stills are CSS colour-grade previews, not AI renders")),
         React.createElement("div",{style:{display:"flex",gap:8,alignItems:"center"}},
           onAssign && React.createElement("button",{className:"art-draftall",disabled:assigning,onClick:onAssign,
-            title:"Read the whole film and (re)assign each scene a preset"},
+            title:"Design a bespoke palette for this film, then color-script each scene along the value-charge spine (replaces the current looks)"},
             React.createElement(Icon.layers,{s:14}), assigning?"Assigning\u2026":"Assign from script"),
           React.createElement("button",{className:"ag-x",onClick:onClose},React.createElement(Icon.x,{s:17})))),
       React.createElement("div",{className:"sb-panel-body"},
@@ -152,29 +188,153 @@ function StyleBibleModal({ project, scenes, onClose, onAssign, assigning }){
 }
 window.StyleBibleModal = StyleBibleModal;
 
+/* Sample a small palette from an uploaded image, entirely client-side. The model is
+   text-only, so we can't send it the image — instead we feed the sampled COLOURS into
+   the design prompt. Returns { id, thumb (small JPEG dataURL), colors:[hex] }. */
+function extractImageRef(file){
+  return new Promise((resolve,reject)=>{
+    const fr=new FileReader();
+    fr.onerror=()=>reject(new Error("read failed"));
+    fr.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error("decode failed"));
+      img.onload=()=>{
+        try{
+          const W=img.width||1, H=img.height||1;
+          const hex=(r,g,b)=>"#"+[r,g,b].map(x=>Math.max(0,Math.min(255,x|0)).toString(16).padStart(2,"0")).join("");
+          // small thumbnail
+          const ts=Math.min(1,72/Math.max(W,H)), tc=document.createElement("canvas");
+          tc.width=Math.max(1,Math.round(W*ts)); tc.height=Math.max(1,Math.round(H*ts));
+          tc.getContext("2d").drawImage(img,0,0,tc.width,tc.height);
+          const thumb=tc.toDataURL("image/jpeg",0.6);
+          // palette from a ~40px sample, quantised by frequency
+          const ss=Math.min(1,40/Math.max(W,H)), sc=document.createElement("canvas");
+          sc.width=Math.max(1,Math.round(W*ss)); sc.height=Math.max(1,Math.round(H*ss));
+          const cx=sc.getContext("2d"); cx.drawImage(img,0,0,sc.width,sc.height);
+          const d=cx.getImageData(0,0,sc.width,sc.height).data, q=v=>Math.round(v/24)*24, buckets={};
+          for(let i=0;i<d.length;i+=4){ if(d[i+3]<125) continue;
+            const k=q(d[i])+","+q(d[i+1])+","+q(d[i+2]); buckets[k]=(buckets[k]||0)+1; }
+          const colors=Object.keys(buckets).sort((a,b)=>buckets[b]-buckets[a]).slice(0,6)
+            .map(k=>{ const p=k.split(",").map(Number); return hex(p[0],p[1],p[2]); });
+          resolve({ id:"ri_"+Date.now().toString(36)+Math.floor(Math.random()*1e6).toString(36), thumb, colors });
+        }catch(err){ reject(err); }
+      };
+      img.src=fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+/* the uploaded reference-image thumbnails: each shows its sampled swatches + a remove ×.
+   (The upload trigger lives in the reference bar itself — see StyleRefsField.) */
+function StyleRefImages({ refImages, onRemoveRefImage }){
+  const imgs = refImages||[];
+  if(!imgs.length) return null;
+  return React.createElement("div",{className:"sb-refimgs"},
+    imgs.map(ri=>React.createElement("div",{key:ri.id,className:"sb-refimg",title:"Reference still — sampled palette"},
+      React.createElement("img",{src:ri.thumb,alt:"reference still"}),
+      React.createElement("div",{className:"sb-refimg-sw"},
+        (ri.colors||[]).slice(0,5).map((c,i)=>React.createElement("span",{key:i,style:{background:c}}))),
+      onRemoveRefImage && React.createElement("button",{className:"sb-refimg-x",title:"Remove",
+        onClick:()=>onRemoveRefImage(ri.id)},React.createElement(Icon.x,{s:11})))));
+}
+
+/* Reference-driven look-dev: a free-text field where the user names films,
+   photographers or paintings whose look they want. 'Assign from script' then
+   translates that cinematography into this film's bespoke palette. Local state so
+   typing is smooth; commits on blur / Enter. */
+function StyleRefsField({ value, onCommit, onAssign, assigning, assignDisabled, refImages, onAddRefImages, onRemoveRefImage }){
+  const [v, setV] = React.useState(value||"");
+  const [saved, setSaved] = React.useState(false);
+  const tRef = React.useRef(null);
+  React.useEffect(()=>{ setV(value||""); },[value]);
+  React.useEffect(()=>()=>{ if(tRef.current) clearTimeout(tRef.current); },[]);
+  const commit = ()=>{ const t=(v||"").trim(); if(t!==((value||"").trim())) onCommit && onCommit(t);
+    setSaved(true); if(tRef.current) clearTimeout(tRef.current); tRef.current = setTimeout(()=>setSaved(false), 2400); };
+  const imgs = refImages||[];
+  const fileRef = React.useRef(null);
+  const onFiles = async (e)=>{
+    const files=[...((e.target&&e.target.files)||[])]; if(e.target) e.target.value="";
+    if(!files.length || !onAddRefImages) return;
+    const room=Math.max(0, 8-imgs.length), out=[];
+    for(const f of files.slice(0,room)){ try{ out.push(await extractImageRef(f)); }catch(err){} }
+    if(out.length) onAddRefImages(out);
+  };
+  return React.createElement("div",{style:{margin:"0 0 16px"}},
+    React.createElement("div",{style:{display:"flex",alignItems:"center",gap:6,fontFamily:"var(--f-mono)",fontSize:11,
+      letterSpacing:".06em",textTransform:"uppercase",color:"var(--txt-3)",marginBottom:6}},
+      React.createElement(Icon.sparkles,{s:12}),"Visual references — optional look targets"),
+    React.createElement("div",{className:"sb-refbar"},
+      React.createElement("input",{type:"text",value:v,
+        placeholder:"e.g. Her, Blade Runner 2049, Gregory Crewdson",
+        onChange:e=>{ setV(e.target.value); if(saved) setSaved(false); }, onBlur:commit,
+        onKeyDown:e=>{ if(e.key==="Enter"){ e.preventDefault(); commit(); e.target.blur(); } }}),
+      onAddRefImages && React.createElement("button",{className:"sb-refbar-btn",disabled:imgs.length>=8,
+        onClick:()=>fileRef.current&&fileRef.current.click(),
+        title:imgs.length>=8?"Up to 8 reference images":"Add reference image(s) — TURN samples their palette to steer the film's grade"},
+        React.createElement(Icon.image,{s:14}), "Image"),
+      React.createElement("button",{className:"sb-refbar-btn secondary"+(saved?" on":""),onClick:commit,
+        title:"Save these references — they're applied the next time you click 'Assign from script'"},
+        saved && React.createElement(Icon.check,{s:14}), saved?"Saved":"Save"),
+      onAssign && React.createElement("button",{className:"sb-refbar-btn assign",disabled:assignDisabled,onClick:onAssign,
+        title:"Design a bespoke palette for this film, then color-script each scene along the value-charge spine (replaces the current looks)"},
+        React.createElement(Icon.layers,{s:14}), assigning?"Assigning…":"Assign from script")),
+    React.createElement("input",{type:"file",accept:"image/*",multiple:true,ref:fileRef,style:{display:"none"},onChange:onFiles}),
+    imgs.length>0 && React.createElement(StyleRefImages,{refImages,onRemoveRefImage}),
+    React.createElement("div",{style:{fontSize:11.5,color:saved?"var(--pos)":"var(--txt-3)",marginTop:6,lineHeight:1.5}},
+      saved
+        ? "Saved — now click “Assign from script” to design the palette from these references."
+        : "Reference names/images of films, photographers or paintings you love, then Save and click “Assign from script” — it translates their cinematography (palette, light, lens, texture) into this film's looks."));
+}
+
+/* InfoTip — a small "i" icon that reveals help text on hover (desktop) or tap
+   (touch). Keeps long explainers out of the header without losing them. */
+function InfoTip({ text, label }){
+  const [open, setOpen] = React.useState(false);
+  const [hover, setHover] = React.useState(false);
+  const ref = React.useRef(null);
+  React.useEffect(()=>{ if(!open) return;
+    const close=(e)=>{ if(ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", close); return ()=>document.removeEventListener("mousedown", close); },[open]);
+  const show = open || hover;
+  return React.createElement("span",{className:"infotip",ref:ref,
+    onMouseEnter:()=>setHover(true), onMouseLeave:()=>setHover(false)},
+    React.createElement("button",{type:"button",className:"infotip-btn"+(show?" on":""),
+      "aria-label":label||"More information","aria-expanded":show?"true":"false",
+      onClick:(e)=>{ e.stopPropagation(); setOpen(o=>!o); }},
+      React.createElement(Icon.info,{s:13})),
+    show && React.createElement("span",{className:"infotip-pop",role:"tooltip"},text));
+}
+window.InfoTip = InfoTip;
+
 /* StyleBibleView — the Style Bible as a full Art Room TAB (not a modal). Reuses the
    film-strip + preset cards. "Assign from script" writes the scene→preset map
    (scene-level, the source of truth); characters / locations / shots merely READ it. */
-function StyleBibleView({ project, scenes, onAssign, assigning }){
-  const { presets, sceneStyles } = styleBibleOf(project);
+function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSetScenePreset, onAddRefImages, onRemoveRefImage, onSetFilmStock }){
+  const { presets, sceneStyles, refs, refImages, filmStock } = styleBibleOf(project);
   const scenesFor = (pid)=> (scenes||[]).filter(s=>sceneStyles[s.id]===pid).sort((a,b)=>(a.no||0)-(b.no||0));
   const assignedCount = (scenes||[]).filter(s=>sceneStyles[s.id]).length;
   return React.createElement("div",{className:"art-scroll"},
     React.createElement("div",{className:"art-intro"},
       React.createElement("div",{className:"art-intro-row"},
         React.createElement("div",{style:{flex:1}},
-          React.createElement("div",{className:"art-intro-t"},"Style Bible"),
-          React.createElement("div",{className:"art-intro-d"},
-            "Your film's reusable cinematic looks \u2014 each a 60/30/10 colour grade with its own lighting, lens and texture. ",
-            "Styles are assigned per SCENE; characters, locations and shots read the assigned look so every frame stays on-palette. ",
-            "The stills below are live CSS grade previews, not AI renders.")),
-        React.createElement("div",{className:"art-intro-actions"},
-          onAssign && React.createElement("button",{className:"art-draftall",disabled:assigning||!(scenes||[]).length,onClick:onAssign,
-            title:"Read the whole film and (re)assign each scene a preset"},
-            React.createElement(Icon.layers,{s:14}), assigning?"Assigning\u2026":"Assign from script")))),
+          React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},
+            "Style Bible",
+            React.createElement(InfoTip,{label:"About the Style Bible",
+              text:"Your film's own cinematic look system \u2014 each a 60/30/10 colour grade with its own lighting, lens and texture. 'Assign from script' designs a BESPOKE palette for this film, then color-scripts it along the value-charge spine \u2014 so the look tracks the emotional arc and every film looks distinct. Styles are assigned per SCENE; characters, locations and shots read the assigned look so every frame stays on-palette. The stills below are live CSS grade previews, not AI renders."}))))),
+    onSetRefs && React.createElement(StyleRefsField,{value:refs,onCommit:onSetRefs,onAssign,assigning,assignDisabled:assigning||!(scenes||[]).length,
+      refImages,onAddRefImages,onRemoveRefImage}),
+    onSetFilmStock && React.createElement("div",{className:"sb-filmstock"},
+      React.createElement("span",{className:"sb-filmstock-lab"},
+        React.createElement(Icon.film,{s:13}),"Film stock"),
+      React.createElement("select",{className:"prop-select",value:filmStock,onChange:e=>onSetFilmStock(e.target.value),
+        title:"A film-stock / capture look applied to every shot, layered on top of each scene's grade"},
+        (window.FILM_STOCKS||[]).map(fs=>React.createElement("option",{key:fs.id,value:fs.id},fs.name))),
+      filmStock && filmStock!=="none" && React.createElement("span",{className:"sb-filmstock-note"},
+        "applied to all shots, over each scene's grade")),
     React.createElement("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",margin:"2px 0 14px"}},
       presets.length+" preset"+(presets.length!==1?"s":"")+" \u00b7 "+assignedCount+" of "+(scenes||[]).length+" scenes assigned"),
-    React.createElement(StyleFilmStrip,{scenes,project,presets}),
+    React.createElement(StyleFilmStrip,{scenes,project,presets,onSetScenePreset}),
     React.createElement("div",{className:"sb-grid",style:{marginTop:16}},
       presets.map(p=>React.createElement(PresetCard,{key:p.id,preset:p,sceneList:scenesFor(p.id),count:scenesFor(p.id).length}))));
 }
