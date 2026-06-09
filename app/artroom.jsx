@@ -249,6 +249,8 @@ function useImageGen(opts){
     const isFlash = usedModel === "gemini-3.1-flash-image";
     const genOpts = { metaOut:{} };
     if(overrideModel) genOpts.model = overrideModel;
+    if(gopts.aspectRatio) genOpts.aspectRatio = gopts.aspectRatio;   // caller can force aspect…
+    if(gopts.imageSize)   genOpts.imageSize   = gopts.imageSize;     // …and resolution (e.g. storyboard: 16:9 / 2K)
     if(refImage) genOpts.referenceImage = refImage;
     if(groundEnabled){ genOpts.groundSearch = true; if(isFlash) genOpts.groundImageSearch = true; }
 
@@ -329,8 +331,8 @@ function useImageGen(opts){
       const meta = {
         modelLabel: mEntry.label || "Nano Banana",
         modelId: usedModel,
-        aspect: (typeof nbGetAspect==="function") ? nbGetAspect() : "16:9",
-        size: (typeof nbGetRes==="function") ? nbGetRes() : "2K",
+        aspect: genOpts.aspectRatio || ((typeof nbGetAspect==="function") ? nbGetAspect() : "16:9"),
+        size: genOpts.imageSize || ((typeof nbGetRes==="function") ? nbGetRes() : "2K"),
         date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
         time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
         iso: now.toISOString(),
@@ -809,6 +811,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
       onClose:()=>setDetailsOpen(false), onView:(url)=>onView&&onView(url, entity) }), document.body));
 }
 window.SheetFrame = SheetFrame;
+window.SheetDetails = SheetDetails;
 
 /* ---- continuity surfacing: which appearance version of each character applies in a
    given scene. A state applies from its pinned scene onward (story order) until a
@@ -1652,7 +1655,7 @@ function ArtComingSoon({ tab }){
 function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds,
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
-  locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onSetFilmStock, onDraftStaging, draftingStageId,
+  locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId,
   shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots }){
   const PropSheets = window.PropSheets;
   const LocationSheets = window.LocationSheets;
@@ -1691,7 +1694,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
           onDraftAll:onDraftAllLocs,onAdd:onAddLocation,onDelete:onDeleteLocation,draftingId:draftingLocId,draftingAll:draftingAllLocs,
           onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId})
       : artView==="stylebible" && window.StyleBibleView
-      ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage,onSetFilmStock})
+      ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage})
       : artView==="shots" && window.ShotList
       ? React.createElement(window.ShotList,{project,scenes,characters,props,locations,shots,beatsMap,
           onUpdateShot,onAddShot,onDeleteShot,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots})

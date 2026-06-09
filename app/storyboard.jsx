@@ -10,13 +10,8 @@
 const _sbEl = React.createElement;
 const SB_PAGE_SIZE = 9;
 
-/* the project's frame aspect, as a CSS aspect-ratio string (a 3×3 of 16:9 panels is itself 16:9) */
-function sbAspectRatio(){
-  const a = (typeof nbGetAspect==="function") ? nbGetAspect() : "16:9";
-  if(a==="9:16") return "9 / 16";
-  if(a==="21:9") return "21 / 9";
-  return "16 / 9";
-}
+/* Storyboard pages are always 16:9 (a 3×3 of 16:9 panels is itself 16:9), rendered at 2K. */
+function sbAspectRatio(){ return "16 / 9"; }
 function sbChunk(arr, n){ const out=[]; for(let i=0;i<(arr||[]).length;i+=n) out.push(arr.slice(i,i+n)); return out; }
 
 /* the scene's beat/subtext map (driver/reactor/desire/antagonism + per-beat rows) */
@@ -29,41 +24,76 @@ function sbBeatRow(beatsMap, sh){
 /* the names of the characters in a shot's frame */
 function sbInFrame(sh, ctx){ return (sh.subjects||[]).map(id=>ctx.charById[id]).filter(Boolean).map(c=>c.name); }
 
-/* the GPT Image 2 prompt for one 3×3 storyboard page — folds in the Shot List fields
-   (composition, dialogue, who's in frame, the shot's framing) AND the Writers' Room
-   beat subtext (driver/reactor, desire, antagonism, the reactor's subtext). */
+/* a brief beat title for the panel label: prefer the beat's dramatic intention
+   (drive.a from the beat map), else the first clause of the action, else "Beat n". */
+function sbBeatTitle(sh, i, row){
+  if(row && row.drive && row.drive.a) return String(row.drive.a).replace(/\s+/g," ").trim().slice(0,46);
+  const a = (sh && sh.action||"").replace(/\s+/g," ").trim();
+  const first = (a.split(/[,;.]/)[0]||"").trim();
+  return first ? first.split(" ").slice(0,6).join(" ") : ("Beat "+((sh&&sh.beatN)||(i+1)));
+}
+/* a mood phrase from the scene's closing value charge */
+function sbMood(scene){
+  const c = (scene&&scene.closeCharge)||0;
+  return c<=-2 ? "stark, urgent, high-tension" : c<0 ? "tense, dramatic"
+    : c>=2 ? "hopeful, warm, uplifting" : c>0 ? "lifting, warmer" : "even, observational";
+}
+
+/* The GPT Image 2 prompt for one 3×3 storyboard page. Each beat becomes a numbered
+   panel written in the labelled format: [Panel n/N]: [beat] , [subject + action,
+   present tense] , [camera & framing] , [lighting & mood] (, dialogue). The SETTING,
+   ART STYLE and TECHNICAL qualities are stated ONCE (they're shared across the one
+   composite 16:9 image). Character sheets + the location plate ride along as refs. */
 function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap){
   const loc = ctx && ctx.location;
   const bm = sbBeatMeta(beatsMap, scene.id);
+  const N = (shots||[]).length;
   const dlab = bm.driverLabel || "Driver", rlab = bm.reactorLabel || "Reactor";
+  const todM = String(scene.loc||"").match(/\b(NIGHT|DAY|DAWN|DUSK|MORNING|EVENING|AFTERNOON|NOON|MIDNIGHT|CONTINUOUS|LATER|SUNSET|SUNRISE)\b/i);
+  const tod = ((typeof parseSlug==="function" && scene.loc) ? (parseSlug(scene.loc).time||"") : "") || (todM ? todM[1] : "");
+  const genre = (ctx && ctx.project && ctx.project.genre) || "";
+  const mood = sbMood(scene);
+  const baseLight = (loc && loc.lighting) ? loc.lighting.replace(/\.$/,"") : "motivated naturalistic light";
+  // shared SETTING — one place across the whole page
+  const setBits = [];
+  if(loc){ setBits.push(loc.name||"the location"); if(loc.intExt) setBits.push(loc.intExt); }
+  if(tod) setBits.push(tod.toLowerCase());
+  if(loc && loc.materials) setBits.push(loc.materials.replace(/\.$/,""));
+  const setting = setBits.join(", ");
+
   const panels = (shots||[]).map((sh,i)=>{
-    const g = (typeof shotGrammarLabel==="function") ? shotGrammarLabel(sh) : "";
-    const who = sbInFrame(sh, ctx).join(", ");
-    const act = (sh.action||"").replace(/\s+/g," ").trim();
-    const comp = (sh.composition||"").replace(/\s+/g," ").trim();
-    const dlg = (sh.dialogue||"").trim();
-    const row = sbBeatRow(beatsMap, sh);
-    let line = "Panel "+(i+1)+" — "+g+(who?" — in frame: "+who:"")+": "+act+".";
-    if(comp) line += " Composition: "+comp+".";
-    if(dlg)  line += " Spoken: “"+dlg+"”.";
-    if(row && row.drive) line += " "+dlab+" subtext — "+(row.drive.a||"")+(row.drive.d?(": "+row.drive.d):"")+".";
-    if(row && row.react) line += " "+rlab+" subtext — "+(row.react.a||"")+(row.react.d?(": "+row.react.d):"")+".";
-    return line;
+    const who  = sbInFrame(sh, ctx).join(" and ");
+    const act  = (sh.action||"").replace(/\s+/g," ").trim().replace(/\.$/,"");
+    const comp = (sh.composition||"").replace(/\s+/g," ").trim().replace(/\.$/,"");
+    const dlg  = (sh.dialogue||"").trim();
+    const gram = (typeof shotGrammarLabel==="function") ? shotGrammarLabel(sh) : "";
+    const row  = sbBeatRow(beatsMap, sh);
+    let line = "Panel "+(i+1)+" of "+N+": "+sbBeatTitle(sh,i,row)+", ";
+    line += (act||"in frame") + (who?" (in frame: "+who+")":"") + ", ";  // subject + action (present tense)
+    line += gram + (comp?(" — "+comp):"") + ", ";                        // camera angle & framing (+ composition)
+    line += baseLight + ", " + mood + " mood";                          // lighting & mood
+    if(dlg) line += ", spoken: “"+dlg+"”";
+    // beat subtext (from the Beat & Shot Briefs) — the emotional intent under the action
+    if(row && row.drive && (row.drive.a||row.drive.d)) line += "; "+dlab+" intent — "+[row.drive.a,row.drive.d].filter(Boolean).join(": ");
+    if(row && row.react && (row.react.a||row.react.d)) line += "; "+rlab+" intent — "+[row.react.a,row.react.d].filter(Boolean).join(": ");
+    return line + ".";
   });
-  let s = "A single CINEMATIC STORYBOARD PAGE as ONE image: a clean 3×3 grid of nine equal rectangular panels "
-    + "separated by thin white gutters, each panel a film storyboard frame. Number each panel small in its top-left "
-    + "corner 1–9, left-to-right then top-to-bottom. ";
+
+  const cols = N<=3 ? Math.max(1,N) : (N<=8 ? Math.ceil(N/2) : 3);
+  let s = "A professional CINEMATIC STORYBOARD SHEET as ONE 16:9 image — exactly "+N+" numbered panels in a tidy grid, "
+    + "about "+cols+" per row, FILLING EVERY PANEL with NO blank or empty white frames (if "+N+" doesn't divide evenly, make the "
+    + "last row shorter and centred — never pad with blank frames). Number each panel small in its top-left corner. Each panel is a "
+    + "cinematic film frame with a small, clean CAPTION strip directly BELOW it — legible monospace text giving the panel number, a "
+    + "short beat title, the action, the camera, the lighting and the lens — like a professional shot-by-shot storyboard sheet. ";
   s += "SCENE: "+(scene.title||("Scene "+scene.no))+". ";
-  if(loc) s += "Setting: "+(loc.name||"")+". ";
+  if(setting)     s += "SETTING (the same place in every panel): "+setting+". ";
   if(bm.desire)   s += "Driver "+(bm.driverLabel?("("+bm.driverLabel+") "):"")+"wants: "+bm.desire+". ";
   if(bm.obstacle) s += "Antagonism (what blocks it): "+bm.obstacle+". ";
-  s += "Let that desire and antagonism colour the emotion and body language in every panel. ";
-  s += "Draw these panels in order:\n"+panels.join("\n")+"\n";
-  if((shots||[]).length < SB_PAGE_SIZE) s += "Leave panels "+(shots.length+1)+"–9 as empty blank frames. ";
+  s += "PANELS (each: cinematic frame above, its caption text below), in order:\n"+panels.join("\n")+"\n";
+  s += "ART STYLE (all frames): cinematic realistic storyboard illustration"+(genre?(", "+genre+" tone"):"")+", cohesive look across the sheet. ";
   s += "Keep every recurring character IDENTICAL across panels (same face, hair and wardrobe) and the location "
-    + "consistent — use the attached character reference sheets and location plate. Frame each panel to the "
-    + "stated size, angle and lens, and stage it per its composition note. Cohesive cinematic storyboard look, "
-    + "clear staging, legible at a glance. ONE single image, 3×3 grid, no captions or text other than the small panel numbers.";
+    + "consistent — use the attached character reference sheets and location plate. ";
+  s += "TECHNICAL: highly detailed frames, sharp focus, clean panel borders, captions crisp and legible, 16:9, subtle film grain. ONE single composite image.";
   return s;
 }
 window.buildStoryboardPagePrompt = buildStoryboardPagePrompt;
@@ -88,7 +118,8 @@ function StoryboardPage({ scene, page, pageCount, ctx, beatsMap, onView, jumpToS
   });
 
   const GPT2 = (window.NB_MODELS||[]).find(m=>/gpt-image/i.test(m.id));
-  const doGen = ()=> gen.generate({ model: GPT2 ? GPT2.id : undefined });
+  // storyboard pages are always 16:9 at 2K, generated with GPT Image 2 when available
+  const doGen = ()=> gen.generate({ model: GPT2 ? GPT2.id : undefined, aspectRatio:"16:9", imageSize:"2K" });
 
   // batch: auto-generate when this page is the active queue member
   const batchStarted = React.useRef(false);
@@ -101,8 +132,16 @@ function StoryboardPage({ scene, page, pageCount, ctx, beatsMap, onView, jumpToS
     wasGening.current = gen.gening;
   },[batchActiveId, gen.gening, page.id]);
 
+  // options menu (mirrors the Shot List card menu) + details modal
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const menuRef = React.useRef(null);
+  React.useEffect(()=>{ if(!menuOpen) return;
+    const h=(e)=>{ if(menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    document.addEventListener("mousedown",h); return ()=>document.removeEventListener("mousedown",h); },[menuOpen]);
+  const doEdit = (t)=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:"16:9", imageSize:"2K", editInstruction:t });
+
   const aspect = sbAspectRatio();
-  const cells = []; for(let i=0;i<SB_PAGE_SIZE;i++) cells.push(page.shots[i]||null);
   const sceneName = (scene.title||("Scene "+scene.no))+" — storyboard";
   const lab = pageCount>1 ? ("Page "+(page.index+1)+" / "+pageCount) : "Storyboard page";
 
@@ -111,32 +150,39 @@ function StoryboardPage({ scene, page, pageCount, ctx, beatsMap, onView, jumpToS
       _sbEl("span",{className:"sb-page-lab"},lab),
       _sbEl("span",{className:"sb-page-range"}, page.shots.length+" panel"+(page.shots.length!==1?"s":"")),
       _sbEl("div",{className:"sb-page-acts"},
-        gen.genUrl && _sbEl("button",{className:"sb-mini",onClick:()=>onView({url:gen.genUrl,character:{name:sceneName}})},
-          _sbEl(Icon.eye,{s:12}),"View"),
-        _sbEl("button",{className:"sb-mini accent",disabled:gen.gening,onClick:doGen,
-          title:(GPT2?"Generate this page with GPT Image 2":"Generate this page")},
-          _sbEl(Icon.sparkles,{s:12}), gen.gening?"Generating…":(gen.genUrl?"Regenerate":"Generate page")),
-        gen.genUrl && _sbEl("button",{className:"sb-mini danger",onClick:gen.clearGen},
-          _sbEl(Icon.trash,{s:12}),"Clear"))),
+        !gen.genUrl && _sbEl("button",{className:"sb-mini accent",disabled:gen.gening,onClick:doGen,
+          title:"Generate the scene storyboard — one image from the beat & shot briefs"+(GPT2?", with GPT Image 2":"")},
+          _sbEl(Icon.sparkles,{s:12}), gen.gening?"Generating storyboard…":"Generate Scene Storyboard"),
+        gen.genUrl && _sbEl("div",{className:"sheet-tools-menu",ref:menuRef},
+          _sbEl("button",{className:"sb-mini"+(menuOpen?" on":""),onClick:()=>setMenuOpen(m=>!m),title:"Options"},
+            _sbEl(Icon.moreV,{s:15})),
+          menuOpen && _sbEl("div",{className:"sheet-tools-dropdown"},
+            _sbEl("button",{className:"sheet-tools-item",onClick:()=>{ onView({url:gen.genUrl,character:{name:sceneName}}); setMenuOpen(false); }},
+              _sbEl(Icon.eye,{s:13}),"View full"),
+            _sbEl("button",{className:"sheet-tools-item",onClick:()=>{ setDetailsOpen(true); setMenuOpen(false); }},
+              _sbEl(Icon.info,{s:13}),"Details"),
+            _sbEl("button",{className:"sheet-tools-item "+(gen.editMode?"on":""),onClick:()=>{ gen.setEditMode(m=>!m); gen.setEditText(""); setMenuOpen(false); }},
+              _sbEl(Icon.wand,{s:13}), gen.editMode?"Close edit":"Edit storyboard"),
+            _sbEl("button",{className:"sheet-tools-item",disabled:gen.gening,onClick:()=>{ doGen(); setMenuOpen(false); }},
+              _sbEl(Icon.sparkles,{s:13}),"Regenerate"),
+            _sbEl("div",{className:"sheet-tools-divider"}),
+            _sbEl("button",{className:"sheet-tools-item danger",onClick:async ()=>{ setMenuOpen(false);
+              const ok = await window.appConfirm({ title:"Clear this storyboard?",
+                body:"This deletes the generated storyboard image and its earlier versions. You can regenerate it from the beat & shot briefs.",
+                confirmLabel:"Clear", cancelLabel:"Cancel", danger:true });
+              if(ok) gen.clearGen();
+            }}, _sbEl(Icon.x,{s:13}),"Clear"))))),
     gen.genErr && _sbEl("div",{className:"sb-page-err"}, _sbEl(Icon.alert,{s:12}), _sbEl("span",null,gen.genErr)),
     _sbEl("div",{className:"sb-page-frame",style:{aspectRatio:aspect}},
       gen.genUrl
         ? _sbEl("img",{className:"sb-page-img",src:gen.genUrl,alt:"",loading:"lazy",
             onClick:()=>onView({url:gen.genUrl,character:{name:sceneName}})})
-        : _sbEl("div",{className:"sb-panels"},
-            cells.map((sh,i)=>{
-              if(!sh) return _sbEl("div",{key:i,className:"sb-panel empty"}, _sbEl("span",{className:"sb-panel-no dim"}, i+1));
-              const who = sbInFrame(sh, ctx);
-              return _sbEl("button",{key:i,className:"sb-panel",onClick:()=>jumpToShot(sh),
-                  title:"Edit shot "+scene.no+"."+(i+1)+" in the Shot List"},
-                _sbEl("span",{className:"sb-panel-no"}, i+1),
-                _sbEl("span",{className:"sb-panel-gram"}, (typeof shotGrammarLabel==="function")?shotGrammarLabel(sh):""),
-                who.length>0 && _sbEl("span",{className:"sb-panel-who"}, who.join(", ")),
-                _sbEl("span",{className:"sb-panel-act"}, sh.action||""),
-                sh.composition && _sbEl("span",{className:"sb-panel-comp"}, sh.composition),
-                sh.dialogue && _sbEl("span",{className:"sb-panel-dlg"}, "“"+sh.dialogue+"”"));
-            })),
-      gen.gening && _sbEl("div",{className:"sb-page-spin"}, _sbEl("span",{className:"ns-spin"}), "Generating page…")),
+        : _sbEl("button",{className:"sb-page-empty",onClick:doGen,disabled:gen.gening,
+            title:"Generate the scene storyboard"},
+            _sbEl(Icon.board,{s:30}),
+            _sbEl("span",{className:"sb-page-empty-t"}, page.shots.length+" panel"+(page.shots.length!==1?"s":"")+" · scene storyboard"),
+            _sbEl("span",{className:"sb-page-empty-d"}, "Reserved for the generated storyboard — click to generate from the beat & shot briefs below.")),
+      gen.gening && _sbEl("div",{className:"sb-page-spin"}, _sbEl("span",{className:"ns-spin"}), "Generating storyboard…")),
 
     // full per-panel detail — Shot List fields + Writers' Room beat subtext + the final frame prompt
     _sbEl(CardFold,{label:"Beat & shot briefs",defaultOpen:false},
@@ -167,7 +213,20 @@ function StoryboardPage({ scene, page, pageCount, ctx, beatsMap, onView, jumpToS
           row && row.drive && _sbEl("div",{className:"sb-brief-line"},_sbEl("b",null,(bm.driverLabel||"Driver")+" ▸ "), (row.drive.a||"")+(row.drive.d?(" — "+row.drive.d):"")),
           row && row.react && _sbEl("div",{className:"sb-brief-line"},_sbEl("b",null,(bm.reactorLabel||"Reactor")+" ▸ "), (row.react.a||"")+(row.react.d?(" — "+row.react.d):"")),
           (typeof combinedShotPrompt==="function") && _sbEl(CopyBox,{label:"Final frame prompt — as in the Shot List",text:combinedShotPrompt(sh, ctx)}));
-      })));
+      })),
+    gen.editMode && gen.genUrl && _sbEl("div",{className:"sheet-edit-panel"},
+      _sbEl("input",{className:"sheet-edit-input",type:"text",autoFocus:true,
+        placeholder:"Describe a change to the whole sheet…  e.g. warmer grade, tighten the crowd, redraw panel 3 as a close-up",
+        value:gen.editText,onChange:e=>gen.setEditText(e.target.value),
+        onKeyDown:e=>{ if(e.key==="Enter"&&gen.editText.trim()) doEdit(gen.editText.trim()); if(e.key==="Escape"){ gen.setEditMode(false); gen.setEditText(""); } }}),
+      _sbEl("div",{className:"sheet-edit-acts"},
+        _sbEl("button",{className:"sheet-edit-apply",disabled:!gen.editText.trim()||gen.gening,onClick:()=>doEdit(gen.editText.trim())},
+          _sbEl(Icon.wand,{s:12}),"Apply edit"),
+        (gen.layers>0) && _sbEl("button",{className:"sheet-edit-undo",disabled:gen.gening,onClick:()=>gen.revertPrevious&&gen.revertPrevious()},
+          _sbEl(Icon.undo,{s:12}),"Undo last edit"),
+        _sbEl("button",{className:"sheet-edit-cancel",onClick:()=>{ gen.setEditMode(false); gen.setEditText(""); }},"Cancel"))),
+    detailsOpen && ReactDOM.createPortal(_sbEl(window.SheetDetails,{ gen, name:sceneName, noun:"storyboard",
+      onClose:()=>setDetailsOpen(false), onView:(url)=>onView({url,character:{name:sceneName}}) }), document.body));
 }
 
 function StoryboardView({ project, scenes, shots, characters, props, locations, beatsMap, setArtView }){

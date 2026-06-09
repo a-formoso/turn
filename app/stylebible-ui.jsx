@@ -310,8 +310,8 @@ window.InfoTip = InfoTip;
 /* StyleBibleView — the Style Bible as a full Art Room TAB (not a modal). Reuses the
    film-strip + preset cards. "Assign from script" writes the scene→preset map
    (scene-level, the source of truth); characters / locations / shots merely READ it. */
-function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSetScenePreset, onAddRefImages, onRemoveRefImage, onSetFilmStock }){
-  const { presets, sceneStyles, refs, refImages, filmStock } = styleBibleOf(project);
+function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSetScenePreset, onAddRefImages, onRemoveRefImage }){
+  const { presets, sceneStyles, refs, refImages } = styleBibleOf(project);
   const scenesFor = (pid)=> (scenes||[]).filter(s=>sceneStyles[s.id]===pid).sort((a,b)=>(a.no||0)-(b.no||0));
   const assignedCount = (scenes||[]).filter(s=>sceneStyles[s.id]).length;
   return React.createElement("div",{className:"art-scroll"},
@@ -324,14 +324,6 @@ function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSet
               text:"Your film's own cinematic look system \u2014 each a 60/30/10 colour grade with its own lighting, lens and texture. 'Assign from script' designs a BESPOKE palette for this film, then color-scripts it along the value-charge spine \u2014 so the look tracks the emotional arc and every film looks distinct. Styles are assigned per SCENE; characters, locations and shots read the assigned look so every frame stays on-palette. The stills below are live CSS grade previews, not AI renders."}))))),
     onSetRefs && React.createElement(StyleRefsField,{value:refs,onCommit:onSetRefs,onAssign,assigning,assignDisabled:assigning||!(scenes||[]).length,
       refImages,onAddRefImages,onRemoveRefImage}),
-    onSetFilmStock && React.createElement("div",{className:"sb-filmstock"},
-      React.createElement("span",{className:"sb-filmstock-lab"},
-        React.createElement(Icon.film,{s:13}),"Film stock"),
-      React.createElement("select",{className:"prop-select",value:filmStock,onChange:e=>onSetFilmStock(e.target.value),
-        title:"A film-stock / capture look applied to every shot, layered on top of each scene's grade"},
-        (window.FILM_STOCKS||[]).map(fs=>React.createElement("option",{key:fs.id,value:fs.id},fs.name))),
-      filmStock && filmStock!=="none" && React.createElement("span",{className:"sb-filmstock-note"},
-        "applied to all shots, over each scene's grade")),
     React.createElement("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",margin:"2px 0 14px"}},
       presets.length+" preset"+(presets.length!==1?"s":"")+" \u00b7 "+assignedCount+" of "+(scenes||[]).length+" scenes assigned"),
     React.createElement(StyleFilmStrip,{scenes,project,presets,onSetScenePreset}),

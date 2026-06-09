@@ -2225,11 +2225,6 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   border:1px dashed var(--line-3);background:transparent;color:var(--txt-2);cursor:pointer;
   font-size:12px;font-family:var(--f-ui);transition:.12s}
 .sb-refimg-add:hover{color:var(--txt-0);border-color:var(--txt-3);background:var(--bg-3)}
-/* film-stock / capture-look selector */
-.sb-filmstock{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
-.sb-filmstock-lab{display:inline-flex;align-items:center;gap:6px;font-family:var(--f-mono);font-size:11px;
-  letter-spacing:.06em;text-transform:uppercase;color:var(--txt-3)}
-.sb-filmstock-note{font-size:11px;color:var(--txt-3);font-style:italic}
 /* unified reference bar: one bordered shell wrapping the input + Image / Save / Assign */
 .sb-refbar{display:flex;align-items:stretch;border:1px solid var(--line, rgba(255,255,255,.14));
   border-radius:10px;background:var(--surface-2, rgba(255,255,255,.04));overflow:hidden;transition:border-color .12s}
@@ -2409,7 +2404,7 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .sb-scene-count{margin-left:auto;font-family:var(--f-mono);font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-3);flex:0 0 auto}
 
 /* one scene page = one composite 3×3 image (or its labelled-guide placeholder) */
-.sb-page{max-width:880px;margin:0 0 16px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:12px;overflow:hidden}
+.sb-page{width:100%;margin:0 0 16px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:12px;overflow:hidden}
 .sb-page.batch-on{border-color:var(--accent,#d8a657);box-shadow:0 0 0 1px var(--accent,#d8a657) inset}
 .sb-page-head{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line-2)}
 .sb-page-lab{font-family:var(--f-mono);font-size:11px;font-weight:600;letter-spacing:.03em;color:var(--txt-1)}
@@ -2426,6 +2421,15 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   background:oklch(0.62 0.2 25 / .07);border-bottom:1px solid oklch(0.62 0.2 25 / .2)}
 .sb-page-frame{position:relative;background:var(--bg-1);overflow:hidden}
 .sb-page-img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;cursor:zoom-in;display:block}
+/* clean reserved canvas shown until the scene storyboard is generated */
+.sb-page-empty{position:absolute;inset:0;width:100%;height:100%;border:0;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:24px;text-align:center;
+  background:repeating-linear-gradient(135deg,var(--bg-1),var(--bg-1) 10px,rgba(255,255,255,.012) 10px,rgba(255,255,255,.012) 20px);
+  color:var(--txt-3);transition:.14s}
+.sb-page-empty:hover:not(:disabled){color:var(--txt-1);background:var(--bg-2)}
+.sb-page-empty:disabled{cursor:default}
+.sb-page-empty-t{font-family:var(--f-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-2)}
+.sb-page-empty-d{font-size:12px;color:var(--txt-3);max-width:420px;line-height:1.5}
 .sb-panels{position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(3,minmax(0,1fr));gap:6px;padding:8px}
 .sb-panel{position:relative;display:flex;flex-direction:column;gap:3px;text-align:left;cursor:pointer;overflow:hidden;
   width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;

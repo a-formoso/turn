@@ -712,8 +712,10 @@ function App(){
             presets = (sb.presets&&sb.presets.length) ? sb.presets : seed;
             sceneStyles = {...(sb.sceneStyles||{}), ...(res.sceneStyles||{})};
           }
+          // the model also picks the film stock (capture look) that fits the film;
           // preserve any other styleBible fields (e.g. the user's visual refs).
-          return {...p, styleBible:{ ...sb, presets, sceneStyles }};
+          const filmStock = res.filmStock || sb.filmStock || "none";
+          return {...p, styleBible:{ ...sb, presets, sceneStyles, filmStock }};
         });
       }
     }catch(e){}
@@ -726,8 +728,6 @@ function App(){
     return { ...p, styleBible:{ ...sb, refImages:[...(sb.refImages||[]), ...(imgs||[])].slice(0,8) } }; });
   const removeStyleRefImage = (id)=> setProject(p=>{ const sb=(p.styleBible)||{};
     return { ...p, styleBible:{ ...sb, refImages:(sb.refImages||[]).filter(r=>r.id!==id) } }; });
-  // project-wide film-stock / capture look, applied to shot frames
-  const setFilmStock = (id)=> setProject(p=>({ ...p, styleBible:{ ...((p.styleBible)||{}), filmStock:String(id||"none") } }));
   // manual per-scene preset override (presetId null = unassign). Note: re-running
   // "Assign from script" re-color-scripts every scene and will overwrite these.
   const setScenePreset = (sceneId, presetId)=> setProject(p=>{
@@ -1148,7 +1148,7 @@ function App(){
             onAddLocation:addLocation,onDeleteLocation:deleteLocation,draftingLocId,draftingAllLocs,
             onPullFromScript:pullLocationsFromScript,scriptHasLocs:(typeof scriptHasLocations==="function" && scriptHasLocations(scenes)),
             onAssignStyles:assignSceneStyles,assigningStyles,onSetStyleRefs:setStyleRefs,onSetScenePreset:setScenePreset,
-            onAddStyleRefImages:addStyleRefImages,onRemoveStyleRefImage:removeStyleRefImage,onSetFilmStock:setFilmStock,
+            onAddStyleRefImages:addStyleRefImages,onRemoveStyleRefImage:removeStyleRefImage,
             onDraftStaging:draftLocationStaging,draftingStageId,
             shots,beatsMap,onUpdateShot:updateShot,onAddShot:addShot,onDeleteShot:deleteShot,
             onDraftSceneShots:draftSceneShots,draftingSceneShots,onDraftAllShots:draftAllShots,draftingAllShots}))
