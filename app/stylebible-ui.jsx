@@ -274,17 +274,14 @@ function StyleRefsField({ value, onCommit, onAssign, assigning, assignDisabled, 
         title:imgs.length>=8?"Up to 8 reference images":"Add reference image(s) — TURN samples their palette to steer the film's grade"},
         React.createElement(Icon.image,{s:14}), "Image"),
       React.createElement("button",{className:"sb-refbar-btn secondary"+(saved?" on":""),onClick:commit,
-        title:"Save these references — they're applied the next time you click 'Assign from script'"},
-        saved && React.createElement(Icon.check,{s:14}), saved?"Saved":"Save"),
-      onAssign && React.createElement("button",{className:"sb-refbar-btn assign",disabled:assignDisabled,onClick:onAssign,
-        title:"Design a bespoke palette for this film, then color-script each scene along the value-charge spine (replaces the current looks)"},
-        React.createElement(Icon.layers,{s:14}), assigning?"Assigning…":"Assign from script")),
+        title:"Save these references — they steer the palette when you run 'Light the film'"},
+        saved && React.createElement(Icon.check,{s:14}), saved?"Saved":"Save")),
     React.createElement("input",{type:"file",accept:"image/*",multiple:true,ref:fileRef,style:{display:"none"},onChange:onFiles}),
     imgs.length>0 && React.createElement(StyleRefImages,{refImages,onRemoveRefImage}),
     React.createElement("div",{style:{fontSize:11.5,color:saved?"var(--pos)":"var(--txt-3)",marginTop:6,lineHeight:1.5}},
       saved
-        ? "Saved — now click “Assign from script” to design the palette from these references."
-        : "Reference names/images of films, photographers or paintings you love, then Save and click “Assign from script” — it translates their cinematography (palette, light, lens, texture) into this film's looks."));
+        ? "Saved — now click “Light the film” above to design the palette from these references."
+        : "Reference names/images of films, photographers or paintings you love, then Save and click “Light the film” above — the Colorist translates their cinematography (palette, light, lens, texture) into this film's looks."));
 }
 
 /* InfoTip — a small "i" icon that reveals help text on hover (desktop) or tap
@@ -310,7 +307,7 @@ window.InfoTip = InfoTip;
 /* StyleBibleView — the Style Bible as a full Art Room TAB (not a modal). Reuses the
    film-strip + preset cards. "Assign from script" writes the scene→preset map
    (scene-level, the source of truth); characters / locations / shots merely READ it. */
-function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSetScenePreset, onAddRefImages, onRemoveRefImage }){
+function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSetScenePreset, onAddRefImages, onRemoveRefImage, onColorist }){
   const { presets, sceneStyles, refs, refImages } = styleBibleOf(project);
   const scenesFor = (pid)=> (scenes||[]).filter(s=>sceneStyles[s.id]===pid).sort((a,b)=>(a.no||0)-(b.no||0));
   const assignedCount = (scenes||[]).filter(s=>sceneStyles[s.id]).length;
@@ -319,9 +316,13 @@ function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSet
       React.createElement("div",{className:"art-intro-row"},
         React.createElement("div",{style:{flex:1}},
           React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},
-            "Style Bible",
+            "Cinematographer (Colorist)",
             React.createElement(InfoTip,{label:"About the Style Bible",
-              text:"Your film's own cinematic look system \u2014 each a 60/30/10 colour grade with its own lighting, lens and texture. 'Assign from script' designs a BESPOKE palette for this film, then color-scripts it along the value-charge spine \u2014 so the look tracks the emotional arc and every film looks distinct. Styles are assigned per SCENE; characters, locations and shots read the assigned look so every frame stays on-palette. The stills below are live CSS grade previews, not AI renders."}))))),
+              text:"Your film's own cinematic look system \u2014 each a 60/30/10 colour grade with its own lighting, lens and texture. Click 'Light the film' and the Cinematographer / Colorist designs a BESPOKE palette + film stock for this film (from the story and your visual references), color-scripts every scene along the value-charge spine \u2014 so the look tracks the emotional arc \u2014 and PROPOSES it for your approval, showing the swatches and a per-scene 'why'. Styles are assigned per SCENE; characters, locations and shots read the assigned look so every frame stays on-palette. You can still fine-tune any scene by clicking it in the film-strip. The stills below are live CSS grade previews, not AI renders."}))),
+        onColorist && React.createElement("div",{className:"art-intro-actions"},
+          React.createElement("button",{className:"art-draftall",disabled:!(scenes||[]).length,onClick:onColorist,
+            title:"Cinematographer / Colorist \u2014 designs your colour system and color-scripts every scene, with a rationale, for your approval"},
+            React.createElement(Icon.palette,{s:14}),"Light the film")))),
     onSetRefs && React.createElement(StyleRefsField,{value:refs,onCommit:onSetRefs,onAssign,assigning,assignDisabled:assigning||!(scenes||[]).length,
       refImages,onAddRefImages,onRemoveRefImage}),
     React.createElement("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",margin:"2px 0 14px"}},

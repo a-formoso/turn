@@ -1362,6 +1362,40 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
   background:var(--bg-3);border-radius:7px;padding:8px 10px;margin-bottom:11px}
 .ag-prop-rat svg{flex:0 0 auto;color:var(--pos);margin-top:2px}
 .ag-prop-act{display:flex;gap:8px;justify-content:flex-end}
+
+/* Colorist proposal — palette swatches + per-scene colour script */
+.ag-color{display:flex;flex-direction:column;gap:10px;margin-bottom:11px}
+.ag-color-presets{display:flex;flex-direction:column;gap:7px}
+.ag-color-preset{display:flex;flex-direction:column;gap:4px}
+.ag-color-pname{font-size:11.5px;font-weight:600;color:var(--txt-1)}
+.ag-color-bar{display:flex;height:14px;border-radius:4px;overflow:hidden;border:1px solid var(--line-2)}
+.ag-color-bar span{display:block;height:100%}
+.ag-color-grade{font-size:10.5px;line-height:1.4;color:var(--txt-3)}
+.ag-color-stock{font-size:11px;color:var(--txt-2)}
+.ag-color-stock b{color:var(--txt-3);font-weight:600}
+.ag-color-strip{display:flex;flex-wrap:wrap;gap:3px}
+.ag-color-cell{width:24px;height:20px;border-radius:3px;display:grid;place-items:center;font-family:var(--f-mono);
+  font-size:8.5px;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.12);cursor:default}
+.ag-color-cell.none{background:repeating-linear-gradient(135deg,var(--bg-3),var(--bg-3) 4px,var(--bg-2) 4px,var(--bg-2) 8px);color:var(--txt-3);text-shadow:none}
+.ag-color-whys{display:flex;flex-direction:column;gap:3px;max-height:170px;overflow-y:auto;
+  background:var(--bg-3);border-radius:7px;padding:8px 10px}
+.ag-color-why{display:flex;align-items:flex-start;gap:7px;font-size:11px;line-height:1.45}
+.ag-color-why-sw{flex:0 0 auto;width:11px;height:11px;border-radius:3px;margin-top:2px;border:1px solid rgba(255,255,255,.15)}
+.ag-color-why-no{flex:0 0 auto;font-family:var(--f-mono);font-size:10px;font-weight:700;color:var(--txt-3);margin-top:1px}
+.ag-color-why-tx{flex:1;min-width:0;color:var(--txt-2)}
+
+/* references shown on the Colorist's launch screen */
+.ag-coloref{display:flex;flex-direction:column;gap:7px;padding:10px 12px;border-radius:8px;background:var(--bg-3);margin-bottom:10px}
+.ag-coloref.empty{flex-direction:row;align-items:center;gap:8px;font-size:11.5px;color:var(--txt-3)}
+.ag-coloref.empty svg{flex:0 0 auto;color:var(--txt-3)}
+.ag-coloref-lab{display:flex;align-items:center;gap:6px;font-family:var(--f-mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--txt-3)}
+.ag-coloref-lab svg{color:var(--pos)}
+.ag-coloref-txt{font-size:12px;color:var(--txt-1);line-height:1.4}
+.ag-coloref-imgs{display:flex;flex-wrap:wrap;gap:8px}
+.ag-coloref-img{display:flex;flex-direction:column;gap:3px}
+.ag-coloref-img img{width:64px;height:40px;object-fit:cover;border-radius:4px;border:1px solid var(--line-2);display:block}
+.ag-coloref-sw{display:flex;height:6px;border-radius:2px;overflow:hidden}
+.ag-coloref-sw span{flex:1;display:block}
 .ag-btn{font-family:var(--f-ui);font-size:12px;font-weight:600;padding:7px 14px;border-radius:8px;cursor:pointer;transition:.12s;border:1px solid var(--line-2)}
 .ag-btn.ghost{background:var(--bg-3);color:var(--txt-1)}
 .ag-btn.ghost:hover{background:var(--bg-4);color:var(--txt-0)}

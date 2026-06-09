@@ -1562,12 +1562,34 @@ function ImageLightbox({ url, character, onClose }){
               :React.createElement(React.Fragment,null,React.createElement(Icon.download,{s:14}),"Download "+res)))));
 }
 
-function CharacterSheets({ project, characters, scenes, props, onUpdate, onDraft, onDraftAll, draftingId, draftingAll, draftingIds, onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAdd, onDelete }){
+function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, onUpdate, onDraft, onDraftAll, draftingId, draftingAll, draftingIds, onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAdd, onDelete, onCast }){
   const [view, setView] = React.useState(null);   // {url, character}
   const [mgrOpen, setMgrOpen] = React.useState(false);
+  const [sceneFilter, setSceneFilter] = React.useState("");   // "" = all scenes
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
   const list = characters || [];
+  const sceneList = (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  // which characters appear in each scene — DERIVED (characters have no `scenes` field):
+  // the scene's driver + everyone in its shots' subjects + the beats' reactor (by name).
+  const charsInSceneMap = React.useMemo(()=>{
+    const shotsBy = {}; (shots||[]).forEach(s=>{ (shotsBy[s.sceneId]=shotsBy[s.sceneId]||[]).push(s); });
+    const m = {};
+    (scenes||[]).forEach(s=>{
+      const ids = new Set();
+      if(s.driver) ids.add(s.driver);
+      (shotsBy[s.id]||[]).forEach(sh=> (sh.subjects||[]).forEach(id=>ids.add(id)));
+      const b = (beatsMap||{})[s.id];
+      if(b && b.reactorLabel){ const rl=String(b.reactorLabel).toLowerCase();
+        const mm = list.find(c=> (c.name||"").toLowerCase()===rl || rl.includes((c.name||"").toLowerCase())); if(mm) ids.add(mm.id); }
+      m[s.id] = ids;
+    });
+    return m;
+  }, [scenes, shots, beatsMap, list]);
+  const inScene = (c, sid)=> !!(charsInSceneMap[sid] && charsInSceneMap[sid].has(c.id));
+  const shown = sceneFilter ? list.filter(c=>inScene(c, sceneFilter)) : list;
+  const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s?s.no:sid; };
+  const draftedIds = (subset)=> subset.filter(c=>charVisualsDrafted(c)).map(c=>c.id);
   // eligible = drafted characters only (so a card with no look/wardrobe never makes a generic sheet)
   const eligibleAll = list.filter(c=>charVisualsDrafted(c)).length;
   // some cast still has no spec (e.g. a hand-added character, or auto-draft didn't
@@ -1576,9 +1598,17 @@ function CharacterSheets({ project, characters, scenes, props, onUpdate, onDraft
   const someUndrafted = eligibleAll < list.length;
   const startAllBatch = ()=>{
     if(batchActiveId) return;
-    const eligible = list.filter(c=>charVisualsDrafted(c)).map(c=>c.id);
+    const eligible = draftedIds(list);
     if(!eligible.length){ batch.setMsg("Draft the characters first \u2014 nothing is ready to generate yet."); return; }
+    if(sceneFilter) setSceneFilter("");            // mount every card so the queue can reach each one
     batch.begin(eligible, list.length - eligible.length);
+  };
+  // generate just the cast in the focused scene (mirrors Props / Locations)
+  const startSceneBatch = ()=>{
+    if(!sceneFilter || batchActiveId) return;
+    const eligible = draftedIds(shown);
+    if(!eligible.length){ batch.setMsg("Draft the characters in this scene first \u2014 nothing here is ready to generate."); return; }
+    batch.begin(eligible, shown.length - eligible.length);
   };
   // when a character is added BY HAND, smooth-scroll it into view (parity with Props)
   const prevIdsRef = React.useRef(null);
@@ -1616,24 +1646,38 @@ function CharacterSheets({ project, characters, scenes, props, onUpdate, onDraft
     React.createElement("div",{className:"art-intro"},
       React.createElement("div",{className:"art-intro-row"},
         React.createElement("div",{style:{flex:1}},
-          React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Character Sheets",
+          React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Casting Director (Character Designer)",
             React.createElement(window.InfoTip,{label:"About Character Sheets",
-              text:"A canonical visual reference for every character \u2014 the consistency anchor you feed into each shot so they look identical in every frame. Generated stories arrive pre-filled; copy the master grid prompt into your image tool, then drop the result back here."}))),
+              text:"A canonical visual reference for every character \u2014 the consistency anchor you feed into each shot so they look identical in every frame. 'Design the cast' runs the Casting Director agent: on its own it drafts each character's look, finds their appearance changes (wounds, dirt, costume shifts), then generates the master sheet (pulling in their prop sheets + any cameo) and every appearance-state variant. 'Draft all' + 'Generate all characters' stay as the manual paths."}))),
         React.createElement("div",{className:"art-intro-actions"},
           cameoCount>0 && React.createElement("button",{className:"art-cameo-mgr",onClick:()=>setMgrOpen(true),
             title:"Review & manage locked likenesses"},
             React.createElement(Icon.userScan,{s:14}),"Cameos \u00b7 "+cameoCount),
           onAdd && React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add character"),
+          onCast && React.createElement("button",{className:"art-draftall",disabled:!characters.length,onClick:onCast,
+            title:"Casting Director — drafts each character's look, finds their appearance changes, and generates the master sheet + every state variant, on its own"},
+            React.createElement(Icon.robot,{s:14}),"Design the cast"),
           someUndrafted && React.createElement("button",{className:"art-draftall",disabled:draftingAll,onClick:onDraftAll,
             title:"Draft the spec for any character that doesn't have one yet \u2014 identity, wardrobe, props & accessories, continuity and look dev (the master reference prompt builds from these)"},
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":(eligibleAll>0?"Draft remaining":"Draft all characters")),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the reference sheet for every drafted character \u2014 you choose whether to redo ones that already have a sheet"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all characters")))),
+    sceneList.length>0 && list.length>0 && React.createElement("div",{className:"prop-scenebar"},
+      React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Focus a scene"),
+      React.createElement("select",{className:"prop-select prop-scenebar-select",value:sceneFilter,onChange:e=>setSceneFilter(e.target.value)},
+        React.createElement("option",{value:""},"All scenes — show every character"),
+        sceneList.map(s=>{ const n=(charsInSceneMap[s.id]?charsInSceneMap[s.id].size:0);
+          return React.createElement("option",{key:s.id,value:s.id},
+            "Scene "+String(s.no).padStart(2,"0")+" · "+(s.title||"")+"  ("+n+" character"+(n!==1?"s":"")+")"); })),
+      sceneFilter && React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId,onClick:startSceneBatch,
+        title:"Generate the reference sheets for the characters in this scene — you choose whether to redo ones that already have a sheet"},
+        React.createElement(Icon.sparkles,{s:14}),
+        batchActiveId?"Generating…":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")))),
     BatchBar && React.createElement(BatchBar,{batch,noun:"character"}),
     React.createElement("div",{className:"sheet-grid"},
-      characters.map(c=>React.createElement(CharacterSheet,{key:c.id,c,project,scenes,props,onUpdate,onDraft,
+      shown.map(c=>React.createElement(CharacterSheet,{key:c.id,c,project,scenes,props,onUpdate,onDraft,
         drafting:draftingId===c.id||(draftingIds||[]).indexOf(c.id)>=0,onView:(url,ch)=>setView({url,character:ch}),
         batchActiveId,onBatchDone:batch.advance,onDelete:onDelete,
         onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem}))));
@@ -1657,7 +1701,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
   locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId,
-  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard }){
+  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard, onColorist, onShoot, onCast }){
   const PropSheets = window.PropSheets;
   const LocationSheets = window.LocationSheets;
 
@@ -1683,9 +1727,9 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
 
   return React.createElement("div",{className:"artroom"},
     artView==="characters"
-      ? React.createElement(CharacterSheets,{project,characters,scenes,props,onUpdate:onUpdateChar,
+      ? React.createElement(CharacterSheets,{project,characters,scenes,props,shots,beatsMap,onUpdate:onUpdateChar,
           onDraft:onDraftVisuals,onDraftAll:onDraftAllVisuals,draftingId:draftingVisualId,draftingAll:draftingAllVisuals,draftingIds:draftingVisualIds,
-          onSuggestStates,suggestingStatesId,onRemoveOwnedItem,onAdd:onAddCharacter,onDelete:onDeleteCharacter})
+          onSuggestStates,suggestingStatesId,onRemoveOwnedItem,onAdd:onAddCharacter,onDelete:onDeleteCharacter,onCast})
     : artView==="props" && PropSheets
       ? React.createElement(PropSheets,{project,props,characters,scenes,onUpdate:onUpdateProp,onDraft:onDraftProp,
           onDraftAll:onDraftAllProps,onAdd:onAddProp,onDelete:onDeleteProp,draftingId:draftingPropId,draftingAll:draftingAllProps,
@@ -1695,10 +1739,10 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
           onDraftAll:onDraftAllLocs,onAdd:onAddLocation,onDelete:onDeleteLocation,draftingId:draftingLocId,draftingAll:draftingAllLocs,
           onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId})
       : artView==="stylebible" && window.StyleBibleView
-      ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage})
+      ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage,onColorist})
       : artView==="shots" && window.ShotList
       ? React.createElement(window.ShotList,{project,scenes,characters,props,locations,shots,beatsMap,
-          onUpdateShot,onAddShot,onDeleteShot,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots})
+          onUpdateShot,onAddShot,onDeleteShot,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots,onShoot})
       : artView==="storyboard" && window.StoryboardView
       ? React.createElement(window.StoryboardView,{project,scenes,shots,characters,props,locations,beatsMap,setArtView,onDirect:onDirectStoryboard})
       : React.createElement(ArtComingSoon,{tab:artView}));

@@ -493,6 +493,201 @@ async function agentStoryboardDirector(ctx){
   ctx.emit({k:"done", t:"Directed "+rendered+" sheet"+(rendered!==1?"s":"")+(skipped?(", "+skipped+" skipped"):"")+" as a continuous board. Sheets are managed per-card in the Storyboard — Clear or Regenerate any to revise."});
 }
 
+/* =========================================================
+   AGENT 6 — CINEMATOGRAPHER / COLORIST  (Art Room ▸ Style Bible, gated)
+   The visual counterpart to the Writers' Room: reads the spine + the user's visual
+   references, designs a bespoke colour-grade system (palette + film stock) WITH a stated
+   rationale, color-scripts every scene along the value-charge spine, and proposes the whole
+   system for approval (swatches + per-scene assignments + the "why"). Applies on accept.
+   Reads ctx.art.designStyles / applyStyles — never touches ctx.model.
+   ========================================================= */
+async function agentColorist(ctx){
+  const art = ctx.art;
+  if(!ctx.ai || !ctx.ai.available){
+    ctx.emit({k:"flag", t:"The writing model isn't available right now — the Colorist needs it to design the palette."});
+    ctx.emit({k:"done", t:"Aborted."}); return;
+  }
+  if(!art || typeof art.designStyles!=="function" || !(art.scenesLite||[]).length){
+    ctx.emit({k:"flag", t:"No scenes to colour yet — build the spine first, then run the Colorist."});
+    ctx.emit({k:"done", t:"Nothing to grade."}); return;
+  }
+  ctx.emit({k:"plan", t:"Designing this film's colour system — a bespoke palette + film stock from the story and your references — then color-scripting every scene along the value-charge spine."});
+  ctx.emit({k:"act", t:"Reading the spine + visual references, designing the looks…"});
+  let res = null;
+  try{ res = await art.designStyles(); }catch(e){}
+  if(ctx.cancelled()) return;
+  if(!res || !(res.presets||[]).length){
+    ctx.emit({k:"flag", t:"The model didn't return a usable palette. Try again."});
+    ctx.emit({k:"done", t:"Aborted."}); return;
+  }
+  const nP = res.presets.length, nS = Object.keys(res.sceneStyles||{}).length;
+  const stock = (window.FILM_STOCKS||[]).find(f=>f.id===res.filmStock);
+  ctx.emit({k:"observe", t:nP+" bespoke look"+(nP!==1?"s":"")+(stock&&stock.id!=="none"?(" · "+stock.name):"")+" · "+nS+" scene"+(nS!==1?"s":"")+" color-scripted"+((res.rationale&&res.rationale.palette)?(" — "+res.rationale.palette):"")});
+
+  const ok = await ctx.propose({
+    title:"Apply this colour system",
+    reason:"Replaces the current looks with a bespoke palette and color-scripts every scene.",
+    rationale: (res.rationale && res.rationale.palette) || "",
+    colorProposal:{ presets:res.presets, sceneStyles:res.sceneStyles, filmStock:res.filmStock, rationale:res.rationale, scenes:art.scenesLite },
+  });
+  if(ctx.cancelled()) return;
+  if(ok){
+    art.applyStyles(res);
+    ctx.emit({k:"ok", t:"Applied — "+nP+" look"+(nP!==1?"s":"")+", color-scripted "+nS+" scene"+(nS!==1?"s":"")+". Fine-tune any scene in the film-strip."});
+  }else{
+    ctx.emit({k:"flag", t:"Kept your current looks — nothing changed."});
+  }
+  ctx.emit({k:"done", t:"Colour pass complete."});
+}
+
+/* =========================================================
+   AGENT 7 — SHOT DESIGNER  (Art Room ▸ Shot List, gated)
+   The cinematographer's COVERAGE pass: audits each scene's shot list — does it establish
+   wide, tighten through the middle, and LAND the turn on its most expressive size, with an
+   anchor set? — and for the weakest scene proposes the coverage (per-beat size/angle/lens/
+   move + the anchor) for approval. Mirrors Story Doctor's audit loop. Does NOT render: it
+   locks the shot list, then hands off to "Generate all shots" (which already renders
+   anchor-first). Reads ctx.art.coverage — never touches ctx.model.
+   ========================================================= */
+const _TIGHT_SIZES = new Set(["MCU","CU","ECU","INSERT"]);
+
+/* find weak / missing coverage, scene by scene (mirrors auditSpine) */
+function auditCoverage(scenes, shots, beatsMap){
+  const issues=[];
+  const byScene={}; (shots||[]).forEach(s=>{ (byScene[s.sceneId]=byScene[s.sceneId]||[]).push(s); });
+  (scenes||[]).forEach(s=>{
+    const bm=(beatsMap||{})[s.id]||{}; const beats=(bm.rows||[]); const ss=byScene[s.id]||[];
+    const t='"'+(s.title||("Scene "+s.no))+'"';
+    if(!ss.length){ issues.push({kind:"nocoverage",sceneId:s.id,sceneNo:s.no,sev:3,msg:t+" has no shots yet — it needs coverage."}); return; }
+    if(beats.length && ss.length < beats.length){ issues.push({kind:"nocoverage",sceneId:s.id,sceneNo:s.no,sev:3,msg:t+" has "+ss.length+" shot"+(ss.length!==1?"s":"")+" for "+beats.length+" beats — coverage is thin."}); return; }
+    const turnAt = bm.turnAt;
+    if(turnAt){ const ts=ss.find(x=>x.beatN===turnAt); if(ts && !_TIGHT_SIZES.has(ts.size)){ issues.push({kind:"weakturn",sceneId:s.id,sceneNo:s.no,sev:2,msg:t+" doesn't land its turn — the turning beat is a "+ts.size+", not a tight push-in (MCU/CU/ECU)."}); return; } }
+    if(ss.length>=3){ const sizes=new Set(ss.map(x=>x.size)); if(sizes.size===1){ issues.push({kind:"flatsizes",sceneId:s.id,sceneNo:s.no,sev:1,msg:t+" is all "+[...sizes][0]+" — no size progression from wide to tight."}); return; } }
+    if(ss.length && !ss.some(x=>x.anchor)){ issues.push({kind:"noanchor",sceneId:s.id,sceneNo:s.no,sev:0,msg:t+" has no anchor frame set — the shots may drift apart."}); return; }
+  });
+  issues.sort((a,b)=>b.sev-a.sev);
+  return issues;
+}
+
+async function agentShotDesigner(ctx){
+  const cov = ctx.art && ctx.art.coverage;
+  if(!cov || typeof cov.audit!=="function"){
+    ctx.emit({k:"flag", t:"No shot data available — build the spine and beats first, then break the scenes into shots."});
+    ctx.emit({k:"done", t:"Aborted."}); return;
+  }
+  const MAX=12, skip=new Set();
+  ctx.emit({k:"plan", t:"Auditing coverage scene by scene — does each scene establish wide, tighten through the middle, and LAND its turn on its most expressive size, with an anchor set?"});
+  let fixes=0;
+  for(let iter=0;iter<MAX;iter++){
+    if(ctx.cancelled()) return;
+    const issues = cov.audit().filter(i=>!skip.has(i.sceneId));
+    if(!issues.length){ ctx.emit({k:"ok", t:"Re-audit complete — every scene establishes, tightens and lands its turn. Coverage holds."}); break; }
+    const issue=issues[0]; const scene=cov.sceneById(issue.sceneId);
+    ctx.emit({k:"observe", t:issues.length+" coverage issue"+(issues.length>1?"s":"")+" — weakest link: Scene "+issue.sceneNo+" — "+issue.msg});
+    const turnAt = cov.turnAtOf(issue.sceneId);
+    let fix=null;
+    if(issue.kind==="noanchor"){
+      const cur = cov.shotsOf(issue.sceneId); const anchorId = cov.pickAnchor(cur);
+      fix = { kind:"anchor", anchorId, list: cov.grammarList(cur, anchorId, turnAt),
+        rationale:"Lock the scene to its establishing frame so every other shot matches its light, grade and world." };
+    } else {
+      if(!ctx.ai || !ctx.ai.available){ ctx.emit({k:"flag", t:"The model isn't available to design coverage — skipping Scene "+issue.sceneNo+"."}); skip.add(issue.sceneId); continue; }
+      ctx.emit({k:"act", t:"Designing coverage for Scene "+issue.sceneNo+" — establishing, tightening, landing the turn…"});
+      let made=null; try{ made = await cov.draftCoverage(scene); }catch(e){}
+      if(ctx.cancelled()) return;
+      if(!made || !made.length){ ctx.emit({k:"flag", t:"Couldn't design coverage for Scene "+issue.sceneNo+". Moving on."}); skip.add(issue.sceneId); continue; }
+      // guarantee the turn LANDS tight: if the model left the turning beat wide, push it to a CU
+      // push-in (also what resolves the weakturn audit so the loop converges, never re-proposes).
+      if(turnAt){ const ti = made.findIndex(s=>s.beatN===turnAt);
+        if(ti>=0 && !_TIGHT_SIZES.has(made[ti].size)){ made[ti] = {...made[ti], size:"CU", move:(made[ti].move==="static"?"push":made[ti].move) }; } }
+      const anchorId = cov.pickAnchor(made);
+      fix = { kind:"coverage", shots:made, anchorId, list: cov.grammarList(made, anchorId, turnAt),
+        rationale:"Coverage that establishes wide, tightens through the middle, and lands the turn on its most expressive size." };
+    }
+    const curCount = cov.shotsOf(issue.sceneId).length;
+    const ok = await ctx.propose({
+      title:"Shot coverage — Scene "+issue.sceneNo+" “"+((scene&&scene.title)||"Untitled")+"”",
+      reason:issue.msg + ((fix.kind==="coverage"&&curCount)?(" This REPLACES the scene's "+curCount+" current shot"+(curCount!==1?"s":"")+"."):""),
+      rationale:fix.rationale,
+      list:fix.list,
+    });
+    if(ctx.cancelled()) return;
+    if(ok){
+      if(fix.kind==="anchor") cov.setAnchorOnly(issue.sceneId, fix.anchorId);
+      else cov.applyCoverage(issue.sceneId, fix.shots, fix.anchorId);
+      fixes++;
+      ctx.emit({k:"ok", t:"Applied to Scene "+issue.sceneNo+". Re-auditing…"});
+    } else {
+      ctx.emit({k:"flag", t:"Skipped Scene "+issue.sceneNo+"."});
+      skip.add(issue.sceneId);
+    }
+  }
+  ctx.emit({k:"done", t: fixes ? ("Designed coverage for "+fixes+" scene"+(fixes!==1?"s":"")+", anchors set. Click ‘Generate all shots’ in the Shot List to render — anchor-first.") : "No coverage changes applied." });
+}
+
+/* =========================================================
+   AGENT 8 — CASTING DIRECTOR  (Art Room ▸ Characters, autonomous)
+   Designs the whole cast in dependency order: per character it (1) drafts the visual spec
+   from the script, (2) suggests appearance states, (3) generates the master sheet (pulling
+   in already-generated prop sheets + any cameo face-lock), then (4) generates each
+   appearance-state variant identity-locked off the master. Runs on its own (no approval);
+   cancellable via Stop; idempotent (fills only what's missing). Reads ctx.art.cast — never
+   touches ctx.model.
+   ========================================================= */
+async function agentCastingDirector(ctx){
+  const cast = ctx.art && ctx.art.cast;
+  if(!cast || !cast.list || !cast.list.length){
+    ctx.emit({k:"flag", t:"No cast yet — build the spine first, then run the Casting Director."});
+    ctx.emit({k:"done", t:"Nothing to cast."}); return;
+  }
+  const N = cast.list.length;
+  ctx.emit({k:"plan", t:"Designing the cast — for each of the "+N+" character"+(N!==1?"s":"")+": draft the look, find their appearance changes, generate the master sheet (with prop + cameo references), then each state variant."});
+  let specs=0, sheets=0, variants=0;
+  for(const ch of cast.list){
+    if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+sheets+" sheet"+(sheets!==1?"s":"")+" generated."}); return; }
+    let c = ch;
+    ctx.emit({k:"act", t:"Casting "+(c.name||"a character")+"…"});
+
+    // 1) draft the visual spec if missing
+    if(!cast.isDrafted(c) && ctx.ai && ctx.ai.available){
+      ctx.emit({k:"act", t:"Drafting "+(c.name||"the character")+"'s look from the script…"});
+      try{ const patch = await cast.draftSpec(c); if(patch){ c = {...c, ...patch}; specs++; } }catch(e){}
+    }
+    if(ctx.cancelled()) return;
+    if(!cast.isDrafted(c)){ ctx.emit({k:"flag", t:(c.name||"This character")+" has no spec yet (add a look in the Characters tab) — skipping."}); continue; }
+
+    // 2) suggest appearance states if none
+    if(!(c.states && c.states.length) && ctx.ai && ctx.ai.available){
+      ctx.emit({k:"act", t:"Finding "+(c.name||"the character")+"'s appearance changes…"});
+      try{ const sts = await cast.suggestStates(c); if(sts && sts.length){ c = {...c, states:sts}; } }catch(e){}
+    }
+    if(ctx.cancelled()) return;
+
+    // 3) generate the master sheet if missing
+    let baseUrl = await cast.imageOf(c.id);
+    if(!baseUrl){
+      ctx.emit({k:"act", t:"Generating "+(c.name||"the character")+"'s master sheet…"});
+      try{ baseUrl = await cast.generateMaster(c); sheets++;
+        ctx.emit({k:"ok", t:(c.name||"Character")+" — master sheet generated."}); }
+      catch(e){ ctx.emit({k:"flag", t:"Couldn't generate "+(c.name||"the character")+"'s sheet: "+((e&&e.message)||e)+". Moving on."}); continue; }
+    }
+    if(ctx.cancelled()) return;
+
+    // 4) generate each appearance-state variant (identity-locked off the master)
+    for(const st of (c.states||[])){
+      if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+sheets+" sheets, "+variants+" variants."}); return; }
+      const sid = c.id+":"+st.id;
+      const have = await cast.imageOf(sid);
+      if(have) continue;
+      ctx.emit({k:"act", t:"Generating "+(c.name||"the character")+" — “"+(st.label||"variant")+"”…"});
+      try{ await cast.generateState(c, st, baseUrl); variants++;
+        ctx.emit({k:"ok", t:(c.name||"Character")+" — “"+(st.label||"variant")+"” generated."}); }
+      catch(e){ ctx.emit({k:"flag", t:"Couldn't generate "+(c.name||"the character")+" — “"+(st.label||"variant")+"”: "+((e&&e.message)||e)+"."}); }
+    }
+  }
+  ctx.emit({k:"done", t:"Cast designed — "+specs+" spec"+(specs!==1?"s":"")+" drafted, "+sheets+" master sheet"+(sheets!==1?"s":"")+", "+variants+" appearance variant"+(variants!==1?"s":"")+". Review and tweak any in the Characters tab."});
+}
+
 const AGENTS = [
   { id:"doctor", name:"Story Doctor", icon:"stethoscope", kind:"fix",
     blurb:"Scans the spine for the weakest link \u2014 scenes that don't turn, soft peaks, flat runs \u2014 and proposes a fix for each, re-auditing until the spine holds.",
@@ -510,6 +705,16 @@ const AGENTS = [
   { id:"director", name:"Storyboard Director", icon:"board", kind:"build", room:"art", autonomous:true,
     blurb:"Boards your film scene by scene \u2014 it thinks through each sheet's panels with the writing model, then renders the whole storyboard sheet with GPT Image 2. Runs on its own; press Stop anytime.",
     run:agentStoryboardDirector },
+  { id:"colorist", name:"Cinematographer", icon:"palette", kind:"build", room:"art",
+    blurb:"Designs your film's colour system \u2014 a bespoke palette + film stock from the story and your visual references \u2014 then color-scripts every scene along the value-charge spine and shows you why, for your approval.",
+    run:agentColorist },
+  { id:"shotdesigner", name:"Shot Designer", icon:"film", kind:"build", room:"art",
+    blurb:"Audits your coverage scene by scene \u2014 does each scene establish wide, tighten, and land its turn on its most expressive size? \u2014 and proposes the shots (and the anchor) to fix it, for your approval. Then hand off to \u2018Generate all shots\u2019.",
+    run:agentShotDesigner },
+  { id:"casting", name:"Casting Director", icon:"userScan", kind:"build", room:"art", autonomous:true,
+    blurb:"Designs your whole cast on its own \u2014 drafts each character's look, finds their appearance changes, then generates the master sheet (with prop + cameo references) and every state variant. Runs autonomously; press Stop anytime.",
+    run:agentCastingDirector },
 ];
 window.AGENTS = AGENTS;
 window.auditSpine = auditSpine;
+window.auditCoverage = auditCoverage;

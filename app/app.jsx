@@ -208,6 +208,9 @@ function App(){
   const [continuityMap, setContinuityMap] = React.useState(()=> (saved && saved.continuityMap) || {});
   const [agentsOpen, setAgentsOpen] = React.useState(false);
   const [directorOpen, setDirectorOpen] = React.useState(false);   // Storyboard Director (Art Room)
+  const [coloristOpen, setColoristOpen] = React.useState(false);   // Cinematographer / Colorist (Art Room)
+  const [shotDesignerOpen, setShotDesignerOpen] = React.useState(false);   // Shot Designer (Art Room)
+  const [castingOpen, setCastingOpen] = React.useState(false);   // Casting Director (Art Room)
   const [newStoryOpen, setNewStoryOpen] = React.useState(false);
 
   // ---- cloud auth (Supabase) ----
@@ -687,38 +690,39 @@ function App(){
   },[room, artView, locsSeeded, locations.length, scenes, pullLocationsFromScript, hydrationTick]);
   // read the whole film, design a BESPOKE per-film palette and color-script it
   // along the value-charge spine (see aiAssignSceneStyles).
+  // merge an aiAssignSceneStyles result into project.styleBible. Shared by the quick
+  // "Assign from script" button AND the explainable Colorist agent (on approval).
+  const applyStyleResult = (res, seed)=>{
+    if(!res) return;
+    setProject(p=>{
+      const sb = (p.styleBible)||{};
+      // A bespoke per-film palette REPLACES the generic starter set (deduped by id)
+      // so each film looks unique; fall back to the existing/seed presets if none.
+      const bespoke = (res.presets&&res.presets.length) ? res.presets : null;
+      let presets, sceneStyles;
+      if(bespoke){
+        const byId = {}; bespoke.forEach(p=>{ byId[p.id]=p; });
+        presets = Object.values(byId);
+        // drop any prior assignment whose preset no longer exists, then overlay the color-script.
+        const validIds = new Set(presets.map(p=>p.id));
+        const kept = {}; Object.entries(sb.sceneStyles||{}).forEach(([sid,pid])=>{ if(validIds.has(pid)) kept[sid]=pid; });
+        sceneStyles = {...kept, ...(res.sceneStyles||{})};
+      } else {
+        presets = (sb.presets&&sb.presets.length) ? sb.presets : (seed||sb.presets||[]);
+        sceneStyles = {...(sb.sceneStyles||{}), ...(res.sceneStyles||{})};
+      }
+      // the model also picks the film stock; preserve other styleBible fields (refs etc.).
+      const filmStock = res.filmStock || sb.filmStock || "none";
+      return {...p, styleBible:{ ...sb, presets, sceneStyles, filmStock }};
+    });
+  };
   const assignSceneStyles = async ()=>{
     if(assigningStyles || !(typeof aiAssignSceneStyles==="function")) return;
     setAssigningStyles(true);
     try{
       const seed = (typeof styleBibleOf==="function") ? styleBibleOf(project).presets : (window.STYLE_PRESETS_DEFAULT||[]);
       const res = await aiAssignSceneStyles(scenes, seed, drafts, project);
-      if(res){
-        setProject(p=>{
-          const sb = (p.styleBible)||{};
-          // A bespoke per-film palette REPLACES the generic starter set (deduped by
-          // id) so each film looks unique; fall back to the existing/seed presets if
-          // the model returned none.
-          const bespoke = (res.presets&&res.presets.length) ? res.presets : null;
-          let presets, sceneStyles;
-          if(bespoke){
-            const byId = {}; bespoke.forEach(p=>{ byId[p.id]=p; });
-            presets = Object.values(byId);
-            // drop any prior assignment whose preset no longer exists, then overlay
-            // the fresh color-script.
-            const validIds = new Set(presets.map(p=>p.id));
-            const kept = {}; Object.entries(sb.sceneStyles||{}).forEach(([sid,pid])=>{ if(validIds.has(pid)) kept[sid]=pid; });
-            sceneStyles = {...kept, ...(res.sceneStyles||{})};
-          } else {
-            presets = (sb.presets&&sb.presets.length) ? sb.presets : seed;
-            sceneStyles = {...(sb.sceneStyles||{}), ...(res.sceneStyles||{})};
-          }
-          // the model also picks the film stock (capture look) that fits the film;
-          // preserve any other styleBible fields (e.g. the user's visual refs).
-          const filmStock = res.filmStock || sb.filmStock || "none";
-          return {...p, styleBible:{ ...sb, presets, sceneStyles, filmStock }};
-        });
-      }
+      applyStyleResult(res, seed);
     }catch(e){}
     setAssigningStyles(false);
   };
@@ -1080,11 +1084,106 @@ function App(){
       return out;
     };
 
+    // ---- Shot Designer (Shot List agent) — coverage audit/design on a per-run WORKING
+    // copy of shots (like Story Doctor's ctx.model); each approval also pushes to real state.
+    let _workShots = (shots||[]).map(s=>({...s}));
+    const _WIDE = new Set(["EWS","WS","FS","MWS"]);
+    const _shotsOf = (sid)=> _workShots.filter(s=>s.sceneId===sid).slice().sort((a,b)=>(a.order||0)-(b.order||0)||(a.beatN||0)-(b.beatN||0));
+    const coverage = {
+      audit: ()=> (typeof auditCoverage==="function") ? auditCoverage(ordered, _workShots, beatsMap) : [],
+      sceneById: (id)=> ordered.find(s=>s.id===id),
+      shotsOf: _shotsOf,
+      pickAnchor: (arr)=>{ const w=(arr||[]).find(s=>_WIDE.has(s.size)); return ((w||(arr||[])[0])||{}).id; },
+      grammarList: (arr, anchorId, turnAt)=> (arr||[]).map((s,i)=> (i+1)+". "+((typeof shotGrammarLabel==="function")?shotGrammarLabel(s):s.size)
+        + (s.id===anchorId?"  ⚓ anchor":"") + ((turnAt&&s.beatN===turnAt)?"  ← lands the turn":"")),
+      turnAtOf: (sid)=> ((beatsMap||{})[sid]||{}).turnAt,
+      draftCoverage: async (scene)=>{ if(typeof aiDraftShots!=="function" || typeof normalizeShot!=="function") return null;
+        const raw = await aiDraftShots(scene, beatsMap, drafts, locations, props, characters, project);
+        return (raw && raw.length) ? raw.map((r,i)=>normalizeShot(r, scene, i, locations, props, characters, beatsMap)) : null; },
+      applyCoverage: (sceneId, newShots, anchorId)=>{
+        const withAnchor = (newShots||[]).map(s=>({...s, anchor:s.id===anchorId}));
+        _workShots = _workShots.filter(s=>s.sceneId!==sceneId).concat(withAnchor);
+        setShots(ss=> ss.filter(s=>s.sceneId!==sceneId).concat(withAnchor.map(s=>({...s})))); },
+      setAnchorOnly: (sceneId, anchorId)=>{
+        _workShots = _workShots.map(s=> s.sceneId===sceneId ? {...s, anchor:s.id===anchorId} : s);
+        setShots(ss=> ss.map(s=> s.sceneId===sceneId ? {...s, anchor:s.id===anchorId} : s)); },
+    };
+
+    // ---- Casting Director (Characters agent) — draft spec, suggest states, and headless
+    // generation of master sheets + appearance-state variants. Mutates `characters` state via
+    // updateCharacter; commits images to the asset store + dispatches nb-gen-done (nbCommit won't).
+    const _grabImg = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
+      if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; };
+    const _cameoOf = async (cid)=>{ let a=[]; if(typeof nbGetCameoAngles==="function"){ try{ a=nbGetCameoAngles(cid)||[]; }catch(e){} }
+      if(!a.length && typeof nbLoadCameoAngles==="function"){ try{ a=await nbLoadCameoAngles(cid)||[]; }catch(e){} } return a||[]; };
+    // Use the SAME image model the master sheet was made with (from its meta) so a variant matches
+    // it; else prefer GPT Image 2 (best identity-lock + what the cast masters use, and it avoids the
+    // Google models' "no image" safety refusals on injury/blood states); else the current model.
+    const _gpt2m = (window.NB_MODELS||[]).find(m=>/gpt-image/i.test(m.id));
+    const _modelFor = (c)=>{ const m=(typeof nbGetMeta==="function")?nbGetMeta(c.id):null;
+      return (m&&m.modelId) || (_gpt2m&&_gpt2m.id) || ((typeof nbGetModel==="function")?nbGetModel():undefined); };
+    const _genCharImage = async (slotId, prompt, opts)=>{
+      const gopts = { aspectRatio:"16:9", ...(opts||{}) };
+      let url;
+      try{ url = await window.nbGenerate(prompt, gopts); }
+      catch(e){ if(/no image/i.test(String((e&&e.message)||e))){ url = await window.nbGenerate(prompt, gopts); } else throw e; }
+      const meta = { modelId: gopts.model || ((typeof nbGetModel==="function")?nbGetModel():undefined), aspect:"16:9",
+        iso:new Date().toISOString(), prompt, agent:"Casting Director" };
+      const kind = (typeof slotAssetKind==="function") ? slotAssetKind("charref-"+slotId) : "character";
+      await window.nbCommit(slotId, url, meta, [], kind);
+      try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:slotId, url } })); }catch(e){}
+      return url;
+    };
+    const cast = {
+      list: (characters||[]).slice(),
+      isDrafted: (c)=> (typeof charVisualsDrafted==="function") ? charVisualsDrafted(c) : true,
+      imageOf: async (id)=> _grabImg(id),
+      draftSpec: async (c)=>{ if(typeof aiCharacterVisuals!=="function") return null;
+        const patch = await aiCharacterVisuals(c, scenes.filter(s=>s.driver===c.id), project);
+        if(patch) updateCharacter(c.id, patch); return patch; },
+      suggestStates: async (c)=>{ if(typeof aiSuggestStates!=="function") return null;
+        const raw = await aiSuggestStates(c, scenes.filter(s=>s.driver===c.id), project);
+        if(!raw || !raw.length) return null;
+        const existing = c.states||[]; const have=new Set(existing.map(s=>(s.label||"").trim().toLowerCase()));
+        const adds = raw.filter(s=>!have.has((s.label||"").trim().toLowerCase()))
+          .map((s,i)=> s.id ? s : {...s, id:"st-"+Date.now().toString(36)+"-"+i});
+        const merged = adds.length ? [...existing, ...adds] : existing;
+        if(adds.length) updateCharacter(c.id, { states: merged });
+        return merged; },
+      generateMaster: async (c)=>{
+        let prompt = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project) : "";
+        const refs=[];
+        for(const p of (props||[]).filter(p=>p.ownerId===c.id && p.kind!=="carried")){ const u=await _grabImg(p.id); if(u) refs.push(u); }
+        const cameo = await _cameoOf(c.id);
+        if(refs.length) prompt += " The additional prop reference image(s) show items this character wears/carries — match them EXACTLY.";
+        if(cameo.length) prompt += " Keep the FACE, bone structure and skin tone identical to the locked-likeness reference; only wardrobe and condition change.";
+        const extra=[...refs, ...cameo];
+        return _genCharImage(c.id, prompt, { model:_modelFor(c), ...(extra.length?{ extraImages:extra }:{}) }); },
+      generateState: async (c, st, baseUrl)=>{
+        const base = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project) : "";
+        const prompt = base + " APPEARANCE STATE — "+(st.label||"variant")+": "+(st.change||"")
+          + ". Render the character in THIS changed state consistently across every panel, keeping the EXACT same face, hair, skin tone and body as the reference; only the described change differs.";
+        const cameo = await _cameoOf(c.id);
+        const opts = { model:_modelFor(c) };
+        if(baseUrl) opts.referenceImage = baseUrl;
+        if(cameo.length) opts.extraImages = cameo;
+        return _genCharImage(c.id+":"+st.id, prompt, opts); },
+    };
+
     return { input, emit, propose, cancelled, project,
       ai:{ available: (typeof aiAvailable==="function" && aiAvailable()) },
       art:{
         pages,
         gpt2Available: !!GPT2,
+        coverage,
+        cast,
+        // ---- Cinematographer / Colorist tools (Style Bible agent) ----
+        scenesLite: ordered.map(s=>({ id:s.id, no:s.no, title:s.title })),
+        references: ()=>{ const sb=(typeof styleBibleOf==="function")?styleBibleOf(project):{}; return { refs:sb.refs||"", refImages:sb.refImages||[] }; },
+        designStyles: async ()=>{ const seed=(typeof styleBibleOf==="function")?styleBibleOf(project).presets:(window.STYLE_PRESETS_DEFAULT||[]);
+          return window.aiAssignSceneStyles(scenes, seed, drafts, project); },
+        applyStyles: (res)=> applyStyleResult(res),
+        // ---- Storyboard Director tools ----
         buildPrompt:(p)=> (typeof buildStoryboardPagePrompt==="function") ? buildStoryboardPagePrompt(p.scene, p.shots, p.ctxFor, beatsMap) : "",
         directorNotes:(p, priorMemo)=> window.aiDirectorNotes(p.scene, p.shots, beatsMap, ()=>p.ctxFor, priorMemo),
         // append the cross-scene continuity block to whatever prompt (LLM-optimized or deterministic)
@@ -1223,6 +1322,9 @@ function App(){
           ? React.createElement("div",{className:"canvas"}, emptyCanvas())
           : React.createElement(ArtRoom,{key:(cloudMode?currentProjectId:"local"),artView,setArtView,project,characters,scenes,props,
             onDirectStoryboard:()=>setDirectorOpen(true),
+            onColorist:()=>setColoristOpen(true),
+            onShoot:()=>setShotDesignerOpen(true),
+            onCast:()=>setCastingOpen(true),
             onUpdateChar:updateCharacter,onDraftVisuals:draftCharacterVisuals,onDraftAllVisuals:draftAllVisuals,
             draftingVisualId,draftingAllVisuals,draftingVisualIds,onAddCharacter:addCharacter,onDeleteCharacter:deleteCharacter,
             onSuggestStates:suggestCharacterStates,suggestingStatesId,onRemoveOwnedItem:removeOwnedProp,
@@ -1335,6 +1437,45 @@ function App(){
       ctxFactory:artAgentCtxFactory,
       onClose:()=>setDirectorOpen(false),
       onView:()=>{ setArtView("storyboard"); setDirectorOpen(false); },
+      issues:{}, undoCount:0,
+      aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
+
+    // Cinematographer / Colorist — gated agent (proposes the colour system for approval);
+    // its idle screen shows the current visual references so you can add taste before it runs.
+    coloristOpen && React.createElement(AgentsPanel,{
+      initialAgentId:"colorist", single:true, viewLabel:"View Style Bible",
+      ctxFactory:artAgentCtxFactory,
+      onClose:()=>setColoristOpen(false),
+      onView:()=>{ setArtView("stylebible"); setColoristOpen(false); },
+      issues:{}, undoCount:0,
+      aiOn: (typeof aiAvailable==="function" && aiAvailable()),
+      introExtra: (()=>{ const sb=(typeof styleBibleOf==="function")?styleBibleOf(project):{}; const refs=(sb.refs||"").trim(); const imgs=sb.refImages||[];
+        if(!refs && !imgs.length) return React.createElement("div",{className:"ag-coloref empty"},
+          React.createElement(Icon.image,{s:13}), "No visual references yet — add films, photographers or reference images in the Style Bible to steer the palette.");
+        return React.createElement("div",{className:"ag-coloref"},
+          React.createElement("div",{className:"ag-coloref-lab"}, React.createElement(Icon.sparkles,{s:12}), "Designing from your references"),
+          refs && React.createElement("div",{className:"ag-coloref-txt"}, refs),
+          imgs.length>0 && React.createElement("div",{className:"ag-coloref-imgs"},
+            imgs.map(ri=> React.createElement("div",{key:ri.id,className:"ag-coloref-img"},
+              React.createElement("img",{src:ri.thumb,alt:""}),
+              React.createElement("div",{className:"ag-coloref-sw"}, (ri.colors||[]).slice(0,5).map((c,i)=>React.createElement("span",{key:i,style:{background:c}}))))))); })()}),
+
+    // Shot Designer — gated coverage agent (proposes per-scene coverage for approval),
+    // launched from the Shot List header; hands off rendering to "Generate all shots".
+    shotDesignerOpen && React.createElement(AgentsPanel,{
+      initialAgentId:"shotdesigner", autoStart:true, single:true, viewLabel:"View Shot List",
+      ctxFactory:artAgentCtxFactory,
+      onClose:()=>setShotDesignerOpen(false),
+      onView:()=>{ setArtView("shots"); setShotDesignerOpen(false); },
+      issues:{}, undoCount:0,
+      aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
+
+    // Casting Director — autonomous cast-design agent, launched from the Characters header.
+    castingOpen && React.createElement(AgentsPanel,{
+      initialAgentId:"casting", autoStart:true, single:true, viewLabel:"View Characters",
+      ctxFactory:artAgentCtxFactory,
+      onClose:()=>setCastingOpen(false),
+      onView:()=>{ setArtView("characters"); setCastingOpen(false); },
       issues:{}, undoCount:0,
       aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
 

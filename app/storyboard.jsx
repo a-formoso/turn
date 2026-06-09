@@ -141,7 +141,7 @@ function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap){
   s += "LOCATION LOCK — EVERY panel is the SAME single physical place"+(locName?(" — "+locName):"")+": identical architecture, walls, "
     + "surfaces"+(loc && loc.materials?(" ("+loc.materials.replace(/\.$/,"")+")"):"")+", signage, fixtures, props, layout and lighting in every panel. "
     + "Only the camera framing/angle and the subject's action change from beat to beat — never relocate, redesign, re-decorate or re-light the space between panels. "
-    + "The attached location plate is the canonical look of this place; match it EXACTLY in every panel. ";
+    + "Treat the ATTACHED LOCATION PLATE as ONE real set seen from different angles: reproduce its EXACT tiling pattern, wall colour, floor, edge markings, fixtures and any SIGNAGE TEXT in the SAME spelling and SAME positions in every panel. When the camera angle changes, show THAT SAME set from the new viewpoint — do NOT invent a different-looking space, add or move or rename signage, or change the tiles, colour or layout between panels. ";
   s += "\nNARRATIVE — "+(scene.title||("Scene "+scene.no))+" (each panel: a cinematic frame above its annotation strip):\n";
   s += panels.join("\n")+"\n";
   s += "EXCLUDE: no comic-book line art, no speech bubbles, no captions inside the frames, no watermark, "
@@ -343,7 +343,7 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
       _sbEl("div",{className:"art-intro"},
         _sbEl("div",{className:"art-intro-row"},
           _sbEl("div",{style:{flex:1}},
-            _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboard",
+            _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboard Director",
               _sbEl(window.InfoTip,{label:"About the Storyboard",
                 text:"Each scene becomes one storyboard sheet — a single composite image of the scene's panels, drawn by GPT Image 2 in one pass."}))))),
       _sbEl("div",{className:"prop-empty"},
@@ -361,7 +361,7 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
     _sbEl("div",{className:"art-intro"},
       _sbEl("div",{className:"art-intro-row"},
         _sbEl("div",{style:{flex:1}},
-          _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboard",
+          _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboard Director",
             _sbEl(window.InfoTip,{label:"About the Storyboard",
               text:"Each scene becomes one storyboard SHEET — a header bar (project · scene · title · page) over a single composite image drawn by GPT Image 2 in one pass (the 'Cinematic Storyboard Grid'): a grid of the scene's panels rendered as one continuous take, with locked characters + location and a baked CAM / MOVE / MOOD·VOICE annotation strip under each panel. References (character sheets + location plate) ride along for consistency. Scenes with more than 12 shots paginate. 'Direct storyboard' hands the whole board to the Storyboard Director agent: it thinks through each scene's panels with the writing model, then renders every sheet with GPT Image 2 on its own."})),
           _sbEl("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",marginTop:4}},

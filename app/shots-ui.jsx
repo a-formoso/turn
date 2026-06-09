@@ -199,7 +199,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,
-  onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots }){
+  onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onShoot }){
   const [view, setView] = React.useState(null);
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
@@ -286,9 +286,9 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     _el("div",{className:"art-intro"},
       _el("div",{className:"art-intro-row"},
         _el("div",{style:{flex:1}},
-          _el("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Shot List",
+          _el("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Cinematographer (Shot Designer)",
             _el(window.InfoTip,{label:"About the Shot List",
-              text:"One shot per beat, grouped by scene. Each frame composes the scene's Style Bible grade, the location plate and the character & prop sheets into a single image \u2014 so every shot stays on-model and on-palette."}))),
+              text:"One shot per beat, grouped by scene. Each frame composes the scene's Style Bible grade, the location plate and the character & prop sheets into a single image \u2014 so every shot stays on-model and on-palette. 'Draft all shots' breaks any scene that has none into coverage. 'Shoot the scenes' is the agentic version: the Shot Designer audits coverage scene by scene \u2014 does each scene establish wide, tighten, and land its turn on its most expressive size, with an anchor set? \u2014 and proposes the shots (and the anchor) to fix it for your approval, then hand off to 'Generate all shots' (which renders anchor-first)."}))),
         _el("div",{className:"art-intro-actions"},
           _el("button",{className:"art-draftall ghost",onClick:anyOpen?collapseAll:expandAll,
             title:anyOpen?"Collapse every scene to its header":"Expand every scene"},
@@ -299,6 +299,9 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
           _el("button",{className:"art-draftall ghost",disabled:draftingAllShots||!ordered.length,onClick:onDraftAllShots,
             title:"Break any scene that has no shots yet into a shot list from its beats"},
             _el(Icon.sparkles,{s:14}), draftingAllShots?"Drafting shots\u2026":"Draft all shots"),
+          onShoot && _el("button",{className:"art-draftall",disabled:!ordered.length,onClick:onShoot,
+            title:"Shot Designer \u2014 audits coverage scene by scene (does each scene establish, tighten, and land its turn?) and proposes the shots and anchor to fix it, for your approval"},
+            _el(Icon.robot,{s:14}),"Shoot the scenes"),
           _el("button",{className:"art-draftall",disabled:!!batchActiveId||!shots.length,onClick:startAll,
             title:"Generate (or regenerate) the frame for every shot \u2014 you choose whether to redo ones that already have a frame"},
             _el(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all shots")))),

@@ -3,7 +3,7 @@
    and gates every change behind an Approve / Reject proposal card. */
 
 function AgentIcon({ name, s=18 }){
-  const map = { stethoscope:Icon.target, link:Icon.layers, flask:Icon.flask, film:Icon.film, board:Icon.board };
+  const map = { stethoscope:Icon.target, link:Icon.layers, flask:Icon.flask, film:Icon.film, board:Icon.board, palette:Icon.palette, userScan:Icon.userScan };
   const Ic = map[name] || Icon.sparkles;
   return React.createElement(Ic,{s});
 }
@@ -34,6 +34,40 @@ function TableReadReport({ rep, onJump }){
           React.createElement("span",{className:"tr-note-tx"},n.issue)))));
 }
 
+/* rich proposal body for the Colorist agent: palette swatch bars + film stock + a
+   per-scene colour strip with the per-scene rationale. */
+function ColoristProposal({ proposal }){
+  const p = proposal||{};
+  const presets = p.presets||[];
+  const byId = {}; presets.forEach(pr=>{ byId[pr.id]=pr; });
+  const scenes = (p.scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const ss = p.sceneStyles||{};
+  const why = (p.rationale && p.rationale.scenes) || {};
+  const stock = (window.FILM_STOCKS||[]).find(f=>f.id===p.filmStock);
+  const pad = (n)=>String(n).padStart(2,"0");
+  const grad = (pr)=>{ const pal=(pr&&pr.palette)||[]; return pal.length>=3
+    ? ("linear-gradient(135deg,"+pal[0]+" 0%,"+pal[1]+" 55%,"+pal[2]+" 100%)") : (pal[0]||"#555"); };
+  return React.createElement("div",{className:"ag-color"},
+    React.createElement("div",{className:"ag-color-presets"},
+      presets.map(pr=> React.createElement("div",{className:"ag-color-preset",key:pr.id},
+        React.createElement("div",{className:"ag-color-pname"}, pr.name),
+        React.createElement("div",{className:"ag-color-bar"},
+          (pr.palette||[]).slice(0,3).map((c,i)=>React.createElement("span",{key:i,style:{flex:[60,30,10][i]||10,background:c},title:c}))),
+        pr.grade && React.createElement("div",{className:"ag-color-grade"}, pr.grade)))),
+    stock && stock.id!=="none" && React.createElement("div",{className:"ag-color-stock"},
+      React.createElement("b",null,"Film stock — "), stock.name),
+    scenes.length>0 && React.createElement("div",{className:"ag-color-strip"},
+      scenes.map(s=>{ const pr=byId[ss[s.id]];
+        return React.createElement("span",{key:s.id,className:"ag-color-cell"+(pr?"":" none"),style:pr?{background:grad(pr)}:undefined,
+          title:"Sc "+pad(s.no)+" · "+(s.title||"")+(pr?(" — "+pr.name):" — unassigned")+(why[s.id]?("\n"+why[s.id]):"")}, pad(s.no)); })),
+    Object.keys(why).length>0 && React.createElement("div",{className:"ag-color-whys"},
+      scenes.filter(s=>why[s.id]).map(s=>{ const pr=byId[ss[s.id]];
+        return React.createElement("div",{key:s.id,className:"ag-color-why"},
+          React.createElement("span",{className:"ag-color-why-sw",style:{background:grad(pr)}}),
+          React.createElement("span",{className:"ag-color-why-no"}, pad(s.no)),
+          React.createElement("span",{className:"ag-color-why-tx"}, why[s.id])); })));
+}
+
 function ProposalCard({ card, onApprove, onReject }){
   return React.createElement("div",{className:"ag-prop"+(card.danger?" danger":"")},
     React.createElement("div",{className:"ag-prop-h"},
@@ -41,6 +75,7 @@ function ProposalCard({ card, onApprove, onReject }){
       React.createElement("span",{className:"ag-prop-title"},card.title),
       React.createElement("span",{className:"ag-prop-tag"},"Needs approval")),
     card.reason && React.createElement("div",{className:"ag-prop-reason"},card.reason),
+    card.colorProposal && React.createElement(ColoristProposal,{proposal:card.colorProposal}),
     (card.before||card.after) && React.createElement("div",{className:"ag-diff"},
       React.createElement("div",{className:"ag-diff-row before"},
         React.createElement("span",{className:"ag-diff-lab"},"Now"),
@@ -95,7 +130,7 @@ function IdeaHelper({ onPick }){
       ", and what ",React.createElement("b",null,"stands in the way"),"."));
 }
 
-function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput, autoStart, single, viewLabel }){
+function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput, autoStart, single, viewLabel, introExtra }){
   const [trace, setTrace] = React.useState([]);
   const [pending, setPending] = React.useState(null);   // proposal card awaiting decision
   const [status, setStatus] = React.useState("idle");   // idle|running|waiting|done
@@ -151,6 +186,7 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
     React.createElement("div",{className:"ag-body",ref:bodyRef},
       status==="idle" && React.createElement("div",{className:"ag-intro"},
         React.createElement("p",null,agent.blurb),
+        introExtra,
         React.createElement("div",{className:"ag-intro-note"},
           React.createElement(Icon.eye,{s:13}),
           agent.autonomous?"Runs on its own \u2014 it boards every scene and you'll see each step. Press Stop anytime.":
@@ -177,7 +213,7 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
           viewLabel||"View story",React.createElement(Icon.chevR,{s:15})))));
 }
 
-function AgentsPanel({ onClose, onView, ctxFactory, aiOn, undoCount, undoLabel, onUndo, issues, initialAgentId, initialInput, autoStart, single, viewLabel }){
+function AgentsPanel({ onClose, onView, ctxFactory, aiOn, undoCount, undoLabel, onUndo, issues, initialAgentId, initialInput, autoStart, single, viewLabel, introExtra }){
   const agents = window.AGENTS || [];
   const [active, setActive] = React.useState(()=> initialAgentId ? (agents.find(a=>a.id===initialAgentId)||null) : null);
   const [auto, setAuto] = React.useState(!!autoStart);
@@ -189,7 +225,7 @@ function AgentsPanel({ onClose, onView, ctxFactory, aiOn, undoCount, undoLabel, 
   return React.createElement("div",{className:"ag-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
     React.createElement("div",{className:"ag-panel"},
       active
-        ? React.createElement(AgentRunner,{agent:active,ctxFactory,onClose,onView,single,viewLabel,
+        ? React.createElement(AgentRunner,{agent:active,ctxFactory,onClose,onView,single,viewLabel,introExtra,
             onBack: single ? onClose : ()=>{ setAuto(false); setActive(null); },
             initialInput: active.id===initialAgentId ? initialInput : "",
             autoStart: auto && active.id===initialAgentId})
