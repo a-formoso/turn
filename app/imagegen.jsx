@@ -630,7 +630,7 @@ async function proxyGenerate(prompt, opts, provider){
     const status = statusOf(error);
     if(status===401) throw new Error("Sign in to use server-side image generation \u2014 it runs on your server, not in the browser.");
     if(status===404) throw new Error("The image proxy isn't deployed yet. Deploy supabase/functions/image-proxy and set imageProxy:true in supabase-config.js.");
-    if(status===504 || status===502 || status===503) throw new Error("The image proxy timed out after retries \u2014 the model is taking too long. Try again, lower the resolution to 1K, or reduce reference images.");
+    if(status===504 || status===502 || status===503) throw new Error("The image proxy timed out after retries \u2014 the model is taking too long. Try again, lower the quality (low / medium), or reduce reference images.");
     throw new Error("Couldn't reach the image proxy: "+((error && error.message) || "unknown error")+".");
   }
   if(data && data.error) throw new Error(data.error);          // provider error relayed by the proxy

@@ -3,7 +3,7 @@
    and gates every change behind an Approve / Reject proposal card. */
 
 function AgentIcon({ name, s=18 }){
-  const map = { stethoscope:Icon.target, link:Icon.layers, flask:Icon.flask, film:Icon.film };
+  const map = { stethoscope:Icon.target, link:Icon.layers, flask:Icon.flask, film:Icon.film, board:Icon.board };
   const Ic = map[name] || Icon.sparkles;
   return React.createElement(Ic,{s});
 }
@@ -95,7 +95,7 @@ function IdeaHelper({ onPick }){
       ", and what ",React.createElement("b",null,"stands in the way"),"."));
 }
 
-function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput, autoStart }){
+function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput, autoStart, single, viewLabel }){
   const [trace, setTrace] = React.useState([]);
   const [pending, setPending] = React.useState(null);   // proposal card awaiting decision
   const [status, setStatus] = React.useState("idle");   // idle|running|waiting|done
@@ -108,8 +108,9 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
 
   React.useEffect(()=>{ if(bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight; },[trace,pending]);
   React.useEffect(()=>()=>{ cancelled.current = true; if(resolver.current) resolver.current(false); },[]);
-  // auto-run once when launched from the New Story intake with a ready logline
-  React.useEffect(()=>{ if(autoStart && (initialInput||"").trim()){ const t=setTimeout(()=>start(),60); return ()=>clearTimeout(t); } },[]);
+  // auto-run once when launched ready: New Story passes a logline; an input-less agent
+  // (e.g. the Storyboard Director) auto-starts straight away.
+  React.useEffect(()=>{ if(autoStart && (!agent.needsInput || (initialInput||"").trim())){ const t=setTimeout(()=>start(),60); return ()=>clearTimeout(t); } },[]);
 
   const start = async ()=>{
     cancelled.current = false;
@@ -152,6 +153,7 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
         React.createElement("p",null,agent.blurb),
         React.createElement("div",{className:"ag-intro-note"},
           React.createElement(Icon.eye,{s:13}),
+          agent.autonomous?"Runs on its own \u2014 it boards every scene and you'll see each step. Press Stop anytime.":
           agent.kind==="report"?"Read-only \u2014 it reports, it won't change anything.":
           "Every change is shown for your approval before it's applied. Nothing happens without your OK.")),
       trace.map((s,i)=>React.createElement(TraceStep,{key:i,step:s})),
@@ -168,14 +170,14 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
           setTrace(tr=>[...tr,{k:"flag",t:"Stopped by you."}]); }},
         React.createElement(Icon.x,{s:15}),"Stop"),
       status==="done" && React.createElement(React.Fragment,null,
-        React.createElement("button",{className:"ag-run ghost",onClick:onBack},"\u2190 All agents"),
+        React.createElement("button",{className:"ag-run ghost",onClick: single?onClose:onBack}, single?"Close":"\u2190 All agents"),
         React.createElement("button",{className:"ag-run ghost",onClick:start},
           React.createElement(Icon.sparkles,{s:15}),"Run again"),
         onView && React.createElement("button",{className:"ag-run",onClick:()=>onView("spine")},
-          "View story",React.createElement(Icon.chevR,{s:15})))));
+          viewLabel||"View story",React.createElement(Icon.chevR,{s:15})))));
 }
 
-function AgentsPanel({ onClose, onView, ctxFactory, aiOn, undoCount, undoLabel, onUndo, issues, initialAgentId, initialInput, autoStart }){
+function AgentsPanel({ onClose, onView, ctxFactory, aiOn, undoCount, undoLabel, onUndo, issues, initialAgentId, initialInput, autoStart, single, viewLabel }){
   const agents = window.AGENTS || [];
   const [active, setActive] = React.useState(()=> initialAgentId ? (agents.find(a=>a.id===initialAgentId)||null) : null);
   const [auto, setAuto] = React.useState(!!autoStart);
@@ -187,8 +189,8 @@ function AgentsPanel({ onClose, onView, ctxFactory, aiOn, undoCount, undoLabel, 
   return React.createElement("div",{className:"ag-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
     React.createElement("div",{className:"ag-panel"},
       active
-        ? React.createElement(AgentRunner,{agent:active,ctxFactory,onClose,onView,
-            onBack:()=>{ setAuto(false); setActive(null); },
+        ? React.createElement(AgentRunner,{agent:active,ctxFactory,onClose,onView,single,viewLabel,
+            onBack: single ? onClose : ()=>{ setAuto(false); setActive(null); },
             initialInput: active.id===initialAgentId ? initialInput : "",
             autoStart: auto && active.id===initialAgentId})
         : React.createElement(React.Fragment,null,

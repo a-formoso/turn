@@ -439,6 +439,60 @@ async function agentTableRead(ctx){
   ctx.emit({k:"done", t:rep.notes.length+" specific notes flagged. Click a note to jump to that scene."});
 }
 
+/* =========================================================
+   AGENT 5 — STORYBOARD DIRECTOR  (Art Room, autonomous)
+   Boards the whole film: per scene-page it (a) asks the writing model to think through
+   the panels into an optimized single-sheet prompt, then (b) renders the composite sheet
+   with GPT Image 2. Runs on its own (no per-sheet approval); cancellable via Stop. Reads
+   a dedicated ctx.art surface (pages + the two tools) — never touches ctx.model.
+   ========================================================= */
+async function agentStoryboardDirector(ctx){
+  const art = ctx.art;
+  if(!art || !art.pages || !art.pages.length){
+    ctx.emit({k:"flag", t:"No shots to board yet. Break your scenes into shots in the Shot List, then run the Director."});
+    ctx.emit({k:"done", t:"Nothing to board."}); return;
+  }
+  if(!art.gpt2Available){
+    ctx.emit({k:"flag", t:"GPT Image 2 isn't available right now — it runs through the server image proxy. Sign in / enable the proxy and try again."});
+    ctx.emit({k:"done", t:"Aborted."}); return;
+  }
+  const pages = art.pages, N = pages.length;
+  ctx.emit({k:"plan", t:"Directing "+N+" storyboard sheet"+(N>1?"s":"")+" — one composite per scene, boarded as a CONTINUOUS film: each scene is thought through with the writing model, then rendered with GPT Image 2 using the previous scene's sheet as a visual anchor so the cast, world and grade carry forward."});
+  let rendered=0, skipped=0;
+  let prevSheetUrl=null;   // chained continuity anchor — the previous scene's rendered sheet
+  let memo="";             // running continuity memo (established cast looks, world, grade)
+  for(let i=0;i<N;i++){
+    if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+rendered+" of "+N+" sheets rendered."}); return; }
+    const p = pages[i];
+    const label = "Sc "+p.scene.no+" “"+(p.scene.title||"Untitled")+"”"+(p.pageCount>1?(" · page "+(p.index+1)+"/"+p.pageCount):"");
+
+    // (a) think — optimized prompt + updated memo from the writing model (fallback to deterministic)
+    let prompt = null, notes = null;
+    if(ctx.ai && ctx.ai.available){
+      ctx.emit({k:"act", t:"Thinking through the panels for "+label+" — beats, blocking, camera"+(prevSheetUrl?", continuity with the last scene":"")+"…"});
+      try{ const dn = await art.directorNotes(p, memo); if(dn && dn.prompt){ prompt = dn.prompt; notes = dn.notes; if(dn.memo) memo = dn.memo; } }catch(e){}
+    }
+    if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+rendered+" of "+N+" sheets rendered."}); return; }
+    if(!prompt){ prompt = art.buildPrompt(p); }
+    // bake the cross-scene continuity block (prev-sheet anchor note + running memo) onto the prompt
+    prompt = art.withContinuity(prompt, memo, !!prevSheetUrl);
+    ctx.emit({k:"observe", t:label+" — "+p.shots.length+" panel"+(p.shots.length!==1?"s":"")+(prevSheetUrl?" · continuing from the previous sheet":"")+(notes?(" · "+notes):"")});
+
+    // (b) render + commit the composite sheet, chaining the previous sheet as the anchor
+    ctx.emit({k:"act", t:"Rendering "+label+" with GPT Image 2…"});
+    try{
+      const url = await art.renderSheet(p, prompt, prevSheetUrl);
+      prevSheetUrl = url;   // this sheet becomes the next scene's continuity anchor
+      rendered++;
+      ctx.emit({k:"ok", t:"Rendered "+label+". "+rendered+" of "+N+" done."});
+    }catch(e){
+      skipped++;
+      ctx.emit({k:"flag", t:"Couldn't render "+label+": "+((e&&e.message)||e)+". Moving on."});
+    }
+  }
+  ctx.emit({k:"done", t:"Directed "+rendered+" sheet"+(rendered!==1?"s":"")+(skipped?(", "+skipped+" skipped"):"")+" as a continuous board. Sheets are managed per-card in the Storyboard — Clear or Regenerate any to revise."});
+}
+
 const AGENTS = [
   { id:"doctor", name:"Story Doctor", icon:"stethoscope", kind:"fix",
     blurb:"Scans the spine for the weakest link \u2014 scenes that don't turn, soft peaks, flat runs \u2014 and proposes a fix for each, re-auditing until the spine holds.",
@@ -453,6 +507,9 @@ const AGENTS = [
   { id:"tableread", name:"Table-Read", icon:"film", kind:"report",
     blurb:"Reads every drafted scene end-to-end and reports pacing, tone, and voice issues across the whole script \u2014 not scene by scene.",
     run:agentTableRead },
+  { id:"director", name:"Storyboard Director", icon:"board", kind:"build", room:"art", autonomous:true,
+    blurb:"Boards your film scene by scene \u2014 it thinks through each sheet's panels with the writing model, then renders the whole storyboard sheet with GPT Image 2. Runs on its own; press Stop anytime.",
+    run:agentStoryboardDirector },
 ];
 window.AGENTS = AGENTS;
 window.auditSpine = auditSpine;

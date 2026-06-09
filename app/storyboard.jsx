@@ -9,6 +9,7 @@
 
 const _sbEl = React.createElement;
 const SB_PAGE_SIZE = 12;   // 4-column × 3-row storyboard sheet
+window.SB_PAGE_SIZE = SB_PAGE_SIZE;   // shared with the Storyboard Director ctx factory (app.jsx)
 
 /* Storyboard pages are always 16:9 (a 3×3 of 16:9 panels is itself 16:9), rendered at 2K. */
 function sbAspectRatio(){ return "16 / 9"; }
@@ -135,7 +136,12 @@ function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap){
   }
   if(bm.desire)   s += "Driver "+(bm.driverLabel?("("+bm.driverLabel+") "):"")+"wants: "+bm.desire+". ";
   if(bm.obstacle) s += "Antagonism (what blocks it): "+bm.obstacle+". ";
-  s += "Keep the location consistent in every panel — use the attached location plate. ";
+  // strong LOCATION LOCK — the same physical place beat to beat, not just "consistent"
+  const locName = (loc && loc.name) ? loc.name : (setting || "the location");
+  s += "LOCATION LOCK — EVERY panel is the SAME single physical place"+(locName?(" — "+locName):"")+": identical architecture, walls, "
+    + "surfaces"+(loc && loc.materials?(" ("+loc.materials.replace(/\.$/,"")+")"):"")+", signage, fixtures, props, layout and lighting in every panel. "
+    + "Only the camera framing/angle and the subject's action change from beat to beat — never relocate, redesign, re-decorate or re-light the space between panels. "
+    + "The attached location plate is the canonical look of this place; match it EXACTLY in every panel. ";
   s += "\nNARRATIVE — "+(scene.title||("Scene "+scene.no))+" (each panel: a cinematic frame above its annotation strip):\n";
   s += panels.join("\n")+"\n";
   s += "EXCLUDE: no comic-book line art, no speech bubbles, no captions inside the frames, no watermark, "
@@ -168,10 +174,11 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
     attachmentsText: ()=> "Reference images (character sheets + location plate): keep every recurring character and the location IDENTICAL across all panels.",
   });
   const GPT2 = (window.NB_MODELS||[]).find(m=>/gpt-image/i.test(m.id));
-  // 1K, not 2K: the composite renders a whole grid in one pass, so a lighter size
-  // keeps it under the image-proxy timeout (it's an overview board, not a final frame).
-  const doGen  = ()=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:"16:9", imageSize:"1K" });
-  const doEdit = (t)=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:"16:9", imageSize:"1K", editInstruction:t });
+  // quality:"medium" is the timeout fix — a whole-grid composite at the default "high"
+  // routinely exceeds the ~150s proxy timeout. (imageSize is ignored by the proxy for
+  // OpenAI; size is fixed by aspect, so quality is the real lever.) A board isn't final art.
+  const doGen  = ()=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:"16:9", quality:"medium" });
+  const doEdit = (t)=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:"16:9", quality:"medium", editInstruction:t });
 
   // batch ("Generate all sheets") — when this sheet is the active id, generate it,
   // then advance the queue when it finishes (mirrors the Shot List batch).
@@ -207,7 +214,7 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
         : _sbEl("button",{className:"sb-comp-empty",onClick:doGen,disabled:gen.gening,title:"Generate the whole sheet as one image"},
             gen.gening ? _sbEl(React.Fragment,null,_sbEl("span",{className:"ns-spin"}),_sbEl("span",null,"Generating sheet…"))
                        : _sbEl(React.Fragment,null,_sbEl(Icon.sparkles,{s:20}),_sbEl("span",null,"Generate single sheet"),
-                           _sbEl("span",{className:"sb-comp-empty-sub"}, page.shots.length+" panels · GPT Image 2 · 16:9 · 1K"))),
+                           _sbEl("span",{className:"sb-comp-empty-sub"}, page.shots.length+" panels · GPT Image 2 · 16:9"))),
       gen.gening && gen.genUrl && _sbEl("div",{className:"sb-tpanel-spin"}, _sbEl("span",{className:"ns-spin"})),
       gen.genErr && _sbEl("div",{className:"sb-tpanel-err",title:gen.genErr}, _sbEl(Icon.alert,{s:13}))),
     gen.editMode && gen.genUrl && _sbEl("div",{className:"sheet-edit-panel"},
@@ -264,7 +271,7 @@ function StoryboardPage({ project, scene, page, pageCount, ctx, beatsMap, onView
       })));
 }
 
-function StoryboardView({ project, scenes, shots, characters, props, locations, beatsMap, setArtView }){
+function StoryboardView({ project, scenes, shots, characters, props, locations, beatsMap, setArtView, onDirect }){
   const [view, setView]   = React.useState(null);   // lightbox {url, character}
   const [frames, setFrames] = React.useState({});    // pageId -> url (for the progress count)
   const batch = (typeof useBatchGen==="function") ? useBatchGen() : { activeId:null, begin:()=>{}, advance:()=>{}, setMsg:()=>{} };
@@ -356,11 +363,14 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
         _sbEl("div",{style:{flex:1}},
           _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboard",
             _sbEl(window.InfoTip,{label:"About the Storyboard",
-              text:"Each scene becomes one storyboard SHEET — a header bar (project · scene · title · page) over a single composite image drawn by GPT Image 2 in one pass (the 'Cinematic Storyboard Grid'): a grid of the scene's panels rendered as one continuous take, with locked characters + location and a baked CAM / MOVE / MOOD·VOICE annotation strip under each panel. References (character sheets + location plate) ride along for consistency. Scenes with more than 12 shots paginate."})),
+              text:"Each scene becomes one storyboard SHEET — a header bar (project · scene · title · page) over a single composite image drawn by GPT Image 2 in one pass (the 'Cinematic Storyboard Grid'): a grid of the scene's panels rendered as one continuous take, with locked characters + location and a baked CAM / MOVE / MOOD·VOICE annotation strip under each panel. References (character sheets + location plate) ride along for consistency. Scenes with more than 12 shots paginate. 'Direct storyboard' hands the whole board to the Storyboard Director agent: it thinks through each scene's panels with the writing model, then renders every sheet with GPT Image 2 on its own."})),
           _sbEl("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",marginTop:4}},
             readySheets+" of "+totalSheets+" sheet"+(totalSheets!==1?"s":"")+" generated")),
         _sbEl("div",{className:"art-intro-actions"},
-          _sbEl("button",{className:"art-draftall",disabled:!!batchActiveId||!totalSheets,onClick:startAll,
+          onDirect && _sbEl("button",{className:"art-draftall",disabled:!!batchActiveId||!totalSheets,onClick:onDirect,
+            title:"Storyboard Director — an agent thinks through each scene's panels with the writing model, then renders every sheet with GPT Image 2"},
+            _sbEl(Icon.robot,{s:14}),"Direct storyboard"),
+          _sbEl("button",{className:"art-draftall ghost",disabled:!!batchActiveId||!totalSheets,onClick:startAll,
             title:"Generate (or regenerate) every scene's storyboard sheet, one at a time"},
             _sbEl(Icon.sparkles,{s:14}), batchActiveId?"Generating…":"Generate all sheets"),
           _sbEl("button",{className:"art-draftall ghost",disabled:!readySheets,

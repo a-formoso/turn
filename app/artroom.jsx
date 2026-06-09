@@ -251,6 +251,7 @@ function useImageGen(opts){
     if(overrideModel) genOpts.model = overrideModel;
     if(gopts.aspectRatio) genOpts.aspectRatio = gopts.aspectRatio;   // caller can force aspect…
     if(gopts.imageSize)   genOpts.imageSize   = gopts.imageSize;     // …and resolution (e.g. storyboard: 16:9 / 2K)
+    if(gopts.quality)     genOpts.quality     = gopts.quality;       // …and GPT Image 2 quality (low/medium/high — lower = far faster, dodges the proxy timeout)
     if(refImage) genOpts.referenceImage = refImage;
     if(groundEnabled){ genOpts.groundSearch = true; if(isFlash) genOpts.groundImageSearch = true; }
 
@@ -1656,7 +1657,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
   locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId,
-  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots }){
+  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard }){
   const PropSheets = window.PropSheets;
   const LocationSheets = window.LocationSheets;
 
@@ -1699,7 +1700,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
       ? React.createElement(window.ShotList,{project,scenes,characters,props,locations,shots,beatsMap,
           onUpdateShot,onAddShot,onDeleteShot,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots})
       : artView==="storyboard" && window.StoryboardView
-      ? React.createElement(window.StoryboardView,{project,scenes,shots,characters,props,locations,beatsMap,setArtView})
+      ? React.createElement(window.StoryboardView,{project,scenes,shots,characters,props,locations,beatsMap,setArtView,onDirect:onDirectStoryboard})
       : React.createElement(ArtComingSoon,{tab:artView}));
 }
 window.ArtRoom = ArtRoom;

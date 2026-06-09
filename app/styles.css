@@ -2425,6 +2425,8 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .sb-tpanel-opts{width:24px;height:24px;border-radius:5px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.5);color:#fff;
   display:grid;place-items:center;cursor:pointer;padding:0;opacity:0;transition:.12s}
 .sb-tpanel-frame:hover .sb-tpanel-opts,.sb-comp-frame:hover .sb-tpanel-opts,.sb-tpanel-opts.on{opacity:1}
+/* on the big composite sheet the menu is easy to miss — keep it visible at rest so users know it's there */
+.sb-comp-frame .sb-tpanel-opts{opacity:.92;background:rgba(0,0,0,.6)}
 .sb-tpanel-opts:hover{background:rgba(0,0,0,.78)}
 .sb-tpanel-cap{display:flex;align-items:flex-start;gap:8px;margin-top:7px;min-height:38px}
 .sb-tpanel-captext{flex:1;min-width:0;font-family:"Caveat",var(--f-ui);font-size:16px;line-height:1.18;color:#e9e9e9;text-transform:uppercase;letter-spacing:.005em}
