@@ -533,6 +533,7 @@ async function agentColorist(ctx){
   if(ctx.cancelled()) return;
   if(ok){
     art.applyStyles(res);
+    if(ctx.art.markApplied) ctx.art.markApplied("colorist");
     ctx.emit({k:"ok", t:"Applied — "+nP+" look"+(nP!==1?"s":"")+", color-scripted "+nS+" scene"+(nS!==1?"s":"")+". Fine-tune any scene in the film-strip."});
   }else{
     ctx.emit({k:"flag", t:"Kept your current looks — nothing changed."});
@@ -648,9 +649,9 @@ async function agentCastingDirector(ctx){
     let c = ch;
     ctx.emit({k:"act", t:"Casting "+(c.name||"a character")+"…"});
 
-    // 1) draft the visual spec if missing
-    if(!cast.isDrafted(c) && ctx.ai && ctx.ai.available){
-      ctx.emit({k:"act", t:"Drafting "+(c.name||"the character")+"'s look from the script…"});
+    // 1) draft the visual spec (force = re-draft even if already drafted, applying the Lookbook)
+    if((ctx.force || !cast.isDrafted(c)) && ctx.ai && ctx.ai.available){
+      ctx.emit({k:"act", t:(ctx.force?"Re-drafting ":"Drafting ")+(c.name||"the character")+"'s look from the script…"});
       try{ const patch = await cast.draftSpec(c); if(patch){ c = {...c, ...patch}; specs++; } }catch(e){}
     }
     if(ctx.cancelled()) return;
@@ -663,8 +664,8 @@ async function agentCastingDirector(ctx){
     }
     if(ctx.cancelled()) return;
 
-    // 3) generate the master sheet if missing
-    let baseUrl = await cast.imageOf(c.id);
+    // 3) generate the master sheet (force = regenerate even if one exists)
+    let baseUrl = ctx.force ? "" : await cast.imageOf(c.id);
     if(!baseUrl){
       ctx.emit({k:"act", t:"Generating "+(c.name||"the character")+"'s master sheet…"});
       try{ baseUrl = await cast.generateMaster(c); sheets++;
@@ -677,7 +678,7 @@ async function agentCastingDirector(ctx){
     for(const st of (c.states||[])){
       if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+sheets+" sheets, "+variants+" variants."}); return; }
       const sid = c.id+":"+st.id;
-      const have = await cast.imageOf(sid);
+      const have = ctx.force ? "" : await cast.imageOf(sid);
       if(have) continue;
       ctx.emit({k:"act", t:"Generating "+(c.name||"the character")+" — “"+(st.label||"variant")+"”…"});
       try{ await cast.generateState(c, st, baseUrl); variants++;
@@ -685,6 +686,7 @@ async function agentCastingDirector(ctx){
       catch(e){ ctx.emit({k:"flag", t:"Couldn't generate "+(c.name||"the character")+" — “"+(st.label||"variant")+"”: "+((e&&e.message)||e)+"."}); }
     }
   }
+  if(ctx.art.markApplied && (ctx.force||specs||sheets||variants)) ctx.art.markApplied("characters");
   ctx.emit({k:"done", t:"Cast designed — "+specs+" spec"+(specs!==1?"s":"")+" drafted, "+sheets+" master sheet"+(sheets!==1?"s":"")+", "+variants+" appearance variant"+(variants!==1?"s":"")+". Review and tweak any in the Characters tab."});
 }
 
@@ -706,10 +708,10 @@ async function agentPropsMaster(ctx){
   ctx.emit({k:"observe", t:"Derived "+castN+" cast prop"+(castN!==1?"s":"")+" + "+setN+" set-dressing object"+(setN!==1?"s":"")+"."});
   if(ctx.cancelled()) return;
 
-  // 2) draft each undrafted prop's spec
-  ctx.emit({k:"act", t:"Drafting prop specs from the story…"});
+  // 2) draft prop specs (force = re-draft ALL, applying the current Lookbook)
+  ctx.emit({k:"act", t:ctx.force?"Re-drafting every prop spec from the story…":"Drafting prop specs from the story…"});
   let drafted=0;
-  try{ drafted = await pm.draftSpecs(); }
+  try{ drafted = await pm.draftSpecs(ctx.force); }
   catch(e){ ctx.emit({k:"flag", t:"Spec drafting hit an error: "+((e&&e.message)||e)}); }
   ctx.emit({k:"observe", t:drafted?("Drafted "+drafted+" spec"+(drafted!==1?"s":"")+"."):"Specs already complete."});
   if(ctx.cancelled()) return;
@@ -720,10 +722,11 @@ async function agentPropsMaster(ctx){
   if(merged) ctx.emit({k:"ok", t:"Merged "+merged+" near-duplicate"+(merged!==1?"s":"")+" into one card each."});
   if(ctx.cancelled()) return;
 
-  // 4) generate a sheet for every drafted prop that doesn't have one
+  // 4) generate sheets (force = regenerate ALL drafted props)
   let todo=[];
-  try{ todo = await pm.toGenerate(); }catch(e){}
+  try{ todo = await pm.toGenerate(ctx.force); }catch(e){}
   if(!todo.length){
+    if(ctx.art.markApplied && (ctx.force||drafted)) ctx.art.markApplied("props");
     ctx.emit({k:"done", t:"Props ready — "+(castN+setN)+" derived, "+drafted+" drafted; every drafted prop already has a sheet. The cast can reference them."}); return;
   }
   ctx.emit({k:"act", t:"Generating "+todo.length+" prop sheet"+(todo.length!==1?"s":"")+"…"});
@@ -735,6 +738,7 @@ async function agentPropsMaster(ctx){
       ctx.emit({k:"ok", t:(p.name||"Prop")+" — sheet generated."}); }
     catch(e){ ctx.emit({k:"flag", t:"Couldn't generate "+(p.name||"the prop")+"'s sheet: "+((e&&e.message)||e)+". Moving on."}); }
   }
+  if(ctx.art.markApplied && (ctx.force||drafted||sheets)) ctx.art.markApplied("props");
   ctx.emit({k:"done", t:"Props mastered — "+(castN+setN)+" derived, "+drafted+" drafted, "+sheets+" sheet"+(sheets!==1?"s":"")+" generated. The cast can now reference them."});
 }
 
@@ -765,10 +769,10 @@ async function agentLocationScout(ctx){
   }
   if(ctx.cancelled()) return;
 
-  // 3) draft the spec (architecture, materials, lighting, significance, look dev)
-  ctx.emit({k:"act", t:"Drafting location specs from the script…"});
+  // 3) draft the spec (force = re-draft ALL, applying the current Lookbook)
+  ctx.emit({k:"act", t:ctx.force?"Re-drafting every location spec from the script…":"Drafting location specs from the script…"});
   let specs=0;
-  try{ specs = await ls.draftSpecs(); }
+  try{ specs = await ls.draftSpecs(ctx.force); }
   catch(e){ ctx.emit({k:"flag", t:"Spec drafting hit an error: "+((e&&e.message)||e)}); }
   ctx.emit({k:"observe", t:specs?("Drafted "+specs+" spec"+(specs!==1?"s":"")+"."):"Specs already complete."});
   if(ctx.cancelled()) return;
@@ -786,11 +790,12 @@ async function agentLocationScout(ctx){
   if(vars) ctx.emit({k:"ok", t:"Added "+vars+" time-of-day variant"+(vars!==1?"s":"")+" for places the script shows at more than one time."});
   if(ctx.cancelled()) return;
 
-  // 6) generate the plates, then the variants
+  // 6) generate plates, then variants (force = regenerate ALL)
   let plates=[], variants=[];
-  try{ plates = await ls.toGeneratePlates(); }catch(e){}
-  try{ variants = await ls.toGenerateVariants(); }catch(e){}
+  try{ plates = await ls.toGeneratePlates(ctx.force); }catch(e){}
+  try{ variants = await ls.toGenerateVariants(ctx.force); }catch(e){}
   if(!plates.length && !variants.length){
+    if(ctx.art.markApplied && (ctx.force||specs)) ctx.art.markApplied("locations");
     ctx.emit({k:"done", t:"Locations ready — "+added+" pulled, "+specs+" drafted; every plate is already generated."}); return;
   }
   ctx.emit({k:"act", t:"Generating "+plates.length+" plate"+(plates.length!==1?"s":"")+(variants.length?(" + "+variants.length+" variant"+(variants.length!==1?"s":"")):"")+"…"});
@@ -808,6 +813,7 @@ async function agentLocationScout(ctx){
     try{ await ls.generateVariant(l, v); madeV++; ctx.emit({k:"ok", t:(l.name||"Location")+" — "+(v.time||"variant")+" generated."}); }
     catch(e){ ctx.emit({k:"flag", t:"Couldn't generate "+(l.name||"the location")+" — "+(v.time||"variant")+": "+((e&&e.message)||e)+"."}); }
   }
+  if(ctx.art.markApplied && (ctx.force||specs||madeP||madeV)) ctx.art.markApplied("locations");
   ctx.emit({k:"done", t:"Locations scouted — "+added+" pulled, "+specs+" drafted, "+madeP+" plate"+(madeP!==1?"s":"")+" + "+madeV+" variant"+(madeV!==1?"s":"")+" generated. Tweak any in the Locations tab."});
 }
 

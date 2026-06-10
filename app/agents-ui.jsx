@@ -130,7 +130,7 @@ function IdeaHelper({ onPick }){
       ", and what ",React.createElement("b",null,"stands in the way"),"."));
 }
 
-function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput, autoStart, single, viewLabel, introExtra }){
+function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput, autoStart, single, viewLabel, introExtra, force }){
   const [trace, setTrace] = React.useState([]);
   const [pending, setPending] = React.useState(null);   // proposal card awaiting decision
   const [status, setStatus] = React.useState("idle");   // idle|running|waiting|done
@@ -153,6 +153,7 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
     const ctx = ctxFactory({
       input: inputRef.current,
       agentName: agent.name,
+      force: !!force,
       emit:(step)=> setTrace(tr=>[...tr, step]),
       propose:(card)=> new Promise(res=>{ setPending(card); setStatus("waiting");
         resolver.current = (val)=>{ resolver.current=null; setPending(null); setStatus("running"); res(val); }; }),
@@ -213,7 +214,7 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
           viewLabel||"View story",React.createElement(Icon.chevR,{s:15})))));
 }
 
-function AgentsPanel({ onClose, onView, ctxFactory, aiOn, undoCount, undoLabel, onUndo, issues, initialAgentId, initialInput, autoStart, single, viewLabel, introExtra }){
+function AgentsPanel({ onClose, onView, ctxFactory, aiOn, undoCount, undoLabel, onUndo, issues, initialAgentId, initialInput, autoStart, single, viewLabel, introExtra, force }){
   const agents = window.AGENTS || [];
   const [active, setActive] = React.useState(()=> initialAgentId ? (agents.find(a=>a.id===initialAgentId)||null) : null);
   const [auto, setAuto] = React.useState(!!autoStart);
@@ -226,6 +227,7 @@ function AgentsPanel({ onClose, onView, ctxFactory, aiOn, undoCount, undoLabel, 
     React.createElement("div",{className:"ag-panel"},
       active
         ? React.createElement(AgentRunner,{agent:active,ctxFactory,onClose,onView,single,viewLabel,introExtra,
+            force: !!force && active.id===initialAgentId,
             onBack: single ? onClose : ()=>{ setAuto(false); setActive(null); },
             initialInput: active.id===initialAgentId ? initialInput : "",
             autoStart: auto && active.id===initialAgentId})

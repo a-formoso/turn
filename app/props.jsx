@@ -373,7 +373,7 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
         React.createElement(CopyBox,{label:"Final prompt \u2014 master + negative (sent to Nano Banana)",text:finalPrompt}))));
 }
 
-function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId, onMergeProps, onPropsMaster }){
+function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId, onMergeProps, onPropsMaster, lookbookStale, onApplyLookbook }){
   const [view, setView] = React.useState(null);   // {url, character/prop}
   const [sceneFilter, setSceneFilter] = React.useState("");   // "" = all
   const [query, setQuery] = React.useState("");               // free-text name/owner search
@@ -485,6 +485,7 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the reference sheet for every drafted prop \u2014 you choose whether to redo ones that already have a sheet"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all props")))),
+    window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,label:"these props",dept:"props"}),
     BatchBar && React.createElement(BatchBar,{batch,noun:"prop"}),
     // free-text search — filter prop cards by name or owner as you type
     (list.length>0 || (tagged && sceneList.length>0)) && React.createElement("div",{className:"prop-toolbar"},

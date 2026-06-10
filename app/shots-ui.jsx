@@ -29,7 +29,7 @@ function FrameToggles({ label, items, selected, onToggle, emptyHint }){
       })));
 }
 
-function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnchor, onUpdate, onDelete, onView, batchActiveId, onBatchDone }){
+function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnchor, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot }){
   const loc = ctx.location;
   const subjects = (sh.subjects||[]).map(id=>ctx.charById[id]).filter(Boolean);
   const finalPrompt = combinedShotPrompt(sh, ctx);
@@ -67,6 +67,30 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
       +"the same characters (identical faces & wardrobe), the same location and the same colour grade. Do not re-imagine the frame.",
   });
 
+  // Manual generate of a NON-anchor shot whose anchor frame doesn't exist yet: notify which
+  // shot (and scene) is the anchor before spending a generation, and only proceed on the user's
+  // say-so. The batch path is left untouched (it already renders anchor-first).
+  const guardedGenerate = async ()=>{
+    if(anchorShot && anchorShot.id!==sh.id && typeof window.appConfirm==="function"){
+      const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
+        if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; };
+      const anchorImg = await grab(anchorShot.id);
+      if(!anchorImg){
+        const aLab = "Beat "+(anchorShot.beatN||"?")+" · "+(sizeOf(anchorShot.size).label||"shot");
+        const sLab = "Scene "+((scene&&scene.no!=null)?scene.no:"?")+((scene&&scene.title)?(" — "+scene.title):"");
+        const ans = await window.appConfirm({
+          title:"Generate before the scene's anchor?",
+          body:"This scene's visual ANCHOR — "+aLab+" in "+sLab+" — hasn't been generated yet. The anchor's frame pins the scene's lighting, colour grade and world so every shot matches. Generate this shot now and it won't be locked to that look, so it may drift from its scene-mates.",
+          confirmLabel:"Generate anyway", altLabel:"Generate the anchor first", cancelLabel:"Cancel" });
+        if(ans===true){ gen.generate(); }
+        else if(ans==="alt" && onGenerateShot){ onGenerateShot(anchorShot.id); }
+        return;
+      }
+    }
+    gen.generate();
+  };
+  const genGuarded = Object.assign({}, gen, { generate: guardedGenerate });
+
   // batch auto-generate when this card is the active queue member
   const batchStarted = React.useRef(false);
   const wasGening = React.useRef(false);
@@ -85,7 +109,7 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
   const initials = (sizeOf(sh.size).label||"SH");
 
   return _el("div",{className:"sheet-card shot-card"+(batchActiveId===sh.id?" batch-on":""),"data-shot-card":sh.id},
-    _el(SheetFrame,{ gen, slotId:"shot-"+sh.id, name:beatLabel, avatarColor:"linear-gradient(135deg,#7a6cae,#2a2440)",
+    _el(SheetFrame,{ gen:genGuarded, slotId:"shot-"+sh.id, name:beatLabel, avatarColor:"linear-gradient(135deg,#7a6cae,#2a2440)",
       initials, drafted:true, drafting:false, onDraft:()=>{}, entity:sh, onView,
       slotPlaceholder:"Generate or drop a frame", noun:"frame",
       extraMeta:[
@@ -147,7 +171,7 @@ function SceneCtxItem({ k, v }){
 }
 
 function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, onUpdate, onDelete, onView,
-  onAddShot, onDraftScene, draftingScene, onSceneBatch, batchActiveId, onBatchDone, open, onToggle }){
+  onAddShot, onDraftScene, draftingScene, onSceneBatch, batchActiveId, onBatchDone, open, onToggle, onGenerateShot }){
   const loc = ctx.location;
   const driver = scene.driver ? ctx.charById[scene.driver] : null;
   // scene-level context (driver/reactor/antagonism/goal/conflict) — driver+goal+conflict from the
@@ -195,7 +219,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
               [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")}))))))),
     open && _el("div",{className:"sheet-grid"},
       shots.map(sh=>_el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,anchorShot,onSetAnchor:setAnchor,onUpdate,onDelete,onView,
-        batchActiveId,onBatchDone}))));
+        batchActiveId,onBatchDone,onGenerateShot}))));
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,
@@ -257,6 +281,8 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     if(!ids.length){ batch.setMsg("Draft the shots first \u2014 nothing to generate yet."); return; } batch.begin(ids, 0); };
   const startScene = (scene)=>{ if(batchActiveId) return; const ids=anchorFirstIds(shotsByScene[scene.id]);
     if(!ids.length) return; batch.begin(ids, 0); };
+  // generate a single shot (used when the user opts to render the scene's anchor first)
+  const startShot = (id)=>{ if(batchActiveId || !id) return; batch.begin([id], 0); };
 
   // ---- empty state ----
   if(!scenesWithShots.length){
@@ -310,7 +336,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
       ctx:ctxFor(scene),characters:characters||[],beatsMap,propsAvail:(typeof propsForScene==="function")?propsForScene(props,scene.id):[],
       onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
       onAddShot,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===scene.id,
-      onSceneBatch:startScene,batchActiveId,onBatchDone:batch.advance,
+      onSceneBatch:startScene,batchActiveId,onBatchDone:batch.advance,onGenerateShot:startShot,
       open:!collapsed[scene.id],onToggle:()=>toggleScene(scene.id)})));
 }
 window.ShotList = ShotList;

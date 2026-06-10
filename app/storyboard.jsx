@@ -124,6 +124,9 @@ function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap){
     + "same place, one unbroken flow of time — NOT "+N+" unrelated images. ";
   s += "STYLE: cinematic"+(genre?(", "+genre+" tone"):"")+", live-action, photorealistic, lifelike, subtle 35mm film grain. "+(grade||"")+"16:9 page layout. ";
   s += "ATMOSPHERE / LIGHT: "+light+"; "+mood+". ";
+  // Lookbook references routed to the storyboard (composition + atmosphere), set on ctx by the director surface
+  const _lb = (ctx && (ctx._lookbookBrief||"")).trim();
+  if(_lb) s += "VISUAL REFERENCES — translate their look (framing, composition, atmosphere), NOT their content: "+_lb.replace(/\s+/g," ")+". ";
   s += "LAYOUT: thin clean separators between panels; NO text or panel numbers INSIDE the panels. "
     + "UNDER EACH panel a thin off-white annotation strip carrying three short lines of production notes in a clean, "
     + "high-contrast sans-serif font (must stay legible at the rendered grid size), formatted as screenplay slug lines: "

@@ -53,6 +53,73 @@ function composeLookbookRefs(statement, cards){
 }
 window.composeLookbookRefs = composeLookbookRefs;
 
+/* which reference categories feed which downstream department. A category may feed more than
+   one. Each Art Room drafter pulls only its department's categories as a focused brief, so the
+   one visual lookbook propagates to every department (not just colour). */
+const LOOKBOOK_ROUTING = {
+  colorist:   ["Palette", "Lighting", "Texture & grain", "Atmosphere"],
+  characters: ["Wardrobe"],
+  locations:  ["Production design", "Atmosphere"],
+  props:      ["Production design"],
+  shots:      ["Lens & format", "Composition", "Lighting"],
+  storyboard: ["Composition", "Atmosphere"],
+};
+window.LOOKBOOK_ROUTING = LOOKBOOK_ROUTING;
+
+/* the lookbook brief for one department: the film's visual statement (north star) + the
+   reference notes whose category routes to that department. Returns "" when there's nothing. */
+function lookbookBriefFor(dept, lookbook, statement){
+  const cats = LOOKBOOK_ROUTING[dept] || [];
+  const lines = (lookbook||[])
+    .filter(c=> cats.indexOf(c.category)>=0 && (c.note||"").trim())
+    .map(c=> (c.source?c.source+" — ":"")+c.note.trim());
+  const st = (statement||"").trim();
+  if(!lines.length && !st) return "";
+  return [st ? ("Overall look: "+st) : "", ...lines].filter(Boolean).join("\n");
+}
+window.lookbookBriefFor = lookbookBriefFor;
+
+/* which departments are now out of date relative to the Lookbook: a dept is stale when it HAS
+   drafted content (contentFlags[dept]) AND the current brief differs from the one last applied
+   (applied[dept]). Scoped per-category by lookbookBriefFor, so editing a Palette card flags only
+   the colorist, editing the statement flags everything. Returns { dept:true }. */
+function lookbookStaleDepts(lookbook, statement, applied, contentFlags){
+  const out = {};
+  Object.keys(LOOKBOOK_ROUTING).forEach(dept=>{
+    if(!(contentFlags && contentFlags[dept])) return;        // nothing drafted → nothing to be stale about
+    const cur = lookbookBriefFor(dept, lookbook, statement);
+    const was = (applied && applied[dept]) || "";
+    if(cur !== was) out[dept] = true;
+  });
+  return out;
+}
+window.lookbookStaleDepts = lookbookStaleDepts;
+
+/* how the Lookbook drives each tab — which of its categories feed this department and what they
+   shape — so the banner can tell the user exactly what re-drafting will pull in (mirrors
+   LOOKBOOK_ROUTING). */
+const LOOKBOOK_DEPT_AFFECT = {
+  characters: "Its Wardrobe references shape each character's costume, silhouette and styling.",
+  props:      "Its Production design references shape each prop's materials, finish and period.",
+  locations:  "Its Production design and Atmosphere references shape each location's architecture, materials, light and mood.",
+  colorist:   "Its Palette, Lighting, Texture & grain and Atmosphere references shape the colour grade and film stock.",
+};
+window.LOOKBOOK_DEPT_AFFECT = LOOKBOOK_DEPT_AFFECT;
+
+/* the in-tab banner: "the Lookbook changed since this was drafted" + how it drives THIS tab + [Re-draft]. */
+function LookbookStaleNotice({ stale, onApply, label, dept }){
+  if(!stale) return null;
+  const affect = LOOKBOOK_DEPT_AFFECT[dept] || "";
+  return React.createElement("div",{className:"lb-stale-notice"},
+    React.createElement(Icon.alert,{s:14}),
+    React.createElement("span",null,
+      "The ",React.createElement("b",null,"Lookbook")," changed since "+(label||"this tab")+" "+((label&&/s$/.test(label))?"were":"was")+" last drafted — re-draft to apply it.",
+      affect && React.createElement("span",{className:"lb-stale-affect"}, affect)),
+    React.createElement("button",{className:"lb-stale-btn",onClick:onApply,title:"Re-draft this tab's specs from the updated Lookbook and regenerate its sheets"},
+      React.createElement(Icon.sparkles,{s:12}),"Re-draft & regenerate"));
+}
+window.LookbookStaleNotice = LookbookStaleNotice;
+
 /* headless mood-frame generation for the Visual Researcher agent (mirrors generatePropSheet) */
 async function generateLookbookFrame(c, project){
   if(typeof nbGenerate!=="function" || typeof nbCommit!=="function") return false;
@@ -135,7 +202,7 @@ function LookbookCard({ c, project, onUpdate, onDelete, onView, batchActiveId, o
 }
 
 /* ---- the Lookbook tab ---- */
-function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSetNote, onResearch }){
+function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSetNote, onResearch, onClear }){
   const [view, setView] = React.useState(null);
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
@@ -167,7 +234,10 @@ function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSe
             React.createElement(Icon.robot,{s:14}),"Research the look"),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Render (or re-render) the mood frame for every reference that has a note"},
-            React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Rendering…":"Generate all frames")))),
+            React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Rendering…":"Generate all frames"),
+          onClear && (list.length || (note||"").trim()) && React.createElement("button",{className:"art-draftall ghost",onClick:onClear,
+            title:"Remove every reference and the visual statement — Art Room only, never touches your story"},
+            React.createElement(Icon.trash,{s:13}),"Clear")))),
 
     // the north-star visual statement
     React.createElement("div",{className:"lb-statement"},

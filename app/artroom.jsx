@@ -1563,7 +1563,7 @@ function ImageLightbox({ url, character, onClose }){
               :React.createElement(React.Fragment,null,React.createElement(Icon.download,{s:14}),"Download "+res)))));
 }
 
-function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, onUpdate, onDraft, onDraftAll, draftingId, draftingAll, draftingIds, onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAdd, onDelete, onCast }){
+function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, onUpdate, onDraft, onDraftAll, draftingId, draftingAll, draftingIds, onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAdd, onDelete, onCast, lookbookStale, onApplyLookbook }){
   const [view, setView] = React.useState(null);   // {url, character}
   const [mgrOpen, setMgrOpen] = React.useState(false);
   const [sceneFilter, setSceneFilter] = React.useState("");   // "" = all scenes
@@ -1676,6 +1676,7 @@ function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, 
         title:"Generate the reference sheets for the characters in this scene — you choose whether to redo ones that already have a sheet"},
         React.createElement(Icon.sparkles,{s:14}),
         batchActiveId?"Generating…":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")))),
+    window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,label:"these characters",dept:"characters"}),
     BatchBar && React.createElement(BatchBar,{batch,noun:"character"}),
     React.createElement("div",{className:"sheet-grid"},
       shown.map(c=>React.createElement(CharacterSheet,{key:c.id,c,project,scenes,props,onUpdate,onDraft,
@@ -1703,7 +1704,9 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
   locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId,
   shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard, onColorist, onShoot, onCast, onPropsMaster,
-  lookbook, lookbookNote, onUpdateLookbook, onAddLookbook, onDeleteLookbook, onSetLookbookNote, onResearch }){
+  lookbook, lookbookNote, onUpdateLookbook, onAddLookbook, onDeleteLookbook, onSetLookbookNote, onResearch, onClearLookbook,
+  staleTabs, onApplyLookbook }){
+  const _stale = staleTabs || {};
   const PropSheets = window.PropSheets;
   const LocationSheets = window.LocationSheets;
   const LookbookView = window.LookbookView;
@@ -1732,21 +1735,25 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
   return React.createElement("div",{className:"artroom"},
     artView==="lookbook" && LookbookView
       ? React.createElement(LookbookView,{project,lookbook,note:lookbookNote,
-          onUpdate:onUpdateLookbook,onAdd:onAddLookbook,onDelete:onDeleteLookbook,onSetNote:onSetLookbookNote,onResearch})
+          onUpdate:onUpdateLookbook,onAdd:onAddLookbook,onDelete:onDeleteLookbook,onSetNote:onSetLookbookNote,onResearch,onClear:onClearLookbook})
     : artView==="characters"
       ? React.createElement(CharacterSheets,{project,characters,scenes,props,shots,beatsMap,onUpdate:onUpdateChar,
           onDraft:onDraftVisuals,onDraftAll:onDraftAllVisuals,draftingId:draftingVisualId,draftingAll:draftingAllVisuals,draftingIds:draftingVisualIds,
-          onSuggestStates,suggestingStatesId,onRemoveOwnedItem,onAdd:onAddCharacter,onDelete:onDeleteCharacter,onCast})
+          onSuggestStates,suggestingStatesId,onRemoveOwnedItem,onAdd:onAddCharacter,onDelete:onDeleteCharacter,onCast,
+          lookbookStale:!!_stale.characters,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("characters")})
     : artView==="props" && PropSheets
       ? React.createElement(PropSheets,{project,props,characters,scenes,onUpdate:onUpdateProp,onDraft:onDraftProp,
           onDraftAll:onDraftAllProps,onAdd:onAddProp,onDelete:onDeleteProp,draftingId:draftingPropId,draftingAll:draftingAllProps,
-          onSeedFromCast,castHasProps,onTagScenes,taggingScenes,onTagOne,taggingSceneId,onMergeProps,onPropsMaster})
+          onSeedFromCast,castHasProps,onTagScenes,taggingScenes,onTagOne,taggingSceneId,onMergeProps,onPropsMaster,
+          lookbookStale:!!_stale.props,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("props")})
       : artView==="locations" && LocationSheets
       ? React.createElement(LocationSheets,{project,locations,scenes,onUpdate:onUpdateLocation,onDraft:onDraftLocation,
           onDraftAll:onDraftAllLocs,onAdd:onAddLocation,onDelete:onDeleteLocation,draftingId:draftingLocId,draftingAll:draftingAllLocs,
-          onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId,onScout})
+          onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId,onScout,
+          lookbookStale:!!_stale.locations,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("locations")})
       : artView==="stylebible" && window.StyleBibleView
-      ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage,onColorist})
+      ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage,onColorist,
+          lookbookStale:!!_stale.stylebible,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("colorist")})
       : artView==="shots" && window.ShotList
       ? React.createElement(window.ShotList,{project,scenes,characters,props,locations,shots,beatsMap,
           onUpdateShot,onAddShot,onDeleteShot,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots,onShoot})

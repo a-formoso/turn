@@ -225,7 +225,7 @@ function LocationVariant({ l, v, project, onTime, onRemove, onView }){
       entity:l, onView, slotPlaceholder:"Drop a photo", noun:"variant", compact:true }));
 }
 
-function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout }){
+function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, lookbookStale, onApplyLookbook }){
   const [view, setView] = React.useState(null);
   const [sceneFilter, setSceneFilter] = React.useState("");
   const batch = useBatchGen();
@@ -276,6 +276,7 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the coverage plate for every drafted location \u2014 you choose whether to redo ones that already have a plate"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all locations"))),),
+    window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,label:"these locations",dept:"locations"}),
     BatchBar && React.createElement(BatchBar,{batch,noun:"location"}),
     sceneList.length>0 && list.length>0 && React.createElement("div",{className:"prop-scenebar"},
       React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Focus a scene"),

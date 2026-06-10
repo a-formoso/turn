@@ -307,7 +307,7 @@ window.InfoTip = InfoTip;
 /* StyleBibleView — the Style Bible as a full Art Room TAB (not a modal). Reuses the
    film-strip + preset cards. "Assign from script" writes the scene→preset map
    (scene-level, the source of truth); characters / locations / shots merely READ it. */
-function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSetScenePreset, onAddRefImages, onRemoveRefImage, onColorist }){
+function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSetScenePreset, onAddRefImages, onRemoveRefImage, onColorist, lookbookStale, onApplyLookbook }){
   const { presets, sceneStyles, refs, refImages } = styleBibleOf(project);
   const scenesFor = (pid)=> (scenes||[]).filter(s=>sceneStyles[s.id]===pid).sort((a,b)=>(a.no||0)-(b.no||0));
   const assignedCount = (scenes||[]).filter(s=>sceneStyles[s.id]).length;
@@ -323,6 +323,7 @@ function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSet
           React.createElement("button",{className:"art-draftall",disabled:!(scenes||[]).length,onClick:onColorist,
             title:"Cinematographer / Colorist \u2014 designs your colour system and color-scripts every scene, with a rationale, for your approval"},
             React.createElement(Icon.palette,{s:14}),"Light the film")))),
+    window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,label:"this palette",dept:"colorist"}),
     onSetRefs && React.createElement(StyleRefsField,{value:refs,onCommit:onSetRefs,onAssign,assigning,assignDisabled:assigning||!(scenes||[]).length,
       refImages,onAddRefImages,onRemoveRefImage}),
     React.createElement("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",margin:"2px 0 14px"}},
