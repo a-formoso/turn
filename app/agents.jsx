@@ -94,6 +94,30 @@ function auditSpine(scenes){
         break; }
     }
   }
+  // 4) one-sided argument \u2014 4+ consecutive scenes arguing the SAME side of the
+  //    controlling idea (explicit scene.argues, or derived from the closing charge
+  //    via themeArgues). A story argues both sides; a one-sided stretch is a sermon.
+  {
+    let run = [];
+    const flag = ()=>{
+      if(run.length<4) return false;
+      const side = themeArgues(run[0]).side;
+      const mid = run[Math.floor(run.length/2)];
+      issues.push({ kind:"themerun", sceneId:mid.id, sceneNo:mid.no, sev:0, side,
+        runFrom:run[0].no, runTo:run[run.length-1].no,
+        msg:"Scenes "+run[0].no+"\u2013"+run[run.length-1].no+" all argue the "
+          +(side==="idea"?"idea":"counter-idea")+" \u2014 "+run.length
+          +" scenes with no answer from the other side. The argument flattens into a sermon." });
+      return true;
+    };
+    for(const s of scenes){
+      const side = themeArgues(s).side;
+      if(side==="neither"){ if(flag()) break; run = []; continue; }
+      if(run.length && themeArgues(run[0]).side!==side){ if(flag()) break; run = []; }
+      run.push(s);
+    }
+    if(!issues.some(i=>i.kind==="themerun")) flag();
+  }
   issues.sort((a,b)=>b.sev-a.sev);
   return issues;
 }
@@ -105,7 +129,7 @@ function auditSpine(scenes){
 async function agentStoryDoctor(ctx){
   const MAX_FIXES = 5;
   const skip = new Set();
-  ctx.emit({k:"plan", t:"Scanning all "+ctx.model.scenes.length+" scenes for the weakest structural link \u2014 scenes that don't turn, soft peaks, and flat runs."});
+  ctx.emit({k:"plan", t:"Scanning all "+ctx.model.scenes.length+" scenes for the weakest structural link \u2014 scenes that don't turn, soft peaks, flat runs, and one-sided stretches of the controlling idea's argument."});
   let fixes = 0;
   for(let iter=0; iter<MAX_FIXES; iter++){
     if(ctx.cancelled()) return;
@@ -126,21 +150,37 @@ async function agentStoryDoctor(ctx){
         const cc = scene.openCharge>=0 ? Math.max(-3,scene.openCharge-3) : Math.min(3,scene.openCharge+3);
         fix = { closeValue:scene.closeValue, closeCharge:cc, rationale:"Reverse the closing charge so the scene's value flips." };
       }
+    } else if(issue.kind==="themerun"){
+      // one-sided argument — flip the middle scene of the run to argue the other side
+      const opp = issue.side==="idea" ? "counter" : "idea";
+      const cc = opp==="idea" ? Math.max(2, Math.abs(scene.closeCharge)) : Math.min(-2, -Math.abs(scene.closeCharge));
+      fix = { closeValue:scene.closeValue, closeCharge:cc,
+        // an explicit override must flip too, or the re-charge wouldn't change the argument
+        argues: themeArgues(scene).explicit ? opp : undefined,
+        rationale:"Scenes "+issue.runFrom+"\u2013"+issue.runTo+" argue only the "
+          +(issue.side==="idea"?"idea":"counter-idea")
+          +". Flip this one so the other side answers back \u2014 the controlling idea stays an argument, not a sermon." };
     } else { // monotony — nudge the middle scene to break the run
       const cc = -Math.sign(scene.closeCharge)*2;
       fix = { closeValue:scene.closeValue, closeCharge:cc, rationale:"Push this scene to the opposite pole to break the flat run and restore contrast." };
     }
 
+    const sideLabel = (s)=> s==="idea" ? "the idea" : s==="counter" ? "the counter-idea" : "neither side";
     const ok = await ctx.propose({
       title:"Re-charge Scene "+scene.no+" \u2014 "+scene.title,
       reason:issue.msg,
       rationale:fix.rationale,
-      before: scene.openValue+" ("+chargeStr(scene.openCharge)+") \u2192 "+scene.closeValue+" ("+chargeStr(scene.closeCharge)+")",
-      after:  scene.openValue+" ("+chargeStr(scene.openCharge)+") \u2192 "+fix.closeValue+" ("+chargeStr(fix.closeCharge)+")",
+      before: issue.kind==="themerun"
+        ? "Argues "+sideLabel(themeArgues(scene).side)+" \u00b7 closes "+scene.closeValue+" ("+chargeStr(scene.closeCharge)+")"
+        : scene.openValue+" ("+chargeStr(scene.openCharge)+") \u2192 "+scene.closeValue+" ("+chargeStr(scene.closeCharge)+")",
+      after: issue.kind==="themerun"
+        ? "Argues "+sideLabel(issue.side==="idea"?"counter":"idea")+" \u00b7 closes "+fix.closeValue+" ("+chargeStr(fix.closeCharge)+")"
+        : scene.openValue+" ("+chargeStr(scene.openCharge)+") \u2192 "+fix.closeValue+" ("+chargeStr(fix.closeCharge)+")",
     });
     if(ctx.cancelled()) return;
     if(ok){
-      ctx.model.scenes[idx] = {...scene, closeValue:fix.closeValue, closeCharge:fix.closeCharge};
+      ctx.model.scenes[idx] = {...scene, closeValue:fix.closeValue, closeCharge:fix.closeCharge,
+        ...(fix.argues!==undefined ? {argues:fix.argues} : {})};
       ctx.sync();
       fixes++;
       ctx.emit({k:"ok", t:"Applied. Scene "+scene.no+" now turns "+chargeStr(scene.openCharge)+" \u2192 "+chargeStr(fix.closeCharge)+". Re-auditing\u2026"});
@@ -436,7 +476,21 @@ async function agentTableRead(ctx){
   if(ctx.cancelled()) return;
   if(!rep){ ctx.emit({k:"flag", t:"The model didn't return a usable report. Try again."}); ctx.emit({k:"done",t:"Aborted."}); return; }
   ctx.emit({k:"report", t:"Table-read complete.", report:rep});
-  ctx.emit({k:"done", t:rep.notes.length+" specific notes flagged. Click a note to jump to that scene."});
+  // voice distinctiveness pass — the sharpest note a real table-read produces:
+  // lines that could swap speakers without anyone noticing
+  ctx.emit({k:"act", t:"Re-reading the dialogue per character — checking every voice is distinct enough that no line could swap speakers…"});
+  const vc = ctx.ai.voiceCheck ? await ctx.ai.voiceCheck(ctx.model.scenes, ctx.model.drafts) : null;
+  if(ctx.cancelled()) return;
+  if(vc){
+    ctx.emit({k:"report", t:"Voice check complete.", voiceReport:vc});
+    const n = (vc.swappable||[]).length;
+    ctx.emit({k:"done", t:rep.notes.length+" note"+(rep.notes.length!==1?"s":"")+" flagged"
+      +(n ? (" + "+n+" swappable line"+(n!==1?"s":"")) : " — and every voice reads distinct")
+      +". Click a note to jump to its scene."});
+  } else {
+    ctx.emit({k:"flag", t:"Voice check skipped — it needs at least two characters with spoken lines."});
+    ctx.emit({k:"done", t:rep.notes.length+" specific notes flagged. Click a note to jump to that scene."});
+  }
 }
 
 /* =========================================================

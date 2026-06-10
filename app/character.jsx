@@ -36,7 +36,7 @@ function ArcSpark({ driven }){
     }));
 }
 
-function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJumpScene, onClose, onCollapse }){
+function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJumpScene, onClose, onCollapse, onFollow }){
   const c = character;
   if(!c) return React.createElement("div",{className:"inspector"},
     React.createElement("div",{className:"empty"},
@@ -79,7 +79,10 @@ function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJump
       // ARC (derived)
       React.createElement("div",{className:"insp-block"},
         React.createElement("div",{className:"insp-block-head"},
-          React.createElement("span",{className:"eyebrow"},React.createElement(Icon.graph,{s:12}),"Arc \u00b7 derived from the spine")),
+          React.createElement("span",{className:"eyebrow"},React.createElement(Icon.graph,{s:12}),"Arc \u00b7 derived from the spine"),
+          onFollow && driven.length>0 && React.createElement("button",{className:"char-draft-btn",
+            title:"Follow "+c.name+" across the spine graph",onClick:()=>onFollow(c.id)},
+            React.createElement(Icon.graph,{s:12}),"View on spine")),
         driven.length
           ? React.createElement(React.Fragment,null,
               React.createElement("div",{className:"char-arc-card"},

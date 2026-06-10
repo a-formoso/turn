@@ -15,6 +15,44 @@ window.turnInfo = turnInfo;
 window.chargeClass = chargeClass;
 window.chargeStr = chargeStr;
 
+/* which side of the controlling idea a scene argues — explicit override on the
+   scene (scene.argues) or derived from its closing charge: a positive close
+   asserts the idea, a negative close asserts the counter-idea. */
+function themeArgues(sc){
+  if(sc.argues==="idea"||sc.argues==="counter"||sc.argues==="neither")
+    return { side:sc.argues, explicit:true };
+  const c = Math.sign(sc.closeCharge);
+  return { side: c>0?"idea":c<0?"counter":"neither", explicit:false };
+}
+window.themeArgues = themeArgues;
+
+/* ---- runtime estimation — 1 screenplay page ≈ 55 lines ≈ 60 seconds ----
+   Drafted scenes are estimated from their actual blocks (action wraps ~12 words
+   a line, dialogue ~7 in its narrow column); undrafted scenes fall back to a
+   rough figure from their beat count and are marked approx (~). */
+function sceneRuntime(scene, draft, beats){
+  const blocks = draft && draft.blocks;
+  if(blocks && blocks.length){
+    let lines = 0;
+    blocks.forEach(b=>{
+      const w = (b.text||"").trim().split(/\s+/).filter(Boolean).length;
+      if(b.type==="scene") lines += 2;
+      else if(b.type==="action") lines += Math.ceil(w/12)+1;
+      else if(b.type==="char") lines += 2;
+      else if(b.type==="paren") lines += 1;
+      else if(b.type==="dia") lines += Math.ceil(w/7);
+      else lines += 2; // transitions and anything else
+    });
+    return { sec: Math.max(20, Math.round(lines/55*60)), approx:false };
+  }
+  const rows = (beats && beats.rows) ? beats.rows.length : 0;
+  if(rows) return { sec: Math.min(240, Math.max(45, rows*35)), approx:true };
+  return { sec: 90, approx:true };
+}
+function fmtClock(sec){ const m = Math.floor(sec/60), s = Math.round(sec%60); return m+":"+String(s).padStart(2,"0"); }
+window.sceneRuntime = sceneRuntime;
+window.fmtClock = fmtClock;
+
 const KIND_LABEL = {
   incite:"Inciting Incident", "act-climax":"Act Climax", midpoint:"Mid-Act Climax",
   crisis:"Crisis", "story-climax":"Story Climax", resolution:"Resolution",
@@ -27,7 +65,102 @@ function ChargeChip({ value, label }){
 }
 window.ChargeChip = ChargeChip;
 
-function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddScene }){
+/* ---- character throughline (the "follow this character" lens) ----
+   Derived ONLY from data the spine already owns (scenes + beatsMap), so it can
+   never drift from the story: drives = scene.driver; appears = named as the
+   beats' driver/reactor or in the summary; arc turns = the charge of consecutive
+   DRIVEN scenes flips sign or jumps >= 2 (same threshold as turnInfo). */
+function charSolidColor(c){
+  const m = /#[0-9a-fA-F]{3,8}/.exec((c && c.color) || "");
+  return m ? m[0] : "#8d8a84";
+}
+function characterThroughline(char, scenes, beatsMap){
+  const first = (((char && char.name) || "").trim().toLowerCase().split(/\s+/)[0]) || "";
+  const driven = scenes.filter(s => s.driver === char.id);
+  const involvedIds = new Set(driven.map(s => s.id));
+  scenes.forEach(s => {
+    if(involvedIds.has(s.id)) return;
+    const b = (beatsMap && beatsMap[s.id]) || {};
+    const hay = [b.driverLabel, b.reactorLabel, s.summary].filter(Boolean).join(" ").toLowerCase();
+    if(first && hay.includes(first)) involvedIds.add(s.id);
+  });
+  const turnIds = new Set(); const turnsByAct = {1:0, 2:0, 3:0};
+  driven.forEach((s, i) => {
+    const prev = i ? driven[i-1].closeCharge : s.openCharge;
+    const turned = Math.sign(prev) !== Math.sign(s.closeCharge) || Math.abs(s.closeCharge - prev) >= 2;
+    if(turned){ turnIds.add(s.id); turnsByAct[s.act] = (turnsByAct[s.act]||0) + 1; }
+  });
+  // verdict — names the classic failure: a character who turns early then coasts
+  const total = turnIds.size;
+  let verdict, flat = false;
+  if(!driven.length){ verdict = "Drives no scenes yet — set them as a scene’s driver and their arc appears here."; flat = true; }
+  else if(!total){ verdict = "Arc is flat — none of their driven scenes move their value."; flat = true; }
+  else {
+    const lastTurnIdx = driven.reduce((acc, s, i) => turnIds.has(s.id) ? i : acc, -1);
+    const coastAfter = driven.length - 1 - lastTurnIdx;
+    if(turnsByAct[1] >= 2 && !turnsByAct[2] && !turnsByAct[3]){
+      verdict = `All the movement is in Act I (×${turnsByAct[1]}) — the arc coasts from there.`; flat = true;
+    } else if(coastAfter >= 3){
+      verdict = `Turns ${total}×, then coasts — the last ${coastAfter} scenes they drive don’t move them.`; flat = true;
+    } else {
+      verdict = `Arc turns ${total}× · Act I ×${turnsByAct[1]} · II ×${turnsByAct[2]} · III ×${turnsByAct[3]}.`;
+    }
+  }
+  return { driven, involvedIds, turnIds, turnsByAct, verdict, flat };
+}
+window.characterThroughline = characterThroughline;
+window.charSolidColor = charSolidColor;
+
+/* chip-per-character strip above the spine graph — click to follow / unfollow */
+function FollowStrip({ characters, scenes, beatsMap, followId, onFollow }){
+  if(!characters || !characters.length) return null;
+  const cur = followId ? characters.find(c => c.id === followId) : null;
+  const tl = cur ? characterThroughline(cur, scenes, beatsMap) : null;
+  return React.createElement("div",{className:"follow-strip"},
+    React.createElement("div",{className:"follow-row"},
+      React.createElement("span",{className:"eyebrow",style:{marginRight:2}},
+        React.createElement(Icon.user,{s:12}),"Follow"),
+      characters.map(c => {
+        const on = followId === c.id;
+        const driven = scenes.filter(s => s.driver === c.id).length;
+        return React.createElement("button",{key:c.id,
+          className:"follow-chip"+(on?" on":""),
+          style: on ? {borderColor:charSolidColor(c)} : null,
+          title: on ? "Stop following" : `Follow ${c.name} across the spine`,
+          onClick:()=>onFollow(on ? null : c.id)},
+          React.createElement("span",{className:"follow-av",style:{background:c.color}}),
+          React.createElement("span",{className:"follow-name"},c.name),
+          React.createElement("span",{className:"follow-n"},driven));
+      })),
+    cur && React.createElement("div",{className:"follow-insight"+(tl.flat?" warn":"")},
+      tl.flat ? React.createElement(Icon.alert,{s:12}) : React.createElement(Icon.check,{s:12}),
+      React.createElement("span",null,tl.verdict),
+      React.createElement("span",{className:"follow-key"},
+        React.createElement("span",{className:"follow-key-dot",style:{borderColor:charSolidColor(cur)}}),"drives",
+        React.createElement("span",{className:"follow-key-dot dash",style:{borderColor:charSolidColor(cur)}}),"arc turns")));
+}
+window.FollowStrip = FollowStrip;
+
+/* catmull-rom smoothing shared by the base spine and the follow overlay */
+function smoothD(pts){
+  if(pts.length < 2) return pts.map((p,i)=>`${i?"L":"M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  let d = `M${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for(let i=0;i<pts.length-1;i++){
+    const p0 = pts[i-1]||pts[i], p1 = pts[i], p2 = pts[i+1], p3 = pts[i+2]||p2;
+    const c1x = p1.x + (p2.x - p0.x)/6, c1y = p1.y + (p2.y - p0.y)/6;
+    const c2x = p2.x - (p3.x - p1.x)/6, c2y = p2.y - (p3.y - p1.y)/6;
+    d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
+function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddScene, follow, runtimes }){
+  // minutes per act, for the ruler's pacing readout
+  const actMin = (act)=>{
+    if(!runtimes) return null;
+    const sec = scenes.filter(s=>s.act===act).reduce((a,s)=> a + ((runtimes[s.id]||{}).sec||0), 0);
+    return sec ? Math.round(sec/60) : null;
+  };
   const [dragIdx, setDragIdx] = React.useState(null);
   const [overIdx, setOverIdx] = React.useState(null);
   // per-act fold state (persisted) — collapse an act to a narrow band to focus the arc
@@ -73,17 +206,10 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
   const lastPt = pts[pts.length-1];
   const linePath = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
   // smooth catmull-rom variant (premium look) — gentle curve through the same points
-  const smoothPath = (()=>{
-    if(pts.length < 2) return linePath;
-    let d = `M${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
-    for(let i=0;i<pts.length-1;i++){
-      const p0 = pts[i-1]||pts[i], p1 = pts[i], p2 = pts[i+1], p3 = pts[i+2]||p2;
-      const c1x = p1.x + (p2.x - p0.x)/6, c1y = p1.y + (p2.y - p0.y)/6;
-      const c2x = p2.x - (p3.x - p1.x)/6, c2y = p2.y - (p3.y - p1.y)/6;
-      d += ` C${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
-    }
-    return d;
-  })();
+  const smoothPath = smoothD(pts);
+  // follow lens — the followed character's own arc through the scenes they DRIVE
+  const fpts = follow ? pts.filter(p => follow.drivenIds.has(p.s.id)) : [];
+  const fInvolved = (s)=> !follow || follow.involvedIds.has(s.id);
 
   return React.createElement("div",{className:"spine-wrap",style:{width:totalW}},
     // ---- act ruler ----
@@ -95,11 +221,14 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
           React.createElement(Icon.chevR,{s:12}),
           React.createElement("span",{className:"no"},roman(r.act)));
         const pct = Math.round((r.count / scenes.length) * 100);
+        const mins = actMin(r.act);
         return React.createElement("div",{key:r.act,className:"act-band",style:{width:bandW(r),cursor:"pointer"},
           onClick:()=>toggle(r.act),title:`Collapse Act ${roman(r.act)}`},
           React.createElement("span",{className:"act-fold-ic"},React.createElement(Icon.chevD,{s:11})),
           React.createElement("span",{className:"no"},`ACT ${roman(r.act)}`),
           showFramework && React.createElement("span",{className:"nm"},actNames[r.act]),
+          mins!=null && React.createElement("span",{className:"act-min",
+            title:`Act ${roman(r.act)} estimated screen time (≈1 page/min)`},`≈${mins} min`),
           React.createElement("span",{className:"pct"},`${pct}%`));
       })),
 
@@ -148,23 +277,34 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
         // area under spine to zero line
         pts.length>=2 && React.createElement("path",{
           d:`${linePath} L${lastPt.x} ${yFor(0)} L${pts[0].x} ${yFor(0)} Z`,
-          fill:"url(#areaFill)",stroke:"none",pointerEvents:"none"}),
-        // spine line
+          fill:"url(#areaFill)",stroke:"none",pointerEvents:"none",opacity:follow?.25:1}),
+        // spine line (recedes while following, so the character's arc reads on top)
         pts.length>=2 && React.createElement("path",{className:"spine-line",d:smoothPath,fill:"none",stroke:"url(#spineStroke)",
-          strokeWidth:2.5,strokeLinejoin:"round",strokeLinecap:"round",pointerEvents:"none"}),
+          strokeWidth:2.5,strokeLinejoin:"round",strokeLinecap:"round",pointerEvents:"none",opacity:follow?.3:1}),
+        // follow overlay — the character's own arc through their driven scenes
+        follow && fpts.length>=2 && React.createElement("path",{d:smoothD(fpts),fill:"none",
+          stroke:follow.color,strokeWidth:2.5,strokeLinejoin:"round",strokeLinecap:"round",
+          pointerEvents:"none",filter:"url(#spineGlow)",opacity:.95}),
         // vertical connector from zero to each point (subtle)
         pts.map(p => React.createElement("line",{key:"v"+p.i,x1:p.x,y1:yFor(0),x2:p.x,y2:p.y,
           stroke: p.s.closeCharge>0?"var(--pos-line)":p.s.closeCharge<0?"var(--neg-line)":"rgba(255,255,255,.15)",
-          strokeWidth:1,opacity:.35,pointerEvents:"none"})),
+          strokeWidth:1,opacity:fInvolved(p.s)?.35:.08,pointerEvents:"none"})),
         // markers (decorative — clicks handled by the hit columns below)
         pts.map(p => {
           const { flagged } = turnInfo(p.s);
           const sel = p.s.id === selId;
           const col = p.s.closeCharge>0?"oklch(0.78 0.15 62)":p.s.closeCharge<0?"oklch(0.72 0.10 232)":"#8d8a84";
           const big = ["incite","story-climax","act-climax","midpoint","crisis"].includes(p.s.kind);
-          return React.createElement("g",{key:"m"+p.i,pointerEvents:"none"},
+          const fDrives = follow && follow.drivenIds.has(p.s.id);
+          const fTurn = follow && follow.turnIds.has(p.s.id);
+          return React.createElement("g",{key:"m"+p.i,pointerEvents:"none",opacity:fInvolved(p.s)?1:.22},
             sel && React.createElement("circle",{cx:p.x,cy:p.y,r:11,fill:"none",
               stroke:col,strokeWidth:1.5,opacity:.6}),
+            // follow lens: solid ring = they drive this scene; dashed ring = their arc turns here
+            fDrives && React.createElement("circle",{cx:p.x,cy:p.y,r:big?10.5:8.5,fill:"none",
+              stroke:follow.color,strokeWidth:1.5,opacity:.9}),
+            fTurn && React.createElement("circle",{cx:p.x,cy:p.y,r:big?14.5:12.5,fill:"none",
+              stroke:follow.color,strokeWidth:1.5,strokeDasharray:"3 3",opacity:.75}),
             React.createElement("circle",{className:"spine-node",cx:p.x,cy:p.y,r:big?6:4.5,fill:col,
               stroke:"var(--bg-0)",strokeWidth:2}),
             flagged && React.createElement("circle",{cx:p.x,cy:p.y,r:big?6:4.5,fill:"none",
@@ -210,6 +350,7 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
         const s = c.s, ci = c.i;
         const { flagged } = turnInfo(s);
         const sel = s.id === selId;
+        const fDrives = follow && follow.drivenIds.has(s.id);
         return React.createElement("div",{key:s.id,
           draggable:true,
           onDragStart:(e)=>{ setDragIdx(ci); e.dataTransfer.effectAllowed="move"; },
@@ -218,8 +359,10 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
           onDrop:(e)=>{ e.preventDefault(); if(dragIdx!=null && dragIdx!==ci) onReorder(dragIdx, ci); setDragIdx(null); setOverIdx(null); },
           className:`scard ${sel?"sel":""} ${s.kind==="incite"?"incite":""} `+
                     `${["story-climax","act-climax","midpoint"].includes(s.kind)?"climax":""} `+
-                    `${dragIdx===ci?"dragging":""} ${overIdx===ci&&dragIdx!=null&&dragIdx!==ci?"dragover":""}`,
-          style:{width:COL_W},onClick:()=>onSelect(s.id)},
+                    `${dragIdx===ci?"dragging":""} ${overIdx===ci&&dragIdx!=null&&dragIdx!==ci?"dragover":""} `+
+                    `${follow && !fInvolved(s) ? "dim":""}`,
+          style:{width:COL_W, ...(fDrives ? {boxShadow:`inset 0 2px 0 ${follow.color}`+(sel?", inset 0 0 0 1px var(--pos-line)":"")} : null)},
+          onClick:()=>onSelect(s.id)},
           React.createElement("span",{className:"scard-grip",title:"Drag to reorder"},React.createElement(Icon.grip,{s:14})),
           React.createElement("div",{className:"scard-top"},
             React.createElement("span",{className:"scard-no"},String(s.no).padStart(2,"0")),
@@ -236,7 +379,14 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
                   React.createElement(Icon.alert,{s:10}),"No turn")
               : React.createElement("span",{className:"turn-badge ok"},
                   React.createElement(Icon.check,{s:10}),"Turns"),
-            React.createElement("span",{className:"scard-dur",style:{marginLeft:"auto"}},
+            (runtimes && runtimes[s.id]) && React.createElement("span",{
+              className:"scard-rt"+(runtimes[s.id].hot?" hot":""),
+              style:{marginLeft:"auto"},
+              title: runtimes[s.id].hot
+                ? "Estimated screen time — runs long against the film's average scene"
+                : "Estimated screen time"+(runtimes[s.id].approx?" (rough — from beats, not yet drafted)":" (from the draft, ≈1 page/min)")},
+              (runtimes[s.id].approx?"~":"")+fmtClock(runtimes[s.id].sec)),
+            React.createElement("span",{className:"scard-dur",style:runtimes?null:{marginLeft:"auto"}},
               `${s.seq}`)));
       }),
       onAddScene && React.createElement("button",{className:"spine-add",style:{height:"auto"},

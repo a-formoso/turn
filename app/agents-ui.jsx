@@ -16,7 +16,33 @@ function TraceStep({ step }){
   return React.createElement("div",{className:"ag-step k-"+step.k},
     React.createElement("span",{className:"ag-step-ic"},React.createElement(Ic,{s:13})),
     React.createElement("div",{className:"ag-step-t"}, step.t,
-      step.report && React.createElement(TableReadReport,{rep:step.report})));
+      step.report && React.createElement(TableReadReport,{rep:step.report}),
+      step.voiceReport && React.createElement(VoiceCheckReport,{rep:step.voiceReport})));
+}
+
+/* per-character voice distinctiveness: fingerprints + the swappable lines */
+function VoiceCheckReport({ rep }){
+  const fps = rep.fingerprints||[], swaps = rep.swappable||[];
+  return React.createElement("div",{className:"tr-report"},
+    rep.verdict && React.createElement("div",{className:"tr-block"},
+      React.createElement("div",{className:"tr-lab"},"Voice separation"),
+      React.createElement("div",{className:"tr-txt"},rep.verdict)),
+    fps.length>0 && React.createElement("div",{className:"tr-block"},
+      React.createElement("div",{className:"tr-lab"},"Voice fingerprints"),
+      fps.map((f,i)=>React.createElement("div",{key:i,className:"vc-fp"},
+        React.createElement("span",{className:"vc-fp-name"},f.name),
+        React.createElement("span",{className:"vc-fp-voice"},f.voice)))),
+    React.createElement("div",{className:"tr-notes"},
+      React.createElement("div",{className:"tr-lab"},"Swappable lines"+(swaps.length?(" · "+swaps.length):"")),
+      swaps.length===0
+        ? React.createElement("div",{className:"tr-txt"},"None — every line could only belong to its speaker.")
+        : swaps.map((x,i)=>React.createElement("div",{key:i,className:"tr-note",
+            onClick:()=> x.scene && window.__turnJump && window.__turnJump(x.scene)},
+            x.scene!=null && React.createElement("span",{className:"tr-note-sc"},"Sc "+x.scene),
+            React.createElement("span",{className:"tr-note-tx"},
+              React.createElement("b",null,(x.speaker||"?")+": "),"“"+x.line+"”",
+              x.couldBe && React.createElement("em",{className:"vc-could"}," — could be "+x.couldBe+"."),
+              x.why ? " "+x.why : "")))));
 }
 
 function TableReadReport({ rep, onJump }){

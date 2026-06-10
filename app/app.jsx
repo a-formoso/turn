@@ -174,6 +174,8 @@ function App(){
   const markApplied = (dept)=> setLookbookApplied(m=> ({ ...m, [dept]:(typeof lookbookBriefFor==="function" ? lookbookBriefFor(dept, lookbook, lookbookNote) : "") }));
   const [selId, setSelId] = React.useState(()=> (saved && saved.selId) || null);
   const [selChar, setSelChar] = React.useState(null);
+  // "follow this character" lens on the Spine view — session-only (not persisted)
+  const [followChar, setFollowChar] = React.useState(null);
   // Restore the room the user last had open (Writers' or Art) from the device-local
   // NAV_KEY — read synchronously so it's correct on first paint. applyDoc never
   // re-applies room, so cloud hydration can't flip it (that flip was the old flash).
@@ -196,6 +198,8 @@ function App(){
   const [aiOpen, setAiOpen] = React.useState(()=> typeof window!=="undefined" && window.innerWidth>=1100);
   const [railOpen, setRailOpen] = React.useState(()=> typeof window==="undefined" || window.innerWidth>=1100);
   const [inspOpen, setInspOpen] = React.useState(()=> typeof window==="undefined" || window.innerWidth>=700);
+  const [inspTab, setInspTab] = React.useState("scene");   // controlled Inspector tab (Scene / Beats / Analysis)
+  const [focusBeat, setFocusBeat] = React.useState(null);  // beat # to reveal in the Beats editor (set from the Script gutter)
   // when crossing a breakpoint, snap panels to a sane default for that size
   const lastVp = React.useRef(vp);
   React.useEffect(()=>{
@@ -450,7 +454,12 @@ function App(){
     }catch(e){}
     setCharDrafting(null);
   };
-  const selectScene = (id)=>{ setSelId(id); setSelChar(null); };
+  const selectScene = (id)=>{ setSelId(id); setSelChar(null); setFocusBeat(null);
+    // surface the selected scene's details — expand a collapsed inspector.
+    // Panel modes only: on mobile the inspector is a full overlay drawer, and
+    // auto-opening it would hijack the canvas on every browsing tap.
+    if(!inspDrawer) setInspOpen(true);
+  };
 
   // Art Room: draft a character's visual layer (look/wardrobe/props) from the script
   const draftCharacterVisuals = async (ch)=>{
@@ -1033,6 +1042,16 @@ function App(){
   const agentIssues = { doctor: turnIssues, continuity: contIssues };
   const totalIssues = turnIssues + contIssues;
 
+  // estimated screen time per scene (≈1 page/min) — drives the spine's pacing readout.
+  // "hot" marks scenes that run long against the film's average (the heat signal).
+  const runtimeMap = {}; let runtimeTotal = 0;
+  if(typeof sceneRuntime==="function") scenes.forEach(s=>{
+    const r = sceneRuntime(s, drafts[s.id], beatsMap[s.id]);
+    runtimeMap[s.id] = r; runtimeTotal += r.sec;
+  });
+  const rtAvg = scenes.length ? runtimeTotal/scenes.length : 0;
+  Object.values(runtimeMap).forEach(r=>{ r.hot = rtAvg>0 && r.sec > rtAvg*1.75; });
+
   // ---- editing handlers (scenes + beats) ----
   const updateScene = (id,patch)=>setScenes(ss=>ss.map(s=>s.id===id?{...s,...patch}:s));
   const onCharge = (field,val)=>updateScene(selId,{[field]:val});
@@ -1120,6 +1139,7 @@ function App(){
         suggestTurn:(s,p)=>window.aiSuggestTurn(s,p),
         plantLine:(s,f,m)=>window.aiPlantLine(s,f,m),
         tableRead:(sc,dr)=>window.aiTableRead(sc,dr),
+        voiceCheck:(sc,dr)=>window.aiVoiceCheck(sc,dr),
         buildSpine:(b)=>window.aiBuildSpine(b),
         buildStoryWorld:(b,sp)=>window.aiBuildStoryWorld(b,sp),
         authorScene:(s,p)=>window.aiAuthorScene(s,p,model.characters),
@@ -1657,6 +1677,10 @@ function App(){
               view==="beats"?"If a scene doesn't turn, cut it":
               view==="script"?"Subtext (beats) becomes text (screenplay)":"16 scenes across 3 acts")),
           view==="spine" && React.createElement("div",{className:"legend"},
+            runtimeTotal>0 && React.createElement("div",{className:"legend-item",
+              title:"Estimated total runtime, ≈1 page/min (drafted scenes from their script; undrafted roughly from beats)"},
+              React.createElement(Icon.clock,{s:11}),
+              "≈ "+Math.round(runtimeTotal/60)+" min"),
             React.createElement("div",{className:"legend-item"},
               React.createElement("span",{className:"legend-swatch",style:{background:"var(--pos)"}}),"Positive"),
             React.createElement("div",{className:"legend-item"},
@@ -1664,9 +1688,16 @@ function App(){
             React.createElement("div",{className:"legend-item"},
               React.createElement("span",{className:"legend-swatch",style:{background:"var(--alert)"}}),"No turn"))),
 
+        view==="spine" && scenes.length>0 && characters.length>0 && React.createElement(FollowStrip,{
+          characters,scenes,beatsMap,followId:followChar,onFollow:setFollowChar}),
         view==="spine" && scenes.length>0 && React.createElement(DragScroll,{className:"canvas-scroll spine-pan"},
           React.createElement(SpineCanvas,{scenes,selId,onSelect:selectScene,showFramework:t.framework,
-            onReorder:reorderScenes,onAddScene:addScene})),
+            onReorder:reorderScenes,onAddScene:addScene,runtimes:runtimeMap,
+            follow:(()=>{ if(!followChar) return null;
+              const c = characters.find(x=>x.id===followChar); if(!c) return null;
+              const tl = characterThroughline(c, scenes, beatsMap);
+              return { char:c, color:charSolidColor(c), drivenIds:new Set(tl.driven.map(s=>s.id)),
+                involvedIds:tl.involvedIds, turnIds:tl.turnIds }; })()})),
         view==="spine" && scenes.length>0 && React.createElement("div",{className:"scroll-fade"}),
         // clean-canvas onboarding: a new/empty project has no scenes yet (shown for
         // ANY view so the data-assuming spine/audit/board/script never render empty).
@@ -1677,7 +1708,10 @@ function App(){
           drafts, scenes, onSelectScene:selectScene, onPolish:polishScene,
           onDraftOne:draftOne, onDraftAll:draftAll, drafting, total:scenes.length,
           history: sel ? (history[sel.id]||{back:[],fwd:[]}) : {back:[],fwd:[]},
-          labelOf, onRevert:revertVersion, onRedo:redoVersion, continuityMap, project}),
+          labelOf, onRevert:revertVersion, onRedo:redoVersion, continuityMap, project,
+          // click a beat in the Script gutter → reveal it in the Inspector's Beats tab
+          onBeatFocus:(n)=>{ setSelChar(null); setInspTab("beats"); setFocusBeat(n);
+            if(!inspDrawer) setInspOpen(true); }}),
 
         // Floating Writers' Room (Agents) launcher — the agents refine an existing
         // story, so it only appears once a story exists (scenes > 0).
@@ -1689,11 +1723,14 @@ function App(){
           ? React.createElement(CharacterPanel,{character:charObj, scenes,
               onUpdate:updateCharacter, onDraft:draftCharacter, drafting:charDrafting===charObj.id,
               onJumpScene:(id)=>selectScene(id), onClose:()=>setSelChar(null),
-              onCollapse:()=>setInspOpen(false)})
+              onCollapse:()=>setInspOpen(false),
+              onFollow:(id)=>{ setFollowChar(id); setView("spine");
+                if(inspDrawer) setInspOpen(false); }})
           : React.createElement(Inspector,{scene:sel,beats,onCharge,onUpdate:updateScene,characters,scenes,
               onAddScene:addScene,onDeleteScene:deleteScene,onMove:moveScene,onBeats:setBeatsFor,
               sceneIndex:scenes.findIndex(s=>s.id===selId),sceneCount:scenes.length,
-              onCollapse:()=>setInspOpen(false)});
+              onCollapse:()=>setInspOpen(false),project,
+              tab:inspTab,onTab:setInspTab,focusBeat});
         return inspDrawer
           ? (inspOpen && inspectorEl)
           : (inspOpen

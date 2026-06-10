@@ -182,13 +182,72 @@ async function localLoadImage(id){
   try{ const v = await idbGet(nbImgKey(id)); if(v){ _nbImgMemory.set(nbImgKey(id), v); return v; } }catch(e){}
   return "";
 }
+/* ---- cloud byte-cache ----------------------------------------------------
+   Signed URLs change every session, so the browser's HTTP cache NEVER hits in
+   cloud mode — every app load re-downloads every multi-MB sheet. Cache the
+   image bytes in IndexedDB keyed by entity and stamped with the storage path:
+   same path → instant object URL, zero network; new path (a re-generation)
+   → refreshed naturally. One blob per entity, so the cache can't balloon. */
+function nbCloudKey(id){ return "turn-cloudimg-"+id; }
+const _objUrls = new Map();   // entityId -> { url, path } (released when the path changes)
+function _setObjUrl(id, blob, path){
+  try{
+    const cur = _objUrls.get(id);
+    if(cur && cur.path===path) return cur.url;   // same version → reuse, don't churn live URLs
+    const u = URL.createObjectURL(blob);
+    if(cur){ try{ URL.revokeObjectURL(cur.url); }catch(e){} }
+    _objUrls.set(id, { url:u, path });
+    return u;
+  }catch(e){ return ""; }
+}
+async function cloudBytesFromCache(id, path){
+  const cur = _objUrls.get(id);
+  if(cur && cur.path===path) return cur.url;     // already materialized this version
+  try{
+    const rec = await idbGet(nbCloudKey(id));
+    if(rec && rec.path===path && rec.blob) return _setObjUrl(id, rec.blob, path);
+  }catch(e){}
+  return "";
+}
+let _byteQueue = Promise.resolve();   // serialize background caching — never hog bandwidth
+function cloudCacheBytes(id, path, url){
+  if(!path || !url || /^blob:/.test(url)) return;
+  _byteQueue = _byteQueue.then(async ()=>{
+    try{
+      const rec = await idbGet(nbCloudKey(id));
+      if(rec && rec.path===path) return;   // already cached for this version
+      const res = await fetch(url); if(!res.ok) return;
+      const blob = await res.blob();
+      await idbSet(nbCloudKey(id), { path, blob });
+    }catch(e){}
+  }).catch(()=>{});
+}
+/* one hydrate path for every cloud load result {url, path, meta}: prefer cached
+   bytes (instant, offline-tolerant); else paint from the signed URL now and
+   cache its bytes in the background for the next session. */
+async function cloudHydrate(id, r){
+  if(!r || !r.url) return "";
+  if(r.path){
+    const cached = await cloudBytesFromCache(id, r.path);
+    if(cached){ _cloudUrlCache.set(id, cached); _cloudMetaCache.set(id, r.meta||null); return cached; }
+    cloudCacheBytes(id, r.path, r.url);
+  }
+  _cloudUrlCache.set(id, r.url); _cloudMetaCache.set(id, r.meta||null);
+  return r.url;
+}
+
 async function nbLoadImage(id){
   if(_nbBackend==="cloud"){
     if(_cloudUrlCache.get(id)) return _cloudUrlCache.get(id);
+    // a whole-project prefetch may already be in flight — ride it instead of
+    // stampeding one DB query + one signing call per mounting card
+    if(_prefetchAllPromise && _prefetchAllProj===_nbProject){
+      try{ await _prefetchAllPromise; }catch(e){}
+      if(_cloudUrlCache.get(id)) return _cloudUrlCache.get(id);
+    }
     if(typeof window.cloudAssetLoad!=="function") return "";
     const r = await window.cloudAssetLoad(_nbProject, id);
-    if(r && r.url){ _cloudUrlCache.set(id, r.url); _cloudMetaCache.set(id, r.meta||null); return r.url; }
-    return "";
+    return await cloudHydrate(id, r);
   }
   return localLoadImage(id);
 }
@@ -211,7 +270,7 @@ async function nbPrefetch(ids){
     let map = {};
     try{ map = await window.cloudAssetLoadMany(_nbProject, ids) || {}; }catch(e){ return; }
     const got = [], urls = [];
-    for(const id in map){ const r=map[id]; if(r && r.url){ _cloudUrlCache.set(id, r.url); _cloudMetaCache.set(id, r.meta||null); got.push(id); urls.push(r.url); } }
+    for(const id in map){ const u = await cloudHydrate(id, map[id]); if(u){ got.push(id); urls.push(u); } }
     if(got.length){ nbPreloadBytes(urls); window.dispatchEvent(new CustomEvent("nb-prefetched",{ detail:{ ids:got } })); }
   } else {
     const got = [];
@@ -235,7 +294,7 @@ async function nbPrefetchAll(){
     let map = {};
     try{ map = await window.cloudAssetLoadAll(_nbProject) || {}; }catch(e){ return; }
     const got = [];
-    for(const id in map){ const r=map[id]; if(r && r.url){ _cloudUrlCache.set(id, r.url); _cloudMetaCache.set(id, r.meta||null); got.push(id); } }
+    for(const id in map){ const u = await cloudHydrate(id, map[id]); if(u) got.push(id); }
     if(got.length) window.dispatchEvent(new CustomEvent("nb-prefetched",{ detail:{ ids:got } }));
   })();
   return _prefetchAllPromise;
@@ -412,7 +471,13 @@ async function nbCommit(id, dataUrl, meta, refs, kind){
   if(_nbBackend==="cloud"){
     if(typeof window.cloudCommit!=="function") return { tier:"error", url:dataUrl };
     const r = await window.cloudCommit(_nbProject, _nbUid, id, dataUrl, meta, refs, kind);
-    if(r && r.url){ _cloudUrlCache.set(id, r.url); _cloudMetaCache.set(id, meta||null); return r; }
+    if(r && r.url){
+      _cloudUrlCache.set(id, r.url); _cloudMetaCache.set(id, meta||null);
+      // we hold the bytes we just generated — warm the byte-cache directly so the
+      // next session never re-downloads this sheet
+      if(r.path){ try{ const blob = await (await fetch(dataUrl)).blob(); await idbSet(nbCloudKey(id), { path:r.path, blob }); }catch(e){} }
+      return r;
+    }
     return { tier:"error", url:dataUrl };
   }
   const prev = localGetImage(id);
@@ -430,6 +495,8 @@ async function nbCommit(id, dataUrl, meta, refs, kind){
 async function nbClearAsset(id){
   if(_nbBackend==="cloud"){
     _cloudUrlCache.delete(id); _cloudMetaCache.delete(id);
+    try{ await idbDel(nbCloudKey(id)); }catch(e){}   // drop the cached bytes too
+    const old = _objUrls.get(id); if(old){ try{ URL.revokeObjectURL(old.url); }catch(e){} _objUrls.delete(id); }
     if(typeof window.cloudClear==="function") await window.cloudClear(_nbProject, id);
     return;
   }

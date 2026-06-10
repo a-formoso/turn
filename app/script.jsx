@@ -126,14 +126,32 @@ const CONFLICT_KIND = {
 
 /* ---------- view ---------- */
 function isSpTransition(t){ return /^(?:CUT|DISSOLVE|SMASH CUT|MATCH CUT|FADE|WIPE|JUMP CUT)\b.*(?:TO|OUT|IN)[:.]?$/i.test(String(t).trim()); }
-function ScriptBlock({ b, contd }){
+function ScriptBlock({ b, contd, sceneNo }){
   let type = b.type, text = b.text;
   if(type==="action" && isSpTransition(text)){ type="trans"; text=text.toUpperCase(); }
   if(type==="char"){
     text = text.toUpperCase();
     if(contd && !/\(CONT\u2019?D\)\s*$/i.test(text)) text = text + " (CONT\u2019D)";
   }
+  // shooting-script convention: the scene number flanks the slugline in both margins
+  if(type==="scene" && sceneNo!=null){
+    return React.createElement("div",{className:(BLOCK_CLASS.scene)+" numbered"},
+      React.createElement("span",{className:"spb-scnum"},sceneNo),
+      React.createElement("span",{className:"spb-sctext"},text),
+      React.createElement("span",{className:"spb-scnum"},sceneNo));
+  }
   return React.createElement("div",{className:BLOCK_CLASS[type]||"spb-action"}, text);
+}
+
+/* the (CONT'D) bookkeeping the main page does, reusable for any block list */
+function buildContdSet(blocks){
+  const set = new Set(); let last = null;
+  (blocks||[]).forEach(b=>{
+    if(b.type==="char"){ const nm = String(b.text).toUpperCase().replace(/\s*\(CONT\u2019?D\)\s*$/i,"");
+      if(last && nm===last) set.add(b); last = nm; }
+    else if(b.type==="scene" || b.type==="trans") last = null;
+  });
+  return set;
 }
 
 function TransitionBar({ trans, out, fromTo }){
@@ -185,7 +203,7 @@ function ContinuityReport({ report, onJump, onClose, currentId }){
 }
 
 function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, onDraftAll, onPolish, drafting, total,
-                     history, labelOf, onRevert, onRedo, continuityMap, project }){
+                     history, labelOf, onRevert, onRedo, continuityMap, project, onBeatFocus }){
   const CONT = continuityMap || (window.TURN_DATA||{}).CONTINUITY || {};
   const FACTS = (window.TURN_DATA||{}).FACTS || {};
   const live = typeof aiAvailable==="function" && aiAvailable();
@@ -237,6 +255,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
     React.createElement(report.conflicts.length?Icon.alert:Icon.check,{s:14}),
     report.conflicts.length ? `Continuity \u00b7 ${report.conflicts.length}` : "Continuity");
 
+
   // ---- screenplay present: render the STORED draft directly (no blend) ----
   let body = null, badge = null, noteText = null, polishUI = null, versionUI = null;
   const hb = history || {back:[],fwd:[]};
@@ -244,13 +263,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
     const groupByBeat = (blocks)=>{ const m={}, order=[]; blocks.forEach(b=>{ if(!m[b.beat]){m[b.beat]=[];order.push(b.beat);} m[b.beat].push(b); }); return {m,order}; };
     const { m:fg, order } = groupByBeat(screenplay.blocks);
     // mark a character cue as (CONT'D) when the same speaker returns after intervening action
-    const contdSet = new Set();
-    let lastSpeaker = null;
-    screenplay.blocks.forEach(b=>{
-      if(b.type==="char"){ const nm=String(b.text).toUpperCase().replace(/\s*\(CONT\u2019?D\)\s*$/i,"");
-        if(lastSpeaker && nm===lastSpeaker) contdSet.add(b); lastSpeaker=nm; }
-      else if(b.type==="scene"||b.type==="trans") lastSpeaker=null;
-    });
+    const contdSet = buildContdSet(screenplay.blocks);
     const slugCount = screenplay.blocks.filter(b=>b.type==="scene").length;
     noteText = screenplay.note || (slugCount>1 ? ("This unit is a sequence \u2014 it spans "+slugCount+" sluglines.") : null);
 
@@ -295,15 +308,17 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
         order.map(n=>{
           const r = beatRow(n);
           const on = activeBeat===n;
-          return React.createElement("div",{key:n,className:"sp-seg"},
+          return React.createElement("div",{key:n,className:`sp-seg ${on?"on":""}`},
             React.createElement("div",{className:`sp-gut ${on?"on":""}`,
-              onMouseEnter:()=>setActiveBeat(n),onClick:()=>setActiveBeat(n)},
+              title:"Open this beat in the Beats panel",
+              onMouseEnter:()=>setActiveBeat(n),
+              onClick:()=>{ setActiveBeat(n); onBeatFocus && onBeatFocus(n); }},
               React.createElement("div",{className:"bnum"},n),
               r && React.createElement("div",{className:"blab"},r.drive.a),
               r && React.createElement("div",{className:"bsub"},"\u2197 "+r.react.a)),
             React.createElement("div",{className:"sp-page"},
               React.createElement("div",{className:"sp-page-inner"},
-                (fg[n]||[]).map((b,i)=>React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b)})))));
+                (fg[n]||[]).map((b,i)=>React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:scene.no})))));
         })),
       transOut && React.createElement(TransitionBar,{trans:transOut,out:true,
         fromTo:`to Sc.${String(nextScene.no).padStart(2,"0")} ${nextScene.title}`}));

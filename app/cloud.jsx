@@ -232,13 +232,13 @@ async function cloudCommit(projectId, uid, entityId, dataUrl, meta, refs, kind){
   }
   await cloudUpsertGen(projectId, uid, entityId, { storage_path:newPath, meta:meta||{}, refs:refRows, history });
   const url = await cloudSignedUrl(newPath);
-  return { tier:"cloud", url };
+  return { tier:"cloud", url, path:newPath };
 }
 async function cloudAssetLoad(projectId, entityId){
   const row = await cloudGetGen(projectId, entityId);
   if(!row || !row.storage_path) return null;
   const url = await cloudSignedUrl(row.storage_path);
-  return { url, meta: row.meta || null };
+  return { url, path: row.storage_path, meta: row.meta || null };
 }
 /* Batch-load many assets: ONE lean DB query for all entity ids + ONE batched signing,
    instead of a query+sign per entity. Returns { entityId: { url, meta } }. Used to
@@ -256,7 +256,7 @@ async function cloudAssetLoadMany(projectId, entityIds){
   }catch(e){ return {}; }
   const urlByPath = await cloudSignedUrlsBatch(rows.filter(r=>r.storage_path).map(r=>r.storage_path));
   const out = {};
-  for(const r of rows){ const u = r.storage_path && urlByPath[r.storage_path]; if(u) out[r.entity_id] = { url:u, meta:r.meta||null }; }
+  for(const r of rows){ const u = r.storage_path && urlByPath[r.storage_path]; if(u) out[r.entity_id] = { url:u, path:r.storage_path, meta:r.meta||null }; }
   return out;
 }
 /* Load EVERY current asset in a project in one lean query + batched signing. Format-agnostic
@@ -273,7 +273,7 @@ async function cloudAssetLoadAll(projectId){
   }catch(e){ return {}; }
   const urlByPath = await cloudSignedUrlsBatch(rows.filter(r=>r.storage_path).map(r=>r.storage_path));
   const out = {};
-  for(const r of rows){ const u = r.storage_path && urlByPath[r.storage_path]; if(u) out[r.entity_id] = { url:u, meta:r.meta||null }; }
+  for(const r of rows){ const u = r.storage_path && urlByPath[r.storage_path]; if(u) out[r.entity_id] = { url:u, path:r.storage_path, meta:r.meta||null }; }
   return out;
 }
 async function cloudClear(projectId, entityId){

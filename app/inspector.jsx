@@ -155,8 +155,15 @@ function Verdict({ scene }){
 }
 
 /* ---------- editable beat map ---------- */
-function BeatEditor({ scene, beats, onBeats }){
+function BeatEditor({ scene, beats, onBeats, focusBeat }){
   const id = scene.id;
+  // reveal the beat the user clicked in the Script gutter — scroll it into view + flag it
+  const rowRefs = React.useRef({});
+  React.useEffect(()=>{
+    if(focusBeat==null) return;
+    const el = rowRefs.current[focusBeat];
+    if(el && el.scrollIntoView) el.scrollIntoView({ block:"nearest", behavior:"smooth" });
+  },[focusBeat, id]);
   if(!beats) return React.createElement("div",{className:"empty",style:{minHeight:150}},
     React.createElement(Icon.grid,{s:30}),
     React.createElement("div",{className:"empty-t"},"No beat map yet"),
@@ -195,7 +202,8 @@ function BeatEditor({ scene, beats, onBeats }){
       React.createElement(EditText,{value:beats.obstacle,multiline:true,placeholder:"What blocks it\u2026",onCommit:v=>setField({obstacle:v})})),
 
     beats.rows.map((r,i)=>
-      React.createElement("div",{key:i,className:`beat-edit ${r.n===beats.turnAt?"turn":""}`},
+      React.createElement("div",{key:i, ref:(el)=>{ rowRefs.current[r.n]=el; },
+        className:`beat-edit ${r.n===beats.turnAt?"turn":""} ${r.n===focusBeat?"focus":""}`},
         React.createElement("div",{className:"beat-edit-head"},
           React.createElement("span",{className:"bn"},r.n),
           React.createElement("button",{className:"beat-turn-btn",onClick:()=>toggleTurn(r.n)},
@@ -234,8 +242,12 @@ const ANALYSIS = (scene, beats) => [
 ];
 
 function Inspector({ scene, beats, onCharge, onUpdate, characters, scenes, onAddScene, onDeleteScene, onMove, onBeats,
-                     sceneIndex, sceneCount, onCollapse }){
-  const [tab, setTab] = React.useState("scene");
+                     sceneIndex, sceneCount, onCollapse, project, tab:tabProp, onTab, focusBeat }){
+  // tab is controllable by the parent (e.g. the Script gutter opens the Beats tab);
+  // falls back to local state when no controller is wired.
+  const [tabState, setTabState] = React.useState("scene");
+  const tab = tabProp || tabState;
+  const setTab = onTab || setTabState;
   // driver options derive from the actual cast (plus the current value if it's an orphan)
   const driverOpts = (()=>{
     const list = (characters||[]).map(c=>[c.id, c.name]);
@@ -281,6 +293,33 @@ function Inspector({ scene, beats, onCharge, onUpdate, characters, scenes, onAdd
           React.createElement("div",{style:{height:12}}),
           React.createElement(Verdict,{scene})),
 
+        // which side of the controlling idea this scene argues — auto-derived from the
+        // closing charge (positive asserts the idea), overridable per scene
+        (()=>{
+          const cur = (typeof themeArgues==="function") ? themeArgues(scene)
+            : {side: Math.sign(scene.closeCharge)>0?"idea":Math.sign(scene.closeCharge)<0?"counter":"neither", explicit:!!scene.argues};
+          const ci = project && project.controllingIdea;
+          const ideaT = (ci && ci.value) ? ci.value : "the story's idea";
+          return React.createElement("div",{className:"insp-block"},
+            React.createElement("div",{className:"insp-block-head"},
+              React.createElement("span",{className:"eyebrow"},React.createElement(Icon.mask,{s:12}),"Argues · controlling idea"),
+              !cur.explicit && React.createElement("span",{className:"argues-auto"},"auto")),
+            React.createElement("div",{className:"argues-seg"},
+              [["idea","Idea"],["counter","Counter-idea"],["neither","Neither"]].map(([v,l])=>
+                React.createElement("button",{key:v,
+                  className:"argues-btn"+(cur.side===v?" on":""),
+                  title: v==="idea" ? ("This scene asserts: "+ideaT)
+                       : v==="counter" ? "This scene asserts the opposite — the counter-idea wins the moment"
+                       : "This scene sits outside the argument",
+                  // clicking the active explicit choice returns the scene to auto
+                  onClick:()=>onUpdate(scene.id,{argues:(cur.side===v && cur.explicit) ? "" : v})},
+                  l))),
+            React.createElement("div",{className:"argues-hint"},
+              cur.explicit
+                ? "Set by you — click it again to go back to auto."
+                : "Derived from the closing charge — a positive close asserts the idea. Click to override."));
+        })(),
+
         React.createElement("div",{className:"insp-block"},
           React.createElement("div",{className:"insp-block-head"},
             React.createElement("span",{className:"eyebrow"},React.createElement(Icon.target,{s:12}),"Drive")),
@@ -321,7 +360,7 @@ function Inspector({ scene, beats, onCharge, onUpdate, characters, scenes, onAdd
         React.createElement("div",{className:"insp-eyebrow",style:{marginBottom:10}},
           React.createElement("span",{className:"insp-scene-no"},String(scene.no).padStart(2,"0")),
           React.createElement("span",{className:"eyebrow"},"Beat / Subtext map \u2014 editable")),
-        React.createElement(BeatEditor,{scene,beats,onBeats})),
+        React.createElement(BeatEditor,{scene,beats,onBeats,focusBeat})),
 
       tab==="analysis" && React.createElement("div",{style:{paddingTop:2}},
         React.createElement("div",{className:"divider"},
