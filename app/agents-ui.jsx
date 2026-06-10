@@ -3,7 +3,7 @@
    and gates every change behind an Approve / Reject proposal card. */
 
 function AgentIcon({ name, s=18 }){
-  const map = { stethoscope:Icon.target, link:Icon.layers, flask:Icon.flask, film:Icon.film, board:Icon.board, palette:Icon.palette, userScan:Icon.userScan };
+  const map = { stethoscope:Icon.target, link:Icon.layers, flask:Icon.flask, film:Icon.film, board:Icon.board, palette:Icon.palette, userScan:Icon.userScan, box:Icon.box, globe:Icon.globe, robot:Icon.robot, image:Icon.image };
   const Ic = map[name] || Icon.sparkles;
   return React.createElement(Ic,{s});
 }

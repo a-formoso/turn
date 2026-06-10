@@ -10,12 +10,13 @@
    generated. Locations / Shots / Storyboard are subsequent increments. */
 
 const ART_TABS = [
+  { id:"lookbook",   label:"Lookbook",   icon:"image" },
   { id:"props",      label:"Props",      icon:"box" },
   { id:"characters", label:"Characters", icon:"user" },
   { id:"locations",  label:"Locations",  icon:"globe" },
-  { id:"stylebible", label:"Style Bible", icon:"layers" },
-  { id:"shots",      label:"Shot List",  icon:"film" },
-  { id:"storyboard", label:"Storyboard", icon:"board" },
+  { id:"stylebible", label:"Presets", icon:"layers" },
+  { id:"shots",      label:"Shots",  icon:"film" },
+  { id:"storyboard", label:"Storyboards", icon:"board" },
 ];
 window.ART_TABS = ART_TABS;
 
@@ -1700,10 +1701,12 @@ function ArtComingSoon({ tab }){
 function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds,
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
-  locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId,
-  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard, onColorist, onShoot, onCast }){
+  locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId,
+  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard, onColorist, onShoot, onCast, onPropsMaster,
+  lookbook, lookbookNote, onUpdateLookbook, onAddLookbook, onDeleteLookbook, onSetLookbookNote, onResearch }){
   const PropSheets = window.PropSheets;
   const LocationSheets = window.LocationSheets;
+  const LookbookView = window.LookbookView;
 
   // Pre-warm EVERY asset URL in the project in ONE batched round-trip the moment the Art Room
   // opens, so any tab (Characters, Props, Locations, Shot List) paints with no per-card DB +
@@ -1712,6 +1715,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
   const projId = project && project.id;
   React.useEffect(()=>{ if(typeof nbPrefetchAll==="function") nbPrefetchAll(); },[projId]);
   const tabPreloadIds = ()=>{
+    if(artView==="lookbook") return (lookbook||[]).map(c=>c&&c.id).filter(Boolean);
     if(artView==="characters") return (characters||[]).flatMap(c=> (c&&c.id) ? [c.id, ...(c.states||[]).map(s=>c.id+":"+s.id)] : []);
     if(artView==="props") return (props||[]).map(p=>p&&p.id).filter(Boolean);
     if(artView==="locations") return (locations||[]).flatMap(l=> (l&&l.id) ? [l.id, ...(l.variants||[]).map(v=>l.id+"-"+v.id)] : []);
@@ -1723,21 +1727,24 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
     const ids = tabPreloadIds();
     if(!ids.length) return;
     if(typeof nbPrefetchAll==="function") nbPrefetchAll().then(()=>nbPreloadFor(ids)); else nbPreloadFor(ids);
-  },[artView, projId, (characters||[]).length, (props||[]).length, (locations||[]).length, (shots||[]).length]);
+  },[artView, projId, (characters||[]).length, (props||[]).length, (locations||[]).length, (shots||[]).length, (lookbook||[]).length]);
 
   return React.createElement("div",{className:"artroom"},
-    artView==="characters"
+    artView==="lookbook" && LookbookView
+      ? React.createElement(LookbookView,{project,lookbook,note:lookbookNote,
+          onUpdate:onUpdateLookbook,onAdd:onAddLookbook,onDelete:onDeleteLookbook,onSetNote:onSetLookbookNote,onResearch})
+    : artView==="characters"
       ? React.createElement(CharacterSheets,{project,characters,scenes,props,shots,beatsMap,onUpdate:onUpdateChar,
           onDraft:onDraftVisuals,onDraftAll:onDraftAllVisuals,draftingId:draftingVisualId,draftingAll:draftingAllVisuals,draftingIds:draftingVisualIds,
           onSuggestStates,suggestingStatesId,onRemoveOwnedItem,onAdd:onAddCharacter,onDelete:onDeleteCharacter,onCast})
     : artView==="props" && PropSheets
       ? React.createElement(PropSheets,{project,props,characters,scenes,onUpdate:onUpdateProp,onDraft:onDraftProp,
           onDraftAll:onDraftAllProps,onAdd:onAddProp,onDelete:onDeleteProp,draftingId:draftingPropId,draftingAll:draftingAllProps,
-          onSeedFromCast,castHasProps,onTagScenes,taggingScenes,onTagOne,taggingSceneId,onMergeProps})
+          onSeedFromCast,castHasProps,onTagScenes,taggingScenes,onTagOne,taggingSceneId,onMergeProps,onPropsMaster})
       : artView==="locations" && LocationSheets
       ? React.createElement(LocationSheets,{project,locations,scenes,onUpdate:onUpdateLocation,onDraft:onDraftLocation,
           onDraftAll:onDraftAllLocs,onAdd:onAddLocation,onDelete:onDeleteLocation,draftingId:draftingLocId,draftingAll:draftingAllLocs,
-          onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId})
+          onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId,onScout})
       : artView==="stylebible" && window.StyleBibleView
       ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage,onColorist})
       : artView==="shots" && window.ShotList

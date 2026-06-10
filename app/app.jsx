@@ -161,6 +161,8 @@ function App(){
   const [characters, setCharacters] = React.useState(()=> (saved && saved.characters) || []);
   const [props, setProps] = React.useState(()=> (saved && saved.props) || []);
   const [locations, setLocations] = React.useState(()=> (saved && saved.locations) || []);
+  const [lookbook, setLookbook] = React.useState(()=> (saved && saved.lookbook) || []);
+  const [lookbookNote, setLookbookNote] = React.useState(()=> (saved && saved.lookbookNote) || "");
   const [shots, setShots] = React.useState(()=> (saved && saved.shots) || []);
   const [project, setProject] = React.useState(()=> (saved && saved.project) || ({ title:"Untitled film", genre:"", logline:"", controllingIdea:{} }));
   const [selId, setSelId] = React.useState(()=> (saved && saved.selId) || null);
@@ -211,6 +213,10 @@ function App(){
   const [coloristOpen, setColoristOpen] = React.useState(false);   // Cinematographer / Colorist (Art Room)
   const [shotDesignerOpen, setShotDesignerOpen] = React.useState(false);   // Shot Designer (Art Room)
   const [castingOpen, setCastingOpen] = React.useState(false);   // Casting Director (Art Room)
+  const [propsMasterOpen, setPropsMasterOpen] = React.useState(false);   // Props Master (Art Room)
+  const [locScoutOpen, setLocScoutOpen] = React.useState(false);   // Location Scout (Art Room)
+  const [researchOpen, setResearchOpen] = React.useState(false);   // Visual Researcher (Lookbook)
+  const [coordOpen, setCoordOpen] = React.useState(false);   // Art Department Coordinator (meta-agent)
   const [newStoryOpen, setNewStoryOpen] = React.useState(false);
 
   // ---- cloud auth (Supabase) ----
@@ -256,13 +262,13 @@ function App(){
   // is already sitting on the tab (e.g. reloaded straight into Locations).
   const [hydrationTick, setHydrationTick] = React.useState(0);
 
-  const freshDoc = ()=>({ scenes:SCENES, characters:CHARACTERS, props:(window.PROPS_SEED||[]), locations:[], shots:[],
+  const freshDoc = ()=>({ scenes:SCENES, characters:CHARACTERS, props:(window.PROPS_SEED||[]), locations:[], lookbook:[], lookbookNote:"", shots:[],
     project:PROJECT, drafts:SCREENPLAY, beatsMap:BEATS, history:{}, continuityMap:CONTINUITY||{},
     selId:"s4", room:"writers", view:"spine", artView:"props", propsSeeded:false, locsSeeded:false, visualsSeeded:false });
   /* A clean canvas — what every NEW registered user (and every "New film") starts
      from. No sample data: empty spine, cast, props, etc. The Matrix sample lives only
      in the seed (story-data.jsx) and in projects already saved to a user's account. */
-  const emptyDoc = ()=>({ scenes:[], characters:[], props:[], locations:[], shots:[],
+  const emptyDoc = ()=>({ scenes:[], characters:[], props:[], locations:[], lookbook:[], lookbookNote:"", shots:[],
     project:{ title:"Untitled film", genre:"", logline:"", controllingIdea:{} },
     drafts:{}, beatsMap:{}, history:{}, continuityMap:{},
     selId:null, room:"writers", view:"spine", artView:"props", propsSeeded:false, locsSeeded:false, visualsSeeded:false, blank:true });
@@ -275,6 +281,8 @@ function App(){
     setCharacters(d.characters||CHARACTERS);
     setProps(d.props||(window.PROPS_SEED||[]));
     setLocations(d.locations||[]);
+    setLookbook(d.lookbook||[]);
+    setLookbookNote(d.lookbookNote||"");
     setShots(d.shots||[]);
     setProject(d.project||PROJECT);
     setDrafts(d.drafts||SCREENPLAY);
@@ -365,12 +373,12 @@ function App(){
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(()=>{
       if(hydratingRef.current) return;
-      const doc = { scenes, characters, props, locations, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded };
+      const doc = { scenes, characters, props, locations, lookbook, lookbookNote, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded };
       if(cloudMode){ if(typeof cloudSaveDoc==="function") cloudSaveDoc(currentProjectId, doc); }
       else { try{ localStorage.setItem(STORY_KEY, JSON.stringify(doc)); }catch(e){} }
     }, cloudMode ? 700 : 250);
     return ()=> clearTimeout(saveTimer.current);
-  },[scenes, characters, props, locations, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, cloudMode, currentProjectId]);
+  },[scenes, characters, props, locations, lookbook, lookbookNote, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, cloudMode, currentProjectId]);
 
   const resetStory = ()=>{
     clearStory();
@@ -457,6 +465,17 @@ function App(){
     }catch(e){}
     setDraftingAllVisuals(false);
     setDraftingVisualIds([]);
+  };
+
+  // ---- Art Room: LOOKBOOK (References) ----
+  const updateLookbookCard = (id,patch)=>setLookbook(ls=>ls.map(c=>c.id===id?{...c,...patch}:c));
+  const addLookbookCard = ()=>{
+    const id = "look-"+Date.now().toString(36);
+    setLookbook(ls=>[...ls, { id, source:"New reference", category:"Palette", note:"", negativePrompt:"", manual:true }]);
+  };
+  const deleteLookbookCard = (id)=>{
+    setLookbook(ls=>ls.filter(c=>c.id!==id));
+    try{ if(typeof nbClearAsset==="function") nbClearAsset(id); }catch(e){}
   };
 
   // ---- Art Room: PROPS ----
@@ -1170,6 +1189,187 @@ function App(){
         return _genCharImage(c.id+":"+st.id, prompt, opts); },
     };
 
+    // ---- Props Master surface (Props tab agent): derive → draft → dedup → generate ----
+    // Works on a per-run copy of the props so each step sees the prior step's result
+    // (React state is async); every step also persists via setProps so the live tab updates.
+    let _propWork = (props||[]).slice();
+    const _propDrafted = (p)=> (typeof propVisualsDrafted==="function") ? propVisualsDrafted(p)
+      : !!((p.form||"").trim() && (p.material||"").trim());
+    // merge a duplicate set on BOTH the working copy and the live state (mirrors app-level mergeProps)
+    const _mergePropsWork = (ids)=>{
+      const set = _propWork.filter(p=> ids.indexOf(p.id)>=0);
+      if(set.length<2) return;
+      const hasImg = (id)=> (typeof nbGetImage==="function") ? !!nbGetImage(id) : false;
+      const score = (p)=> ((p.scenes||[]).length*100) + (hasImg(p.id)?40:0) + Math.min((p.name||"").length,30);
+      const survivor = set.slice().sort((a,b)=> score(b)-score(a))[0];
+      const others = set.filter(p=>p.id!==survivor.id);
+      const anyScenes = set.some(p=>p.scenes!==undefined);
+      const patch = {};
+      if(anyScenes) patch.scenes = Array.from(new Set(set.flatMap(p=>p.scenes||[])));
+      ["form","material","detail","renderStyle"].forEach(f=>{
+        if(!String(survivor[f]||"").trim()){ const donor = others.find(o=>String(o[f]||"").trim()); if(donor) patch[f]=donor[f]; }
+      });
+      const apply = (ps)=> ps.map(p=> p.id===survivor.id ? {...p, ...patch} : p).filter(p=> p.id===survivor.id || ids.indexOf(p.id)<0);
+      _propWork = apply(_propWork);
+      setProps(apply);
+      others.forEach(o=>{ try{ if(typeof nbClearAsset==="function") nbClearAsset(o.id); }catch(e){} });
+    };
+    const propmaster = {
+      // pull the cast's own worn/carried items in (dedup handled by propsFromCast)
+      deriveCast: ()=>{
+        if(typeof propsFromCast!=="function") return 0;
+        const add = propsFromCast(characters, _propWork);
+        if(add.length){ _propWork = [..._propWork, ...add]; setProps(ps=>[...ps, ...add]); setPropsSeeded(true); }
+        return add.length;
+      },
+      // derive set-dressing objects named in the action (no owner), deduped vs existing by object
+      deriveSet: async ()=>{
+        if(typeof aiDeriveSetDressing!=="function") return 0;
+        const found = await aiDeriveSetDressing(scenes, drafts, project);
+        if(!found || !found.length) return 0;
+        const headOf = (n)=> (typeof propHeadNoun==="function" ? propHeadNoun(n) : "")
+          || ("name:"+String(n||"").toLowerCase().replace(/[^a-z0-9]+/g,"-"));
+        const seen = new Set(_propWork.map(p=>headOf(p.name)));   // skip an object the cast (or a prior card) already owns
+        const slug = (n)=> (typeof propSlug==="function") ? propSlug(n) : String(n||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
+        const cards = [];
+        found.forEach((e,i)=>{
+          const h = headOf(e.name); if(seen.has(h)) return; seen.add(h);
+          const kind = (typeof classifyPropKind==="function" && classifyPropKind(e.name)) || "carried";
+          cards.push({ id:"prop-set-"+slug(e.name)+"-"+i, name:e.name.replace(/^\w/, m=>m.toUpperCase()),
+            kind, ownerId:"", ownerName:"", form:"", material:"", detail:"", renderStyle:"", negativePrompt:"",
+            scenes:e.sceneIds||[], fromSet:true });
+        });
+        if(cards.length){ _propWork = [..._propWork, ...cards]; setProps(ps=>[...ps, ...cards]); }
+        return cards.length;
+      },
+      // draft form/material/detail/renderStyle for every undrafted prop
+      draftSpecs: async ()=>{
+        if(typeof aiDesignPropBible!=="function") return 0;
+        const todo = _propWork.filter(p=>!_propDrafted(p));
+        if(!todo.length) return 0;
+        const map = await aiDesignPropBible(todo, characters, project);
+        if(!map) return 0;
+        const patch = (ps)=> ps.map(p=> map[p.id] ? {...p, ...map[p.id]} : p);
+        _propWork = patch(_propWork); setProps(patch);
+        return Object.keys(map).length;
+      },
+      // merge near-duplicate cards (same owner + same object) into one; returns # removed
+      dedup: ()=>{
+        if(typeof findDuplicateProps!=="function") return 0;
+        const groups = findDuplicateProps(_propWork);
+        let merged = 0;
+        Object.keys(groups).forEach(k=>{ const ids = groups[k]; if(ids && ids.length>1){ _mergePropsWork(ids); merged += ids.length-1; } });
+        return merged;
+      },
+      // drafted props that still need a sheet
+      toGenerate: async ()=>{
+        const out=[];
+        for(const p of _propWork){ if(!_propDrafted(p)) continue; if(await _grabImg(p.id)) continue; out.push(p); }
+        return out;
+      },
+      generateSheet: async (p)=>{
+        if(typeof window.generatePropSheet!=="function") throw new Error("prop generator unavailable");
+        return window.generatePropSheet(p, project);
+      },
+    };
+
+    // ---- Location Scout surface (Locations tab agent): pull → coverage → spec → staging → variants → generate ----
+    let _locWork = (locations||[]).slice();
+    const _locDrafted = (l)=> (typeof locVisualsDrafted==="function") ? locVisualsDrafted(l)
+      : !!((l.architecture||"").trim() && (l.lighting||"").trim());
+    const locscout = {
+      // pull places from the sluglines (new cards), and refresh scene lists / times on existing
+      pull: ()=>{
+        if(typeof deriveLocations!=="function") return 0;
+        const derived = deriveLocations(scenes, _locWork);          // new only
+        const fresh = deriveLocations(scenes, []);                  // all, to refresh scene lists/times/areas
+        let next = _locWork.map(l=>{ const m=fresh.find(f=>f.key===l.key);
+          return m ? {...l, scenes:m.scenes, times:[...new Set([...(l.times||[]),...m.times])], areas:[...new Set([...(l.areas||[]),...m.areas])]} : l; });
+        if(derived.length) next = [...next, ...derived];
+        _locWork = next; setLocations(next); setLocsSeeded(true);
+        return derived.length;
+      },
+      coverage: ()=> (typeof locationCoverage==="function") ? locationCoverage(scenes, _locWork) : [],
+      draftSpecs: async ()=>{
+        if(typeof aiDesignLocationBible!=="function") return 0;
+        const todo = _locWork.filter(l=>!_locDrafted(l));
+        if(!todo.length) return 0;
+        const map = await aiDesignLocationBible(todo, scenes, project);
+        if(!map) return 0;
+        const patch = (ls)=> ls.map(l=> map[l.id] ? {...l, ...map[l.id]} : l);
+        _locWork = patch(_locWork); setLocations(patch);
+        return Object.keys(map).length;
+      },
+      draftStaging: async ()=>{
+        if(typeof aiDraftStaging!=="function") return 0;
+        const todo = _locWork.filter(l=>_locDrafted(l) && !l.staging);
+        if(!todo.length) return 0;
+        const res = await Promise.all(todo.map(async l=>{ try{ return {id:l.id, staging: await aiDraftStaging(l, scenes, project)}; }catch(e){ return {id:l.id, staging:null}; } }));
+        const sMap={}; res.forEach(x=>{ if(x.staging) sMap[x.id]=x.staging; });
+        if(!Object.keys(sMap).length) return 0;
+        const patch = (ls)=> ls.map(l=> sMap[l.id] ? {...l, staging:sMap[l.id]} : l);
+        _locWork = patch(_locWork); setLocations(patch);
+        return Object.keys(sMap).length;
+      },
+      // add a variant for each extra time-of-day a place appears at (times[0] is the base plate)
+      addVariants: ()=>{
+        let added=0;
+        const stamp = Date.now().toString(36);
+        const patch = (ls)=> ls.map(l=>{
+          const times = (typeof deriveLocationTimes==="function") ? deriveLocationTimes(l, scenes) : (l.times||[]);
+          if(times.length<2) return l;
+          const have = new Set((l.variants||[]).map(v=>v.time));
+          const need = times.slice(1).filter(t=>!have.has(t));
+          if(!need.length) return l;
+          const adds = need.map((t,i)=>({ id:"v"+stamp+"-"+(added+i)+"-"+t.toLowerCase().replace(/[^a-z0-9]/g,""), time:t }));
+          added += adds.length;
+          return {...l, variants:[...(l.variants||[]), ...adds]};
+        });
+        const next = patch(_locWork); _locWork = next; if(added) setLocations(next);
+        return added;
+      },
+      toGeneratePlates: async ()=>{
+        const out=[];
+        for(const l of _locWork){ if(!_locDrafted(l)) continue; if(await _grabImg(l.id)) continue; out.push(l); }
+        return out;
+      },
+      toGenerateVariants: async ()=>{
+        const out=[];
+        for(const l of _locWork){ if(!_locDrafted(l)) continue;
+          for(const v of (l.variants||[])){ if(await _grabImg(l.id+"-"+v.id)) continue; out.push({l, v}); } }
+        return out;
+      },
+      generatePlate: async (l)=>{ if(typeof window.generateLocationPlate!=="function") throw new Error("plate generator unavailable"); return window.generateLocationPlate(l, project); },
+      generateVariant: async (l, v)=>{ if(typeof window.generateLocationVariant!=="function") throw new Error("variant generator unavailable"); return window.generateLocationVariant(l, v, project); },
+    };
+
+    // ---- Visual Researcher surface (Lookbook tab agent): research → render frames ----
+    let _lbWork = (lookbook||[]).slice();
+    const lookbookSurface = {
+      // write the visual statement + reference touchstones, then write them through to the
+      // Colorist's references (project.styleBible.refs) so the look propagates downstream.
+      research: async ()=>{
+        if(typeof window.aiResearchLookbook!=="function") return { statement:"", added:0 };
+        const r = await window.aiResearchLookbook(scenes, project);
+        if(!r) return { statement:"", added:0 };
+        if(r.statement) setLookbookNote(r.statement);
+        const slug = (s)=> String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+        const seen = new Set(_lbWork.map(c=>slug(c.source)));
+        const cards = (r.refs||[]).filter(e=>e.source && !seen.has(slug(e.source))).map((e,i)=>({
+          id:"look-"+slug(e.source).slice(0,24)+"-"+i, source:e.source, category:e.category||"Palette", note:e.note||"", negativePrompt:"" }));
+        if(cards.length){ _lbWork = [..._lbWork, ...cards]; setLookbook(ls=>[...ls, ...cards]); }
+        // No write-through: the Colorist reads the lookbook LIVE (see art.designStyles), so the
+        // references propagate downstream without mutating the Presets tab's persisted data.
+        return { statement:r.statement||"", added:cards.length };
+      },
+      toGenerate: async ()=>{
+        const out=[];
+        for(const c of _lbWork){ if(!lookbookCardDrafted(c)) continue; if(await _grabImg(c.id)) continue; out.push(c); }
+        return out;
+      },
+      generateFrame: async (c)=>{ if(typeof window.generateLookbookFrame!=="function") throw new Error("frame generator unavailable"); return window.generateLookbookFrame(c, project); },
+    };
+
     return { input, emit, propose, cancelled, project,
       ai:{ available: (typeof aiAvailable==="function" && aiAvailable()) },
       art:{
@@ -1177,11 +1377,24 @@ function App(){
         gpt2Available: !!GPT2,
         coverage,
         cast,
+        propmaster,
+        locscout,
+        lookbook: lookbookSurface,
         // ---- Cinematographer / Colorist tools (Style Bible agent) ----
         scenesLite: ordered.map(s=>({ id:s.id, no:s.no, title:s.title })),
-        references: ()=>{ const sb=(typeof styleBibleOf==="function")?styleBibleOf(project):{}; return { refs:sb.refs||"", refImages:sb.refImages||[] }; },
-        designStyles: async ()=>{ const seed=(typeof styleBibleOf==="function")?styleBibleOf(project).presets:(window.STYLE_PRESETS_DEFAULT||[]);
-          return window.aiAssignSceneStyles(scenes, seed, drafts, project); },
+        // the Colorist's references = the user's manual Presets refs PLUS the live Lookbook
+        // (statement + reference notes), folded in here so the lookbook drives the palette
+        // without a fragile write-through into another tab's persisted data.
+        references: ()=>{ const sb=(typeof styleBibleOf==="function")?styleBibleOf(project):{};
+          const lbText=(typeof composeLookbookRefs==="function")?composeLookbookRefs(lookbookNote, lookbook):"";
+          const refs=[(sb.refs||"").trim(), lbText].filter(Boolean).join("\n");
+          return { refs, refImages:sb.refImages||[] }; },
+        designStyles: async ()=>{ const sb=(typeof styleBibleOf==="function")?styleBibleOf(project):{};
+          const seed=(sb.presets&&sb.presets.length)?sb.presets:(window.STYLE_PRESETS_DEFAULT||[]);
+          const lbText=(typeof composeLookbookRefs==="function")?composeLookbookRefs(lookbookNote, lookbook):"";
+          const mergedRefs=[((sb.refs)||"").trim(), lbText].filter(Boolean).join("\n");
+          const projForDesign = mergedRefs ? {...project, styleBible:{...(project.styleBible||{}), refs:mergedRefs}} : project;
+          return window.aiAssignSceneStyles(scenes, seed, drafts, projForDesign); },
         applyStyles: (res)=> applyStyleResult(res),
         // ---- Storyboard Director tools ----
         buildPrompt:(p)=> (typeof buildStoryboardPagePrompt==="function") ? buildStoryboardPagePrompt(p.scene, p.shots, p.ctxFor, beatsMap) : "",
@@ -1295,7 +1508,6 @@ function App(){
 
     React.createElement(TopBar,{view,setView,room,setRoom,artView,setArtView,project,scenes,drafts,onReset:resetStory,
       onToggleAI:toggleAI,
-      onAgents:()=>setAgentsOpen(true),
       onNewStory:()=>setNewStoryOpen(true),
       theme,onTheme:setTheme,
       authSlot: React.createElement(AccountChip,{ session, cloudActive: cloudMode,
@@ -1308,7 +1520,9 @@ function App(){
 
     // the room's view tabs, moved out of the top bar to a full-width bar beneath it
     React.createElement(ViewNav,{room,view,setView,artView,setArtView,
-      railOpen,inspOpen,onToggleRail:toggleRail,onToggleInsp:toggleInsp}),
+      railOpen,inspOpen,onToggleRail:toggleRail,onToggleInsp:toggleInsp,
+      onCoordinate:()=>setCoordOpen(true),
+      onAgents:()=>setAgentsOpen(true)}),
 
     authOpen && React.createElement(AuthModal,{ initialMode:authMode, plan:intendedPlan,
       onClose:()=>setAuthOpen(false),
@@ -1325,6 +1539,11 @@ function App(){
             onColorist:()=>setColoristOpen(true),
             onShoot:()=>setShotDesignerOpen(true),
             onCast:()=>setCastingOpen(true),
+            onPropsMaster:()=>setPropsMasterOpen(true),
+            onScout:()=>setLocScoutOpen(true),
+            onResearch:()=>setResearchOpen(true),
+            lookbook,lookbookNote,onUpdateLookbook:updateLookbookCard,onAddLookbook:addLookbookCard,
+            onDeleteLookbook:deleteLookbookCard,onSetLookbookNote:setLookbookNote,
             onUpdateChar:updateCharacter,onDraftVisuals:draftCharacterVisuals,onDraftAllVisuals:draftAllVisuals,
             draftingVisualId,draftingAllVisuals,draftingVisualIds,onAddCharacter:addCharacter,onDeleteCharacter:deleteCharacter,
             onSuggestStates:suggestCharacterStates,suggestingStatesId,onRemoveOwnedItem:removeOwnedProp,
@@ -1433,7 +1652,7 @@ function App(){
     // "director" agent with the Art-Room ctx factory (kind:"build" keeps it out of the
     // Writers' picker, so opening here goes straight into its runner).
     directorOpen && React.createElement(AgentsPanel,{
-      initialAgentId:"director", autoStart:true, single:true, viewLabel:"View storyboard",
+      initialAgentId:"director", autoStart:true, single:true, viewLabel:"View Storyboards",
       ctxFactory:artAgentCtxFactory,
       onClose:()=>setDirectorOpen(false),
       onView:()=>{ setArtView("storyboard"); setDirectorOpen(false); },
@@ -1443,15 +1662,17 @@ function App(){
     // Cinematographer / Colorist — gated agent (proposes the colour system for approval);
     // its idle screen shows the current visual references so you can add taste before it runs.
     coloristOpen && React.createElement(AgentsPanel,{
-      initialAgentId:"colorist", single:true, viewLabel:"View Style Bible",
+      initialAgentId:"colorist", single:true, viewLabel:"View Presets",
       ctxFactory:artAgentCtxFactory,
       onClose:()=>setColoristOpen(false),
       onView:()=>{ setArtView("stylebible"); setColoristOpen(false); },
       issues:{}, undoCount:0,
       aiOn: (typeof aiAvailable==="function" && aiAvailable()),
-      introExtra: (()=>{ const sb=(typeof styleBibleOf==="function")?styleBibleOf(project):{}; const refs=(sb.refs||"").trim(); const imgs=sb.refImages||[];
+      introExtra: (()=>{ const sb=(typeof styleBibleOf==="function")?styleBibleOf(project):{};
+        const lbText=(typeof composeLookbookRefs==="function")?composeLookbookRefs(lookbookNote, lookbook):"";
+        const refs=[(sb.refs||"").trim(), lbText].filter(Boolean).join("\n"); const imgs=sb.refImages||[];
         if(!refs && !imgs.length) return React.createElement("div",{className:"ag-coloref empty"},
-          React.createElement(Icon.image,{s:13}), "No visual references yet — add films, photographers or reference images in the Style Bible to steer the palette.");
+          React.createElement(Icon.image,{s:13}), "No visual references yet — research the look in the Lookbook tab, or add films, photographers or reference images here, to steer the palette.");
         return React.createElement("div",{className:"ag-coloref"},
           React.createElement("div",{className:"ag-coloref-lab"}, React.createElement(Icon.sparkles,{s:12}), "Designing from your references"),
           refs && React.createElement("div",{className:"ag-coloref-txt"}, refs),
@@ -1463,7 +1684,7 @@ function App(){
     // Shot Designer — gated coverage agent (proposes per-scene coverage for approval),
     // launched from the Shot List header; hands off rendering to "Generate all shots".
     shotDesignerOpen && React.createElement(AgentsPanel,{
-      initialAgentId:"shotdesigner", autoStart:true, single:true, viewLabel:"View Shot List",
+      initialAgentId:"shotdesigner", autoStart:true, single:true, viewLabel:"View Shots",
       ctxFactory:artAgentCtxFactory,
       onClose:()=>setShotDesignerOpen(false),
       onView:()=>{ setArtView("shots"); setShotDesignerOpen(false); },
@@ -1476,6 +1697,47 @@ function App(){
       ctxFactory:artAgentCtxFactory,
       onClose:()=>setCastingOpen(false),
       onView:()=>{ setArtView("characters"); setCastingOpen(false); },
+      issues:{}, undoCount:0,
+      aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
+
+    // Props Master — autonomous props agent (derive → draft → dedup → generate),
+    // launched from the Props header; runs before the cast so the references exist.
+    propsMasterOpen && React.createElement(AgentsPanel,{
+      initialAgentId:"propsmaster", autoStart:true, single:true, viewLabel:"View Props",
+      ctxFactory:artAgentCtxFactory,
+      onClose:()=>setPropsMasterOpen(false),
+      onView:()=>{ setArtView("props"); setPropsMasterOpen(false); },
+      issues:{}, undoCount:0,
+      aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
+
+    // Production Designer / Location Scout — autonomous locations agent (pull → spec → staging
+    // → variants → generate, + coverage check), launched from the Locations header.
+    locScoutOpen && React.createElement(AgentsPanel,{
+      initialAgentId:"locscout", autoStart:true, single:true, viewLabel:"View Locations",
+      ctxFactory:artAgentCtxFactory,
+      onClose:()=>setLocScoutOpen(false),
+      onView:()=>{ setArtView("locations"); setLocScoutOpen(false); },
+      issues:{}, undoCount:0,
+      aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
+
+    // Visual Researcher — autonomous lookbook agent (research the look + render mood frames),
+    // launched from the Lookbook header. Writes references through to the Colorist (Presets).
+    researchOpen && React.createElement(AgentsPanel,{
+      initialAgentId:"researcher", autoStart:true, single:true, viewLabel:"View Lookbook",
+      ctxFactory:artAgentCtxFactory,
+      onClose:()=>setResearchOpen(false),
+      onView:()=>{ setArtView("lookbook"); setResearchOpen(false); },
+      issues:{}, undoCount:0,
+      aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
+
+    // Art Department Coordinator — the meta-agent that runs the whole pre-production
+    // pipeline in dependency order (props → cast → locations → colour → shots → storyboard),
+    // launched from the Art Room's "Run pre-production" button in the view bar.
+    coordOpen && React.createElement(AgentsPanel,{
+      initialAgentId:"coordinator", autoStart:true, single:true, viewLabel:"View Storyboards",
+      ctxFactory:artAgentCtxFactory,
+      onClose:()=>setCoordOpen(false),
+      onView:()=>{ setArtView("storyboard"); setCoordOpen(false); },
       issues:{}, undoCount:0,
       aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
 

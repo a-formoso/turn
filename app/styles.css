@@ -201,11 +201,22 @@ body{
    only because space was tight there). Higher specificity re-shows them here. */
 .viewnav .seg{gap:6px;padding:5px 11px}
 .viewnav .seg .seg-lab{display:inline}
+/* Lookbook — the north-star visual statement block above the reference grid */
+.lb-statement{margin:0 0 18px;padding:14px 16px;background:var(--bg-2);border:1px solid var(--line);border-radius:12px}
+
+/* three balanced zones: equal-width flex sides keep the tab strip horizontally centered
+   while each room's agent CTA sits in the right zone (Run pre-production / Agents). */
+.viewnav .vn-side{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:8px}
+.viewnav .vn-left{justify-content:flex-start}
+.viewnav .vn-right{justify-content:flex-end}
+.viewnav .vn-cta{flex:0 0 auto}
 /* truly narrow screens: icon-only tabs, scroll from the left (no centre-clip) */
 @media (max-width:640px){
   .viewnav{justify-content:flex-start;padding:6px 12px}
+  .viewnav .vn-side{flex:0 0 auto}
   .viewnav .seg{gap:0;padding:6px 9px}
   .viewnav .seg .seg-lab{display:none}
+  .viewnav .vn-cta-lab{display:none}
 }
 
 .tb-btn{
@@ -2086,11 +2097,11 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
   padding:4px 11px;border-radius:6px;cursor:pointer;transition:.12s;white-space:nowrap}
 .nb-seg-btn:hover{color:var(--txt-1)}
 .nb-seg-btn.on{background:var(--bg-5);color:var(--txt-0);box-shadow:0 1px 2px rgba(0,0,0,.25)}
-image-slot[id^="charref-"], image-slot[id^="propref-"], image-slot[id^="locref-"], image-slot[id^="locvar-"], image-slot[id^="shot-"]{width:100%;aspect-ratio:16/9;height:auto;display:block;color:var(--txt-1);
+image-slot[id^="charref-"], image-slot[id^="propref-"], image-slot[id^="locref-"], image-slot[id^="locvar-"], image-slot[id^="shot-"], image-slot[id^="lookref-"]{width:100%;aspect-ratio:16/9;height:auto;display:block;color:var(--txt-1);
   border:1.5px dashed var(--line-3);border-radius:11px;background:var(--bg-2);transition:border-color .12s}
-image-slot[id^="charref-"]:hover, image-slot[id^="propref-"]:hover, image-slot[id^="locref-"]:hover, image-slot[id^="locvar-"]:hover, image-slot[id^="shot-"]:hover{border-color:var(--pos-line)}
-image-slot[id^="charref-"][data-filled], image-slot[id^="propref-"][data-filled], image-slot[id^="locref-"][data-filled], image-slot[id^="locvar-"][data-filled], image-slot[id^="shot-"][data-filled]{border:1px solid var(--line)}
-image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame), image-slot[id^="locref-"]::part(frame), image-slot[id^="locvar-"]::part(frame), image-slot[id^="shot-"]::part(frame){background:transparent}
+image-slot[id^="charref-"]:hover, image-slot[id^="propref-"]:hover, image-slot[id^="locref-"]:hover, image-slot[id^="locvar-"]:hover, image-slot[id^="shot-"]:hover, image-slot[id^="lookref-"]:hover{border-color:var(--pos-line)}
+image-slot[id^="charref-"][data-filled], image-slot[id^="propref-"][data-filled], image-slot[id^="locref-"][data-filled], image-slot[id^="locvar-"][data-filled], image-slot[id^="shot-"][data-filled], image-slot[id^="lookref-"][data-filled]{border:1px solid var(--line)}
+image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame), image-slot[id^="locref-"]::part(frame), image-slot[id^="locvar-"]::part(frame), image-slot[id^="shot-"]::part(frame), image-slot[id^="lookref-"]::part(frame){background:transparent}
 .sheet-frame-cap{display:flex;align-items:center;gap:7px;margin-top:10px;font-family:var(--f-mono);font-size:9.5px;
   letter-spacing:.04em;text-transform:uppercase;color:var(--txt-3)}
 /* lock caption colours — parent hover states must not override */

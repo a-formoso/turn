@@ -688,6 +688,200 @@ async function agentCastingDirector(ctx){
   ctx.emit({k:"done", t:"Cast designed — "+specs+" spec"+(specs!==1?"s":"")+" drafted, "+sheets+" master sheet"+(sheets!==1?"s":"")+", "+variants+" appearance variant"+(variants!==1?"s":"")+". Review and tweak any in the Characters tab."});
 }
 
+async function agentPropsMaster(ctx){
+  const pm = ctx.art && ctx.art.propmaster;
+  if(!pm){
+    ctx.emit({k:"flag", t:"Props workspace unavailable."});
+    ctx.emit({k:"done", t:"Nothing to do."}); return;
+  }
+  ctx.emit({k:"plan", t:"Mastering the props — derive every prop the script names (worn/carried by the cast + the set dressing in the action), draft each spec, dedup near-duplicates, then generate a reference sheet for each so the cast can reference them."});
+
+  // 1) derive props from the script: cast-owned + set dressing
+  ctx.emit({k:"act", t:"Reading the script for props…"});
+  let castN=0, setN=0;
+  try{ castN = pm.deriveCast(); }catch(e){}
+  if(ctx.cancelled()) return;
+  try{ setN = await pm.deriveSet(); }
+  catch(e){ ctx.emit({k:"flag", t:"Couldn't derive set dressing: "+((e&&e.message)||e)}); }
+  ctx.emit({k:"observe", t:"Derived "+castN+" cast prop"+(castN!==1?"s":"")+" + "+setN+" set-dressing object"+(setN!==1?"s":"")+"."});
+  if(ctx.cancelled()) return;
+
+  // 2) draft each undrafted prop's spec
+  ctx.emit({k:"act", t:"Drafting prop specs from the story…"});
+  let drafted=0;
+  try{ drafted = await pm.draftSpecs(); }
+  catch(e){ ctx.emit({k:"flag", t:"Spec drafting hit an error: "+((e&&e.message)||e)}); }
+  ctx.emit({k:"observe", t:drafted?("Drafted "+drafted+" spec"+(drafted!==1?"s":"")+"."):"Specs already complete."});
+  if(ctx.cancelled()) return;
+
+  // 3) dedup near-duplicates (same owner + same object) into one card each
+  let merged=0;
+  try{ merged = pm.dedup(); }catch(e){}
+  if(merged) ctx.emit({k:"ok", t:"Merged "+merged+" near-duplicate"+(merged!==1?"s":"")+" into one card each."});
+  if(ctx.cancelled()) return;
+
+  // 4) generate a sheet for every drafted prop that doesn't have one
+  let todo=[];
+  try{ todo = await pm.toGenerate(); }catch(e){}
+  if(!todo.length){
+    ctx.emit({k:"done", t:"Props ready — "+(castN+setN)+" derived, "+drafted+" drafted; every drafted prop already has a sheet. The cast can reference them."}); return;
+  }
+  ctx.emit({k:"act", t:"Generating "+todo.length+" prop sheet"+(todo.length!==1?"s":"")+"…"});
+  let sheets=0;
+  for(const p of todo){
+    if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+sheets+" sheet"+(sheets!==1?"s":"")+" generated."}); return; }
+    ctx.emit({k:"act", t:"Generating "+(p.name||"a prop")+"'s sheet…"});
+    try{ await pm.generateSheet(p); sheets++;
+      ctx.emit({k:"ok", t:(p.name||"Prop")+" — sheet generated."}); }
+    catch(e){ ctx.emit({k:"flag", t:"Couldn't generate "+(p.name||"the prop")+"'s sheet: "+((e&&e.message)||e)+". Moving on."}); }
+  }
+  ctx.emit({k:"done", t:"Props mastered — "+(castN+setN)+" derived, "+drafted+" drafted, "+sheets+" sheet"+(sheets!==1?"s":"")+" generated. The cast can now reference them."});
+}
+
+async function agentLocationScout(ctx){
+  const ls = ctx.art && ctx.art.locscout;
+  if(!ls){
+    ctx.emit({k:"flag", t:"Locations workspace unavailable."});
+    ctx.emit({k:"done", t:"Nothing to do."}); return;
+  }
+  ctx.emit({k:"plan", t:"Scouting the film's locations — pull every place from the sluglines, draft each one's staging + depth-grid spec, generate the plate, and add the time-of-day variants the script needs. Plus a coverage check: any scene whose slugline location has no card yet."});
+
+  // 1) pull locations from the sluglines (and refresh existing scene lists / times)
+  ctx.emit({k:"act", t:"Reading the sluglines for locations…"});
+  let added=0;
+  try{ added = ls.pull(); }catch(e){}
+  ctx.emit({k:"observe", t:added?("Pulled "+added+" new location"+(added!==1?"s":"")+" from the script."):"Locations already pulled — refreshed their scene lists."});
+  if(ctx.cancelled()) return;
+
+  // 2) coverage check
+  let gaps=[];
+  try{ gaps = ls.coverage(); }catch(e){}
+  if(gaps.length){
+    ctx.emit({k:"flag", t:"Coverage — "+gaps.length+" scene"+(gaps.length!==1?"s":"")+" with no location card: "+
+      gaps.slice(0,6).map(g=>"Sc "+String(g.no||"?")+(g.place?(" ("+g.place+")"):"")).join(", ")+(gaps.length>6?"…":"")+
+      ". Their sluglines may be malformed — add a card by hand if needed."});
+  } else {
+    ctx.emit({k:"ok", t:"Coverage clean — every scene's slugline location has a card."});
+  }
+  if(ctx.cancelled()) return;
+
+  // 3) draft the spec (architecture, materials, lighting, significance, look dev)
+  ctx.emit({k:"act", t:"Drafting location specs from the script…"});
+  let specs=0;
+  try{ specs = await ls.draftSpecs(); }
+  catch(e){ ctx.emit({k:"flag", t:"Spec drafting hit an error: "+((e&&e.message)||e)}); }
+  ctx.emit({k:"observe", t:specs?("Drafted "+specs+" spec"+(specs!==1?"s":"")+"."):"Specs already complete."});
+  if(ctx.cancelled()) return;
+
+  // 4) design the depth-grid staging
+  ctx.emit({k:"act", t:"Designing the depth-grid staging…"});
+  let staged=0;
+  try{ staged = await ls.draftStaging(); }catch(e){}
+  if(staged) ctx.emit({k:"observe", t:"Staged "+staged+" location"+(staged!==1?"s":"")+"."});
+  if(ctx.cancelled()) return;
+
+  // 5) add the time-of-day variants the script calls for (a place seen at >1 time)
+  let vars=0;
+  try{ vars = ls.addVariants(); }catch(e){}
+  if(vars) ctx.emit({k:"ok", t:"Added "+vars+" time-of-day variant"+(vars!==1?"s":"")+" for places the script shows at more than one time."});
+  if(ctx.cancelled()) return;
+
+  // 6) generate the plates, then the variants
+  let plates=[], variants=[];
+  try{ plates = await ls.toGeneratePlates(); }catch(e){}
+  try{ variants = await ls.toGenerateVariants(); }catch(e){}
+  if(!plates.length && !variants.length){
+    ctx.emit({k:"done", t:"Locations ready — "+added+" pulled, "+specs+" drafted; every plate is already generated."}); return;
+  }
+  ctx.emit({k:"act", t:"Generating "+plates.length+" plate"+(plates.length!==1?"s":"")+(variants.length?(" + "+variants.length+" variant"+(variants.length!==1?"s":"")):"")+"…"});
+  let madeP=0, madeV=0;
+  for(const l of plates){
+    if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+madeP+" plate"+(madeP!==1?"s":"")+", "+madeV+" variant"+(madeV!==1?"s":"")+" generated."}); return; }
+    ctx.emit({k:"act", t:"Generating "+(l.name||"a location")+"'s plate…"});
+    try{ await ls.generatePlate(l); madeP++; ctx.emit({k:"ok", t:(l.name||"Location")+" — plate generated."}); }
+    catch(e){ ctx.emit({k:"flag", t:"Couldn't generate "+(l.name||"the location")+"'s plate: "+((e&&e.message)||e)+". Moving on."}); }
+  }
+  for(const pair of variants){
+    if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+madeP+" plates, "+madeV+" variants generated."}); return; }
+    const l=pair.l, v=pair.v;
+    ctx.emit({k:"act", t:"Generating "+(l.name||"a location")+" — "+(v.time||"variant")+"…"});
+    try{ await ls.generateVariant(l, v); madeV++; ctx.emit({k:"ok", t:(l.name||"Location")+" — "+(v.time||"variant")+" generated."}); }
+    catch(e){ ctx.emit({k:"flag", t:"Couldn't generate "+(l.name||"the location")+" — "+(v.time||"variant")+": "+((e&&e.message)||e)+"."}); }
+  }
+  ctx.emit({k:"done", t:"Locations scouted — "+added+" pulled, "+specs+" drafted, "+madeP+" plate"+(madeP!==1?"s":"")+" + "+madeV+" variant"+(madeV!==1?"s":"")+" generated. Tweak any in the Locations tab."});
+}
+
+async function agentVisualResearcher(ctx){
+  const lb = ctx.art && ctx.art.lookbook;
+  if(!lb){
+    ctx.emit({k:"flag", t:"Lookbook workspace unavailable."});
+    ctx.emit({k:"done", t:"Nothing to do."}); return;
+  }
+  if(!ctx.ai || !ctx.ai.available){
+    ctx.emit({k:"flag", t:"The writing model isn't available — the Visual Researcher needs it to research the look."});
+    ctx.emit({k:"done", t:"Aborted."}); return;
+  }
+  ctx.emit({k:"plan", t:"Researching the film's visual language — writing the look statement, gathering reference touchstones (palette, lighting, lens, texture), then rendering a mood frame for each. The colour system (Presets) reads these references when it designs the palette downstream."});
+
+  // 1) research: statement + reference entries, written through to the Colorist
+  ctx.emit({k:"act", t:"Reading the story, writing the look statement, gathering references…"});
+  let res;
+  try{ res = await lb.research(); }
+  catch(e){ ctx.emit({k:"flag", t:"Research hit an error: "+((e&&e.message)||e)}); }
+  if(res && res.statement) ctx.emit({k:"observe", t:"Look statement — "+res.statement.slice(0,150)});
+  ctx.emit({k:"observe", t:(res&&res.added ? ("Gathered "+res.added+" reference"+(res.added!==1?"s":"")) : "References already gathered")+" — the colour system (Presets) reads these directly when it designs the palette."});
+  if(ctx.cancelled()) return;
+
+  // 2) render a mood frame for each drafted reference without one
+  let todo=[];
+  try{ todo = await lb.toGenerate(); }catch(e){}
+  if(!todo.length){
+    ctx.emit({k:"done", t:"Lookbook ready — references gathered; every mood frame is already rendered."}); return;
+  }
+  ctx.emit({k:"act", t:"Rendering "+todo.length+" mood frame"+(todo.length!==1?"s":"")+"…"});
+  let made=0;
+  for(const c of todo){
+    if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+made+" frame"+(made!==1?"s":"")+" rendered."}); return; }
+    ctx.emit({k:"act", t:"Rendering "+(c.source||"a reference")+"…"});
+    try{ await lb.generateFrame(c); made++; ctx.emit({k:"ok", t:(c.source||"Reference")+" — mood frame rendered."}); }
+    catch(e){ ctx.emit({k:"flag", t:"Couldn't render "+(c.source||"the reference")+": "+((e&&e.message)||e)+"."}); }
+  }
+  ctx.emit({k:"done", t:"Lookbook complete — "+((res&&res.added)||0)+" references, "+made+" mood frame"+(made!==1?"s":"")+" rendered. The look now guides the colour system."});
+}
+
+async function agentDepartmentCoordinator(ctx){
+  // The meta-agent: chains the six Art Room agents in dependency order. The four
+  // autonomous ones (Props, Characters, Locations, Storyboard) run hands-off; the two
+  // approval-gated ones (Colour, Shots) pause at their proposal cards and resume on your yes.
+  const steps = [
+    ["Lookbook",   agentVisualResearcher],
+    ["Props",      agentPropsMaster],
+    ["Characters", agentCastingDirector],
+    ["Locations",  agentLocationScout],
+    ["Colour",     agentColorist],
+    ["Shots",      agentShotDesigner],
+    ["Storyboard", agentStoryboardDirector],
+  ];
+  ctx.emit({k:"plan", t:"Running the whole pre-production pipeline in dependency order — the lookbook first (it steers the look), then props, then the cast that references them, then locations, then the colour system, then shot coverage, then the storyboard. It runs end to end WITHOUT stopping — the colour and shot-coverage steps are applied automatically, no approval needed. Press Stop anytime."});
+  // each sub-agent emits its own k:"done" when its stage finishes — relabel those to k:"ok"
+  // so each stage reads as one completed step and only THIS coordinator emits the final done.
+  // propose() is auto-approved so the two gated steps (Colour, Shots) apply without pausing.
+  const subCtx = Object.assign({}, ctx, {
+    emit:(e)=> ctx.emit((e && e.k==="done") ? Object.assign({}, e, {k:"ok"}) : e),
+    propose:()=> Promise.resolve(true),
+  });
+  let n=0;
+  for(const step of steps){
+    if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — completed "+n+" of "+steps.length+" steps."}); return; }
+    n++;
+    ctx.emit({k:"act", t:"▸ Step "+n+"/"+steps.length+" — "+step[0]+"…"});
+    try{ await step[1](subCtx); }
+    catch(e){ ctx.emit({k:"flag", t:step[0]+" step hit an error: "+((e&&e.message)||e)+". Continuing with the next."}); }
+  }
+  if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — completed "+n+" of "+steps.length+" steps."}); return; }
+  ctx.emit({k:"done", t:"Pre-production complete — props, cast, locations, colour, shots and the storyboard are all built in order. Review or tweak anything in its tab."});
+}
+
 const AGENTS = [
   { id:"doctor", name:"Story Doctor", icon:"stethoscope", kind:"fix",
     blurb:"Scans the spine for the weakest link \u2014 scenes that don't turn, soft peaks, flat runs \u2014 and proposes a fix for each, re-auditing until the spine holds.",
@@ -714,6 +908,18 @@ const AGENTS = [
   { id:"casting", name:"Casting Director", icon:"userScan", kind:"build", room:"art", autonomous:true,
     blurb:"Designs your whole cast on its own \u2014 drafts each character's look, finds their appearance changes, then generates the master sheet (with prop + cameo references) and every state variant. Runs autonomously; press Stop anytime.",
     run:agentCastingDirector },
+  { id:"propsmaster", name:"Props Master", icon:"box", kind:"build", room:"art", autonomous:true,
+    blurb:"Derives every prop the script names \u2014 worn/carried by the cast plus the set dressing in the action \u2014 drafts each spec, dedups near-duplicates, and generates the reference sheets, so they're ready before the cast. Runs autonomously; press Stop anytime.",
+    run:agentPropsMaster },
+  { id:"researcher", name:"Visual Researcher", icon:"image", kind:"build", room:"art", autonomous:true,
+    blurb:"Builds the film's lookbook on its own — writes the visual statement, gathers reference touchstones (palette, lighting, lens, texture), and renders a mood frame for each. The colour system (Presets) reads these references when it designs the palette, so the whole look is built from one brief. Runs autonomously; press Stop anytime.",
+    run:agentVisualResearcher },
+  { id:"locscout", name:"Location Scout", icon:"globe", kind:"build", room:"art", autonomous:true,
+    blurb:"Scouts your film's locations on its own \u2014 pulls every place from the sluglines, drafts each one's staging + depth-grid spec, generates the plate, and adds the time-of-day variants the script calls for. Also flags any scene whose slugline location has no card yet. Runs autonomously; press Stop anytime.",
+    run:agentLocationScout },
+  { id:"coordinator", name:"Art Department Coordinator", icon:"robot", kind:"build", room:"art", autonomous:true,
+    blurb:"Runs your whole pre-production in the right order, on its own \u2014 props, then the cast that references them, then locations, then the colour system, then shot coverage, then the storyboard. One click = 'do my pre-production', end to end with no stops: the colour and shot-coverage steps are applied automatically rather than waiting for approval. Press Stop anytime.",
+    run:agentDepartmentCoordinator },
 ];
 window.AGENTS = AGENTS;
 window.auditSpine = auditSpine;

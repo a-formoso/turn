@@ -354,3 +354,69 @@ function buildLocationFromPhotoPrompt(l, project){
   return s;
 }
 window.buildLocationFromPhotoPrompt = buildLocationFromPhotoPrompt;
+
+/* ---- Headless location generation (for the Location Scout agent) ----
+   Mirrors generatePropSheet: build the prompt, generate (retry a simplified prompt on a
+   "no image" safety refusal), commit to the location's slot, and dispatch nb-gen-done so
+   the live card adopts it. The base plate commits to l.id ("locref-"+l.id); a time-of-day
+   variant commits to l.id+"-"+v.id ("locvar-"+l.id+"-"+v.id). ---- */
+function _nbLocMeta(prompt){
+  const model = (typeof nbGetModel==="function") ? nbGetModel() : "";
+  const aspect = (typeof nbGetAspect==="function") ? nbGetAspect() : "16:9";
+  const size = (typeof nbGetRes==="function") ? nbGetRes() : "2K";
+  const now = new Date();
+  const mEntry = (window.NB_MODELS||[]).find(m=>m.id===model) || {};
+  return { modelLabel:mEntry.label||"Nano Banana", modelId:model, aspect, size,
+    date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
+    time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
+    iso: now.toISOString(), prompt, mode:"final", version:1 };
+}
+async function generateLocationPlate(l, project){
+  if(typeof nbGenerate!=="function" || typeof nbCommit!=="function") return false;
+  const prompt = (typeof combinedLocationPrompt==="function") ? combinedLocationPrompt(l, project, {}) : (l.name||"location reference");
+  if(!window.__nbGenInflight) window.__nbGenInflight = {};
+  window.__nbGenInflight[l.id] = true;
+  try{
+    let url;
+    try{ url = await nbGenerate(prompt, {}); }
+    catch(e){ if(/no image/i.test((e&&e.message)||"") && typeof buildSimpleLocationPrompt==="function"){ url = await nbGenerate(buildSimpleLocationPrompt(l), {}); } else throw e; }
+    await nbCommit(l.id, url, _nbLocMeta(prompt), [], "location");
+    try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:l.id, url } })); }catch(e){}
+    return true;
+  } finally { window.__nbGenInflight[l.id] = false; }
+}
+window.generateLocationPlate = generateLocationPlate;
+
+async function generateLocationVariant(l, v, project){
+  if(typeof nbGenerate!=="function" || typeof nbCommit!=="function") return false;
+  const id = l.id+"-"+v.id;
+  const prompt = (typeof buildLocationVariantPrompt==="function") ? buildLocationVariantPrompt(l, project, { time:v.time }) : (l.name||"location reference");
+  if(!window.__nbGenInflight) window.__nbGenInflight = {};
+  window.__nbGenInflight[id] = true;
+  try{
+    let url;
+    try{ url = await nbGenerate(prompt, {}); }
+    catch(e){ if(/no image/i.test((e&&e.message)||"") && typeof buildSimpleLocationPrompt==="function"){ url = await nbGenerate(buildSimpleLocationPrompt(l), {}); } else throw e; }
+    await nbCommit(id, url, _nbLocMeta(prompt), [], "location");
+    try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, url } })); }catch(e){}
+    return true;
+  } finally { window.__nbGenInflight[id] = false; }
+}
+window.generateLocationVariant = generateLocationVariant;
+
+/* coverage audit — scenes whose slugline names a place that isn't linked to any Location
+   card yet (e.g. an unparseable or brand-new slug). After a pull every parseable scene is
+   covered, so this surfaces the genuine gaps. */
+function locationCoverage(scenes, locations){
+  const covered = new Set();
+  (locations||[]).forEach(l=> (l.scenes||[]).forEach(id=> covered.add(id)));
+  const out = [];
+  (scenes||[]).forEach(s=>{
+    if(!s || !(s.loc||"").trim()) return;     // no slugline → not a location-bearing scene
+    if(covered.has(s.id)) return;
+    const p = (typeof parseSlugline==="function") ? parseSlugline(s.loc) : null;
+    out.push({ id:s.id, no:s.no, title:s.title||"", slug:(s.loc||"").trim(), place:(p&&p.place)||"" });
+  });
+  return out;
+}
+window.locationCoverage = locationCoverage;

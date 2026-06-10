@@ -105,22 +105,38 @@ window.OverflowMenu = OverflowMenu;
    Room tabs) as a full-width bar directly beneath the top bar, at every screen
    size. Moved out of the top bar to free its space; the panel toggles ride along
    at the edges (Writers' Room only). Replaces the old mobile-only bottom bar. */
-function ViewNav({ room, view, setView, artView, setArtView, railOpen, inspOpen, onToggleRail, onToggleInsp }){
+function ViewNav({ room, view, setView, artView, setArtView, railOpen, inspOpen, onToggleRail, onToggleInsp, onCoordinate, onAgents }){
   const writersNav = [["spine","Spine",Icon.graph],["beats","Audit",Icon.grid],["board","Board",Icon.board],["script","Script",Icon.script]];
   const artNav = (window.ART_TABS||[]).map(t=>[t.id,t.label,Icon[t.icon]||Icon.user]);
   const inArt = room==="art";
   const nav = inArt ? artNav : writersNav;
   const cur = inArt ? artView : view;
   const setCur = inArt ? setArtView : setView;
+  // each room's primary agent action, pinned to the right of the centered tab strip:
+  // Art Room → the meta-agent (Run pre-production); Writers' Room → the Agents panel.
+  const cta = inArt
+    ? (onCoordinate && React.createElement("button",{className:"tb-btn accent vn-cta",onClick:onCoordinate,
+        title:"Art Department Coordinator — runs your whole pre-production in dependency order: props → cast → locations → colour → shots → storyboard, in one click"},
+        React.createElement(Icon.robot,{s:14}),React.createElement("span",{className:"vn-cta-lab"},"Run pre-production")))
+    : (onAgents && React.createElement("button",{className:"tb-btn accent vn-cta",onClick:onAgents,
+        title:"Story Editors — AI agents that refine your story: Story Doctor, Continuity Repair, Table-Read"},
+        React.createElement(Icon.robot,{s:14}),React.createElement("span",{className:"vn-cta-lab"},"Story Editors")));
   return React.createElement("div",{className:"viewnav","aria-label":"Views"},
-    !inArt && React.createElement("button",{className:`tb-icon ${railOpen?"on":""}`,onClick:onToggleRail,title:"Toggle story panel"},
-      React.createElement(Icon.panelLeft,{s:16})),
+    // LEFT zone — story-panel toggle (Writers' Room); empty in the Art Room. Balances the
+    // right zone so the tab strip stays horizontally centered in both rooms.
+    React.createElement("div",{className:"vn-side vn-left"},
+      !inArt && React.createElement("button",{className:`tb-icon ${railOpen?"on":""}`,onClick:onToggleRail,title:"Toggle story panel"},
+        React.createElement(Icon.panelLeft,{s:16}))),
+    // CENTER — the room's view tabs, always centered
     React.createElement("div",{className:"segmented"},
       nav.map(([id,lab,Ic])=>
         React.createElement("button",{key:id,className:`seg ${cur===id?"on":""}`,onClick:()=>setCur(id),title:lab},
           React.createElement(Ic,{s:14}),React.createElement("span",{className:"seg-lab"},lab)))),
-    !inArt && React.createElement("button",{className:`tb-icon ${inspOpen?"on":""}`,onClick:onToggleInsp,title:"Toggle inspector"},
-      React.createElement(Icon.panelRight,{s:16})));
+    // RIGHT zone — the room's agent CTA, plus the inspector toggle (Writers' Room)
+    React.createElement("div",{className:"vn-side vn-right"},
+      cta,
+      !inArt && React.createElement("button",{className:`tb-icon ${inspOpen?"on":""}`,onClick:onToggleInsp,title:"Toggle inspector"},
+        React.createElement(Icon.panelRight,{s:16}))));
 }
 window.ViewNav = ViewNav;
 
@@ -195,8 +211,8 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
         React.createElement(Icon.plus,{s:14}),"New Story"),
       React.createElement(ExportMenu,{project,scenes,drafts,onReset}),
       React.createElement(OverflowMenu,{onNewStory,project,scenes,drafts,onReset}),
-      room==="writers" && React.createElement("button",{className:"tb-btn accent",onClick:onAgents,title:"Agents — AI agents + ask MUSE"},
-        React.createElement(Icon.robot,{s:14}),"Agents"),
+      // 'Agents' moved to the ViewNav's right zone (Writers' Room), mirroring the Art Room's
+      // 'Run pre-production' — both sit to the right of their centered tab strip.
       authSlot || React.createElement("div",{className:"avatar"},"MV")),
   );
 }

@@ -373,7 +373,7 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
         React.createElement(CopyBox,{label:"Final prompt \u2014 master + negative (sent to Nano Banana)",text:finalPrompt}))));
 }
 
-function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId, onMergeProps }){
+function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId, onMergeProps, onPropsMaster }){
   const [view, setView] = React.useState(null);   // {url, character/prop}
   const [sceneFilter, setSceneFilter] = React.useState("");   // "" = all
   const [query, setQuery] = React.useState("");               // free-text name/owner search
@@ -470,12 +470,15 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
     React.createElement("div",{className:"art-intro"},
       React.createElement("div",{className:"art-intro-row"},
         React.createElement("div",{style:{flex:1}},
-          React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Props",
+          React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Props Master",
             React.createElement(window.InfoTip,{label:"About Props",
-              text:"Continuity objects \u2014 the things characters wear and carry. Each gets its own multi-view reference sheet so the object stays identical in every shot. Generate a prop here first, then reference it when you build the character sheets and shots that feature it."}))),
+              text:"Continuity objects \u2014 the things characters wear and carry, plus the set dressing the camera sees. Each gets its own multi-view reference sheet so the object stays identical in every shot. 'Master the props' runs the Props Master agent: on its own it derives every prop the script names (cast-owned + set dressing in the action), drafts each spec, dedups near-duplicates, and generates the sheets \u2014 run it before the cast so their props exist to reference. 'Draft all props' + 'Generate all props' stay as the manual paths."}))),
         React.createElement("div",{className:"art-intro-actions"},
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add prop"),
+          onPropsMaster && React.createElement("button",{className:"art-draftall",onClick:onPropsMaster,
+            title:"Props Master \u2014 derives every prop (cast-owned + set dressing named in the action), drafts each spec, dedups near-duplicates, and generates the reference sheets, on its own"},
+            React.createElement(Icon.robot,{s:14}),"Master the props"),
           React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!castHasProps),onClick:onDraftAll,
             title:"Build every prop from the story in one pass \u2014 pull missing items from the cast, draft each spec (object, significance, look dev) from the script, and map every prop to the scenes it appears in"},
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Draft all props"),

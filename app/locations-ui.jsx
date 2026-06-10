@@ -81,7 +81,7 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
             React.createElement(EditText,{value:l.name,placeholder:"Location name\u2026",onCommit:val=>onUpdate(l.id,{name:val})})),
           React.createElement("div",{className:"sheet-role"},
             scenePresets.length ? React.createElement("span",{className:"loc-style-chip lead",
-              title:"Style Bible presets the scenes here use \u2014 the grade is applied per shot, not baked into this reference plate"},
+              title:"Presets the scenes here use \u2014 the grade is applied per shot, not baked into this reference plate"},
               ...scenePresets.map(p=>React.createElement("span",{key:p.id,className:"loc-style-dot",style:{background:(p.palette&&p.palette[0])||"#888"}})),
               scenePresets.map(p=>p.name).join(", ")) : null),
           React.createElement("div",{className:"prop-scenes"},
@@ -133,7 +133,7 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
           React.createElement(Icon.layers,{s:12}),
           React.createElement("span",null,"Scenes here use ",
             React.createElement("b",null,scenePresets.map(p=>p.name).join(", ")),
-            " in the Style Bible. This reference plate is rendered grade-neutral on purpose \u2014 that scene grade is applied per shot, not baked into the plate.")) : null,
+            " in the Presets tab. This reference plate is rendered grade-neutral on purpose \u2014 that scene grade is applied per shot, not baked into the plate.")) : null,
         React.createElement(SheetField,{label:"Render style \u2014 the neutral look this reference plate is rendered in",value:l.renderStyle||d.renderStyle,multiline:true,
           placeholder:"photoreal architectural cinematography, wide lens, natural light\u2026",onCommit:val=>onUpdate(l.id,{renderStyle:val})})),
 
@@ -225,7 +225,7 @@ function LocationVariant({ l, v, project, onTime, onRemove, onView }){
       entity:l, onView, slotPlaceholder:"Drop a photo", noun:"variant", compact:true }));
 }
 
-function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId }){
+function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout }){
   const [view, setView] = React.useState(null);
   const [sceneFilter, setSceneFilter] = React.useState("");
   const batch = useBatchGen();
@@ -261,12 +261,15 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
     React.createElement("div",{className:"art-intro"},
       React.createElement("div",{className:"art-intro-row"},
         React.createElement("div",{style:{flex:1}},
-          React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Locations",
+          React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Production Designer (Location Scout)",
             React.createElement(window.InfoTip,{label:"About Locations",
-              text:"Every place the film visits, pulled straight from the script's sluglines. Each gets a multi-angle coverage plate \u2014 the same space from several views \u2014 so any shot set there matches its geometry, materials and light. Generate locations here, then reference them when you build shots."}))),
+              text:"Every place the film visits, pulled straight from the script's sluglines. Each gets a multi-angle coverage plate \u2014 the same space from several views \u2014 so any shot set there matches its geometry, materials and light. 'Scout the locations' runs the Location Scout agent: on its own it pulls every place from the sluglines, drafts each one's spec + depth-grid staging, generates the plate, and adds the time-of-day variants the script calls for \u2014 plus a coverage check that flags any scene whose slugline location has no card yet. 'Draft all locations' + 'Generate all locations' stay as the manual paths."}))),
         React.createElement("div",{className:"art-intro-actions"},
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add location"),
+          onScout && React.createElement("button",{className:"art-draftall",onClick:onScout,
+            title:"Location Scout \u2014 pulls every place from the sluglines, drafts each spec + depth-grid staging, generates the plate, and adds the time-of-day variants the script needs, on its own"},
+            React.createElement(Icon.robot,{s:14}),"Scout the locations"),
           React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!scriptHasLocs),onClick:onDraftAll,
             title:"Build every location from the story in one pass \u2014 pull any missing places from the script's sluglines, draft each spec (the space, significance, look dev), and stage its depth grid"},
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Draft all locations"),
