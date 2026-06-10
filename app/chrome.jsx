@@ -24,12 +24,8 @@ function ExportMenu({ project, scenes, drafts, onReset }){
     ["outline", Icon.layers, "Story outline (.txt)", "Premise, idea & spine"],
     ["csv", Icon.grid, "Spine data (.csv)", "Scenes, charges, turns"],
   ];
-  const shareItems=[
-    ["whatsapp", Icon.whatsapp, "Share to WhatsApp", "Send the outline as a message"],
-    ["email", Icon.mail, "Send via email", "Outline in the email body"],
-  ];
   return React.createElement("div",{className:"export-wrap",ref:ref},
-    React.createElement("button",{className:`tb-btn ${open?"on":""}`,onClick:()=>setOpen(o=>!o),title:"Export & share"},
+    React.createElement("button",{className:`tb-btn ${open?"on":""}`,onClick:()=>setOpen(o=>!o),title:"Export the screenplay / story"},
       React.createElement(Icon.download,{s:14}),"Export"),
     open && React.createElement("div",{className:"export-menu"},
       React.createElement("div",{className:"export-head"},
@@ -40,13 +36,7 @@ function ExportMenu({ project, scenes, drafts, onReset }){
           React.createElement("span",{className:"export-item-t"},
             React.createElement("span",{className:"t"},title),
             React.createElement("span",{className:"s"},sub)))),
-      React.createElement("div",{className:"export-subhead"},"Share outline"),
-      shareItems.map(([kind,Ic,title,sub])=>
-        React.createElement("button",{key:kind,className:"export-item",onClick:()=>run(kind)},
-          React.createElement("span",{className:"export-item-ic"},React.createElement(Ic,{s:15})),
-          React.createElement("span",{className:"export-item-t"},
-            React.createElement("span",{className:"t"},title),
-            React.createElement("span",{className:"s"},sub)))),
+      // admin-only (app.jsx passes onReset only for the admin account)
       onReset && React.createElement("div",{className:"export-foot"},
         React.createElement("button",{className:"export-item reset",
           onClick:async ()=>{ setOpen(false); const ok=await window.appConfirm({title:"Reset to the sample story?",body:"This permanently discards your edits, drafts and version history.",confirmLabel:"Reset",danger:true}); if(ok) onReset(); }},
@@ -57,9 +47,9 @@ function ExportMenu({ project, scenes, drafts, onReset }){
 }
 
 /* OverflowMenu — mobile-only kebab that holds the actions whose labels don't
-   fit the narrow bar (New Story, all Export/share targets, Reset). Keeps every
-   action reachable on a phone instead of hiding them. */
-function OverflowMenu({ onNewStory, project, scenes, drafts, onReset }){
+   fit the narrow bar (New Story; the export targets in the Writers' Room only;
+   the admin-only Reset). Keeps every action reachable on a phone. */
+function OverflowMenu({ onNewStory, project, scenes, drafts, onReset, room }){
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
   React.useEffect(()=>{
@@ -74,9 +64,8 @@ function OverflowMenu({ onNewStory, project, scenes, drafts, onReset }){
     ["fountain", Icon.script, "Screenplay (.fountain)"],
     ["outline", Icon.layers, "Story outline (.txt)"],
     ["csv", Icon.grid, "Spine data (.csv)"],
-    ["whatsapp", Icon.whatsapp, "Share to WhatsApp"],
-    ["email", Icon.mail, "Send via email"],
   ];
+  const inWriters = room!=="art";   // export is a Writers' Room (screenplay/story) action
   return React.createElement("div",{className:"overflow-wrap",ref:ref},
     React.createElement("button",{className:`tb-icon ${open?"on":""}`,onClick:()=>setOpen(o=>!o),"aria-label":"More actions",title:"More"},
       React.createElement(Icon.moreV,{s:18})),
@@ -86,12 +75,13 @@ function OverflowMenu({ onNewStory, project, scenes, drafts, onReset }){
         React.createElement("span",{className:"export-item-t"},
           React.createElement("span",{className:"t"},"New Story"),
           React.createElement("span",{className:"s"},"Start from an idea"))),
-      React.createElement("div",{className:"export-subhead"},"Export & share"),
-      exp.map(([kind,Ic,title])=>
+      inWriters && React.createElement("div",{className:"export-subhead"},"Export"),
+      inWriters && exp.map(([kind,Ic,title])=>
         React.createElement("button",{key:kind,className:"export-item",onClick:()=>run(kind)},
           React.createElement("span",{className:"export-item-ic"},React.createElement(Ic,{s:15})),
           React.createElement("span",{className:"export-item-t"},
             React.createElement("span",{className:"t"},title)))),
+      // admin-only (app.jsx passes onReset only for the admin account)
       onReset && React.createElement("div",{className:"export-foot"},
         React.createElement("button",{className:"export-item reset",
           onClick:async ()=>{ setOpen(false); const ok=await window.appConfirm({title:"Reset to the sample story?",body:"This permanently discards your edits, drafts and version history.",confirmLabel:"Reset",danger:true}); if(ok) onReset(); }},
@@ -211,8 +201,9 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
       React.createElement(ThemeToggle,{theme,onTheme}),
       React.createElement("button",{className:"tb-btn newstory",onClick:onNewStory,title:"Start a new story from an idea"},
         React.createElement(Icon.plus,{s:14}),"New Story"),
-      React.createElement(ExportMenu,{project,scenes,drafts,onReset}),
-      React.createElement(OverflowMenu,{onNewStory,project,scenes,drafts,onReset}),
+      // Export is a Writers' Room action (screenplay / story formats) — hidden in the Art Room
+      room!=="art" && React.createElement(ExportMenu,{project,scenes,drafts,onReset}),
+      React.createElement(OverflowMenu,{onNewStory,project,scenes,drafts,onReset,room}),
       // 'Agents' moved to the ViewNav's right zone (Writers' Room), mirroring the Art Room's
       // 'Run pre-production' — both sit to the right of their centered tab strip.
       authSlot || React.createElement("div",{className:"avatar"},"MV")),

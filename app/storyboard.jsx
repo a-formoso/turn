@@ -68,7 +68,10 @@ function sbGridPos(i, cols, rows){
 /* the FOUR production-note slug lines under a panel — CAMERA / MOTION / ACTION /
    PERFORMANCE — each short (2–9 words). PERFORMANCE carries the spoken line on a
    dialogue panel, else the beat's behavioural note (how it's played), else the mood. */
-function sbStrip(sh, scene, row){
+/* `full` = the canvas-composed sheet, which draws REAL text and can word-wrap —
+   so it gets the whole first sentence / line. Without it (the GPT-painted sheet)
+   values stay capped at 9 words: baked-in text must be short to render legibly. */
+function sbStrip(sh, scene, row, full){
   const camera = [
     (typeof shotSizeOf==="function")  ? shotSizeOf(sh.size).label   : sh.size,
     (typeof shotAngleOf==="function") ? shotAngleOf(sh.angle).label : sh.angle,
@@ -77,11 +80,12 @@ function sbStrip(sh, scene, row){
   const motion = ((typeof shotMoveOf==="function") ? shotMoveOf(sh.move).label : (sh.move||"Static")) || "Static";
   let action = (sh.action||"").replace(/\s+/g," ").trim();
   const m = action.match(/^[^.!?]*[.!?]/); if(m) action=m[0];
-  action = action.replace(/[.!?]+$/,"").split(" ").slice(0,9).join(" ");
+  action = action.replace(/[.!?]+$/,"");
+  if(!full) action = action.split(" ").slice(0,9).join(" ");
   const dlg = (sh.dialogue||"").trim().replace(/^["“]|["”]$/g,"").replace(/[.!?]+$/,"");
   const beh = ((row && ((row.drive&&row.drive.d)||(row.react&&row.react.d)))||"").replace(/\s+/g," ").trim();
-  const performance = dlg ? ('"'+dlg.slice(0,60)+'"')
-    : (beh ? beh.split(" ").slice(0,9).join(" ") : sbMood(scene));
+  const performance = dlg ? ('"'+dlg.slice(0, full?160:60)+'"')
+    : (beh ? (full ? beh : beh.split(" ").slice(0,9).join(" ")) : sbMood(scene));
   return { camera, motion, action, performance };
 }
 
@@ -90,7 +94,8 @@ function sbStrip(sh, scene, row){
    continuous take, with locked characters + geography, and a baked off-white
    annotation strip (CAM / MOVE / MOOD|VOICE) under each panel. Character sheets +
    the location plate ride along as identity anchors. */
-function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap){
+function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap, opts){
+  opts = opts || {};
   const loc = ctx && ctx.location;
   const bm = sbBeatMeta(beatsMap, scene.id);
   const N = (shots||[]).length;
@@ -131,6 +136,10 @@ function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap){
     + "(read left-to-right, top-to-bottom) depicting ONE CONTINUOUS scene"+(setting?(" in "+setting):"")+". ";
   s += "Treat the panels as one continuous take broken into "+N+" sequential frames — the camera moves naturally around the action, "
     + "same place, one unbroken flow of time — NOT "+N+" unrelated images. ";
+  // CLIP BOARD — these panels ARE one generated video clip (the Stage's render unit)
+  if(opts.clip) s += "THIS SHEET BOARDS ONE SINGLE VIDEO CLIP of about "+(opts.clip.dur||window.CLIP_MAX_SECONDS||15)
+    + " seconds — the "+N+" panels are its keyframes IN ORDER: stage the action and camera so motion flows seamlessly "
+    + "from each panel into the next, one unbroken take with no time jumps. ";
   s += "STYLE: cinematic"+(genre?(", "+genre+" tone"):"")+", live-action, photorealistic, lifelike, subtle 35mm film grain. "+(grade||"")+"16:9 page layout. ";
   s += "ATMOSPHERE / LIGHT: "+light+"; "+mood+". ";
   // Lookbook references routed to the storyboard (composition + atmosphere), set on ctx by the director surface
@@ -187,9 +196,29 @@ async function sbLoadBitmap(url){
     return { img, revoke };
   }catch(e){ if(revoke){ try{ URL.revokeObjectURL(revoke); }catch(_){} } return null; }
 }
+/* greedy word-wrap for the canvas strips; overflow past maxLines ellipsizes the
+   last line (so ACTION / PERFORMANCE read whole, not chopped mid-thought). */
+function sbWrapText(g, text, maxW, maxLines){
+  const words = String(text||"").replace(/\s+/g," ").trim().split(" ").filter(Boolean);
+  if(!words.length) return ["—"];
+  const lines = []; let cur = words[0];
+  for(let i=1;i<words.length;i++){
+    const t = cur+" "+words[i];
+    if(g.measureText(t).width <= maxW) cur = t; else { lines.push(cur); cur = words[i]; }
+  }
+  lines.push(cur);
+  if(lines.length > maxLines){
+    let last = lines[maxLines-1];
+    while(last && g.measureText(last+" …").width > maxW) last = last.replace(/\s*\S+$/,"");
+    lines.length = maxLines; lines[maxLines-1] = (last?last+" ":"")+"…";
+  }
+  return lines;
+}
+
 async function composeStoryboardSheet(scene, page, ctx, beatsMap){
   const shots = page.shots || [];
   const N = shots.length; if(!N) return null;
+  const off = page.start || 0;   // scene-relative shot numbering (page 2+ / clip boards)
   // gather the shots' generated frames (cache-first; cloud byte-cache makes this instant)
   const urls = [];
   for(const sh of shots){
@@ -198,8 +227,10 @@ async function composeStoryboardSheet(scene, page, ctx, beatsMap){
     urls.push(u || "");
   }
   if(!urls.some(Boolean)) return null;
-  // layout — 3 columns of TRUE 16:9 panels, a 4-line annotation strip under each
-  const PAD=8, GAP=8, CELL_W=632, IMG_H=Math.round(CELL_W*9/16), STRIP_H=108, CELL_H=IMG_H+STRIP_H;
+  // layout — 3 columns of TRUE 16:9 panels, an annotation strip under each:
+  // CAMERA + MOTION one line each, ACTION + PERFORMANCE up to TWO wrapped lines
+  // (fixed slots — 6 rows — so every panel's strip is the same height)
+  const PAD=8, GAP=8, CELL_W=632, IMG_H=Math.round(CELL_W*9/16), STRIP_H=148, CELL_H=IMG_H+STRIP_H;
   const cols = Math.min(3, N), rows = Math.ceil(N/cols);
   const W = PAD*2 + cols*CELL_W + (cols-1)*GAP;
   const H = PAD*2 + rows*CELL_H + (rows-1)*GAP;
@@ -207,7 +238,8 @@ async function composeStoryboardSheet(scene, page, ctx, beatsMap){
   const g = canvas.getContext("2d");
   g.fillStyle = "#101012"; g.fillRect(0,0,W,H);
   const bitmaps = await Promise.all(urls.map(u=>sbLoadBitmap(u)));
-  const LINES = [["CAMERA","camera"],["MOTION","motion"],["ACTION","action"],["PERFORMANCE","performance"]];
+  // [label, key, line slots] — ACTION and PERFORMANCE get two wrapped lines
+  const SLOTS = [["CAMERA","camera",1],["MOTION","motion",1],["ACTION","action",2],["PERFORMANCE","performance",2]];
   for(let i=0;i<N;i++){
     const sh = shots[i], row = sbBeatRow(beatsMap, sh);
     const x = PAD + (i%cols)*(CELL_W+GAP), y = PAD + Math.floor(i/cols)*(CELL_H+GAP);
@@ -222,7 +254,7 @@ async function composeStoryboardSheet(scene, page, ctx, beatsMap){
       g.fillStyle="#17171a"; g.fillRect(x,y,CELL_W,IMG_H);
       g.strokeStyle="rgba(255,255,255,.14)"; g.setLineDash([6,6]); g.strokeRect(x+8.5,y+8.5,CELL_W-17,IMG_H-17); g.setLineDash([]);
       g.fillStyle="#6f6a60"; g.font="500 15px 'Hanken Grotesk', sans-serif"; g.textAlign="center";
-      g.fillText("Frame not generated — Shot "+scene.no+"."+(i+1), x+CELL_W/2, y+IMG_H/2-8);
+      g.fillText("Frame not generated — Shot "+scene.no+"."+(off+i+1), x+CELL_W/2, y+IMG_H/2-8);
       g.font="500 12px 'Space Mono', monospace";
       g.fillText("generate it in the Shot List, then recompose", x+CELL_W/2, y+IMG_H/2+14);
       g.textAlign="left";
@@ -231,20 +263,21 @@ async function composeStoryboardSheet(scene, page, ctx, beatsMap){
     const sy = y + IMG_H;
     g.fillStyle = "#f2eee4"; g.fillRect(x, sy, CELL_W, STRIP_H);
     g.strokeStyle = "#d8d2c2"; g.beginPath(); g.moveTo(x, sy+.5); g.lineTo(x+CELL_W, sy+.5); g.stroke();
-    const st = sbStrip(sh, scene, row);
+    const st = sbStrip(sh, scene, row, true);   // full text — the canvas wraps it
     const LABEL_X = x+12, VALUE_X = x+128, MAX_W = CELL_W-(VALUE_X-x)-12;
-    LINES.forEach(([lab,key],li)=>{
-      const ly = sy + 24 + li*24;
+    let rowI = 0;
+    SLOTS.forEach(([lab,key,maxL])=>{
+      const ly = sy + 22 + rowI*20;
       g.fillStyle = "#8a8474"; g.font = "700 11px 'Space Mono', monospace";
       g.fillText(lab, LABEL_X, ly);
-      let v = String(st[key]||"—");
-      g.fillStyle = "#1b1a16"; g.font = "500 15px 'Hanken Grotesk', sans-serif";
-      while(v.length>4 && g.measureText(v).width > MAX_W) v = v.slice(0, -4).replace(/\s+\S*$/,"")+"…";
-      g.fillText(v, VALUE_X, ly);
+      g.fillStyle = "#1b1a16"; g.font = "500 14px 'Hanken Grotesk', sans-serif";
+      sbWrapText(g, String(st[key]||"—"), MAX_W, maxL)
+        .forEach((ln,k)=> g.fillText(ln, VALUE_X, ly + k*20));
+      rowI += maxL;
     });
     // panel number, top-right of the strip
     g.fillStyle = "#8a8474"; g.font = "700 11px 'Space Mono', monospace"; g.textAlign="right";
-    g.fillText(scene.no+"."+(i+1), x+CELL_W-12, sy+24); g.textAlign="left";
+    g.fillText(scene.no+"."+(off+i+1), x+CELL_W-12, sy+22); g.textAlign="left";
   }
   bitmaps.forEach(bm=>{ if(bm && bm.revoke){ try{ URL.revokeObjectURL(bm.revoke); }catch(e){} } });
   return canvas.toDataURL("image/jpeg", 0.92);
@@ -259,7 +292,8 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
   const sid = "sbsheet-"+page.id;
   const gen = useImageGen({
     id: sid, slotId: sid,
-    buildFinal: ()=> (typeof buildStoryboardPagePrompt==="function") ? buildStoryboardPagePrompt(scene, page.shots, ctx, beatsMap) : "",
+    buildFinal: ()=> (typeof buildStoryboardPagePrompt==="function")
+      ? buildStoryboardPagePrompt(scene, page.shots, ctx, beatsMap, page.clip?{clip:{dur:page.dur}}:null) : "",
     // A composite is one heavy image (a whole panel grid) — keep the reference set
     // LEAN (location plate + at most 4 character sheets) so the proxy doesn't time out.
     attachments: async ()=>{
@@ -446,12 +480,12 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
           className:"sb-panel-chip"+(panelEdit.idx===i?" on":""),
           title:(typeof shotGrammarLabel==="function")?shotGrammarLabel(sh):"",
           onClick:()=>{ setPanelEdit(p=>({ ...p, idx:i })); setPanelErr(""); }},
-          scene.no+"."+(i+1),
+          scene.no+"."+((page.start||0)+i+1),
           _sbEl("span",{className:"sb-panel-chip-sub"},(typeof shotSizeOf==="function")?shotSizeOf(sh.size).label:(sh.size||""))))),
       panelEdit.idx!=null && _sbEl("input",{className:"sheet-edit-input",type:"text",autoFocus:true,
         placeholder: isComposed
-          ? "Change panel "+scene.no+"."+(panelEdit.idx+1)+" — edits that shot's frame, then recomposes…"
-          : "Change panel "+scene.no+"."+(panelEdit.idx+1)+" only — the rest of the sheet stays…",
+          ? "Change panel "+scene.no+"."+((page.start||0)+panelEdit.idx+1)+" — edits that shot's frame, then recomposes…"
+          : "Change panel "+scene.no+"."+((page.start||0)+panelEdit.idx+1)+" only — the rest of the sheet stays…",
         value:panelEdit.text,onChange:e=>setPanelEdit(p=>({ ...p, text:e.target.value })),
         onKeyDown:e=>{ if(e.key==="Enter") applyPanelEdit(); if(e.key==="Escape") setPanelEdit(null); }}),
       panelErr && _sbEl("div",{className:"sb-panel-err"}, _sbEl(Icon.alert,{s:12}), panelErr),
@@ -472,7 +506,13 @@ function StoryboardPage({ project, scene, page, pageCount, ctx, beatsMap, onView
       _sbEl("span",{className:"sb-sheet-hi"}, _sbEl("b",null,"PROJECT: "), (project&&project.title)||"Untitled film"),
       _sbEl("span",{className:"sb-sheet-hi"}, _sbEl("b",null,"SCENE: "), String(scene.no).padStart(2,"0")),
       _sbEl("span",{className:"sb-sheet-hi"}, _sbEl("b",null,"TITLE: "), scene.title||"Untitled scene"),
-      _sbEl("span",{className:"sb-sheet-hi page"}, _sbEl("b",null,"PAGE: "), (page.index+1)+" of "+pageCount)),
+      page.clip
+        ? _sbEl("span",{className:"sb-sheet-hi page"+((page.dur||0)>(window.CLIP_MAX_SECONDS||15)?" clip-over":""),
+            title:(page.dur||0)>(window.CLIP_MAX_SECONDS||15)
+              ? "≈"+page.dur+"s — over the "+(window.CLIP_MAX_SECONDS||15)+"s clip budget; split it in the Shot List's Clips strip"
+              : "One generated video clip — ≈"+page.dur+"s of the "+(window.CLIP_MAX_SECONDS||15)+"s budget"},
+            _sbEl("b",null,"CLIP: "), (page.index+1)+" of "+pageCount+" · ≈"+(page.dur||0)+"s")
+        : _sbEl("span",{className:"sb-sheet-hi page"}, _sbEl("b",null,"PAGE: "), (page.index+1)+" of "+pageCount)),
     _sbEl(StoryboardComposite,{ scene, page, ctx, beatsMap, onView, batchActiveId, onBatchDone }),
 
     // full per-panel detail — Shot List fields + Writers' Room beat subtext + the final frame prompt
@@ -493,7 +533,7 @@ function StoryboardPage({ project, scene, page, pageCount, ctx, beatsMap, onView
         const who = sbInFrame(sh, ctx);
         return _sbEl("div",{className:"sb-brief",key:sh.id},
           _sbEl("div",{className:"sb-brief-head"},
-            _sbEl("span",{className:"sb-brief-no"}, scene.no+"."+(i+1)),
+            _sbEl("span",{className:"sb-brief-no"}, scene.no+"."+((page.start||0)+i+1)),
             _sbEl("span",{className:"sb-brief-gram"}, (typeof shotGrammarLabel==="function")?shotGrammarLabel(sh):""),
             _sbEl("button",{className:"sb-brief-jump",onClick:()=>jumpToShot(sh),title:"Edit in Shot List"},
               _sbEl(Icon.film,{s:10}),"Edit")),
@@ -523,13 +563,23 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
   const propById = React.useMemo(()=>{ const m={}; (props||[]).forEach(p=>m[p.id]=p); return m; },[props]);
   const ctxFor = (scene)=>({ scene, location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null, charById, propById, project });
 
-  // scene -> its pages (chunks of 9)
+  // board mode: SCENE sheets (chunks of 9) or CLIP boards (one sheet per clip
+  // sequence — the Shot List's shared partition, one generated video clip each)
+  const [boardMode, setBoardMode] = React.useState(()=>{ try{ return localStorage.getItem("turn_sb_mode")||"scene"; }catch(e){ return "scene"; } });
+  React.useEffect(()=>{ try{ localStorage.setItem("turn_sb_mode", boardMode); }catch(e){} },[boardMode]);
+  const clipMode = boardMode==="clips" && typeof sceneSequences==="function";
+
+  // scene -> its pages (scene mode: chunks of 9; clip mode: one page per sequence)
   const pagesByScene = React.useMemo(()=> ordered
     .filter(s=>(shotsByScene[s.id]||[]).length)
     .map(scene=>({
       scene,
-      pages: sbChunk(shotsByScene[scene.id]||[], SB_PAGE_SIZE).map((shots,index)=>({ id:"sbpage-"+scene.id+"-"+index, index, shots }))
-    })), [ordered, shotsByScene]);
+      pages: clipMode
+        ? sceneSequences(shotsByScene[scene.id]||[]).map(g=>({
+            id:"sbclip-"+scene.id+"-"+g.index, index:g.index, shots:g.shots, start:g.start, dur:g.dur, clip:true }))
+        : sbChunk(shotsByScene[scene.id]||[], SB_PAGE_SIZE).map((shots,index)=>({
+            id:"sbpage-"+scene.id+"-"+index, index, shots, start:index*SB_PAGE_SIZE }))
+    })), [ordered, shotsByScene, clipMode]);
   const allSheetIds = React.useMemo(()=> pagesByScene.flatMap(g=>g.pages.map(p=>"sbsheet-"+p.id)), [pagesByScene]);
 
   // load sheet image urls (for the X-of-Y progress) + adopt freshly generated ones
@@ -621,11 +671,16 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
         _sbEl("div",{style:{flex:1}},
           _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboard Director",
             _sbEl(window.InfoTip,{label:"About the Storyboard",
-              text:"Each scene becomes one storyboard SHEET — a header bar (project · scene · title · page) over a single composite image drawn by GPT Image 2 in one pass (the 'Cinematic Storyboard Grid'): a grid of the scene's panels rendered as one continuous take, with locked characters + location and a baked CAM / MOVE / MOOD·VOICE annotation strip under each panel. References (character sheets + location plate) ride along for consistency. Scenes with more than 12 shots paginate. 'Direct storyboard' hands the whole board to the Storyboard Director agent: it thinks through each scene's panels with the writing model, then renders every sheet with GPT Image 2 on its own."})),
+              text:"Each scene becomes one storyboard SHEET — a header bar (project · scene · title · page) over a single composite image drawn by GPT Image 2 in one pass (the 'Cinematic Storyboard Grid'): a grid of the scene's panels rendered as one continuous take, with locked characters + location and a baked CAM / MOVE / MOOD·VOICE annotation strip under each panel. References (character sheets + location plate) ride along for consistency. Scenes with more than 12 shots paginate. The Scenes/Clips toggle switches the board unit: CLIP boards make one sheet per clip sequence from the Shot List's Clips strip — the panels of one generated video clip (≤15s), the hand-off unit for the Stage. 'Direct storyboard' hands the whole board to the Storyboard Director agent: it thinks through each scene's panels with the writing model, then renders every sheet with GPT Image 2 on its own."})),
           _sbEl("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",marginTop:4}},
             readySheets+" of "+totalSheets+" sheet"+(totalSheets!==1?"s":"")+" generated")),
         _sbEl("div",{className:"art-intro-actions"},
-          onDirect && _sbEl("button",{className:"art-draftall",disabled:!!batchActiveId||!totalSheets,onClick:onDirect,
+          _sbEl("div",{className:"sb-mode",role:"group","aria-label":"Board by"},
+            _sbEl("button",{className:"sb-mode-btn"+(clipMode?"":" on"),onClick:()=>setBoardMode("scene"),
+              title:"One sheet per scene — 3×3 pages of up to 9 panels"},"Scenes"),
+            _sbEl("button",{className:"sb-mode-btn"+(clipMode?" on":""),onClick:()=>setBoardMode("clips"),
+              title:"One board per CLIP — the Shot List's clip sequences (one generated video clip each, ≤"+(window.CLIP_MAX_SECONDS||15)+"s), the hand-off unit for the Stage"},"Clips")),
+          onDirect && !clipMode && _sbEl("button",{className:"art-draftall",disabled:!!batchActiveId||!totalSheets,onClick:onDirect,
             title:"Storyboard Director — an agent thinks through each scene's panels with the writing model, then renders every sheet with GPT Image 2"},
             _sbEl(Icon.robot,{s:14}),"Direct storyboard"),
           _sbEl("button",{className:"art-draftall ghost",disabled:!!batchActiveId||!!composingAll||!totalSheets,onClick:composeAll,
@@ -636,7 +691,7 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
             _sbEl(Icon.sparkles,{s:14}), batchActiveId?"Generating…":"Generate all sheets"),
           _sbEl("button",{className:"art-draftall ghost",disabled:!readySheets,
             onClick:()=> exportStoryboard(pagesByScene, frames, project),
-            title:"Export the generated storyboard sheets as a printable document (open & Save as PDF)"},
+            title:"Preview the storyboard as a printable document (sheet images inlined for keeps), then print / save as PDF or download the HTML"},
             _sbEl(Icon.download,{s:14}),"Export storyboard"))) ),
     (typeof BatchBar!=="undefined") && BatchBar && _sbEl(BatchBar,{batch,noun:"sheet"}),
 
@@ -648,27 +703,63 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
           _sbEl("span",{className:"sb-scene-no"},String(scene.no).padStart(2,"0")),
           _sbEl("span",{className:"sb-scene-title"},scene.title||"Untitled scene"),
           ln && _sbEl("span",{className:"sb-scene-loc"},_sbEl(Icon.globe,{s:11}),ln),
-          _sbEl("span",{className:"sb-scene-count"}, pages.length>1 ? (pages.length+" pages") : (shotsByScene[scene.id].length+" shots"))),
+          _sbEl("span",{className:"sb-scene-count"},
+            clipMode ? (pages.length+" clip"+(pages.length!==1?"s":"")+" · "+shotsByScene[scene.id].length+" shots")
+            : pages.length>1 ? (pages.length+" pages") : (shotsByScene[scene.id].length+" shots"))),
         pages.map(page=> _sbEl(StoryboardPage,{key:page.id,project,scene,page,pageCount:pages.length,ctx,beatsMap,
           onView:setView,jumpToShot,batchActiveId,onBatchDone:batch.advance})));
     }));
 }
 window.StoryboardView = StoryboardView;
 
-/* ---- export: printable storyboard SHEETS (header + the composite sheet image), Save as PDF ---- */
-function exportStoryboard(pagesByScene, frames, project){
+/* ---- export: printable storyboard SHEETS (header + the composite sheet image), Save as PDF ----
+   DURABLE: every sheet image is inlined as a data URL before the document is written —
+   cloud sheets are served on SIGNED URLs that expire within the hour, so an export that
+   merely links them goes blank as soon as it's saved or printed later. */
+async function sbToDataUrl(url){
+  if(!url || /^data:/.test(url)) return url || "";
+  try{
+    const res = await fetch(url, { mode:"cors" }); if(!res.ok) return url;
+    const blob = await res.blob();
+    return await new Promise((resolve)=>{ const r = new FileReader();
+      r.onload = ()=>resolve(String(r.result||url)); r.onerror = ()=>resolve(url); r.readAsDataURL(blob); });
+  }catch(e){ return url; }
+}
+async function exportStoryboard(pagesByScene, frames, project){
   const esc = (s)=> String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   const title = (project && project.title) || "Storyboard";
+  const placeholder = '<!doctype html><html><head><meta charset="utf-8"><title>'+esc(title)
+    +' — Storyboard</title></head><body style="background:#000;color:#9a958b;font:13px -apple-system,Segoe UI,sans-serif;'
+    +'display:flex;align-items:center;justify-content:center;height:100vh;margin:0">Preparing a durable export — inlining sheet images…</body></html>';
+  // in-app PREVIEW (same overlay as the screenplay export): opens instantly on the
+  // placeholder, swaps in the finished document once the images are inlined —
+  // print/download from there, nothing prints uninvited.
+  const prev = (typeof window.docPreview==="function")
+    ? window.docPreview({ title:"Storyboard preview", sub:title,
+        fileName:(title||"storyboard").replace(/[^\w\-]+/g,"_").toUpperCase()+"_STORYBOARD.html", html:placeholder,
+        hint:"Sheet images are inlined as data URLs — the saved file stays viewable after image links expire." })
+    : null;
+  // fallback tab (overlay unavailable) — open NOW, inside the click: popup blockers
+  // kill a window opened after an await
+  const w = prev ? null : window.open("", "_blank");
+  if(w){ w.document.open(); w.document.write(placeholder); w.document.close(); }
+  // inline every sheet image (cache-keyed by page id; data URLs pass straight through)
+  const inline = {};
+  for(const g of pagesByScene){ for(const page of g.pages){
+    const k = "sbsheet-"+page.id;
+    if(frames[k]) inline[k] = await sbToDataUrl(frames[k]);
+  } }
   let body = "";
   pagesByScene.forEach(({scene,pages})=>{
     pages.forEach((page)=>{
-      const url = frames["sbsheet-"+page.id];
+      const url = inline["sbsheet-"+page.id];
       const img = url ? '<img src="'+esc(url)+'">' : '<div class="ph"></div>';
       body += '<section class="sheet"><div class="sheet-h">'
         + '<span><b>PROJECT:</b> '+esc(title)+'</span>'
         + '<span><b>SCENE:</b> '+esc(String(scene.no).padStart(2,"0"))+'</span>'
         + '<span><b>TITLE:</b> '+esc(scene.title||"")+'</span>'
-        + '<span><b>PAGE:</b> '+(page.index+1)+' of '+pages.length+'</span>'
+        + '<span><b>'+(page.clip?'CLIP':'PAGE')+':</b> '+(page.index+1)+' of '+pages.length
+        + (page.clip?(' &middot; &asymp;'+(page.dur||0)+'s'):'')+'</span>'
         + '</div><div class="sheet-img">'+img+'</div></section>';
     });
   });
@@ -684,9 +775,10 @@ function exportStoryboard(pagesByScene, frames, project){
     + '@media print{body{margin:10mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}'
     + '</style></head><body>'
     + (body||'<p>No sheets generated yet.</p>')
-    + '<script>setTimeout(function(){try{window.print();}catch(e){}},450);<\/script>'
     + '</body></html>';
-  const w = window.open("", "_blank");
-  if(w){ w.document.open(); w.document.write(html); w.document.close(); }
+  if(prev){ prev.setHtml(html); return; }
+  if(w){ w.document.open();
+    w.document.write(html.replace('</body>','<script>setTimeout(function(){try{window.print();}catch(e){}},450);<\/script></body>'));
+    w.document.close(); }
 }
 window.exportStoryboard = exportStoryboard;

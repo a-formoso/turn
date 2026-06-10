@@ -118,6 +118,14 @@ Deno.serve(async (req) => {
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: String(m.content || "") }],
       }));
+      // vision: data-URL images attach to the last user turn (powers the Scene Director's QC)
+      if (images.length && contents.length) {
+        const last = contents[contents.length - 1];
+        for (const src of images) {
+          const m2 = /^data:(.*?);base64,(.*)$/.exec(src || "");
+          if (m2) last.parts.push({ inlineData: { mimeType: m2[1] || "image/jpeg", data: m2[2] } });
+        }
+      }
       try {
         const r = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(gkey)}`,
@@ -126,7 +134,7 @@ Deno.serve(async (req) => {
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `Google error (${r.status}).`, status: r.status }, 200); }
         const data = await r.json();
         const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
-        return json({ text: parts.map((p: any) => p.text || "").join("") });
+        return json({ text: parts.map((p: any) => p.text || "").join(""), vision: images.length > 0 });
       } catch (e) { return json({ error: "Proxy failed to reach Google: " + (e?.message || e) }, 502); }
     }
     if (provider === "openai") {
@@ -136,11 +144,16 @@ Deno.serve(async (req) => {
         const r = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model, messages: messages.map((m: any) => ({ role: m.role || "user", content: String(m.content || "") })) }),
+          body: JSON.stringify({ model, messages: messages.map((m: any, i: number) => {
+            const text = String(m.content || "");
+            if (images.length && i === messages.length - 1)
+              return { role: m.role || "user", content: [{ type: "text", text }, ...images.map((u: string) => ({ type: "image_url", image_url: { url: u } }))] };
+            return { role: m.role || "user", content: text };
+          }) }),
         });
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `OpenAI error (${r.status}).`, status: r.status }, 200); }
         const data = await r.json();
-        return json({ text: (((data.choices || [])[0] || {}).message || {}).content || "" });
+        return json({ text: (((data.choices || [])[0] || {}).message || {}).content || "", vision: images.length > 0 });
       } catch (e) { return json({ error: "Proxy failed to reach OpenAI: " + (e?.message || e) }, 502); }
     }
     if (provider === "anthropic") {
@@ -151,6 +164,16 @@ Deno.serve(async (req) => {
       const turns = messages
         .filter((m: any) => m.role !== "system")
         .map((m: any) => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.content || "") }));
+      // vision: image blocks attach to the last turn (powers the Scene Director's QC)
+      if (images.length && turns.length) {
+        const last = turns[turns.length - 1];
+        const blocks: any[] = [{ type: "text", text: String(last.content || "") }];
+        for (const src of images) {
+          const m2 = /^data:(.*?);base64,(.*)$/.exec(src || "");
+          if (m2) blocks.push({ type: "image", source: { type: "base64", media_type: m2[1] || "image/jpeg", data: m2[2] } });
+        }
+        last.content = blocks;
+      }
       try {
         const r = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
@@ -159,7 +182,7 @@ Deno.serve(async (req) => {
         });
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `Anthropic error (${r.status}).`, status: r.status }, 200); }
         const data = await r.json();
-        return json({ text: (data.content || []).map((p: any) => p.text || "").join("") });
+        return json({ text: (data.content || []).map((p: any) => p.text || "").join(""), vision: images.length > 0 });
       } catch (e) { return json({ error: "Proxy failed to reach Anthropic: " + (e?.message || e) }, 502); }
     }
     return json({ error: `Text provider "${provider}" is not configured on this proxy.` }, 400);

@@ -70,6 +70,63 @@ function shotGrammarLabel(sh){
 }
 window.shotGrammarLabel = shotGrammarLabel;
 
+/* ---- CLIP SEQUENCES — the Stage hand-off unit ---------------------------------- */
+/* A SEQUENCE is a contiguous run of a scene's shots that becomes ONE generated
+   video clip (the Stage's video model renders up to ~15 seconds per clip). The
+   grouping lives on the shots themselves — an automatic duration estimate
+   (shotDur) and `seqBreak` (this shot STARTS a new clip) — so the Shot List,
+   the Storyboard's clip boards and the future Stage all read the SAME partition. */
+const CLIP_MAX_SECONDS = 15;   // one generated clip's budget (Seedance-class video models)
+window.CLIP_MAX_SECONDS = CLIP_MAX_SECONDS;
+
+/* AUTO duration estimate. A shot's real length can't be predicted — the video
+   model decides its own pacing; the only duration we control is the CLIP's total.
+   The one measurable anchor is dialogue: the spoken line fixes the shot's floor
+   (~2.4 words/sec + a breath). Everything else gets a flat working guess. These
+   are packing BUDGETS (how many beats can one 15s clip carry?), not promises. */
+function shotEstDur(sh){
+  const words = String((sh && sh.dialogue)||"").trim().split(/\s+/).filter(Boolean).length;
+  if(words) return Math.min(CLIP_MAX_SECONDS, Math.max(3, Math.round(words/2.4 + 1.5)));
+  return 5;
+}
+window.shotEstDur = shotEstDur;
+
+/* a shot's budgeted screen time: a hand-pinned value, else the auto estimate */
+function shotDur(sh){ const n = Number(sh && sh.dur); return (isFinite(n) && n>0) ? n : shotEstDur(sh); }
+window.shotDur = shotDur;
+function seqDuration(list){ return (list||[]).reduce((t,s)=>t+shotDur(s),0); }
+window.seqDuration = seqDuration;
+
+/* Partition a scene's ORDERED shots into clip sequences.
+   MANUAL: any shot (beyond the first) carrying an explicit boolean `seqBreak`
+   makes the scene hand-grouped — a new clip starts at every seqBreak:true.
+   AUTO (the default): greedy duration packing — a new clip starts whenever the
+   next shot would push the running clip past the budget.
+   Returns [{ index, start, shots, dur, over, manual }]. */
+function sceneSequences(sceneShots){
+  const list = sceneShots || [];
+  if(!list.length) return [];
+  const manual = list.some((s,i)=> i>0 && typeof s.seqBreak==="boolean");
+  const groups = [];
+  if(manual){
+    list.forEach((s,i)=>{ if(i===0 || s.seqBreak===true) groups.push([]); groups[groups.length-1].push(s); });
+  } else {
+    let cur=[], t=0;
+    list.forEach(s=>{ const d=shotDur(s);
+      if(cur.length && t+d>CLIP_MAX_SECONDS){ groups.push(cur); cur=[]; t=0; }
+      cur.push(s); t+=d; });
+    if(cur.length) groups.push(cur);
+  }
+  let start=0;
+  return groups.map((shots,index)=>{
+    const dur = seqDuration(shots);
+    const g = { index, start, shots, dur, over: dur>CLIP_MAX_SECONDS, manual };
+    start += shots.length;
+    return g;
+  });
+}
+window.sceneSequences = sceneSequences;
+
 /* ---- resolution helpers (scene ▸ location / subjects / props) ----------------- */
 function locationForScene(locations, sceneId){
   return (locations||[]).find(l=> Array.isArray(l.scenes) && l.scenes.indexOf(sceneId)>=0) || null;
@@ -176,7 +233,7 @@ function buildShotPrompt(sh, ctx){
   // 6) consistency contract for the reference images
   const refNouns = [];
   if(subjects.length) refNouns.push(subjects.length>1?"character sheets":"character sheet");
-  if(loc) refNouns.push("location plate");
+  if(loc) refNouns.push("location coverage sheet");
   if(props.length) refNouns.push(props.length>1?"prop sheets":"prop sheet");
   if(refNouns.length){
     s += "The reference image"+(refNouns.length>1?"s are":" is")+" the canonical "+refNouns.join(", ")
@@ -184,6 +241,13 @@ function buildShotPrompt(sh, ctx){
       + [subjects.length?"people":null, loc?"place":null, props.length?"objects":null].filter(Boolean).join(", ")
       + " to them EXACTLY for continuity (faces, wardrobe, geometry, materials); do not redesign them. "
       + "Compose them into this ONE frame as described. ";
+  }
+  // 6b) LOCATION LOCK — the location reference is a MULTI-VIEW sheet of ONE set, not six moods
+  if(loc){
+    s += "LOCATION LOCK: the location reference is a MULTI-VIEW coverage sheet — six photographs of ONE single real set "
+      + "seen from different angles, NOT six different places. Reproduce THAT EXACT set from this shot's viewpoint: "
+      + "identical architecture, wall and floor surfaces, tiling, colour, fixtures, and any SIGNAGE TEXT in the same "
+      + "spelling and same positions. Never invent a different-looking space. ";
   }
   s += "Photoreal, filmic, theatrical aspect; natural production lighting; no text, no watermark, no split panels — a single frame.";
   return s;
@@ -203,6 +267,79 @@ function combinedShotPrompt(sh, ctx){
   return buildShotPrompt(sh, ctx) + (neg ? (" NEGATIVE (exclude): "+neg) : "");
 }
 window.combinedShotPrompt = combinedShotPrompt;
+
+/* DERIVE-FROM-ANCHOR — the consistency fix. A fresh text-to-image sample
+   re-synthesizes the whole world every time (references bias, they don't
+   constrain), so independent shots drift in set/light/identity. This prompt
+   instead treats the scene's KEY FRAME as the BASE IMAGE and asks the model to
+   RE-FRAME the same moment — single-sample physics, per shot. The base carries
+   the set, light and grade implicitly; we only restate what changes. */
+function deriveShotPrompt(sh, ctx){
+  ctx = ctx || {};
+  const loc = ctx.location || null;
+  const charById = ctx.charById || {};
+  const subjects = (sh.subjects||[]).map(id=>charById[id]).filter(Boolean);
+  const size = sizeOf(sh.size), angle = angleOf(sh.angle), move = moveOf(sh.move), lens = lensOf(sh.lens);
+  let s = "The base image is THIS SAME SCENE — the scene's key frame: same set, same moment, same lighting, "
+    + "same colour grade, same people. RE-FRAME it to a different camera setup, as one continuous take would: ";
+  s += "SHOT: "+size.name+" ("+size.desc+"), "+angle.label.toLowerCase()+" ("+angle.desc+"), "
+     + "on a "+lens.label+" lens ("+lens.desc+")";
+  if(sh.move && sh.move!=="static") s += ", camera "+move.label.toLowerCase()+" ("+move.desc+")";
+  s += ". ";
+  if(subjects.length) s += "IN FRAME: "+subjects.map(c=>c.name).join(" and ")+". ";
+  if(sh.action) s += "ACTION: "+sh.action.replace(/\.$/,"")+". ";
+  if(sh.dialogue) s += "They are mid-line: “"+sh.dialogue.replace(/^["“]|["”]$/g,"")+"”. ";
+  if(sh.composition) s += "COMPOSITION: "+sh.composition.replace(/\.$/,"")+". ";
+  s += "EVERYTHING ELSE STAYS IDENTICAL TO THE BASE: the set's architecture, surfaces, signage and layout; "
+    + "the light sources and colour grade; every character's face, hair and wardrobe. ";
+  s += "If this new angle reveals space not visible in the base frame, extend the SAME set consistently"
+    + (loc ? " using the attached location coverage sheet (six views of this ONE set)" : "")+". ";
+  s += "Photoreal, filmic, a single 16:9 frame; no text, no watermark, no split panels.";
+  const neg = shotNegativePrompt(sh);
+  return s + (neg ? (" NEGATIVE (exclude): "+neg) : "");
+}
+window.deriveShotPrompt = deriveShotPrompt;
+
+/* HEADLESS shot-frame generation — the Scene Director's primitive (no mounted
+   card). Mirrors ShotCard's pipeline exactly: derive-from-anchor when the
+   scene's key frame exists (fresh sample otherwise), the same reference stack,
+   quality "medium", commit + nb-gen-done so any mounted card adopts the result.
+   opts: { fresh, correction } — correction is the QC repair instruction. */
+async function generateShotFrame(sh, sceneShots, ctx, opts){
+  opts = opts || {};
+  const anchorSh = (sceneShots||[]).find(s=>s.anchor) || (sceneShots||[])[0] || null;
+  const isAnchor = !!(anchorSh && anchorSh.id===sh.id);
+  const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
+    if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; };
+  const base = (!isAnchor && anchorSh && !opts.fresh) ? await grab(anchorSh.id) : "";
+  // reference stack (the anchor rides as a reference only when it isn't the base)
+  const refs = [];
+  if(!base && !isAnchor && anchorSh){ const u=await grab(anchorSh.id); if(u) refs.push({ url:u, note:"scene key frame" }); }
+  if(ctx.location){ const u=await grab(ctx.location.id); if(u) refs.push({ url:u, note:(ctx.location.name||"location")+" location coverage sheet (six views of ONE set)" }); }
+  for(const id of (sh.subjects||[])){ const c=(ctx.charById||{})[id]; if(!c) continue;
+    const u=await grab(id); if(u) refs.push({ url:u, note:c.name+" character sheet" }); }
+  let prompt = base ? deriveShotPrompt(sh, ctx) : combinedShotPrompt(sh, ctx);
+  if(refs.length) prompt += " Reference images provided, IN ORDER: "+refs.map(r=>r.note).join("; ")
+    +". Match the corresponding character(s), location and prop(s) to these reference designs EXACTLY (faces, wardrobe, geometry, materials).";
+  if(isAnchor) prompt += " THIS FRAME IS THE SCENE'S KEY FRAME — every other shot in the scene will be derived from it. "
+    +"Lock it to the location coverage sheet exactly (ONE real set, six views): its architecture, surfaces, signage and light define the scene's look.";
+  if(opts.correction) prompt += " CORRECTIONS (the previous attempt failed visual QC): "+opts.correction.replace(/\.$/,"")+".";
+  const gopts = { aspectRatio:"16:9", quality:"medium" };
+  if(base) gopts.referenceImage = base;
+  if(refs.length) gopts.extraImages = refs.map(r=>r.url);
+  const url = await nbGenerate(prompt, gopts);
+  const now = new Date();
+  const prior = (typeof nbGetMeta==="function") ? (nbGetMeta(sh.id)||{}) : {};
+  const meta = { ...prior, mode: base?"base":"final", prompt, director:true,
+    date:now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
+    time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}), iso:now.toISOString(),
+    version:((prior.version||0)+1), ...(opts.correction?{editInstruction:opts.correction}:{}) };
+  const r = (typeof nbCommit==="function") ? await nbCommit(sh.id, url, meta, [], "shot") : null;
+  const committed = (r && r.url) || url;
+  try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:sh.id, url:committed } })); }catch(e){}
+  return committed;
+}
+window.generateShotFrame = generateShotFrame;
 
 /* a shot is "drafted" / generatable once it has a size and at least an action or subject */
 function shotDrafted(sh){
@@ -317,6 +454,8 @@ function normalizeShot(raw, scene, idx, locations, props, characters, beats){
     props: resolveProps(raw.props),
     action: action,
     dialogue: (raw.dialogue||"").toString().slice(0,200),
+    // no dur: a drafted shot stays on AUTO — its length can't be predicted, only
+    // budgeted (dialogue-anchored estimate via shotDur); the user pins by hand
     negativePrompt:""
   };
 }

@@ -221,6 +221,7 @@ function App(){
   const [continuityMap, setContinuityMap] = React.useState(()=> (saved && saved.continuityMap) || {});
   const [agentsOpen, setAgentsOpen] = React.useState(false);
   const [directorOpen, setDirectorOpen] = React.useState(false);   // Storyboard Director (Art Room)
+  const [sceneDirLaunch, setSceneDirLaunch] = React.useState(null); // Scene Director: {sceneId}|{} (whole film)|null
   const [coloristOpen, setColoristOpen] = React.useState(false);   // Cinematographer / Colorist (Art Room)
   const [shotDesignerOpen, setShotDesignerOpen] = React.useState(false);   // Shot Designer (Art Room)
   const [castingOpen, setCastingOpen] = React.useState(false);   // Casting Director (Art Room)
@@ -299,15 +300,15 @@ function App(){
   const [projects, setProjects] = React.useState([]);
   const [currentProjectId, setCurrentProjectId] = React.useState(null);
   const cloudMode = !!(session && currentProjectId);
+  // ADMIN — demo upkeep account. The Matrix sample story (and "Reset to sample story")
+  // is admin-only: every other user (and signed-out local mode) never sees Matrix data.
+  const isAdmin = (((typeof cloudUserEmail==="function" && cloudUserEmail(session))||"").toLowerCase()==="admin@infinitestudioai.com");
   const hydratingRef = React.useRef(false);
   // bumped when a hydration pass finishes — lets effects that are gated on
   // hydratingRef (auto-seed) re-run once the doc has settled, even if the user
   // is already sitting on the tab (e.g. reloaded straight into Locations).
   const [hydrationTick, setHydrationTick] = React.useState(0);
 
-  const freshDoc = ()=>({ scenes:SCENES, characters:CHARACTERS, props:(window.PROPS_SEED||[]), locations:[], lookbook:[], lookbookNote:"", lookbookApplied:{}, shots:[],
-    project:PROJECT, drafts:SCREENPLAY, beatsMap:BEATS, history:{}, continuityMap:CONTINUITY||{},
-    selId:"s4", room:"writers", view:"spine", artView:"props", propsSeeded:false, locsSeeded:false, visualsSeeded:false });
   /* A clean canvas — what every NEW registered user (and every "New film") starts
      from. No sample data: empty spine, cast, props, etc. The Matrix sample lives only
      in the seed (story-data.jsx) and in projects already saved to a user's account. */
@@ -318,22 +319,23 @@ function App(){
   const applyDoc = (d)=>{
     d = d || {};
     hydratingRef.current = true;
-    // honor an explicitly-empty project (clean canvas); only fall back to the sample
-    // when the doc has no scenes array at all (missing/legacy doc).
-    setScenes(Array.isArray(d.scenes)?d.scenes:SCENES);
-    setCharacters(d.characters||CHARACTERS);
-    setProps(d.props||(window.PROPS_SEED||[]));
+    // honor an explicitly-empty project (clean canvas). A missing/legacy field only
+    // falls back to The Matrix sample for the ADMIN account (demo upkeep) — every
+    // other user gets an empty field instead: the sample is admin-only.
+    setScenes(Array.isArray(d.scenes)?d.scenes:(isAdmin?SCENES:[]));
+    setCharacters(d.characters||(isAdmin?CHARACTERS:[]));
+    setProps(d.props||(isAdmin?(window.PROPS_SEED||[]):[]));
     setLocations(d.locations||[]);
     setLookbook(d.lookbook||[]);
     setLookbookNote(d.lookbookNote||"");
     setLookbookApplied(d.lookbookApplied||{});
     setShots(d.shots||[]);
-    setProject(d.project||PROJECT);
-    setDrafts(d.drafts||SCREENPLAY);
-    setBeatsMap(d.beatsMap||BEATS);
+    setProject(d.project||(isAdmin?PROJECT:{ title:"Untitled film", genre:"", logline:"", controllingIdea:{} }));
+    setDrafts(d.drafts||(isAdmin?SCREENPLAY:{}));
+    setBeatsMap(d.beatsMap||(isAdmin?BEATS:{}));
     setHistory(d.history||{});
-    setContinuityMap(d.continuityMap||CONTINUITY||{});
-    setSelId(d.selId||"s4");
+    setContinuityMap(d.continuityMap||(isAdmin?(CONTINUITY||{}):{}));
+    setSelId(d.selId||(isAdmin?"s4":null));
     // Navigation (room / view / artView) is device-local UI state owned by NAV_KEY
     // and restored synchronously in useState above. Intentionally do NOT re-apply
     // any of it from the hydrated doc — that re-application is what produced the
@@ -425,6 +427,7 @@ function App(){
   },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, cloudMode, currentProjectId]);
 
   const resetStory = ()=>{
+    if(!isAdmin) return;   // the Matrix sample is admin-only — belt & braces behind the hidden menu item
     clearStory();
     setScenes(SCENES); setCharacters(CHARACTERS); setProps((window.PROPS_SEED||[])); setLocations([]); setShots([]); setProject(PROJECT); setDrafts(SCREENPLAY); setBeatsMap(BEATS);
     setHistory({}); setContinuityMap(CONTINUITY||{}); setSelId("s4"); setSelChar(null); setPropsSeeded(false); setLocsSeeded(false); setVisualsSeeded(false);
@@ -1152,6 +1155,33 @@ function App(){
   // ctx.model / sync(): image commits live in the asset store, not the scene/beats undo
   // snapshot (reversal is per-sheet via the Storyboard card menu). Mirrors StoryboardView's
   // page derivation so the slot ids ("sbsheet-"+pageId) match the live tab. ----
+  // Scene Director — the visual ctx (docs/Scene Director Agent Plan.md §8): the
+  // scene groups with their shots + resolution ctx, frame reads, the headless
+  // generation primitive, and the vision QC. Scoped to one scene when launched
+  // from a scene group's "Direct scene", or the whole film from the header.
+  const sceneDirectorCtxFactory = ({ emit, propose, cancelled })=>{
+    const ordered = scenes.slice().sort((a,b)=>(a.no||0)-(b.no||0));
+    const charById = {}; characters.forEach(c=>{ charById[c.id]=c; });
+    const propById = {}; props.forEach(p=>{ propById[p.id]=p; });
+    const byScene = {}; (shots||[]).forEach(s=>{ (byScene[s.sceneId]=byScene[s.sceneId]||[]).push(s); });
+    Object.values(byScene).forEach(a=>a.sort((x,y)=>(x.order||0)-(y.order||0) || (x.beatN||0)-(y.beatN||0)));
+    const target = (sceneDirLaunch && sceneDirLaunch.sceneId)
+      ? ordered.filter(s=>s.id===sceneDirLaunch.sceneId) : ordered;
+    const groups = target.filter(s=>(byScene[s.id]||[]).length).map(scene=>({
+      scene, shots:byScene[scene.id],
+      ctx:{ scene, location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null,
+        charById, propById, project } }));
+    return { emit, propose, cancelled, sync:()=>{},
+      ai:{ available: typeof aiAvailable==="function" && aiAvailable() },
+      art:{
+        scenes: groups,
+        frameOf: async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
+          if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; },
+        shotFrame: (sh, sceneShots, sctx, o)=> window.generateShotFrame(sh, sceneShots, sctx, o),
+        qc: (sh, frameUrl, anchorUrl)=> window.aiQcShotFrame(sh, frameUrl, anchorUrl),
+      } };
+  };
+
   const artAgentCtxFactory = ({ input, emit, propose, cancelled, agentName, force })=>{
     const ordered = scenes.slice().sort((a,b)=>(a.no||0)-(b.no||0));
     const charById = {}; characters.forEach(c=>{ charById[c.id]=c; });
@@ -1593,7 +1623,10 @@ function App(){
       opacity:.025,mixBlendMode:"overlay",
       backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")"}}),
 
-    React.createElement(TopBar,{view,setView,room,setRoom,artView,setArtView,project,scenes,drafts,onReset:resetStory,
+    // "Reset to sample story" is an ADMIN-ONLY tool (demo upkeep): only the admin
+    // account ever sees it — every other user (and signed-out local mode) gets no reset.
+    React.createElement(TopBar,{view,setView,room,setRoom,artView,setArtView,project,scenes,drafts,
+      onReset: isAdmin ? resetStory : null,
       onToggleAI:toggleAI,
       onNewStory:()=>setNewStoryOpen(true),
       theme,onTheme:setTheme,
@@ -1623,6 +1656,7 @@ function App(){
           ? React.createElement("div",{className:"canvas"}, emptyCanvas())
           : React.createElement(ArtRoom,{key:(cloudMode?currentProjectId:"local"),artView,setArtView,project,characters,scenes,props,
             onDirectStoryboard:()=>setDirectorOpen(true),
+            onDirectScene:(sceneId)=>setSceneDirLaunch({ sceneId: sceneId||null }),
             onColorist:()=>setColoristOpen(true),
             onShoot:()=>setShotDesignerOpen(true),
             onCast:()=>setCastingOpen(true),
@@ -1761,6 +1795,16 @@ function App(){
       ctxFactory:artAgentCtxFactory,
       onClose:()=>setDirectorOpen(false),
       onView:()=>{ setArtView("storyboard"); setDirectorOpen(false); },
+      issues:{}, undoCount:0,
+      aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
+
+    // Scene Director — gated per scene (plan card before each scene's spend); takes a
+    // shot list to a consistent frame set: anchor → derive → vision QC → bounded repair.
+    sceneDirLaunch && React.createElement(AgentsPanel,{
+      initialAgentId:"scenedirector", autoStart:true, single:true, viewLabel:"View Shot List",
+      ctxFactory:sceneDirectorCtxFactory,
+      onClose:()=>setSceneDirLaunch(null),
+      onView:()=>{ setArtView("shots"); setSceneDirLaunch(null); },
       issues:{}, undoCount:0,
       aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
 

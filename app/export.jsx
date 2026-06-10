@@ -185,36 +185,6 @@ function screenplayHTML(project, scenes, drafts){
     '</body></html>';
 }
 
-/* ---------- SHARE (text-only: WhatsApp / email carry text, not file attachments) ---------- */
-function buildShareText(project, scenes){
-  const ci = project.controllingIdea || {};
-  const L = [];
-  L.push("🎬 "+(project.title||"Untitled").toUpperCase()+(project.format?(" — "+project.format):""));
-  if(project.genre) L.push(project.genre);
-  L.push("");
-  if(project.premise) L.push("LOGLINE: "+project.premise);
-  if(ci.value) L.push("CONTROLLING IDEA: "+ci.value+" "+(ci.cause||""));
-  L.push("");
-  L.push("SPINE ("+scenes.length+" scenes):");
-  scenes.forEach(s=>{
-    const k = (window.KIND_LABEL && window.KIND_LABEL[s.kind]) ? (" ["+window.KIND_LABEL[s.kind]+"]") : "";
-    L.push(String(s.no).padStart(2,"0")+". "+s.title+k);
-  });
-  L.push("");
-  L.push("— Made with TURN · Infinite Studio AI");
-  return L.join("\n");
-}
-function shareWhatsApp(project, scenes){
-  const text = buildShareText(project, scenes);
-  window.open("https://wa.me/?text="+encodeURIComponent(text), "_blank");
-}
-function shareEmail(project, scenes){
-  const subject = (project.title||"Story")+" — story outline";
-  const body = buildShareText(project, scenes) +
-    "\n\n(For the full screenplay, attach the PDF you exported from TURN.)";
-  window.location.href = "mailto:?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(body);
-}
-
 /* ---------- helpers ---------- */
 function downloadText(filename, text, mime){
   const blob = new Blob([text], { type: (mime||"text/plain")+";charset=utf-8" });
@@ -290,6 +260,47 @@ function screenplayPreview(project, scenes, drafts){
   return true;
 }
 
+/* Generic in-app DOCUMENT PREVIEW — the same overlay as the screenplay preview
+   (sp-prev-* styles), for any export HTML: review it in a sandboxed iframe FIRST,
+   then 'Print / Save as PDF' or 'Download .html' — nothing prints uninvited.
+   Returns { setHtml, close } so an async export (e.g. the storyboard inlining its
+   images as data URLs) can open instantly with a placeholder and swap in the
+   finished document. Used by the Shot List and Storyboard exports. */
+function docPreview({ title, sub, fileName, html, hint }){
+  let cur = html || "";
+  const ce = (tag, cls, txt)=>{ const e=document.createElement(tag); if(cls) e.className=cls; if(txt!=null) e.textContent=txt; return e; };
+  const overlay = ce("div","sp-prev-overlay");
+  const panel = ce("div","sp-prev-panel");
+  const head = ce("div","sp-prev-head");
+  const titleWrap = ce("div","sp-prev-titlewrap");
+  titleWrap.appendChild(ce("div","sp-prev-t", title||"Preview"));
+  if(sub) titleWrap.appendChild(ce("div","sp-prev-sub", sub));
+  const closeBtn = ce("button","sp-prev-x"); closeBtn.setAttribute("title","Close"); closeBtn.setAttribute("aria-label","Close preview"); closeBtn.innerHTML="✕";
+  head.appendChild(titleWrap); head.appendChild(closeBtn);
+  const frame = document.createElement("iframe");
+  frame.className = "sp-prev-frame";
+  frame.setAttribute("title", title||"Preview");
+  frame.setAttribute("sandbox","allow-same-origin allow-scripts allow-modals");   // scripts: none in these docs; modals: the print dialog
+  frame.srcdoc = cur;
+  const foot = ce("div","sp-prev-foot");
+  foot.appendChild(ce("div","sp-prev-hint", hint||"Review it, then save as PDF (Print → Save as PDF)."));
+  const dlBtn = ce("button","sp-prev-btn ghost","Download .html");
+  const printBtn = ce("button","sp-prev-btn primary","Print / Save as PDF");
+  foot.appendChild(dlBtn); foot.appendChild(printBtn);
+  panel.appendChild(head); panel.appendChild(frame); panel.appendChild(foot);
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  const remove = ()=>{ try{ document.body.removeChild(overlay); }catch(e){} document.removeEventListener("keydown", onKey); };
+  const onKey = (e)=>{ if(e.key==="Escape") remove(); };
+  document.addEventListener("keydown", onKey);
+  closeBtn.onclick = remove;
+  overlay.addEventListener("mousedown",(e)=>{ if(e.target===overlay) remove(); });
+  dlBtn.onclick = ()=> downloadText(fileName||"export.html", cur, "text/html");
+  printBtn.onclick = ()=>{ try{ frame.contentWindow.focus(); frame.contentWindow.print(); }catch(e){} };
+  return { setHtml:(h)=>{ cur=h||""; frame.srcdoc=cur; }, close: remove };
+}
+window.docPreview = docPreview;
+
 const TURNExport = {
   pdf:   (p,s,d)=> screenplayPreview(p,s,d),
   pdfDirect: (p,s,d)=> exportScreenplayPDF(p,s,d),
@@ -297,7 +308,5 @@ const TURNExport = {
   fountain:(p,s,d)=> downloadText(safeName(p,"fountain"), buildFountain(p,s,d), "text/plain"),
   outline:(p,s,d)=> downloadText(safeName(p,"txt"), buildOutline(p,s), "text/plain"),
   csv:   (p,s,d)=> downloadText((p.title||"spine").replace(/[^\w\-]+/g,"_").toUpperCase()+"_spine.csv", buildCSV(s), "text/csv"),
-  whatsapp:(p,s,d)=> shareWhatsApp(p,s),
-  email:(p,s,d)=> shareEmail(p,s),
 };
 window.TURNExport = TURNExport;

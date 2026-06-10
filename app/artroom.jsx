@@ -234,7 +234,7 @@ function useImageGen(opts){
     if(isEditMode){ refImage = genUrl; mode = "edit"; }
     else if(useSimple){ mode = "simple"; }
     else if(slotHasRef && typeof nbGetSlotImage==="function"){ refImage = nbGetSlotImage(slotId); mode = "photo"; }
-    else if(opts.referenceFallback){ const b = opts.referenceFallback(); if(b){ refImage = b; mode = "base"; } }
+    else if(opts.referenceFallback){ const b = opts.referenceFallback(gopts); if(b){ refImage = b; mode = "base"; } }
     else if(cameoUrl){ refImage = cameoUrl; mode = "cameo"; }
 
     /* prompt: edit | simplified fallback | from-photo/cameo | from-base | master */
@@ -262,7 +262,7 @@ function useImageGen(opts){
     let attachList = [];
     if(opts.attachments && mode!=="simple"){
       let attach = [];
-      try{ attach = (await opts.attachments()) || []; }catch(e){ attach = []; }
+      try{ attach = (await opts.attachments(gopts, mode)) || []; }catch(e){ attach = []; }
       attach = attach.filter(a=>a && a.url);
       if(attach.length){
         attachList = attach;
@@ -453,9 +453,17 @@ window.useBatchGen = useBatchGen;
    is the singular card noun ("prop" / "character" / "location"). */
 function BatchBar({ batch, noun }){
   const { activeId, msg, prompt, run, cancel, setPrompt, setMsg } = batch;
+  // the bar lives at the TOP of the tab, but its triggers (e.g. a card's generate
+  // button) can sit far down the page — scroll the bar into view when it has a
+  // question or status, or the click looks like it did nothing.
+  const barRef = React.useRef(null);
+  React.useEffect(()=>{
+    if((prompt || msg) && barRef.current && barRef.current.scrollIntoView)
+      barRef.current.scrollIntoView({ block:"nearest", behavior:"smooth" });
+  },[!!prompt, msg]);
   if(!activeId && !prompt && !msg) return null;
   const N = noun || "card";
-  return React.createElement("div",{className:"art-batchbar"},
+  return React.createElement("div",{className:"art-batchbar",ref:barRef},
     prompt && React.createElement("div",{className:"batch-choice"},
       React.createElement("span",{className:"batch-choice-q"},
         prompt.missing.length>0
@@ -640,7 +648,7 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
 /* SheetFrame — the visual half of any reference-sheet card: generated image (with
    options menu + inline AI edit), or the reference-photo drop slot, then the
    Generate button, error recovery, and the metadata caption. Driven by useImageGen. */
-function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate, extraMeta }){
+function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate, extraMeta, menuExtra }){
   const { genUrl, genMeta, genTier, gening, genErr, retrying, slotHasRef,
     editMode, setEditMode, editText, setEditText, generate, clearGen, relatedClearCount, revertPrevious, layers, allModels } = gen;
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -700,6 +708,11 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
           genUrl && React.createElement("button",{className:"sheet-tools-item",disabled:gening,
             onClick:()=>{ generate(); setMenuOpen(false); }},
             React.createElement(Icon.sparkles,{s:13}),"Regenerate"),
+          // caller-specific menu items (e.g. Shots: "Generate fresh sample")
+          ...(menuExtra||[]).filter(Boolean).map((m,i)=>
+            React.createElement("button",{key:"mx"+i,className:"sheet-tools-item",disabled:gening||m.disabled,title:m.title,
+              onClick:()=>{ setMenuOpen(false); m.onClick&&m.onClick(); }},
+              React.createElement(m.icon||Icon.sparkles,{s:13}), m.label)),
           genUrl && React.createElement("div",{className:"sheet-tools-divider"}),
           genUrl && React.createElement("button",{className:"sheet-tools-item danger",onClick:async ()=>{
               setMenuOpen(false);
@@ -1703,7 +1716,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
   locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId,
-  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard, onColorist, onShoot, onCast, onPropsMaster,
+  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard, onDirectScene, onColorist, onShoot, onCast, onPropsMaster,
   lookbook, lookbookNote, onUpdateLookbook, onAddLookbook, onDeleteLookbook, onSetLookbookNote, onResearch, onClearLookbook,
   staleTabs, onApplyLookbook }){
   const _stale = staleTabs || {};
@@ -1756,7 +1769,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
           lookbookStale:!!_stale.stylebible,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("colorist")})
       : artView==="shots" && window.ShotList
       ? React.createElement(window.ShotList,{project,scenes,characters,props,locations,shots,beatsMap,
-          onUpdateShot,onAddShot,onDeleteShot,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots,onShoot})
+          onUpdateShot,onAddShot,onDeleteShot,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots,onShoot,onDirectScene})
       : artView==="storyboard" && window.StoryboardView
       ? React.createElement(window.StoryboardView,{project,scenes,shots,characters,props,locations,beatsMap,setArtView,onDirect:onDirectStoryboard})
       : React.createElement(ArtComingSoon,{tab:artView}));

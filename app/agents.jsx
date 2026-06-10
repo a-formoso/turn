@@ -942,6 +942,105 @@ async function agentDepartmentCoordinator(ctx){
   ctx.emit({k:"done", t:"Pre-production complete — props, cast, locations, colour, shots and the storyboard are all built in order. Review or tweak anything in its tab."});
 }
 
+/* =========================================================
+   AGENT — SCENE DIRECTOR  (Art Room ▸ Shot List, gated)
+   Per docs/Scene Director Agent Plan.md: takes a scene from shot list to a
+   CONSISTENT set of frames — locks the key frame (anchor), derives every
+   other shot from it, visually QCs each result against the anchor, and
+   repairs the drifted ones with bounded corrective regenerations. A plan
+   gate (propose) sits BEFORE every scene's spend. Reads ctx.art:
+   { scenes:[{scene,shots,ctx}], frameOf(id), shotFrame(sh,shots,ctx,opts),
+     qc(sh,frameUrl,anchorUrl) }.
+   ========================================================= */
+async function agentSceneDirector(ctx){
+  const art = ctx.art;
+  const MAX_GENS = 24, MAX_REPAIRS = 2;
+  if(!art || !art.scenes || !art.scenes.length){
+    ctx.emit({k:"flag", t:"No shots to direct yet — break your scenes into shots in the Shot List first."});
+    ctx.emit({k:"done", t:"Nothing to direct."}); return;
+  }
+  let gens = 0, qcDown = false;
+  ctx.emit({k:"plan", t:"Directing "+art.scenes.length+" scene"+(art.scenes.length>1?"s":"")
+    +" — per scene: lock the KEY FRAME, derive every other shot from it, visually inspect each result against the anchor, repair drift (max "+MAX_REPAIRS+" per shot). Capped at "+MAX_GENS+" generations this run."});
+  for(const grp of art.scenes){
+    if(ctx.cancelled()) return;
+    const { scene, shots } = grp, sctx = grp.ctx;
+    const no = (i)=> scene.no+"."+(i+1);
+    const anchorSh = shots.find(s=>s.anchor) || shots[0];
+    const others = shots.filter(s=>s!==anchorSh);
+    const haveAnchor = !!(await art.frameOf(anchorSh.id));
+    const missing = [];
+    for(const s of others){ if(!(await art.frameOf(s.id))) missing.push(s); }
+    const planned = (haveAnchor?0:1) + missing.length;
+    // PLAN GATE — generation costs money; ask before spending on this scene
+    const ok = await ctx.propose({
+      title:"Direct Scene "+scene.no+" — "+(scene.title||"Untitled"),
+      reason:(haveAnchor ? "The key frame exists" : "The key frame is missing — it generates first")
+        +" · "+missing.length+" frame"+(missing.length!==1?"s":"")+" to generate · then visual QC of every shot with up to "+MAX_REPAIRS+" repairs per drifted frame.",
+      rationale:"Roughly "+Math.max(planned,1)+"–"+(planned+Math.min(others.length,4))+" image generations. Every frame is version-committed — each change is revertible on its card.",
+      before: shots.length+" shots · "+(shots.length-missing.length-(haveAnchor?0:1))+" frame"+((shots.length-missing.length)!==1?"s":"")+" already exist",
+      after:  "All "+shots.length+" frames generated, inspected against the key frame, drifted ones repaired",
+    });
+    if(ctx.cancelled()) return;
+    if(!ok){ ctx.emit({k:"flag", t:"Skipped Scene "+scene.no+"."}); continue; }
+    // 1) ANCHOR — the scene's look-master
+    if(!haveAnchor){
+      if(gens>=MAX_GENS){ ctx.emit({k:"flag", t:"Generation cap reached — stopping."}); break; }
+      ctx.emit({k:"act", t:"Scene "+scene.no+": generating the KEY FRAME — shot "+no(shots.indexOf(anchorSh))+", locked hard to the location coverage sheet…"});
+      try{ await art.shotFrame(anchorSh, shots, sctx, {}); gens++; ctx.emit({k:"ok", t:"Key frame locked."}); }
+      catch(e){ ctx.emit({k:"flag", t:"Key frame failed: "+((e&&e.message)||e)+". Skipping this scene."}); continue; }
+    }
+    const anchorUrl = await art.frameOf(anchorSh.id);
+    // 2) SEQUENCE — derive the missing shots from the key frame
+    for(const s of missing){
+      if(ctx.cancelled()) return;
+      if(gens>=MAX_GENS){ ctx.emit({k:"flag", t:"Generation cap reached — stopping."}); break; }
+      ctx.emit({k:"act", t:"Deriving "+no(shots.indexOf(s))+" from the key frame ("+(typeof shotGrammarLabel==="function"?shotGrammarLabel(s):"")+")…"});
+      try{ await art.shotFrame(s, shots, sctx, {}); gens++; }
+      catch(e){ ctx.emit({k:"flag", t:no(shots.indexOf(s))+" failed: "+((e&&e.message)||e)+". Moving on."}); }
+    }
+    // 3) QC — look at every non-anchor frame against the key frame
+    const flagged = []; let repaired = 0;
+    if(!qcDown && art.qc){
+      for(const s of others){
+        if(ctx.cancelled()) return;
+        const u = await art.frameOf(s.id); if(!u) continue;
+        ctx.emit({k:"act", t:"QC: inspecting "+no(shots.indexOf(s))+" against the key frame…"});
+        let v = null; try{ v = await art.qc(s, u, anchorUrl); }catch(e){}
+        if(v && v.unsupported){ qcDown = true;
+          ctx.emit({k:"flag", t:"Visual QC unavailable — the image-proxy needs a redeploy to accept image inputs on its text task (supabase functions deploy image-proxy). Frames are generated; QC and repair skipped."});
+          break; }
+        if(!v){ ctx.emit({k:"flag", t:"No QC verdict for "+no(shots.indexOf(s))+" — leaving the frame as is."}); continue; }
+        if(v.overall==="fail"){ flagged.push({ s, v });
+          ctx.emit({k:"observe", t:"Drift in "+no(shots.indexOf(s))+": "+(v.issues||[]).slice(0,2).map(i=>i.dim+" — "+i.reason).join("; ")}); }
+        else ctx.emit({k:"ok", t:no(shots.indexOf(s))+" consistent"+(v.overall==="minor"?" (minor notes)":"")+"."});
+      }
+    }
+    // 4) REPAIR — bounded corrective regenerations
+    for(const f of flagged){
+      let fixed = false;
+      for(let r=0; r<MAX_REPAIRS && !fixed; r++){
+        if(ctx.cancelled()) return;
+        if(gens>=MAX_GENS){ ctx.emit({k:"flag", t:"Generation cap reached — stopping repairs."}); break; }
+        ctx.emit({k:"act", t:"Repairing "+no(shots.indexOf(f.s))+" — "+(f.v.fix||"re-deriving tight to the key frame")+"…"});
+        try{ await art.shotFrame(f.s, shots, sctx, { correction:f.v.fix||"match the key frame's set, lighting and characters exactly" }); gens++; }
+        catch(e){ ctx.emit({k:"flag", t:"Repair failed: "+((e&&e.message)||e)}); break; }
+        const u2 = await art.frameOf(f.s.id);
+        let v2 = null; try{ v2 = await art.qc(f.s, u2, anchorUrl); }catch(e){}
+        if(!v2 || v2.unsupported || v2.overall!=="fail"){ fixed = true; repaired++; ctx.emit({k:"ok", t:no(shots.indexOf(f.s))+" repaired."}); }
+        else f.v = v2;
+      }
+      if(!fixed) ctx.emit({k:"flag", t:no(shots.indexOf(f.s))+" still drifts after "+MAX_REPAIRS+" repairs — needs your eye (its card has Edit frame / Generate fresh sample, and every version is revertible)."});
+    }
+    ctx.emit({k:"ok", t:"Scene "+scene.no+" directed — "+shots.length+" frames"
+      +(repaired?(", "+repaired+" repaired"):"")
+      +((flagged.length-repaired)>0?(", "+(flagged.length-repaired)+" still flagged"):"")+"."});
+  }
+  ctx.emit({k:"done", t:"Direction complete — "+gens+" generation"+(gens!==1?"s":"")+" spent"
+    +(qcDown?" (visual QC was unavailable — redeploy the image-proxy to enable it)":"")
+    +". Review flagged frames in the Shot List; every change is revertible per card."});
+}
+
 const AGENTS = [
   { id:"doctor", name:"Story Doctor", icon:"stethoscope", kind:"fix",
     blurb:"Scans the spine for the weakest link \u2014 scenes that don't turn, soft peaks, flat runs \u2014 and proposes a fix for each, re-auditing until the spine holds.",
@@ -977,6 +1076,9 @@ const AGENTS = [
   { id:"locscout", name:"Location Scout", icon:"globe", kind:"build", room:"art", autonomous:true,
     blurb:"Scouts your film's locations on its own \u2014 pulls every place from the sluglines, drafts each one's staging + depth-grid spec, generates the plate, and adds the time-of-day variants the script calls for. Also flags any scene whose slugline location has no card yet. Runs autonomously; press Stop anytime.",
     run:agentLocationScout },
+  { id:"scenedirector", name:"Scene Director", icon:"clapper", kind:"build", room:"art",
+    blurb:"Takes a scene from shot list to a CONSISTENT set of frames: locks the key frame, derives every other shot from it, visually inspects each result against the anchor, and repairs the drifted ones — asking before it spends on each scene.",
+    run:agentSceneDirector },
   { id:"coordinator", name:"Art Department Coordinator", icon:"robot", kind:"build", room:"art", autonomous:true,
     blurb:"Runs your whole pre-production in the right order, on its own \u2014 props, then the cast that references them, then locations, then the colour system, then shot coverage, then the storyboard. One click = 'do my pre-production', end to end with no stops: the colour and shot-coverage steps are applied automatically rather than waiting for approval. Press Stop anytime.",
     run:agentDepartmentCoordinator },
