@@ -102,8 +102,10 @@ window.seqDuration = seqDuration;
    makes the scene hand-grouped — a new clip starts at every seqBreak:true.
    AUTO (the default): greedy duration packing — a new clip starts whenever the
    next shot would push the running clip past the budget.
+   `clipMax` (optional) is the format's per-clip budget — clipMaxFor(project).
    Returns [{ index, start, shots, dur, over, manual }]. */
-function sceneSequences(sceneShots){
+function sceneSequences(sceneShots, clipMax){
+  const MAX = clipMax || CLIP_MAX_SECONDS;
   const list = sceneShots || [];
   if(!list.length) return [];
   const manual = list.some((s,i)=> i>0 && typeof s.seqBreak==="boolean");
@@ -113,14 +115,14 @@ function sceneSequences(sceneShots){
   } else {
     let cur=[], t=0;
     list.forEach(s=>{ const d=shotDur(s);
-      if(cur.length && t+d>CLIP_MAX_SECONDS){ groups.push(cur); cur=[]; t=0; }
+      if(cur.length && t+d>MAX){ groups.push(cur); cur=[]; t=0; }
       cur.push(s); t+=d; });
     if(cur.length) groups.push(cur);
   }
   let start=0;
   return groups.map((shots,index)=>{
     const dur = seqDuration(shots);
-    const g = { index, start, shots, dur, over: dur>CLIP_MAX_SECONDS, manual };
+    const g = { index, start, shots, dur, over: dur>MAX, manual };
     start += shots.length;
     return g;
   });
@@ -249,7 +251,8 @@ function buildShotPrompt(sh, ctx){
       + "identical architecture, wall and floor surfaces, tiling, colour, fixtures, and any SIGNAGE TEXT in the same "
       + "spelling and same positions. Never invent a different-looking space. ";
   }
-  s += "Photoreal, filmic, theatrical aspect; natural production lighting; no text, no watermark, no split panels — a single frame.";
+  const _asp = (typeof aspectFor==="function") ? aspectFor(ctx.project) : "16:9";
+  s += "Photoreal, filmic, a single "+(_asp==="9:16"?"VERTICAL 9:16 (phone) frame":_asp+" frame")+"; natural production lighting; no text, no watermark, no split panels — a single frame.";
   return s;
 }
 window.buildShotPrompt = buildShotPrompt;
@@ -294,7 +297,8 @@ function deriveShotPrompt(sh, ctx){
     + "the light sources and colour grade; every character's face, hair and wardrobe. ";
   s += "If this new angle reveals space not visible in the base frame, extend the SAME set consistently"
     + (loc ? " using the attached location coverage sheet (six views of this ONE set)" : "")+". ";
-  s += "Photoreal, filmic, a single 16:9 frame; no text, no watermark, no split panels.";
+  const _asp = (typeof aspectFor==="function") ? aspectFor(ctx.project) : "16:9";
+  s += "Photoreal, filmic, a single "+(_asp==="9:16"?"VERTICAL 9:16 (phone) frame":_asp+" frame")+"; no text, no watermark, no split panels.";
   const neg = shotNegativePrompt(sh);
   return s + (neg ? (" NEGATIVE (exclude): "+neg) : "");
 }
@@ -324,7 +328,7 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   if(isAnchor) prompt += " THIS FRAME IS THE SCENE'S KEY FRAME — every other shot in the scene will be derived from it. "
     +"Lock it to the location coverage sheet exactly (ONE real set, six views): its architecture, surfaces, signage and light define the scene's look.";
   if(opts.correction) prompt += " CORRECTIONS (the previous attempt failed visual QC): "+opts.correction.replace(/\.$/,"")+".";
-  const gopts = { aspectRatio:"16:9", quality:"medium" };
+  const gopts = { aspectRatio:(typeof aspectFor==="function") ? aspectFor(ctx.project) : "16:9", quality:"medium" };
   if(base) gopts.referenceImage = base;
   if(refs.length) gopts.extraImages = refs.map(r=>r.url);
   const url = await nbGenerate(prompt, gopts);

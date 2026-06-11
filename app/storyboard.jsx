@@ -96,6 +96,9 @@ function sbStrip(sh, scene, row, full){
    the location plate ride along as identity anchors. */
 function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap, opts){
   opts = opts || {};
+  // the format's native frame (16:9, or 9:16 for vertical micro-drama)
+  const asp = (typeof aspectFor==="function") ? aspectFor(ctx && ctx.project) : "16:9";
+  const vertical = asp==="9:16";
   const loc = ctx && ctx.location;
   const bm = sbBeatMeta(beatsMap, scene.id);
   const N = (shots||[]).length;
@@ -140,13 +143,16 @@ function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap, opts){
   if(opts.clip) s += "THIS SHEET BOARDS ONE SINGLE VIDEO CLIP of about "+(opts.clip.dur||window.CLIP_MAX_SECONDS||15)
     + " seconds — the "+N+" panels are its keyframes IN ORDER: stage the action and camera so motion flows seamlessly "
     + "from each panel into the next, one unbroken take with no time jumps. ";
-  s += "STYLE: cinematic"+(genre?(", "+genre+" tone"):"")+", live-action, photorealistic, lifelike, subtle 35mm film grain. "+(grade||"")+"16:9 page layout. ";
+  s += "STYLE: cinematic"+(genre?(", "+genre+" tone"):"")+", live-action, photorealistic, lifelike, subtle 35mm film grain. "+(grade||"")+(vertical?"9:16 vertical page layout. ":"16:9 page layout. ");
   s += "ATMOSPHERE / LIGHT: "+light+"; "+mood+". ";
   // Lookbook references routed to the storyboard (composition + atmosphere), set on ctx by the director surface
   const _lb = (ctx && (ctx._lookbookBrief||"")).trim();
   if(_lb) s += "VISUAL REFERENCES — translate their look (framing, composition, atmosphere), NOT their content: "+_lb.replace(/\s+/g," ")+". ";
-  s += "LAYOUT: a strict "+rows+"×"+cols+" grid; every panel's IMAGE is a WIDESCREEN 16:9 cinematic frame — "
-    + "clearly WIDER than it is tall, like a film still — NEVER square, portrait or 4:3; all panels exactly the "
+  s += "LAYOUT: a strict "+rows+"×"+cols+" grid; every panel's IMAGE is "
+    + (vertical
+      ? "a VERTICAL 9:16 phone frame — clearly TALLER than it is wide — NEVER square, landscape or 4:3; "
+      : "a WIDESCREEN 16:9 cinematic frame — clearly WIDER than it is tall, like a film still — NEVER square, portrait or 4:3; ")
+    + "all panels exactly the "
     + "same size, aligned to the grid; thin clean separators between panels; NO text or panel numbers INSIDE the panels. "
     + "UNDER EACH panel a thin off-white annotation strip carrying FOUR short lines of production notes in a clean, "
     + "high-contrast sans-serif font (must stay legible at the rendered grid size), formatted as screenplay slug lines: "
@@ -169,7 +175,7 @@ function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap, opts){
   s += "\nNARRATIVE — "+(scene.title||("Scene "+scene.no))+" (each panel: a cinematic frame above its annotation strip):\n";
   s += panels.join("\n")+"\n";
   s += "EXCLUDE: no comic-book line art, no speech bubbles, no captions inside the frames, no watermark, "
-    + "no duplicate or inconsistent characters, no blank panels. Photoreal frames, sharp focus, legible annotation strips, 16:9.";
+    + "no duplicate or inconsistent characters, no blank panels. Photoreal frames, sharp focus, legible annotation strips, "+asp+".";
   return s;
 }
 window.buildStoryboardPagePrompt = buildStoryboardPagePrompt;
@@ -227,10 +233,14 @@ async function composeStoryboardSheet(scene, page, ctx, beatsMap){
     urls.push(u || "");
   }
   if(!urls.some(Boolean)) return null;
-  // layout — 3 columns of TRUE 16:9 panels, an annotation strip under each:
-  // CAMERA + MOTION one line each, ACTION + PERFORMANCE up to TWO wrapped lines
-  // (fixed slots — 6 rows — so every panel's strip is the same height)
-  const PAD=8, GAP=8, CELL_W=632, IMG_H=Math.round(CELL_W*9/16), STRIP_H=148, CELL_H=IMG_H+STRIP_H;
+  // layout — 3 columns of panels in the FORMAT's native frame (16:9, or vertical
+  // 9:16 for micro-drama), an annotation strip under each: CAMERA + MOTION one
+  // line each, ACTION + PERFORMANCE up to TWO wrapped lines (fixed slots — 6
+  // rows — so every panel's strip is the same height)
+  const _asp = (typeof aspectFor==="function") ? aspectFor(ctx && ctx.project) : "16:9";
+  const _ap = _asp.split(":").map(Number);
+  const _vert = _ap[1] > _ap[0];
+  const PAD=8, GAP=8, CELL_W=_vert?400:632, IMG_H=Math.round(CELL_W*_ap[1]/_ap[0]), STRIP_H=148, CELL_H=IMG_H+STRIP_H;
   const cols = Math.min(3, N), rows = Math.ceil(N/cols);
   const W = PAD*2 + cols*CELL_W + (cols-1)*GAP;
   const H = PAD*2 + rows*CELL_H + (rows-1)*GAP;
@@ -312,8 +322,11 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
   // quality:"medium" is the timeout fix — a whole-grid composite at the default "high"
   // routinely exceeds the ~150s proxy timeout. (imageSize is ignored by the proxy for
   // OpenAI; size is fixed by aspect, so quality is the real lever.) A board isn't final art.
-  const doGen  = ()=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:"16:9", quality:"medium" });
-  const doEdit = (t)=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:"16:9", quality:"medium", editInstruction:t });
+  // the sheet's aspect follows the format's panel frame (a near-square grid of
+  // 9:16 panels reads as a 9:16 sheet; of 16:9 panels as a 16:9 sheet)
+  const sheetAsp = (typeof aspectFor==="function") ? aspectFor(ctx && ctx.project) : "16:9";
+  const doGen  = ()=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:sheetAsp, quality:"medium" });
+  const doEdit = (t)=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:sheetAsp, quality:"medium", editInstruction:t });
 
   // ---- compose-from-frames: how many of this page's shots already have frames ----
   const shotIds = (page.shots||[]).map(s=>s.id);
@@ -365,7 +378,7 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
           +"(unless the instruction changes them) the same shot size, lens and staging. Do not re-imagine the frame.";
         // quality:"medium" is the GPT Image 2 timeout lever (a frame edit at the default
         // "high" routinely exceeds the ~150s proxy timeout); other models ignore it.
-        const url = await nbGenerate(prompt, { referenceImage:frame, aspectRatio:"16:9", quality:"medium" });
+        const url = await nbGenerate(prompt, { referenceImage:frame, aspectRatio:sheetAsp, quality:"medium" });
         const prior = (typeof nbGetMeta==="function") ? (nbGetMeta(sh.id)||{}) : {};
         const now = new Date();
         const meta = { ...prior, mode:"edit", editInstruction:text, prompt,
@@ -501,16 +514,17 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
 /* one scene PAGE = a storyboard SHEET: a header bar + the composite single-sheet image
    (the whole page drawn in one pass), plus a beat-briefs expander. */
 function StoryboardPage({ project, scene, page, pageCount, ctx, beatsMap, onView, jumpToShot, batchActiveId, onBatchDone }){
+  const clipMax = (typeof clipMaxFor==="function") ? clipMaxFor(project) : 15;
   return _sbEl("div",{className:"sb-sheet","data-sbpage":page.id},
     _sbEl("div",{className:"sb-sheet-head"},
       _sbEl("span",{className:"sb-sheet-hi"}, _sbEl("b",null,"PROJECT: "), (project&&project.title)||"Untitled film"),
       _sbEl("span",{className:"sb-sheet-hi"}, _sbEl("b",null,"SCENE: "), String(scene.no).padStart(2,"0")),
       _sbEl("span",{className:"sb-sheet-hi"}, _sbEl("b",null,"TITLE: "), scene.title||"Untitled scene"),
       page.clip
-        ? _sbEl("span",{className:"sb-sheet-hi page"+((page.dur||0)>(window.CLIP_MAX_SECONDS||15)?" clip-over":""),
-            title:(page.dur||0)>(window.CLIP_MAX_SECONDS||15)
-              ? "≈"+page.dur+"s — over the "+(window.CLIP_MAX_SECONDS||15)+"s clip budget; split it in the Shot List's Clips strip"
-              : "One generated video clip — ≈"+page.dur+"s of the "+(window.CLIP_MAX_SECONDS||15)+"s budget"},
+        ? _sbEl("span",{className:"sb-sheet-hi page"+((page.dur||0)>clipMax?" clip-over":""),
+            title:(page.dur||0)>clipMax
+              ? "≈"+page.dur+"s — over the "+clipMax+"s clip budget; split it in the Shot List's Clips strip"
+              : "One generated video clip — ≈"+page.dur+"s of the "+clipMax+"s budget"},
             _sbEl("b",null,"CLIP: "), (page.index+1)+" of "+pageCount+" · ≈"+(page.dur||0)+"s")
         : _sbEl("span",{className:"sb-sheet-hi page"}, _sbEl("b",null,"PAGE: "), (page.index+1)+" of "+pageCount)),
     _sbEl(StoryboardComposite,{ scene, page, ctx, beatsMap, onView, batchActiveId, onBatchDone }),
@@ -575,7 +589,7 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
     .map(scene=>({
       scene,
       pages: clipMode
-        ? sceneSequences(shotsByScene[scene.id]||[]).map(g=>({
+        ? sceneSequences(shotsByScene[scene.id]||[], (typeof clipMaxFor==="function")?clipMaxFor(project):15).map(g=>({
             id:"sbclip-"+scene.id+"-"+g.index, index:g.index, shots:g.shots, start:g.start, dur:g.dur, clip:true }))
         : sbChunk(shotsByScene[scene.id]||[], SB_PAGE_SIZE).map((shots,index)=>({
             id:"sbpage-"+scene.id+"-"+index, index, shots, start:index*SB_PAGE_SIZE }))

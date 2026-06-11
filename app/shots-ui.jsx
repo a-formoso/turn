@@ -34,9 +34,10 @@ function FrameToggles({ label, items, selected, onToggle, emptyHint }){
    between two shots to split/merge; hand edits make the scene manual, "Auto-pack"
    returns it to duration packing. The partition itself lives in sceneSequences()
    (shots.jsx) so the Storyboard's clip boards and the Stage read the same groups. */
-function ClipBar({ shots, onUpdate }){
+function ClipBar({ shots, onUpdate, clipMax }){
   if(typeof sceneSequences!=="function" || (shots||[]).length<2) return null;
-  const seqs = sceneSequences(shots);
+  const MAX = clipMax || window.CLIP_MAX_SECONDS || 15;
+  const seqs = sceneSequences(shots, MAX);
   const manual = !!(seqs.length && seqs[0].manual);
   // toggle a clip boundary BEFORE shot index i — materializes explicit flags scene-wide
   const toggleAt = (i)=>{
@@ -47,16 +48,16 @@ function ClipBar({ shots, onUpdate }){
   const autoPack = ()=> shots.forEach(s=> onUpdate(s.id, { seqBreak:null }));
   return _el("div",{className:"clip-bar"},
     _el("span",{className:"clip-bar-lab",
-      title:"Each CLIP is one generated video clip on the Stage — at most "+(window.CLIP_MAX_SECONDS||15)+" seconds. Durations are working estimates (dialogue shots from their line's length, else ≈5s); click a joint between shots to split or merge clips."},
+      title:"Each CLIP is one generated video clip on the Stage — at most "+MAX+" seconds. Durations are working estimates (dialogue shots from their line's length, else ≈5s); click a joint between shots to split or merge clips."},
       _el(Icon.clapper,{s:11}),"Clips",
-      _el("span",{className:"clip-bar-sub"},"≤"+(window.CLIP_MAX_SECONDS||15)+"s each · "+seqs.length+" clip"+(seqs.length!==1?"s":"")+(manual?" · hand-grouped":""))),
+      _el("span",{className:"clip-bar-sub"},"≤"+MAX+"s each · "+seqs.length+" clip"+(seqs.length!==1?"s":"")+(manual?" · hand-grouped":""))),
     _el("div",{className:"clip-bar-strip"},
       seqs.map((g,gi)=> _el(React.Fragment,{key:gi},
         gi>0 && _el("button",{className:"clip-joint break",onClick:()=>toggleAt(g.start),
           title:"Merge clip "+gi+" and clip "+(gi+1)+" into one clip"},"‖"),
         _el("div",{className:"clip-seg"+(g.over?" over":"")},
           _el("span",{className:"clip-seg-lab",
-            title:g.over?("≈"+g.dur+"s — over the "+(window.CLIP_MAX_SECONDS||15)+"s clip budget; split it or shorten its shots"):("≈"+g.dur+"s of "+(window.CLIP_MAX_SECONDS||15)+"s")},
+            title:g.over?("≈"+g.dur+"s — over the "+MAX+"s clip budget; split it or shorten its shots"):("≈"+g.dur+"s of "+MAX+"s")},
             "CLIP "+(g.index+1)+" · ≈"+g.dur+"s"),
           g.shots.map((s,j)=> _el(React.Fragment,{key:s.id},
             j>0 && _el("button",{className:"clip-joint",onClick:()=>toggleAt(g.start+j),
@@ -243,8 +244,10 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
   // the scene's visual anchor: the shot flagged .anchor, else the first shot in order
   const anchorShot = shots.find(s=>s.anchor) || shots[0] || null;
   const setAnchor = (target)=> shots.forEach(s=> onUpdate(s.id, { anchor: s.id===target.id }));
-  // the scene's clip sequences (shared partition — Storyboard clip boards + the Stage)
-  const seqs = (typeof sceneSequences==="function") ? sceneSequences(shots) : [];
+  // the scene's clip sequences (shared partition — Storyboard clip boards + the Stage);
+  // the per-clip budget comes from the project FORMAT (clipMaxFor)
+  const clipMax = (typeof clipMaxFor==="function") ? clipMaxFor(ctx.project) : 15;
+  const seqs = (typeof sceneSequences==="function") ? sceneSequences(shots, clipMax) : [];
   const clipOf = {}; seqs.forEach(g=> g.shots.forEach(s=>{ clipOf[s.id] = g.index+1; }));
   return _el("div",{className:"shot-scene-group"+(open?"":" collapsed")},
     _el("div",{className:"shot-scene-head"},
@@ -279,7 +282,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
             confLab && _el("span",{className:"ssx-conf-lab"},confLab),
             _el("div",{className:"ssx-pips"},
               [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")}))))))),
-    open && _el(ClipBar,{shots,onUpdate}),
+    open && _el(ClipBar,{shots,onUpdate,clipMax}),
     open && _el("div",{className:"sheet-grid"},
       shots.map(sh=>_el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,anchorShot,onSetAnchor:setAnchor,onUpdate,onDelete,onView,
         batchActiveId,onBatchDone,onGenerateShot,clipNo:clipOf[sh.id]}))));

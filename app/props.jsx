@@ -472,9 +472,11 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
     React.createElement("div",{className:"art-intro"},
       React.createElement("div",{className:"art-intro-row"},
         React.createElement("div",{style:{flex:1}},
-          React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Props Master",
+          React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},
+            ((typeof roomCopy==="function" && roomCopy(project,"props").title) || "Props Master"),
             React.createElement(window.InfoTip,{label:"About Props",
-              text:"Continuity objects \u2014 the things characters wear and carry, plus the set dressing the camera sees. Each gets its own multi-view reference sheet so the object stays identical in every shot. 'Design all props' builds every prop from the story in one pass \u2014 pulls missing items from the cast, drafts each spec, and maps every prop to its scenes; 'Generate all props' then renders the sheets."}))),
+              text:((typeof roomCopy==="function" && roomCopy(project,"props").tip) ||
+                "Continuity objects \u2014 the things characters wear and carry, plus the set dressing the camera sees. Each gets its own multi-view reference sheet so the object stays identical in every shot. 'Design all props' builds every prop from the story in one pass \u2014 pulls missing items from the cast, drafts each spec, and maps every prop to its scenes; 'Generate all props' then renders the sheets.")}))),
         React.createElement("div",{className:"art-intro-actions"},
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add prop"),

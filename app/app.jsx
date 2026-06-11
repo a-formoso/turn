@@ -305,6 +305,9 @@ function App(){
   const isAdmin = (((typeof cloudUserEmail==="function" && cloudUserEmail(session))||"").toLowerCase()==="admin@infinitestudioai.com");
   // expose for leaf components that have no session prop (e.g. the Art Room key bar)
   React.useEffect(()=>{ window.turnIsAdmin = isAdmin; },[isAdmin]);
+  // expose the current project for format-aware helpers with no project param
+  // (e.g. the scene drafter reads formatOf(window.turnProject).screenplayBrief)
+  React.useEffect(()=>{ window.turnProject = project; },[project]);
   const hydratingRef = React.useRef(false);
   // bumped when a hydration pass finishes — lets effects that are gated on
   // hydratingRef (auto-seed) re-run once the doc has settled, even if the user
@@ -1670,6 +1673,7 @@ function App(){
 
     // the room's view tabs, moved out of the top bar to a full-width bar beneath it
     React.createElement(ViewNav,{room,view,setView,artView,setArtView,staleTabs,
+      hiddenTabs:(typeof tabHidden==="function") ? Object.fromEntries((window.ART_TABS||[]).map(t=>[t.id, tabHidden(project, t.id)])) : null,
       railOpen,inspOpen,onToggleRail:toggleRail,onToggleInsp:toggleInsp,
       onCoordinate:async ()=>{ if(await requireStory("Art Department Coordinator")) setCoordOpen(true); },
       onAgents:async ()=>{ if(await requireStory("Story Editors")) setAgentsOpen(true); }}),
