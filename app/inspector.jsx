@@ -1,7 +1,12 @@
 /* inspector.jsx — right panel: EDITABLE scene detail, charge editor, turn verdict, beats, analysis */
 
-const KIND_OPTS = [["normal","Scene"],["incite","Inciting Incident"],["act-climax","Act Climax"],
+const KIND_OPTS_3ACT = [["normal","Scene"],["incite","Inciting Incident"],["act-climax","Act Climax"],
   ["midpoint","Mid-Act Climax"],["crisis","Crisis"],["story-climax","Story Climax"],["resolution","Resolution"]];
+/* the kind dropdown lists the FRAMEWORK's milestones (frameworks.jsx kindOpts);
+   a scene whose stored kind isn't in the list keeps it via an extra option. */
+function kindOptsNow(){
+  return (typeof fwKindOpts==="function" && fwKindOpts()) || KIND_OPTS_3ACT;
+}
 
 /* inline editable text — local state so the cursor never jumps */
 function EditText({ value, onCommit, className, placeholder, multiline, autoFocus }){
@@ -240,7 +245,9 @@ const ANALYSIS = (scene, beats) => [
       : "Not yet broken into beats." },
   { lab:"Closing Value", txt: React.createElement(React.Fragment,null,
       React.createElement("em",null,`${scene.closeValue} (${chargeStr(scene.closeCharge)})`),
-      turnInfo(scene).turned ? " \u2014 the value has reversed. The scene turns." : " \u2014 unchanged. Flat exposition.") },
+      turnInfo(scene).turned
+        ? ((typeof fwAuditOf==="function" && fwAuditOf().analysisTurned)||" \u2014 the value has reversed. The scene turns.")
+        : ((typeof fwAuditOf==="function" && fwAuditOf().analysisFlat)||" \u2014 unchanged. Flat exposition.")) },
   { lab:"Turning Point", txt: scene.turningPoint || "Locate the beat where the gap opens." },
 ];
 
@@ -283,7 +290,9 @@ function Inspector({ scene, beats, onCharge, onUpdate, characters, scenes, onAdd
           React.createElement("span",{className:"insp-scene-no"},String(scene.no).padStart(2,"0")),
           React.createElement("select",{className:"insp-select",value:scene.kind,
             onChange:e=>onUpdate(scene.id,{kind:e.target.value})},
-            KIND_OPTS.map(([v,l])=>React.createElement("option",{key:v,value:v},l)))),
+            (()=>{ const opts=kindOptsNow();
+              const extra = opts.some(([v])=>v===scene.kind) ? [] : [[scene.kind, (typeof fwKindLabel==="function"&&fwKindLabel(scene.kind))||scene.kind]];
+              return opts.concat(extra).map(([v,l])=>React.createElement("option",{key:v,value:v},l)); })())),
         React.createElement(EditText,{value:scene.title,className:"insp-title",onCommit:v=>onUpdate(scene.id,{title:v})}),
         React.createElement(EditText,{value:scene.loc,className:"loc",onCommit:v=>onUpdate(scene.id,{loc:v})}),
         React.createElement("div",{style:{height:8}}),

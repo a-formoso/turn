@@ -11,11 +11,14 @@
    render byte-identical before and after this registry existed. */
 
 const FRAMEWORKS = [
-  { id:"threeact", label:"Three-Act Turns", icon:"graph",
+  { id:"threeact", label:"Three-Act Turns", badge:"Three-Act", icon:"graph",
     blurb:"Conflict-driven. Every scene turns a value.",
     acts:{ 1:"Setup", 2:"Complication", 3:"Resolution" },
     kinds:{ incite:"Inciting Incident", "act-climax":"Act Climax", midpoint:"Mid-Act Climax",
             crisis:"Crisis", "story-climax":"Story Climax", resolution:"Resolution" },
+    // the Inspector's kind dropdown — TODAY'S list, frozen
+    kindOpts:[["normal","Scene"],["incite","Inciting Incident"],["act-climax","Act Climax"],
+      ["midpoint","Mid-Act Climax"],["crisis","Crisis"],["story-climax","Story Climax"],["resolution","Resolution"]],
     audit:{
       // EXACTLY the former turnInfo: turned = sign flip or |Δ| ≥ 2; resolution exempt
       rule:(sc)=>{
@@ -25,12 +28,15 @@ const FRAMEWORKS = [
         return { turned, flagged: !turned && !exempt, exempt };
       },
       okTitle:"This scene turns", flagTitle:"This scene doesn't turn",
+      okBadge:"Turns", flagBadge:"No turn",
       subline:"If a scene doesn't turn, cut it", flagIcon:"scissors",
-      flagDetail:"If a scene doesn't turn a value, it's exposition — recharge it or cut it." },
+      flagDetail:"If a scene doesn't turn a value, it's exposition — recharge it or cut it.",
+      analysisTurned:" — the value has reversed. The scene turns.",
+      analysisFlat:" — unchanged. Flat exposition." },
     doctorCriteria:"flag scenes that open and close on the same charge; strengthen weak act climaxes",
     beatVocab:{ turnLabel:"the turn" } },
 
-  { id:"kishotenketsu", label:"Kishōtenketsu", icon:"layers",
+  { id:"kishotenketsu", label:"Kishōtenketsu", badge:"Kishōtenketsu", icon:"layers",
     blurb:"Four movements. The twist recontextualizes — no clash required.",
     acts:{ 1:"Ki — Introduction", 2:"Shō — Development", 3:"Ten — Twist", 4:"Ketsu — Reconciliation" },
     kinds:{ plant:"Planting", deepen:"Deepening", ten:"The Twist",
@@ -38,6 +44,8 @@ const FRAMEWORKS = [
             // legacy three-act kinds still label sensibly if they appear
             incite:"Planting", "act-climax":"Deepening", midpoint:"Deepening",
             crisis:"The Twist", "story-climax":"Recontextualization", resolution:"Reconciliation" },
+    kindOpts:[["normal","Scene"],["plant","Planting"],["deepen","Deepening"],["ten","The Twist"],
+      ["re-read","Recontextualization"],["ketsu","Reconciliation"]],
     audit:{
       /* Deterministic layer only (the semantic "does the ten re-read everything?"
          question belongs to the Story Doctor — Plan Phase 3). Band-aware:
@@ -54,11 +62,22 @@ const FRAMEWORKS = [
         return { turned:!inert, flagged:inert, exempt:false };
       },
       okTitle:"This scene carries its movement", flagTitle:"This scene is inert",
+      okBadge:"Moves", flagBadge:"Inert",
       subline:"Ki plants · Shō deepens · Ten re-reads everything · Ketsu reconciles",
       flagIcon:"alert",
-      flagDetail:"A ki/shō scene must plant or deepen something; the ten must break the pattern. Give it movement — or fold it into its neighbour." },
+      flagDetail:"A ki/shō scene must plant or deepen something; the ten must break the pattern. Give it movement — or fold it into its neighbour.",
+      analysisTurned:" — the movement lands. The scene carries its weight in the pattern.",
+      analysisFlat:" — inert. It neither plants, deepens, nor shifts — fold it into a neighbour or give it something to plant." },
     doctorCriteria:"the ten must make the reader re-read every scene before it — audit it as a question, not arithmetic; flag shō scenes that repeat instead of deepen; the ketsu must reconcile, not defeat",
-    beatVocab:{ turnLabel:"the re-read" } },
+    beatVocab:{ turnLabel:"the re-read" },
+    /* spine-builder grammar (Phase 2): two batched calls — ki+shō, then ten+ketsu.
+       The ten is a RECONTEXTUALIZATION; the prompts forbid conflict-escalation. */
+    spine:{
+      intro:(total)=>"You are a story architect designing the "+total+"-scene spine of a KISHŌTENKETSU story with the Infinite Studio method — four movements: KI (introduction), SHŌ (development), TEN (twist/recontextualization), KETSU (reconciliation). Conflict is OPTIONAL; the engine is curiosity and the re-read, never a battle. ",
+      firstRange:(firstN,total)=>"scenes 1–"+firstN+": the KI (plant the world, people and charged images — establish without forcing conflict) and the SHŌ (develop and deepen what was planted; let it breathe and accumulate meaning)",
+      secondRange:(firstN,total)=>"scenes "+(firstN+1)+"–"+total+": the TEN (the twist — ONE recontextualizing revelation or perspective shift that makes the audience RE-READ everything before it; NOT a fight, NOT an escalation) and the KETSU (the reconciliation — settle the new understanding; calm and resonance, not victory)",
+      actSpec:"a=act 1-4 (1=ki, 2=shō, 3=ten, 4=ketsu)" },
+    authorBrief:"FRAMEWORK: Kishōtenketsu — beats PRESENT and DEEPEN rather than clash; a scene's movement is a shift in understanding or pattern, not a conflict won or lost; the value charges trace mood and meaning, not victory." },
 ];
 window.FRAMEWORKS = FRAMEWORKS;
 
@@ -76,4 +95,7 @@ window.frameworkOf = frameworkOf;
 function fwAuditOf(){ return frameworkOf(window.turnProject).audit; }
 function fwActName(act){ return frameworkOf(window.turnProject).acts[act] || ("Act "+act); }
 function fwKindLabel(kind){ return frameworkOf(window.turnProject).kinds[kind]; }
+function fwKindOpts(){ return frameworkOf(window.turnProject).kindOpts; }
+function fwActNos(){ return Object.keys(frameworkOf(window.turnProject).acts).map(Number); }
 window.fwAuditOf = fwAuditOf; window.fwActName = fwActName; window.fwKindLabel = fwKindLabel;
+window.fwKindOpts = fwKindOpts; window.fwActNos = fwActNos;

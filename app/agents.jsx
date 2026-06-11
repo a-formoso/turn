@@ -15,13 +15,25 @@
 */
 
 /* ---- shared spine analysis (deterministic) ---- */
-/* derive the major plot-point kinds from position in the three-act structure,
-   so a generated spine gets the same labels (Inciting Incident, Act Climax,
-   Midpoint, Crisis, Story Climax, Resolution) the sample story has. */
+/* derive the major plot-point kinds from position in the FRAMEWORK's structure:
+   three-act gets the classic labels (Inciting Incident, Act Climax, Midpoint,
+   Crisis, Story Climax, Resolution); Kishōtenketsu gets its movements (Planting,
+   Deepening, The Twist, Recontextualization, Reconciliation). */
 function assignPlotPoints(scenes){
   scenes.forEach(s=>{ s.kind = "normal"; s.plot = ""; });
   const idxByAct = (act)=> scenes.map((s,i)=>s.act===act?i:-1).filter(i=>i>=0);
   const set = (i,k)=>{ if(i>=0 && i<scenes.length) scenes[i].kind = k; };
+  const fw = (typeof frameworkOf==="function") ? frameworkOf(window.turnProject) : null;
+  if(fw && fw.id==="kishotenketsu"){
+    const k1=idxByAct(1), k2=idxByAct(2), k3=idxByAct(3), k4=idxByAct(4);
+    if(k1.length) set(k1[0],"plant");
+    if(k2.length) set(k2[k2.length-1],"deepen");
+    if(k3.length){ set(k3[0],"ten"); k3.slice(1).forEach(i=>set(i,"re-read")); }
+    if(k4.length) set(k4[k4.length-1],"ketsu");
+    scenes.forEach(s=>{ if(s.kind!=="normal") return;
+      s.plot = s.act===1 ? "Planting" : s.act===2 ? "Deepening" : s.act===3 ? "Re-reading" : "Settling"; });
+    return scenes;
+  }
   const a1 = idxByAct(1), a2 = idxByAct(2), a3 = idxByAct(3);
   let inciteIdx=-1, midIdx=-1;
   // Act I: inciting incident (mid/late) + act climax (end)
@@ -76,16 +88,32 @@ function sd_turnInfo(s){
 function auditSpine(scenes){
   const issues = [];
   // 1) scenes that don't turn (highest priority)
+  const _kisho = (typeof frameworkOf==="function") && frameworkOf(window.turnProject).id==="kishotenketsu";
   scenes.forEach(s=>{ if(sd_turnInfo(s).flagged)
     issues.push({ kind:"noturn", sceneId:s.id, sceneNo:s.no, sev:2,
-      msg:'"'+s.title+'" opens and closes on the same charge ('+chargeStr(s.openCharge)+" \u2192 "+chargeStr(s.closeCharge)+") \u2014 it doesn't turn." }); });
-  // 2) flat climax/midpoint — a big-beat scene whose magnitude is weak
-  scenes.forEach(s=>{
-    const big = ["midpoint","story-climax","act-climax","crisis"].includes(s.kind);
-    if(big && Math.abs(s.closeCharge)<2 && !sd_turnInfo(s).flagged)
-      issues.push({ kind:"weakpeak", sceneId:s.id, sceneNo:s.no, sev:1,
-        msg:'"'+s.title+'" is a '+(KIND_LABEL[s.kind]||s.kind)+" but lands soft (close "+chargeStr(s.closeCharge)+"). A peak should hit \u00b13." });
-  });
+      msg: _kisho
+        ? '"'+s.title+'" sits flat ('+chargeStr(s.openCharge)+" \u2192 "+chargeStr(s.closeCharge)+") \u2014 it neither plants, deepens, nor shifts the pattern. It's inert."
+        : '"'+s.title+'" opens and closes on the same charge ('+chargeStr(s.openCharge)+" \u2192 "+chargeStr(s.closeCharge)+") \u2014 it doesn't turn." }); });
+  // 2) flat peaks — framework-specific. Three-act: a big-beat scene that lands
+  // soft. Kishōtenketsu: only the TEN must land hard — a soft ten can't re-read
+  // anything (ki/shō scenes are ALLOWED to be quiet).
+  if(_kisho){
+    scenes.forEach(s=>{
+      const isTen = s.kind==="ten" || (Number(s.act)===3 && ["crisis","story-climax"].includes(s.kind));
+      const delta = Math.abs(s.closeCharge - s.openCharge);
+      const flip = Math.sign(s.openCharge)!==Math.sign(s.closeCharge);
+      if(isTen && !flip && delta<2)
+        issues.push({ kind:"weakpeak", sceneId:s.id, sceneNo:s.no, sev:1,
+          msg:'"'+s.title+'" is the TEN but barely shifts ('+chargeStr(s.openCharge)+" \u2192 "+chargeStr(s.closeCharge)+"). The twist must break the pattern hard enough to make the audience re-read everything before it." });
+    });
+  } else {
+    scenes.forEach(s=>{
+      const big = ["midpoint","story-climax","act-climax","crisis"].includes(s.kind);
+      if(big && Math.abs(s.closeCharge)<2 && !sd_turnInfo(s).flagged)
+        issues.push({ kind:"weakpeak", sceneId:s.id, sceneNo:s.no, sev:1,
+          msg:'"'+s.title+'" is a '+(KIND_LABEL[s.kind]||s.kind)+" but lands soft (close "+chargeStr(s.closeCharge)+"). A peak should hit \u00b13." });
+    });
+  }
   // 3) monotony — 3+ consecutive scenes closing on the same sign with little movement
   for(let i=0;i<scenes.length-2;i++){
     const run = [scenes[i],scenes[i+1],scenes[i+2]];
@@ -132,7 +160,10 @@ function auditSpine(scenes){
 async function agentStoryDoctor(ctx){
   const MAX_FIXES = 5;
   const skip = new Set();
-  ctx.emit({k:"plan", t:"Scanning all "+ctx.model.scenes.length+" scenes for the weakest structural link \u2014 scenes that don't turn, soft peaks, flat runs, and one-sided stretches of the controlling idea's argument."});
+  const _fwDoc = (typeof frameworkOf==="function") ? frameworkOf(window.turnProject) : null;
+  ctx.emit({k:"plan", t:"Scanning all "+ctx.model.scenes.length+" scenes for the weakest structural link \u2014 "
+    +((_fwDoc && _fwDoc.id!=="threeact" && _fwDoc.doctorCriteria) ? _fwDoc.doctorCriteria
+      : "scenes that don't turn, soft peaks, flat runs, and one-sided stretches of the controlling idea's argument")+"."});
   let fixes = 0;
   for(let iter=0; iter<MAX_FIXES; iter++){
     if(ctx.cancelled()) return;
@@ -143,6 +174,13 @@ async function agentStoryDoctor(ctx){
     const idx = ctx.model.scenes.findIndex(s=>s.id===issue.sceneId);
     const scene = ctx.model.scenes[idx];
     const prev = idx>0 ? ctx.model.scenes[idx-1] : null;
+
+    // Kishōtenketsu: quiet ki/shō scenes are never forced to "turn" — the Doctor
+    // reports the inert scene and leaves the re-charge to the writer.
+    if(_fwDoc && _fwDoc.id==="kishotenketsu" && issue.kind==="noturn" && Number(scene.act)<3){
+      ctx.emit({k:"flag", t:"Scene "+scene.no+" is inert — but ki/shō scenes aren't forced to turn in kishōtenketsu. Give it something to plant or deepen; noting it for your pass, not re-charging it."});
+      skip.add(scene.id); continue;
+    }
 
     let fix = null;
     if(issue.kind==="noturn" || issue.kind==="weakpeak"){
@@ -190,6 +228,21 @@ async function agentStoryDoctor(ctx){
     } else {
       ctx.emit({k:"flag", t:"Skipped Scene "+scene.no+". Moving on."});
       skip.add(scene.id);
+    }
+  }
+  // Kishōtenketsu's real audit is semantic — put the re-read question to the model
+  // and report prose findings (docs/Frameworks Plan.md, Phase 3).
+  if(_fwDoc && _fwDoc.id==="kishotenketsu" && ctx.ai.available && typeof window.aiTenReRead==="function" && !ctx.cancelled()){
+    ctx.emit({k:"act", t:"Re-reading the story with the ten in mind — what recontextualizes, and what doesn't?"});
+    let rr=null; try{ rr = await window.aiTenReRead(ctx.model.scenes); }catch(e){}
+    if(ctx.cancelled()) return;
+    if(rr){
+      if(rr.verdict) ctx.emit({k:"observe", t:rr.verdict});
+      (rr.hits||[]).forEach(h=>ctx.emit({k:"ok", t:"Scene "+h.scene+" re-reads — "+h.how}));
+      (rr.misses||[]).forEach(m=>ctx.emit({k:"flag", t:"Scene "+m.scene+" doesn't re-read — "+m.why}));
+      if(!(rr.misses||[]).length) ctx.emit({k:"ok", t:"The ten earns its re-read — every scene before it means something new."});
+    } else {
+      ctx.emit({k:"flag", t:"Couldn't put the re-read question to the model — run the Doctor again when the engine is reachable."});
     }
   }
   ctx.emit({k:"done", t: fixes? ("Story Doctor applied "+fixes+" fix"+(fixes>1?"es":"")+". Open the Spine to see the reshaped charge graph.") : "No changes applied."});
@@ -608,6 +661,15 @@ async function agentColorist(ctx){
    anchor-first). Reads ctx.art.coverage — never touches ctx.model.
    ========================================================= */
 const _TIGHT_SIZES = new Set(["MCU","CU","ECU","INSERT"]);
+/* the framework's word for what coverage must land on ("the turn" / "the re-read");
+   null for three-act so the classic copy stays byte-identical */
+function fwTurnWord(){
+  try{
+    const fw = (typeof frameworkOf==="function") ? frameworkOf(window.turnProject) : null;
+    if(fw && fw.id!=="threeact" && fw.beatVocab && fw.beatVocab.turnLabel) return fw.beatVocab.turnLabel;
+  }catch(e){}
+  return null;
+}
 
 /* find weak / missing coverage, scene by scene (mirrors auditSpine) */
 function auditCoverage(scenes, shots, beatsMap){
@@ -619,7 +681,7 @@ function auditCoverage(scenes, shots, beatsMap){
     if(!ss.length){ issues.push({kind:"nocoverage",sceneId:s.id,sceneNo:s.no,sev:3,msg:t+" has no shots yet — it needs coverage."}); return; }
     if(beats.length && ss.length < beats.length){ issues.push({kind:"nocoverage",sceneId:s.id,sceneNo:s.no,sev:3,msg:t+" has "+ss.length+" shot"+(ss.length!==1?"s":"")+" for "+beats.length+" beats — coverage is thin."}); return; }
     const turnAt = bm.turnAt;
-    if(turnAt){ const ts=ss.find(x=>x.beatN===turnAt); if(ts && !_TIGHT_SIZES.has(ts.size)){ issues.push({kind:"weakturn",sceneId:s.id,sceneNo:s.no,sev:2,msg:t+" doesn't land its turn — the turning beat is a "+ts.size+", not a tight push-in (MCU/CU/ECU)."}); return; } }
+    if(turnAt){ const ts=ss.find(x=>x.beatN===turnAt); if(ts && !_TIGHT_SIZES.has(ts.size)){ issues.push({kind:"weakturn",sceneId:s.id,sceneNo:s.no,sev:2,msg:t+" doesn't land "+(fwTurnWord()||"its turn")+" — the turning beat is a "+ts.size+", not a tight push-in (MCU/CU/ECU)."}); return; } }
     if(ss.length>=3){ const sizes=new Set(ss.map(x=>x.size)); if(sizes.size===1){ issues.push({kind:"flatsizes",sceneId:s.id,sceneNo:s.no,sev:1,msg:t+" is all "+[...sizes][0]+" — no size progression from wide to tight."}); return; } }
     if(ss.length && !ss.some(x=>x.anchor)){ issues.push({kind:"noanchor",sceneId:s.id,sceneNo:s.no,sev:0,msg:t+" has no anchor frame set — the shots may drift apart."}); return; }
   });
@@ -634,12 +696,12 @@ async function agentShotDesigner(ctx){
     ctx.emit({k:"done", t:"Aborted."}); return;
   }
   const MAX=12, skip=new Set();
-  ctx.emit({k:"plan", t:"Auditing coverage scene by scene — does each scene establish wide, tighten through the middle, and LAND its turn on its most expressive size, with an anchor set?"});
+  ctx.emit({k:"plan", t:"Auditing coverage scene by scene — does each scene establish wide, tighten through the middle, and LAND "+(fwTurnWord()||"its turn")+" on its most expressive size, with an anchor set?"});
   let fixes=0;
   for(let iter=0;iter<MAX;iter++){
     if(ctx.cancelled()) return;
     const issues = cov.audit().filter(i=>!skip.has(i.sceneId));
-    if(!issues.length){ ctx.emit({k:"ok", t:"Re-audit complete — every scene establishes, tightens and lands its turn. Coverage holds."}); break; }
+    if(!issues.length){ ctx.emit({k:"ok", t:"Re-audit complete — every scene establishes, tightens and lands "+(fwTurnWord()||"its turn")+". Coverage holds."}); break; }
     const issue=issues[0]; const scene=cov.sceneById(issue.sceneId);
     ctx.emit({k:"observe", t:issues.length+" coverage issue"+(issues.length>1?"s":"")+" — weakest link: Scene "+issue.sceneNo+" — "+issue.msg});
     const turnAt = cov.turnAtOf(issue.sceneId);
@@ -650,7 +712,7 @@ async function agentShotDesigner(ctx){
         rationale:"Lock the scene to its establishing frame so every other shot matches its light, grade and world." };
     } else {
       if(!ctx.ai || !ctx.ai.available){ ctx.emit({k:"flag", t:"The model isn't available to design coverage — skipping Scene "+issue.sceneNo+"."}); skip.add(issue.sceneId); continue; }
-      ctx.emit({k:"act", t:"Designing coverage for Scene "+issue.sceneNo+" — establishing, tightening, landing the turn…"});
+      ctx.emit({k:"act", t:"Designing coverage for Scene "+issue.sceneNo+" — establishing, tightening, landing "+(fwTurnWord()||"the turn")+"…"});
       let made=null; try{ made = await cov.draftCoverage(scene); }catch(e){}
       if(ctx.cancelled()) return;
       if(!made || !made.length){ ctx.emit({k:"flag", t:"Couldn't design coverage for Scene "+issue.sceneNo+". Moving on."}); skip.add(issue.sceneId); continue; }
@@ -660,7 +722,7 @@ async function agentShotDesigner(ctx){
         if(ti>=0 && !_TIGHT_SIZES.has(made[ti].size)){ made[ti] = {...made[ti], size:"CU", move:(made[ti].move==="static"?"push":made[ti].move) }; } }
       const anchorId = cov.pickAnchor(made);
       fix = { kind:"coverage", shots:made, anchorId, list: cov.grammarList(made, anchorId, turnAt),
-        rationale:"Coverage that establishes wide, tightens through the middle, and lands the turn on its most expressive size." };
+        rationale:"Coverage that establishes wide, tightens through the middle, and lands "+(fwTurnWord()||"the turn")+" on its most expressive size." };
     }
     const curCount = cov.shotsOf(issue.sceneId).length;
     const ok = await ctx.propose({

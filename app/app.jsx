@@ -76,15 +76,21 @@ function TurnAudit({ scenes, selId, onSelect }){
               `${s.openValue} \u2192 ${s.closeValue}`),
             React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)"}},
               flagged
-                ? React.createElement("span",{className:"turn-badge no"},React.createElement(Icon.alert,{s:10}),"No turn")
-                : React.createElement("span",{className:"turn-badge ok"},React.createElement(Icon.check,{s:10}),"Turns")));
+                ? React.createElement("span",{className:"turn-badge no"},React.createElement(Icon.alert,{s:10}),
+                    (typeof fwAuditOf==="function" && fwAuditOf().flagBadge)||"No turn")
+                : React.createElement("span",{className:"turn-badge ok"},React.createElement(Icon.check,{s:10}),
+                    (typeof fwAuditOf==="function" && fwAuditOf().okBadge)||"Turns")));
         }))));
 }
 
 /* ---- alternate view: Board (acts as columns) ---- */
 function Board({ scenes, selId, onSelect }){
-  const acts=[1,2,3].map(a=>({act:a,scenes:scenes.filter(s=>s.act===a)}));
-  const titles={1:"Act I · Setup",2:"Act II · Complication",3:"Act III · Resolution"};
+  // act columns come from the FRAMEWORK (three-act → 3 columns, Kishōtenketsu → 4)
+  const fwB = (typeof frameworkOf==="function") ? frameworkOf(window.turnProject) : null;
+  const actNos = fwB ? Object.keys(fwB.acts).map(Number) : [1,2,3];
+  const acts=actNos.map(a=>({act:a,scenes:scenes.filter(s=>s.act===a)}));
+  const ROMAN=["I","II","III","IV"];
+  const titles={}; actNos.forEach(a=>{ titles[a]="Act "+(ROMAN[a-1]||a)+" · "+((fwB&&fwB.acts[a])||["Setup","Complication","Resolution"][a-1]||("Act "+a)); });
   // per-act fold state (persisted) — collapse an act column to a narrow strip to
   // focus on the act you're working in.
   const [collapsed,setCollapsed]=React.useState(()=>{ try{ return JSON.parse(localStorage.getItem("turn_board_collapsed")||"{}")||{}; }catch(e){ return {}; } });
@@ -93,7 +99,7 @@ function Board({ scenes, selId, onSelect }){
   return React.createElement(DragScroll,{className:"canvas-scroll board-pan",style:{padding:"18px 22px 40px"}},
     React.createElement("div",{style:{display:"flex",gap:14,minWidth:"max-content"}},
       acts.map(a=>{
-        const roman=["I","II","III"][a.act-1];
+        const roman=["I","II","III","IV"][a.act-1]||String(a.act);
         // collapsed → a slim, clickable vertical strip
         if(collapsed[a.act]) return React.createElement("div",{key:a.act,className:"board-act-strip",
           onClick:()=>toggle(a.act),title:`Expand ${titles[a.act]}`,
@@ -1243,7 +1249,7 @@ function App(){
         plantLine:(s,f,m)=>window.aiPlantLine(s,f,m),
         tableRead:(sc,dr)=>window.aiTableRead(sc,dr),
         voiceCheck:(sc,dr)=>window.aiVoiceCheck(sc,dr),
-        buildSpine:(b)=>window.aiBuildSpine(b, (project&&project.format)||"film"),
+        buildSpine:(b)=>window.aiBuildSpine(b, (project&&project.format)||"film", (project&&project.framework)||"threeact"),
         buildStoryWorld:(b,sp)=>window.aiBuildStoryWorld(b,sp),
         authorScene:(s,p)=>window.aiAuthorScene(s,p,model.characters),
         draftScene:(s,b,p)=>window.aiDraftScene(s,b,p),
@@ -1734,6 +1740,8 @@ function App(){
         onSignIn:()=>setAuthOpen(true), onSignOut:signOut }),
       projectSlot: cloudMode ? React.createElement(ProjectSwitcher,{ projects, currentId:currentProjectId,
         formatLabel:(typeof formatOf==="function") ? formatOf(project).label : null,
+        // framework badge only when it differs from the default — three-act is the baseline
+        frameworkLabel:(typeof frameworkOf==="function" && frameworkOf(project).id!=="threeact") ? frameworkOf(project).badge : null,
         onSwitch:switchProject, onCreate:createProject, onRename:renameProject, onDelete:deleteProject,
         onNewEpisode:createEpisode, onMakeShow:makeShow,
         canMakeShow: !currentShowId && scenes.length>0 }) : null,
@@ -1998,10 +2006,11 @@ function App(){
     newStoryOpen && React.createElement(NewStoryIntake,{
       onClose:()=>setNewStoryOpen(false),
       aiOn: (typeof aiAvailable==="function" && aiAvailable()),
-      onLaunch:(logline, synopsis, formatId)=>{ setNewStoryOpen(false);
-        // Step 0 (pipeline): the chosen FORMAT lands on the project; the spine
-        // builder and rooms read it via formatOf(project) (app/formats.jsx)
-        if(formatId) setProject(p=>({ ...p, format:formatId }));
+      onLaunch:(logline, synopsis, formatId, frameworkId)=>{ setNewStoryOpen(false);
+        // Step 0 (pipeline): the chosen FORMAT and FRAMEWORK land on the project;
+        // the spine builder, rooms and audit read them via formatOf/frameworkOf
+        if(formatId || frameworkId) setProject(p=>({ ...p,
+          ...(formatId?{format:formatId}:{}), ...(frameworkId?{framework:frameworkId}:{}) }));
         const brief = (typeof composeStoryBrief==="function") ? composeStoryBrief(logline, synopsis) : logline;
         setAgentLaunch({id:"adapt", input:brief}); setAgentsOpen(true); }}),
 

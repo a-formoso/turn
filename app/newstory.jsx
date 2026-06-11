@@ -16,6 +16,7 @@ const SEED_TYPES = [
 
 function NewStoryIntake({ onClose, onLaunch, aiOn }){
   const [format, setFormat] = React.useState("film");   // Step 0 — what are we making?
+  const [framework, setFramework] = React.useState("threeact");   // Step 0 — how is it told?
   const [seed, setSeed] = React.useState("logline");
   const [text, setText] = React.useState("");
   const [step, setStep] = React.useState("format");  // format | seed | loglines | synopsis
@@ -66,7 +67,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
     if(withSyn && syn){
       synOut = { ...syn, synopsis:{ setup:setup.trim(), confrontation:conf.trim(), resolution:reso.trim() } };
     }
-    onLaunch(l, synOut, format);
+    onLaunch(l, synOut, format, framework);
   };
 
   const pillar = (label, body)=> body ? React.createElement("div",{className:"syn-pillar"},
@@ -103,6 +104,14 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
                 React.createElement("button",{key:f.id,className:"ns-format "+(format===f.id?"on":""),
                   onClick:()=>setFormat(f.id)},
                   React.createElement(Icon[f.icon]||Icon.film,{s:16}),
+                  React.createElement("span",{className:"ns-format-name"},f.label),
+                  React.createElement("span",{className:"ns-format-blurb"},f.blurb)))),
+            React.createElement("div",{className:"ns-seclab",style:{marginTop:18}},"How should it be told?"),
+            React.createElement("div",{className:"ns-formats fw"},
+              (window.FRAMEWORKS||[]).map(f=>
+                React.createElement("button",{key:f.id,className:"ns-format "+(framework===f.id?"on":""),
+                  onClick:()=>setFramework(f.id)},
+                  React.createElement(Icon[f.icon]||Icon.graph,{s:16}),
                   React.createElement("span",{className:"ns-format-name"},f.label),
                   React.createElement("span",{className:"ns-format-blurb"},f.blurb)))),
             React.createElement("div",{className:"ns-foot"},

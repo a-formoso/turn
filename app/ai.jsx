@@ -264,7 +264,9 @@ async function aiAuthorScene(scene, prevScene, characters){
   const castList = cast.map(c=>c.id+" ("+c.name+")").join(", ");
   const castIds = cast.map(c=>c.id);
   const driverEnum = castIds.length ? castIds.join("|") : "lead";
+  const fwBrief = (typeof frameworkOf==="function") ? (frameworkOf(window.turnProject).authorBrief||"") : "";
   const prompt = storyContext(scene, prevScene) +
+    (fwBrief ? "\n\n"+fwBrief : "") +
     "\n\nCAST of this film (use ONLY these characters \u2014 never invent or borrow names from other films): "+ (castList||"(none defined)") +
     "\n\n" + ask +
     "\nReturn ONLY JSON (no markdown, no commentary): {"+
@@ -430,7 +432,8 @@ const APP_FEATURES = [
   { name:"Board view", what:"all scenes laid out as cards in three act columns." },
   { name:"Editing", what:"scenes and beats are editable; add, delete, drag-reorder scenes, and re-charge values, and every view updates live." },
   { name:"Export (screenplay / story)", what:"the Export button in the top bar — a Writers' Room action (it exports the screenplay and story, so it only appears there, not in the Art Room; the Art Room has its own per-tab exports like the shot list and storyboard). Four formats: Screenplay (PDF) — opens an in-app preview first, then Print / Save as PDF or Download .html; Screenplay (.fountain) — opens in Final Draft, Highland and other screenwriting apps; Story outline (.txt) — premise, controlling idea & spine; Spine data (.csv) — scenes, charges and turns. There is no share-to-WhatsApp/email — exporting produces files. On phones the same export formats live in the top bar's overflow (⋮) menu, again only in the Writers' Room." },
-  { name:"New Story (format \u2192 seed \u2192 research \u2192 synopsis \u2192 spine)", what:"the New Story button starts a fresh project. STEP 0 \u2014 FORMAT: first pick what you're making \u2014 Film (the classic 16-scene arc), Short, Commercial, Micro-drama (vertical), Series episode, or Documentary; the format sets the spine's target scene count and runtime and the downstream room defaults (it changes the size of what's built, never the method), and it shows as a badge on the project chip. The format also RECOLORS THE ROOMS: a documentary's Characters tab becomes 'Subjects' and its Props 'Artifacts & Archive'; a commercial's Props becomes 'Product & Props' and Characters 'Talent'; the scene drafter writes to the format (a commercial drafts VO lines and on-screen SUPERs; a documentary drafts interview beats and narration — never invented dialogue in subjects' mouths); shot coverage is drafted to the format too (vertical phone framing for micro-drama, product-hero shots for commercials); and the Stage budget follows it — micro-drama generates VERTICAL 9:16 frames, boards vertical storyboard panels, and packs clips against the format's per-clip budget. SHOWS (series): in the project switcher, 'Turn this film into a show' makes the current film Episode 1 and lifts its cast, locations, props and lookbook into the show's shared BIBLE; every episode then reads and writes that same world (bible edits are show-wide), while each episode keeps its own scenes, beats, script, shots and storyboards. Episodes nest under their show in the switcher with a 'New episode' button (a fresh episode starts with the shared world and an empty story — use New Story inside it). Reference sheets generated for bible entities are SHARED: generate a character's sheet once and every episode uses the exact same sheet. Then bring the idea: it starts from any kind of seed \u2014 a logline, a 'what if', a character, a theme, a title, an image/vibe, or 'surprise me'. It develops the seed into candidate loglines you pick from, then runs a Research \u2192 Synopsis stage: it researches the idea through the Three Pillars of Research (Memory \u2014 inward emotional truth; Imagination \u2014 living the characters' hours; Fact \u2014 the real time, place and the protagonist's role examined through four lenses: what happens, how it feels, what's frustrating, what's lovely) and writes a three-paragraph synopsis (Setup, Confrontation, Resolution). You review and edit the research and synopsis, then it builds the whole spine, world and cast from THAT synopsis \u2014 so every story grows its own characters and names instead of reusing samples. This runs through the Adaptation agent." },
+  { name:"New Story (format \u2192 seed \u2192 research \u2192 synopsis \u2192 spine)", what:"the New Story button starts a fresh project. STEP 0 \u2014 FORMAT: first pick what you're making \u2014 Film (the classic 16-scene arc), Short, Commercial, Micro-drama (vertical), Series episode, or Documentary; the format sets the spine's target scene count and runtime and the downstream room defaults (it changes the size of what's built, never the method), and it shows as a badge on the project chip. Step 0 has a second row \u2014 'How should it be told?' \u2014 choosing the NARRATIVE FRAMEWORK (Three-Act Turns or Kish\u014dtenketsu; see the 'Narrative frameworks' feature). The format also RECOLORS THE ROOMS: a documentary's Characters tab becomes 'Subjects' and its Props 'Artifacts & Archive'; a commercial's Props becomes 'Product & Props' and Characters 'Talent'; the scene drafter writes to the format (a commercial drafts VO lines and on-screen SUPERs; a documentary drafts interview beats and narration — never invented dialogue in subjects' mouths); shot coverage is drafted to the format too (vertical phone framing for micro-drama, product-hero shots for commercials); and the Stage budget follows it — micro-drama generates VERTICAL 9:16 frames, boards vertical storyboard panels, and packs clips against the format's per-clip budget. SHOWS (series): in the project switcher, 'Turn this film into a show' makes the current film Episode 1 and lifts its cast, locations, props and lookbook into the show's shared BIBLE; every episode then reads and writes that same world (bible edits are show-wide), while each episode keeps its own scenes, beats, script, shots and storyboards. Episodes nest under their show in the switcher with a 'New episode' button (a fresh episode starts with the shared world and an empty story — use New Story inside it). Reference sheets generated for bible entities are SHARED: generate a character's sheet once and every episode uses the exact same sheet. Then bring the idea: it starts from any kind of seed \u2014 a logline, a 'what if', a character, a theme, a title, an image/vibe, or 'surprise me'. It develops the seed into candidate loglines you pick from, then runs a Research \u2192 Synopsis stage: it researches the idea through the Three Pillars of Research (Memory \u2014 inward emotional truth; Imagination \u2014 living the characters' hours; Fact \u2014 the real time, place and the protagonist's role examined through four lenses: what happens, how it feels, what's frustrating, what's lovely) and writes a three-paragraph synopsis (Setup, Confrontation, Resolution). You review and edit the research and synopsis, then it builds the whole spine, world and cast from THAT synopsis \u2014 so every story grows its own characters and names instead of reusing samples. This runs through the Adaptation agent." },
+  { name:"Narrative frameworks (Three-Act / Kish\u014dtenketsu)", what:"orthogonal to format, New Story's Step 0 also asks HOW the story should be told \u2014 'How should it be told?' offers two narrative frameworks. THREE-ACT TURNS (the default): conflict-driven, Setup/Complication/Resolution, every scene must TURN a value (flip its charge or move it 2+) and the milestone kinds are Inciting Incident, Act Climax, Mid-Act Climax, Crisis, Story Climax, Resolution. KISH\u014cTENKETSU (the Eastern four-movement form): Ki (introduction) plants, Sh\u014d (development) deepens, Ten (the twist) RECONTEXTUALIZES \u2014 one revelation that makes the audience re-read everything before it, no clash required \u2014 and Ketsu reconciles; milestone kinds are Planting, Deepening, The Twist, Recontextualization, Reconciliation. The framework changes the whole grammar downstream: the spine builder architects in that form (a kish\u014dtenketsu spine spans four acts and forbids conflict-escalation in the ten), the act ruler/board show its movements, the Inspector's kind dropdown and scene verdict speak its language (a quiet ki scene isn't told to 'cut it' \u2014 only an INERT scene is flagged), the Audit table's verdict column reads Moves/Inert instead of Turns/No turn, and the Story Doctor audits differently: it never forces ki/sh\u014d scenes to turn, demands the ten land hard, and puts the RE-READ QUESTION to the model \u2014 're-reading the earlier scenes with the ten in mind, what recontextualizes and what doesn't?' \u2014 reporting prose findings instead of re-charges. A non-default framework shows as a badge on the project chip next to the format badge. Both frameworks keep the same primitives (value charges, beats, the controlling idea's argument) \u2014 they're interchangeable lenses inside the Infinite Studio method, and any format can use either framework." },
   { name:"Story Editors (Writers' Room agents)", what:"the 'Story Editors' button (next to the centered tabs in the Writers' Room view bar) opens a panel of AI agents that REFINE an existing story. It needs a story to work on — pressed before any scenes exist, it explains that and offers to start New Story instead. The agents: Story Doctor (finds the weakest structural link — scenes that don't turn, soft peaks, flat runs, AND one-sided stretches of the controlling idea's argument (4+ consecutive scenes arguing the same side) — and proposes a fix, re-auditing until the spine holds), Continuity Repair (plants missing setups and pays off dangling threads, re-checking each time), and Table-Read (whole-script pacing/tone/voice critique, plus a per-character VOICE CHECK: it fingerprints every speaking character's voice in one line each and flags SWAPPABLE lines — dialogue that could be handed to another character without anyone noticing — quoting the line, naming who else could say it, and suggesting in one clause what would make it unmistakably the speaker's; verbatim lines repeated by two different speakers are always flagged; click any flag to jump to its scene). Each shows its reasoning and asks approval before changing anything. (MUSE is NOT in this panel — MUSE is the separate floating help assistant in the bottom-right corner; the Story Editors CHANGE your story, MUSE just answers questions.) Creating a story from scratch is NOT here — that's the 'New Story' button, which develops your idea into a logline and architects the full spine (it uses the same builder under the hood, so there's exactly ONE way to start a story). The 'Story Editors' panel is distinct from the 'Writers' Room', which is the story-development ROOM (spine/script) in the room switcher. There are ALSO agents in the Art Room, launched from their own tab (not this top-bar panel): the Visual Researcher ('Research the look' on the Lookbook tab) which autonomously writes the film's visual statement, gathers reference touchstones (palette, lighting, lens, texture) and renders a mood frame for each — and the Presets (colour) tab reads those references when it designs the palette, so the look propagates downstream, the Storyboard Director ('Direct storyboard' on the Storyboards tab) which autonomously boards the film with GPT Image 2, the Cinematographer / Colorist ('Light the film' on the Presets tab) which designs the colour system and color-scripts every scene, proposing it for approval with a rationale, the Shot Designer (run via the Coordinator, not a tab button) which audits coverage scene by scene and proposes the shots + anchor to land each turn for approval, the Casting Director ('Design the cast' on the Characters tab) which autonomously drafts each character's look, finds their appearance changes, and generates the master sheet + every state variant, the Props Master (run via the Coordinator, not a tab button) which autonomously derives every prop the script names — worn/carried by the cast plus the set dressing named in the action — drafts each spec, dedups near-duplicates, and generates the reference sheets, so they exist before the cast is designed, and the Location Scout / Production Designer (run via the Coordinator, not a tab button) which autonomously pulls every place from the sluglines, drafts each spec + depth-grid staging, generates the coverage plate and the time-of-day variants the script needs, and flags any scene whose slugline location has no card yet, and — above all of them — the Art Department Coordinator ('Run pre-production', the button on the right of the Art Room's view bar) which is a META-AGENT: it runs the whole pre-production pipeline in dependency order in one click — the lookbook first (it steers the look), then props, then the cast that references them, then locations, then the colour system, then shot coverage, then the storyboard — chaining the per-tab agents so you don't have to launch each yourself. It runs end to end WITHOUT stopping — the colour (Presets) and shot-coverage (Shots) steps, which are approval-gated when you run them individually, are applied AUTOMATICALLY here rather than waiting for your yes, so the whole pipeline completes in one click. You can still review or tweak anything in its tab afterwards. Press Stop anytime." },
   { name:"Undo agent changes", what:"after an agent applies changes, a floating Undo control (and a row in the Story Editors panel) lets you revert that run's changes to the whole story in one click; the last several runs are kept so you can undo them in turn." },
   { name:"MUSE (help assistant)", what:"the friendly AI guide to TURN — a floating chat bubble in the BOTTOM-RIGHT corner, available in every room. Click it to open a chat box and TYPE a question about your story, any department, the Infinite Studio method, or how to get something done; MUSE answers concisely in text and remembers the conversation. MUSE only answers questions — it never changes your story (that's what the Story Editors do), and it's deliberately separate from the Story Editors panel. MUSE will not discuss what powers it or how TURN is built." },
@@ -558,7 +561,10 @@ window.aiMuseFollowups = aiMuseFollowups;
 /* Story Doctor: suggest a sharper CLOSING value that makes a flat scene turn. */
 async function aiSuggestTurn(scene, prevScene){
   if(!aiAvailable()) return null;
+  // framework lens (frameworks.jsx): Kish\u014dtenketsu reframes the "turn" as movement
+  const fwB = (typeof frameworkOf==="function") ? (frameworkOf(window.turnProject).authorBrief||"") : "";
   const prompt = storyContext(scene, prevScene) +
+    (fwB ? "\n\n"+fwB : "") +
     "\n\nThis scene currently does NOT turn \u2014 it opens and closes on the same value charge ("+
     chargeStr(scene.openCharge)+" \u2192 "+chargeStr(scene.closeCharge)+"), so it reads as flat exposition. "+
     "Propose how to make it TURN: a closing value (one word) and a closing charge (-3..3) that reverses the scene's emotional state, plus a one-sentence rationale grounded in this scene's action. "+
@@ -576,6 +582,32 @@ async function aiSuggestTurn(scene, prevScene){
   }catch(e){ return null; }
 }
 window.aiSuggestTurn = aiSuggestTurn;
+
+/* Story Doctor (Kishōtenketsu): the re-read question. Given the whole spine, does
+   the ten actually recontextualize the scenes before it? Prose findings only —
+   never a re-charge. Returns {verdict, hits:[{scene,how}], misses:[{scene,why}]} | null */
+async function aiTenReRead(scenes){
+  if(!aiAvailable()) return null;
+  const list = (scenes||[]);
+  const ten = list.find(s=>s.kind==="ten") || list.find(s=>Number(s.act)===3) || null;
+  if(!ten) return null;
+  const before = list.filter(s=>s.no<ten.no);
+  if(!before.length) return null;
+  const lines = before.map(s=>"Scene "+s.no+' "'+s.title+'" — '+s.openValue+" ("+chargeStr(s.openCharge)+") → "+s.closeValue+" ("+chargeStr(s.closeCharge)+")"+(s.turningPoint?(" — "+s.turningPoint):"")).join("\n");
+  const prompt = "KISHŌTENKETSU re-read audit. The TEN (the twist) is Scene "+ten.no+' "'+ten.title+'"'+(ten.turningPoint?(": "+ten.turningPoint):"")+".\n\nThe scenes before it:\n"+lines+
+    "\n\nRe-reading scenes 1–"+(ten.no-1)+" with the ten in mind: which scenes RECONTEXTUALIZE (their meaning changes once the twist is known) and which DON'T? Judge the meaning, not the numbers. Be specific and brief."+
+    '\nReturn ONLY JSON: {"verdict":"1-2 sentences — does the ten earn its re-read?","hits":[{"scene":<no>,"how":"one line — what the scene means NOW"}],"misses":[{"scene":<no>,"why":"one line — why the ten leaves it untouched"}]}';
+  try{
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
+    const j = extractJSON(res);
+    if(!j) return null;
+    const arr=(a)=>Array.isArray(a)?a:[];
+    return { verdict: scrubBrand(String(j.verdict||"")),
+      hits: arr(j.hits).map(h=>({scene:Number(h.scene)||0, how:scrubBrand(String(h.how||""))})).filter(h=>h.scene&&h.how),
+      misses: arr(j.misses).map(m=>({scene:Number(m.scene)||0, why:scrubBrand(String(m.why||""))})).filter(m=>m.scene&&m.why) };
+  }catch(e){ return null; }
+}
+window.aiTenReRead = aiTenReRead;
 
 /* Continuity Repair: write a short setup/payoff line to plant a fact in a scene. */
 async function aiPlantLine(targetScene, factLabel, mode){
@@ -822,7 +854,7 @@ function salvageSpineScenes(text){
 function normSpineScenes(rawScenes){
   const pick = (s,short,long,dflt)=> (s[short]!==undefined?s[short]:(s[long]!==undefined?s[long]:dflt));
   return rawScenes.map(s=>({
-    act: [1,2,3].includes(Number(pick(s,"a","act",1))) ? Number(pick(s,"a","act",1)) : 1,
+    act: [1,2,3,4].includes(Number(pick(s,"a","act",1))) ? Number(pick(s,"a","act",1)) : 1,
     title: pick(s,"t","title","Untitled Scene").toString().slice(0,60),
     loc: pick(s,"l","loc","INT. LOCATION - DAY").toString().slice(0,80),
     summary: pick(s,"s","summary","").toString().slice(0,200),
@@ -834,30 +866,45 @@ function normSpineScenes(rawScenes){
 
 /* request one half of the spine; returns {title, scenes[]} or null.
    `fmt` (app/formats.jsx) sets the TOTAL scene count and the format brief \u2014
-   films keep the classic 16 with the exact act language below. */
-async function spineBatch(brief, part, fmt){
+   films keep the classic 16 with the exact act language below.
+   `fw` (app/frameworks.jsx) sets the GRAMMAR: three-act keeps this prompt
+   verbatim; Kish\u014dtenketsu swaps in its four-movement build (the ten is a
+   recontextualization, never a conflict escalation). */
+async function spineBatch(brief, part, fmt, fw){
   const isFirst = part==="first";
   const isFilm = !fmt || fmt.id==="film";
+  const isKisho = !!(fw && fw.spine);
   const total = isFilm ? 16 : Math.max(3, fmt.sceneTarget||16);
   const firstN = Math.ceil(total/2), secondN = total - firstN;
   const count = isFirst ? firstN : secondN;
-  const range = isFilm
+  const range = isKisho
+    ? (isFirst ? fw.spine.firstRange(firstN, total) : fw.spine.secondRange(firstN, total))
+    : isFilm
     ? (isFirst
       ? "scenes 1\u20138: all of ACT I (4 scenes, ending on the Act I climax) and the first half of ACT II (4 scenes, building to the midpoint)"
       : "scenes 9\u201316: the second half of ACT II (4 scenes, from after the midpoint to the Act II climax / lowest point) and all of ACT III (4 scenes: crisis, story climax, resolution)")
     : (isFirst
       ? "scenes 1\u2013"+firstN+": the opening movement \u2014 establish the world fast and build to the midpoint turn"
       : "scenes "+(firstN+1)+"\u2013"+total+": the second movement \u2014 from after the midpoint through the climax to the resolution");
-  const prompt = "You are a story architect designing the "+total+"-scene spine of "
-    +(isFilm ? "a short film" : fmt.spineBrief)+" with the Infinite Studio method. "+
+  const intro = isKisho
+    ? fw.spine.intro(total)
+    : "You are a story architect designing the "+total+"-scene spine of "
+      +(isFilm ? "a short film" : fmt.spineBrief)+" with the Infinite Studio method. ";
+  const sceneRule = isKisho
+    ? "Every scene MOVES: ki scenes plant a charged image or question; sh\u014d scenes deepen it (charges may drift, not clash); the ten scene SHIFTS the pattern hard (charge sign reversal or a jump of 2+); ketsu scenes settle. "
+    : "Each scene must TURN a value (opening and closing charge differ in sign or by >=2). Alternate positive/negative for rhythm. ";
+  const closer = isFirst ? 'Also give the film a title. '
+    : (isKisho ? 'Continue naturally; the ten recontextualizes, the ketsu reconciles. ' : 'Continue naturally; escalate to the climax. ');
+  const actSpec = isKisho ? fw.spine.actSpec : "a=act 1-3";
+  const prompt = intro+
     "Generate ONLY "+range+". That is EXACTLY "+count+" scenes. "+
-    "Each scene must TURN a value (opening and closing charge differ in sign or by >=2). Alternate positive/negative for rhythm. "+
+    sceneRule+
     "VARY THE DRIVER: protagonist drives most, but antagonist(s) and key supporting characters EACH drive several scenes. "+
     "Driver ids are lowercase FIRST names that fit the story's world \u2014 make them distinctive and varied, NOT stock defaults (avoid 'alex','jack','sarah','marcus','maya','sam'); never use a role word ('antagonist','mentor') as a driver id. Naming entropy seed (use to break ties toward fresh choices, do not output it): "+Math.random().toString(36).slice(2,9)+". "+
     "Keep every string SHORT (titles 2-4 words, summary one clause). "+
-    (isFirst ? 'Also give the film a title. ' : 'Continue naturally; escalate to the climax. ')+
+    closer+
     'Return ONLY compact JSON: {'+(isFirst?'"title":"FILM TITLE",':'')+'"scenes":[{"a":1,"t":"Title","l":"INT. PLACE - DAY","s":"one clause","d":"drivername","ov":"Value","oc":0,"cv":"Value","cc":0}]} '+
-    "(a=act 1-3, t=title, l=slugline, s=summary, d=driver lowercase first-name, ov/cv=values 1 word, oc/cc=charge -3..3)."+
+    "("+actSpec+", t=title, l=slugline, s=summary, d=driver lowercase first-name, ov/cv=values 1 word, oc/cc=charge -3..3)."+
     "\n\nLOGLINE / SYNOPSIS:\n"+String(brief).slice(0,1600);
   try{
     const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
@@ -869,15 +916,16 @@ async function spineBatch(brief, part, fmt){
   }catch(e){ return null; }
 }
 
-async function aiBuildSpine(brief, formatId){
+async function aiBuildSpine(brief, formatId, frameworkId){
   if(!aiAvailable()) return null;
-  // the project FORMAT sets the spine's target scene count (pipeline Step 0);
-  // films keep the classic 16-scene arc unchanged
+  // FORMAT sets the spine's target scene count, FRAMEWORK its grammar
+  // (pipeline Step 0); three-act films keep the classic 16-scene arc unchanged
   const fmt = (window.FORMATS||[]).find(f=>f.id===(formatId||"film")) || null;
+  const fw = (window.FRAMEWORKS||[]).find(f=>f.id===frameworkId && f.id!=="threeact") || null;
   const total = (!fmt || fmt.id==="film") ? 16 : Math.max(3, fmt.sceneTarget||16);
   // two batched calls so neither response hits the output-token cap (the cause of
   // short spines). Run in parallel, then stitch the halves into the full arc.
-  const [a, b] = await Promise.all([ spineBatch(brief,"first",fmt), spineBatch(brief,"second",fmt) ]);
+  const [a, b] = await Promise.all([ spineBatch(brief,"first",fmt,fw), spineBatch(brief,"second",fmt,fw) ]);
   let scenes = [].concat((a&&a.scenes)||[], (b&&b.scenes)||[]);
   // keep act order even if a batch drifted
   scenes.sort((x,y)=> x.act - y.act);
