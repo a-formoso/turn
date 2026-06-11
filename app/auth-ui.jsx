@@ -2,14 +2,30 @@
    Rendered by app.jsx. Local-first: signing in is optional; it switches the app
    from browser-local storage to the Supabase cloud. */
 
-function AuthModal({ onClose, onAuthed, initialMode, plan }){
+/* `light` — the Paper & Ink variant used over the marketing landing page;
+   without it the modal keeps the app's dark theme. */
+function AuthModal({ onClose, onAuthed, initialMode, plan, light }){
   const [mode, setMode] = React.useState(initialMode==="signup"?"signup":"signin");   // signin | signup
   const planName = plan==="pro" ? "Pro plan" : plan==="studio" ? "Studio plan" : null;
   const [email, setEmail] = React.useState("");
   const [pw, setPw] = React.useState("");
+  const [showPw, setShowPw] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState("");
   const [notice, setNotice] = React.useState("");
+
+  const forgot = async ()=>{
+    const e = email.trim();
+    if(!e){ setErr("Enter your email above, then tap “Forgot password”."); return; }
+    if(typeof window.cloudResetPassword!=="function"){ setErr("Password reset isn’t available."); return; }
+    setErr(""); setNotice(""); setBusy(true);
+    try{
+      const { error } = await window.cloudResetPassword(e);
+      if(error){ setErr(error.message || "Couldn’t send the reset link."); }
+      else setNotice("Reset link sent. Check your email.");
+    }catch(ex){ setErr((ex && ex.message) || "Network error."); }
+    setBusy(false);
+  };
 
   const submit = async ()=>{
     if(busy) return;
@@ -32,14 +48,14 @@ function AuthModal({ onClose, onAuthed, initialMode, plan }){
     }catch(ex){ setErr((ex && ex.message) || "Network error."); setBusy(false); }
   };
 
-  return React.createElement("div",{className:"lb-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose && onClose(); }},
-    React.createElement("div",{className:"auth-panel"},
+  return React.createElement("div",{className:"lb-overlay"+(light?" auth-light":""),onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose && onClose(); }},
+    React.createElement("div",{className:"auth-panel"+(light?" light":"")},
       React.createElement("div",{className:"auth-head"},
         React.createElement("div",{className:"auth-mark"},"TURN"),
+        light && React.createElement("div",{className:"auth-act"}, mode==="signup"?"Prologue":"Welcome back"),
         React.createElement("div",{className:"auth-title"}, mode==="signup"?"Create your account":"Sign in"),
         (mode==="signup" && planName) && React.createElement("div",{className:"auth-plan"},
-          React.createElement(Icon.sparkles,{s:11}), planName, React.createElement("span",{className:"auth-plan-note"},"· start free, upgrade after")),
-        React.createElement("div",{className:"auth-sub"},"Save your films and generated sheets to the cloud, across devices.")),
+          React.createElement(Icon.sparkles,{s:11}), planName, React.createElement("span",{className:"auth-plan-note"},"· start free, upgrade after"))),
       React.createElement("div",{className:"auth-body"},
         notice && React.createElement("div",{className:"auth-notice"}, notice),
         React.createElement("label",{className:"auth-field"},
@@ -48,11 +64,17 @@ function AuthModal({ onClose, onAuthed, initialMode, plan }){
             placeholder:"you@studio.com",onChange:e=>setEmail(e.target.value),
             onKeyDown:e=>{ if(e.key==="Enter") submit(); }})),
         React.createElement("label",{className:"auth-field"},
-          React.createElement("span",{className:"auth-lab"},"Password"),
-          React.createElement("input",{className:"auth-input",type:"password",
-            autoComplete:mode==="signup"?"new-password":"current-password",value:pw,
-            placeholder:mode==="signup"?"At least 6 characters":"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-            onChange:e=>setPw(e.target.value),onKeyDown:e=>{ if(e.key==="Enter") submit(); }})),
+          React.createElement("div",{className:"auth-lab-row"},
+            React.createElement("span",{className:"auth-lab"},"Password"),
+            mode==="signin" && React.createElement("button",{type:"button",className:"auth-forgot",onClick:forgot},"Forgot password?")),
+          React.createElement("div",{className:"auth-pw"},
+            React.createElement("input",{className:"auth-input",type:showPw?"text":"password",
+              autoComplete:mode==="signup"?"new-password":"current-password",value:pw,
+              placeholder:mode==="signup"?"At least 6 characters":"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+              onChange:e=>setPw(e.target.value),onKeyDown:e=>{ if(e.key==="Enter") submit(); }}),
+            React.createElement("button",{type:"button",className:"auth-pw-toggle",
+              "aria-label":showPw?"Hide password":"Show password",title:showPw?"Hide password":"Show password",
+              onClick:()=>setShowPw(s=>!s)}, React.createElement(showPw?Icon.eyeOff:Icon.eye,{s:16})))),
         err && React.createElement("div",{className:"auth-err"}, err),
         React.createElement("button",{className:"auth-submit",disabled:busy,onClick:submit},
           busy ? React.createElement(React.Fragment,null,React.createElement("span",{className:"ns-spin dark"}),

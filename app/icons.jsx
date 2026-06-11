@@ -45,6 +45,10 @@ const Icon = {
   eye:(p)=>I({...p,children:[
     React.createElement("path",{key:1,d:"M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"}),
     React.createElement("circle",{key:2,cx:12,cy:12,r:2.6})]}),
+  eyeOff:(p)=>I({...p,children:[
+    React.createElement("path",{key:1,d:"M9.9 4.2A10 10 0 0112 4c6.5 0 10 7 10 7a16 16 0 01-3 3.7M6.3 6.3A16 16 0 002 11s3.5 7 10 7a10 10 0 005-1.3"}),
+    React.createElement("path",{key:2,d:"M9.7 9.7a3 3 0 004.2 4.2"}),
+    React.createElement("path",{key:3,d:"M3 3l18 18"})]}),
   mask:(p)=>I({...p,d:"M3 5s2 3 9 3 9-3 9-3v6c0 5-4 8-9 8s-9-3-9-8V5zM8 12h.01M16 12h.01"}),
   user:(p)=>I({...p,children:[
     React.createElement("circle",{key:1,cx:12,cy:8,r:3.5}),

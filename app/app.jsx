@@ -303,6 +303,8 @@ function App(){
   // ADMIN — demo upkeep account. The Matrix sample story (and "Reset to sample story")
   // is admin-only: every other user (and signed-out local mode) never sees Matrix data.
   const isAdmin = (((typeof cloudUserEmail==="function" && cloudUserEmail(session))||"").toLowerCase()==="admin@infinitestudioai.com");
+  // expose for leaf components that have no session prop (e.g. the Art Room key bar)
+  React.useEffect(()=>{ window.turnIsAdmin = isAdmin; },[isAdmin]);
   const hydratingRef = React.useRef(false);
   // bumped when a hydration pass finishes — lets effects that are gated on
   // hydratingRef (auto-seed) re-run once the doc has settled, even if the user
@@ -316,6 +318,11 @@ function App(){
     project:{ title:"Untitled film", genre:"", logline:"", controllingIdea:{} },
     drafts:{}, beatsMap:{}, history:{}, continuityMap:{},
     selId:null, room:"writers", view:"spine", artView:"props", propsSeeded:false, locsSeeded:false, visualsSeeded:false, blank:true });
+  /* The Matrix sample as a full project doc — used ONLY to seed the admin
+     account's first project (the demo lives in the admin account by default). */
+  const sampleDoc = ()=>({ scenes:SCENES, characters:CHARACTERS, props:(window.PROPS_SEED||[]), locations:[], lookbook:[], lookbookNote:"", lookbookApplied:{}, shots:[],
+    project:PROJECT, drafts:SCREENPLAY, beatsMap:BEATS, history:{}, continuityMap:CONTINUITY||{},
+    selId:"s4", propsSeeded:false, locsSeeded:false, visualsSeeded:false });
   const applyDoc = (d)=>{
     d = d || {};
     hydratingRef.current = true;
@@ -376,7 +383,14 @@ function App(){
     (async()=>{
       let list = await cloudListProjects();
       if(!list.length){
-        const created = await cloudCreateProject("Untitled film", emptyDoc());
+        // admin's first project IS the Matrix demo; everyone else starts clean.
+        // Read the session FRESH here — during sign-in the captured `isAdmin`
+        // can lag a render behind the session this bootstrap is running for.
+        const s = (typeof cloudGetSession==="function") ? await cloudGetSession() : null;
+        const adminBoot = (((typeof cloudUserEmail==="function" && cloudUserEmail(s))||"").toLowerCase()==="admin@infinitestudioai.com");
+        const created = adminBoot
+          ? await cloudCreateProject("The Matrix", sampleDoc())
+          : await cloudCreateProject("Untitled film", emptyDoc());
         if(created) list = [created];
       }
       if(!alive) return;
@@ -425,6 +439,21 @@ function App(){
     }, cloudMode ? 700 : 250);
     return ()=> clearTimeout(saveTimer.current);
   },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, cloudMode, currentProjectId]);
+
+  /* No story yet → the studio has nothing to work on: rooms beyond the Writers'
+     Room stay locked, and story-dependent actions explain what to do instead. */
+  const requireStory = async (what)=>{
+    if(scenes.length) return true;
+    const ok = await window.appConfirm({ title:"Create a story first",
+      body:what+" works on your story — and there isn't one yet. Bring an idea and TURN builds the story with you, scene by scene.",
+      confirmLabel:"+ New Story", cancelLabel:"Not now" });
+    if(ok) setNewStoryOpen(true);
+    return false;
+  };
+  const guardedSetRoom = (id)=>{
+    if(id!=="writers" && !scenes.length){ requireStory("The Art Room"); return; }
+    setRoom(id);
+  };
 
   const resetStory = ()=>{
     if(!isAdmin) return;   // the Matrix sample is admin-only — belt & braces behind the hidden menu item
@@ -913,7 +942,7 @@ function App(){
   };
 
   // ---- appearance: dark / light / system ----
-  const [theme, setThemeState] = React.useState(()=>{ try{ return localStorage.getItem("turn-theme")||"dark"; }catch(e){ return "dark"; } });
+  const [theme, setThemeState] = React.useState(()=>{ try{ return localStorage.getItem("turn-theme")||"light"; }catch(e){ return "light"; } });
   const [sysDark, setSysDark] = React.useState(()=> !window.matchMedia || window.matchMedia("(prefers-color-scheme: dark)").matches);
   React.useEffect(()=>{
     if(!window.matchMedia) return;
@@ -1611,7 +1640,7 @@ function App(){
     return React.createElement(React.Fragment,null,
       window.ConfirmHost && React.createElement(window.ConfirmHost,null),
       React.createElement(Landing,{ onStart:startWithPlan, onSignIn:()=>openAuth("signin") }),
-      authOpen && React.createElement(AuthModal,{ initialMode:authMode, plan:intendedPlan,
+      authOpen && React.createElement(AuthModal,{ initialMode:authMode, plan:intendedPlan, light:true,
         onClose:()=>setAuthOpen(false), onAuthed:(s)=>{ if(s) setSession(s); } }),
       (typeof MuseDock!=="undefined") && React.createElement(MuseDock,{
         scenes:[], selScene:null, signedIn:false, aiOn:false, onSignIn:()=>openAuth("signup") }));
@@ -1625,7 +1654,7 @@ function App(){
 
     // "Reset to sample story" is an ADMIN-ONLY tool (demo upkeep): only the admin
     // account ever sees it — every other user (and signed-out local mode) gets no reset.
-    React.createElement(TopBar,{view,setView,room,setRoom,artView,setArtView,project,scenes,drafts,
+    React.createElement(TopBar,{view,setView,room,setRoom:guardedSetRoom,artView,setArtView,project,scenes,drafts,
       onReset: isAdmin ? resetStory : null,
       onToggleAI:toggleAI,
       onNewStory:()=>setNewStoryOpen(true),
@@ -1641,8 +1670,8 @@ function App(){
     // the room's view tabs, moved out of the top bar to a full-width bar beneath it
     React.createElement(ViewNav,{room,view,setView,artView,setArtView,staleTabs,
       railOpen,inspOpen,onToggleRail:toggleRail,onToggleInsp:toggleInsp,
-      onCoordinate:()=>setCoordOpen(true),
-      onAgents:()=>setAgentsOpen(true)}),
+      onCoordinate:async ()=>{ if(await requireStory("Art Department Coordinator")) setCoordOpen(true); },
+      onAgents:async ()=>{ if(await requireStory("Story Editors")) setAgentsOpen(true); }}),
 
     authOpen && React.createElement(AuthModal,{ initialMode:authMode, plan:intendedPlan,
       onClose:()=>setAuthOpen(false),

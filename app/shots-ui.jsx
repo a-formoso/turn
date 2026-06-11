@@ -290,10 +290,21 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   const [view, setView] = React.useState(null);
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
-  // per-scene fold state (persisted) so a long shot list isn't all-or-nothing scrolling
+  // per-scene fold state (persisted). DEFAULT: everything folded except the first
+  // scene — a long shot list opens scannable, not as one endless scroll.
   const [collapsed, setCollapsed] = React.useState(()=>{ try{ return JSON.parse(localStorage.getItem("turn_shots_collapsed")||"{}")||{}; }catch(e){ return {}; } });
   React.useEffect(()=>{ try{ localStorage.setItem("turn_shots_collapsed", JSON.stringify(collapsed)); }catch(e){} },[collapsed]);
   const toggleScene = (id)=> setCollapsed(c=>({ ...c, [id]: !c[id] }));
+  // seed the default fold once scenes hydrate (an empty saved map = never touched)
+  const foldSeeded = React.useRef(false);
+  React.useEffect(()=>{
+    if(foldSeeded.current || !(scenes||[]).length) return;
+    foldSeeded.current = true;
+    if(Object.keys(collapsed).length) return;   // the user has a real fold state already
+    const m = {};
+    (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0)).forEach((s,i)=>{ if(i>0) m[s.id]=true; });
+    setCollapsed(m);
+  },[(scenes||[]).length]);
 
   const charById = React.useMemo(()=>{ const m={}; (characters||[]).forEach(c=>m[c.id]=c); return m; },[characters]);
   const propById = React.useMemo(()=>{ const m={}; (props||[]).forEach(p=>m[p.id]=p); return m; },[props]);
@@ -332,9 +343,6 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   const shotsByScene = React.useMemo(()=>{ const m={}; (shots||[]).forEach(s=>{ (m[s.sceneId]=m[s.sceneId]||[]).push(s); });
     Object.values(m).forEach(arr=>arr.sort((a,b)=>(a.order||0)-(b.order||0) || (a.beatN||0)-(b.beatN||0))); return m; },[shots]);
   const scenesWithShots = ordered.filter(s=>(shotsByScene[s.id]||[]).length);
-  const anyOpen = scenesWithShots.some(s=>!collapsed[s.id]);
-  const collapseAll = ()=> setCollapsed(()=>{ const m={}; scenesWithShots.forEach(s=>{ m[s.id]=true; }); return m; });
-  const expandAll = ()=> setCollapsed({});
 
   // scene FOCUS (same pattern as Props / Characters / Locations): pick one scene
   // from the dropdown to see only its shots and batch-generate the whole scene.
@@ -365,17 +373,17 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
           _el("div",{style:{flex:1}},
             _el("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Shot List",
               _el(window.InfoTip,{label:"About the Shots tab",
-                text:"Every beat becomes a shot. \u201cDraft all shots\u201d breaks each scene into coverage \u2014 size, angle, movement and lens \u2014 then composes each frame from the scene's grade, the location plate and the character & prop sheets. Generate the frames here; the Storyboards tab lays them out next."}))),
+                text:"Every beat becomes a shot. \u201cDesign all shots\u201d breaks each scene into coverage \u2014 size, angle, movement and lens \u2014 then composes each frame from the scene's grade, the location plate and the character & prop sheets. Generate the frames here; the Storyboards tab lays them out next."}))),
           _el("div",{className:"art-intro-actions"},
             _el("button",{className:"art-draftall",disabled:draftingAllShots||!ordered.length,onClick:onDraftAllShots,
               title:"Break every scene into a shot list from its beats"},
-              _el(Icon.sparkles,{s:14}), draftingAllShots?"Drafting shots\u2026":"Draft all shots")))),
+              _el(Icon.sparkles,{s:14}), draftingAllShots?"Designing\u2026":"Design all shots")))),
       _el("div",{className:"prop-empty"},
         _el("div",{className:"art-soon-ic"},_el(Icon.film,{s:30})),
         _el("div",{className:"art-soon-t"},"No shots yet"),
         _el("div",{className:"art-soon-d"},"Break your scenes into shots \u2014 one shot per beat, with full coverage \u2014 then generate a frame for each."),
         _el("button",{className:"art-draftall",style:{marginTop:16},disabled:draftingAllShots||!ordered.length,onClick:onDraftAllShots},
-          _el(Icon.sparkles,{s:14}), draftingAllShots?"Drafting shots\u2026":"Draft all shots")));
+          _el(Icon.sparkles,{s:14}), draftingAllShots?"Designing\u2026":"Design all shots")));
   }
 
   return _el("div",{className:"art-scroll"},
@@ -386,23 +394,17 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
         _el("div",{style:{flex:1}},
           _el("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Cinematographer (Shot Designer)",
             _el(window.InfoTip,{label:"About the Shot List",
-              text:"One shot per beat, grouped by scene. Each frame composes the scene's Style Bible grade, the location plate and the character & prop sheets into a single image \u2014 so every shot stays on-model and on-palette. Each scene's CLIPS strip groups its shots into clip sequences \u2014 one generated video clip each (\u226415s, the Stage's render unit): it auto-packs by estimated duration (dialogue shots from their line's length, else \u22485s); click a joint to split or merge by hand. The Storyboards tab can board these same clips. Focus a scene from the dropdown to see only its shots and generate the whole scene at once. 'Draft all shots' breaks any scene that has none into coverage. 'Shoot the scenes' is the agentic version: the Shot Designer audits coverage scene by scene \u2014 does each scene establish wide, tighten, and land its turn on its most expressive size, with an anchor set? \u2014 and proposes the shots (and the anchor) to fix it for your approval, then hand off to 'Generate all shots' (which renders anchor-first)."}))),
+              text:"One shot per beat, grouped by scene. Each frame composes the scene's Style Bible grade, the location plate and the character & prop sheets into a single image \u2014 so every shot stays on-model and on-palette. Each scene's CLIPS strip groups its shots into clip sequences \u2014 one generated video clip each (\u226415s, the Stage's render unit): it auto-packs by estimated duration (dialogue shots from their line's length, else \u22485s); click a joint to split or merge by hand. The Storyboards tab can board these same clips. Focus a scene from the dropdown to see only its shots and generate the whole scene at once. 'Design all shots' breaks any scene that has none into coverage; 'Generate all shots' renders every frame, anchor first."}))),
         _el("div",{className:"art-intro-actions"},
-          _el("button",{className:"art-draftall ghost",onClick:anyOpen?collapseAll:expandAll,
-            title:anyOpen?"Collapse every scene to its header":"Expand every scene"},
-            _el(Icon.layers,{s:14}), anyOpen?"Collapse all":"Expand all"),
           _el("button",{className:"art-draftall ghost",onClick:()=>exportShotList(scenesWithShots, shotsByScene, ctxFor, project),
             title:"Preview the shot list as a printable table, then print / save as PDF or download the HTML"},
             _el(Icon.download,{s:14}),"Export shot list"),
           _el("button",{className:"art-draftall ghost",disabled:draftingAllShots||!ordered.length,onClick:onDraftAllShots,
-            title:"Break any scene that has no shots yet into a shot list from its beats"},
-            _el(Icon.sparkles,{s:14}), draftingAllShots?"Drafting shots\u2026":"Draft all shots"),
+            title:"Break any scene that has no shots yet into full coverage \u2014 size, angle, move and lens per beat"},
+            _el(Icon.sparkles,{s:14}), draftingAllShots?"Designing\u2026":"Design all shots"),
           onDirectScene && _el("button",{className:"art-draftall ghost",disabled:!scenesWithShots.length,onClick:()=>onDirectScene(null),
             title:"Scene Director — scene by scene: lock the key frame, derive every shot from it, visually inspect each result against the anchor, repair drift. Asks before spending on each scene."},
             _el(Icon.clapper,{s:14}),"Direct all scenes"),
-          onShoot && _el("button",{className:"art-draftall",disabled:!ordered.length,onClick:onShoot,
-            title:"Shot Designer \u2014 audits coverage scene by scene (does each scene establish, tighten, and land its turn?) and proposes the shots and anchor to fix it, for your approval"},
-            _el(Icon.robot,{s:14}),"Shoot the scenes"),
           _el("button",{className:"art-draftall",disabled:!!batchActiveId||!shots.length,onClick:startAll,
             title:"Generate (or regenerate) the frame for every shot \u2014 you choose whether to redo ones that already have a frame"},
             _el(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all shots")))),

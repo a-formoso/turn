@@ -31,6 +31,9 @@
   --neg-soft:oklch(0.72 0.10 232 / .16);
   --neg-line:oklch(0.72 0.10 232 / .5);
 
+  --accent:var(--pos);             /* primary accent = the warm amber grade (no stray blue) */
+  --accent-soft:var(--pos-soft);
+  --accent-line:var(--pos-line);
   --accent2:var(--neg);            /* secondary button = cool teal (vs amber primary) */
   --accent2-ink:#06141d;           /* dark ink on the secondary fill */
 
@@ -55,35 +58,37 @@
 }
 
 /* ============================================================
-   LIGHT THEME — warm paper. Charge colors (--pos/--neg/...) are
-   re-shaded for light contrast by the grade effect in app.jsx.
+   LIGHT THEME — "Paper & Ink", matched to the marketing homepage:
+   cool neutral surfaces, near-black ink, hairline structure. Charge
+   colors (--pos/--neg) stay as the cinematic grade (warm amber harmonises
+   with the homepage's Reel orange). This block flips the WHOLE app light.
    ============================================================ */
 html[data-theme="light"]{
   color-scheme:light;
 
-  --bg-0:#dbd7ce;   /* canvas / letterbox — warm light gray */
-  --bg-1:#e9e6de;   /* panels: topbar, rail, inspector */
-  --bg-2:#f2efe8;   /* cards */
-  --bg-3:#f8f6f1;   /* raised controls / segmented container */
-  --bg-4:#fcfbf7;   /* higher */
-  --bg-5:#ffffff;   /* highest — active segment */
+  --bg-0:#EBEBE8;   /* canvas / letterbox — the darkest neutral, panels float on it */
+  --bg-1:#F1F1EE;   /* panels: topbar, rail, inspector */
+  --bg-2:#FCFCFB;   /* cards — Paper */
+  --bg-3:#F6F6F4;   /* raised controls / segmented container — Bone */
+  --bg-4:#FFFFFF;   /* higher */
+  --bg-5:#FFFFFF;   /* highest — active segment */
 
-  --line:rgba(40,34,22,.10);
-  --line-2:rgba(40,34,22,.16);
-  --line-3:rgba(40,34,22,.26);
+  --line:rgba(15,16,18,.07);    /* Hairline */
+  --line-2:rgba(15,16,18,.12);
+  --line-3:rgba(15,16,18,.20);
 
-  --txt-0:#221f19;  /* near-black warm */
-  --txt-1:#56524a;
-  --txt-2:#857f74;
-  --txt-3:#aaa499;
+  --txt-0:#0F1012;  /* Ink */
+  --txt-1:#3C3F44;  /* Ink, soft */
+  --txt-2:#5D6066;  /* Slate */
+  --txt-3:#9A9DA3;  /* muted */
 
   --alert:oklch(0.55 0.19 27);
   --alert-soft:oklch(0.55 0.19 27 / .12);
 
-  --shadow-pop:0 16px 44px -14px rgba(45,38,24,.30),0 2px 8px rgba(45,38,24,.13);
+  --shadow-pop:0 16px 44px -14px rgba(15,16,18,.20),0 2px 8px rgba(15,16,18,.10);
 }
-html[data-theme="light"] ::-webkit-scrollbar-thumb{background:#cfcabe}
-html[data-theme="light"] ::-webkit-scrollbar-thumb:hover{background:#b8b2a4;background-clip:padding-box}
+html[data-theme="light"] ::-webkit-scrollbar-thumb{background:#dededa}
+html[data-theme="light"] ::-webkit-scrollbar-thumb:hover{background:#cfcabe;background-clip:padding-box}
 
 
 *{box-sizing:border-box;margin:0;padding:0}
@@ -192,7 +197,7 @@ body{
    bar directly beneath it (frees top-bar space at every screen size). */
 .viewnav{
   flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:10px;
-  padding:7px 16px;background:var(--bg-1);border-bottom:1px solid var(--line);
+  padding:13px 16px;background:var(--bg-1);border-bottom:1px solid var(--line);
   position:relative;z-index:20;overflow-x:auto;scrollbar-width:none;
 }
 .viewnav::-webkit-scrollbar{display:none}
@@ -204,12 +209,15 @@ body{
 /* Lookbook — the north-star visual statement block above the reference grid */
 .lb-statement{margin:0 0 18px;padding:14px 16px;background:var(--bg-2);border:1px solid var(--line);border-radius:12px}
 
-/* three balanced zones: equal-width flex sides keep the tab strip horizontally centered
-   while each room's agent CTA sits in the right zone (Run pre-production / Agents). */
+/* three balanced zones: equal-width flex sides keep the CENTER group (tab strip +
+   the room's agent CTA) horizontally centered. The side panel-toggles only render
+   usefully in drawer modes — on desktop the panels collapse/expand from inside. */
 .viewnav .vn-side{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:8px}
 .viewnav .vn-left{justify-content:flex-start}
 .viewnav .vn-right{justify-content:flex-end}
+.viewnav .vn-center{flex:0 0 auto;display:flex;align-items:center;gap:10px}
 .viewnav .vn-cta{flex:0 0 auto}
+@media (min-width:1100px){ .viewnav .vn-paneltoggle{display:none} }
 /* Lookbook staleness — amber dot on an out-of-date Art Room tab + the in-tab "re-draft" banner */
 .seg-stale-dot{flex:0 0 auto;width:6px;height:6px;border-radius:50%;background:oklch(0.74 0.15 60);margin-left:1px;box-shadow:0 0 0 2px rgba(0,0,0,.25)}
 .lb-stale-notice{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 16px;padding:9px 12px;border-radius:9px;
@@ -221,6 +229,13 @@ body{
 .lb-stale-btn{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:7px;cursor:pointer;
   border:1px solid oklch(0.72 0.13 60 / .5);background:oklch(0.72 0.13 60 / .2);color:oklch(0.9 0.08 75);font-family:var(--f-ui);font-size:11.5px;font-weight:600;transition:.12s}
 .lb-stale-btn:hover{background:oklch(0.72 0.13 60 / .34)}
+/* light theme: the amber notice needs DARK amber ink, not the dark-theme cream */
+html[data-theme="light"] .lb-stale-notice{background:oklch(0.78 0.12 70 / .16);border-color:oklch(0.6 0.13 62 / .38);color:oklch(0.42 0.1 58)}
+html[data-theme="light"] .lb-stale-notice > svg{color:oklch(0.55 0.14 60)}
+html[data-theme="light"] .lb-stale-notice b{color:oklch(0.32 0.09 58)}
+html[data-theme="light"] .lb-stale-btn{border-color:oklch(0.55 0.13 60 / .45);background:oklch(0.72 0.13 60 / .16);color:oklch(0.36 0.1 58)}
+html[data-theme="light"] .lb-stale-btn:hover{background:oklch(0.72 0.13 60 / .28)}
+html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 /* truly narrow screens: icon-only tabs, scroll from the left (no centre-clip) */
 @media (max-width:640px){
   .viewnav{justify-content:flex-start;padding:6px 12px}
@@ -458,10 +473,10 @@ body{
 .empty-canvas{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;z-index:6;padding:24px}
 .empty-canvas-card{pointer-events:auto;max-width:440px;text-align:center;padding:30px 28px;
   background:var(--bg-1);border:1px solid var(--line-2);border-radius:16px;box-shadow:0 18px 56px rgba(0,0,0,.4)}
-.empty-canvas-title{font-family:var(--f-display);font-size:20px;font-weight:650;color:var(--txt-0);margin-bottom:9px}
+.empty-canvas-title{font-family:"Spectral",Georgia,serif;font-size:27px;font-weight:600;letter-spacing:-.01em;color:var(--txt-0);margin-bottom:9px}
 .empty-canvas-sub{font-size:13px;line-height:1.55;color:var(--txt-2);margin-bottom:20px}
-.empty-canvas-btn{font:600 13px var(--f-ui);color:#fff;background:var(--accent,oklch(0.72 0.15 250));
-  border:0;border-radius:9px;padding:11px 20px;cursor:pointer}
+.empty-canvas-btn{font:600 13px var(--f-ui);color:#1a1205;background:var(--accent);
+  border:0;border-radius:999px;padding:11px 22px;cursor:pointer}
 .empty-canvas-btn:hover{filter:brightness(1.08)}
 .scroll-fade{
   position:absolute;top:96px;bottom:0;right:0;width:54px;pointer-events:none;z-index:5;
@@ -820,7 +835,6 @@ body{
   box-shadow:inset 0 0 0 0 var(--pos);transition:box-shadow .12s;
 }
 /* active beat (hover or click in the gutter) — accent the screenplay block's left edge */
-.sp-seg.on .sp-page{box-shadow:inset 3px 0 0 0 var(--pos)}
 .sp-seg:first-child .sp-page{padding-top:40px;border-radius:0 6px 0 0}
 .sp-seg:last-child .sp-page{padding-bottom:48px;border-radius:0 0 6px 0}
 .sp-seg:first-child .sp-gut{border-radius:6px 0 0 0;background:rgba(255,255,255,.015)}
@@ -1165,13 +1179,14 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
 /* MUSE — floating help-assistant dock (bottom-right, every room) + shared chat bits */
 .muse-dock-wrap{position:fixed;right:22px;bottom:22px;z-index:75;display:flex;flex-direction:column;
   align-items:flex-end;gap:12px;font-family:var(--f-ui)}
-/* no resting outline — the border is transparent so only hover / voice states show one */
+/* no resting disc — the button is just the orb itself (the pulse provides the
+   presence); voice states (listening/speaking) still paint their own circle */
 .muse-bubble{width:54px;height:54px;border-radius:50%;border:1px solid transparent;cursor:pointer;
-  position:relative;background:var(--bg-3);display:grid;place-items:center;color:var(--txt-0);
-  box-shadow:0 8px 28px rgba(0,0,0,.45);transition:.15s}
-.muse-bubble:hover{transform:translateY(-2px);border-color:var(--pos-line);box-shadow:0 12px 34px rgba(0,0,0,.55)}
-.muse-bubble.open{background:var(--bg-4)}
-.muse-bubble .ai-orb{width:30px;height:30px;position:relative;z-index:2}   /* orb stays crisp above the pulse */
+  position:relative;background:transparent;display:grid;place-items:center;color:var(--txt-0);
+  box-shadow:none;transition:.15s}
+.muse-bubble:hover{transform:translateY(-2px);border-color:transparent;box-shadow:none}
+.muse-bubble.open{background:transparent}
+.muse-bubble .ai-orb{width:40px;height:40px;position:relative;z-index:2}   /* orb stays crisp above the pulse */
 
 /* attention pulse — a whole soft accent SHADE blooms from inside the orb's body and
    swells outward: brightest at its core, fading softer toward its outer reach. Two
@@ -1180,9 +1195,9 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
 .muse-bubble::after{content:"";position:absolute;left:50%;top:50%;width:60px;height:60px;
   margin:-30px 0 0 -30px;border-radius:50%;pointer-events:none;z-index:1;
   background:radial-gradient(circle,
-    color-mix(in oklab, var(--pos) 55%, transparent) 0%,
-    color-mix(in oklab, var(--pos) 34%, transparent) 32%,
-    color-mix(in oklab, var(--pos) 12%, transparent) 58%,
+    rgba(224,116,43,.7) 0%,
+    rgba(224,116,43,.45) 32%,
+    rgba(224,116,43,.18) 58%,
     transparent 80%);
   transform:scale(.35);opacity:0;
   animation:muse-pulse 4.4s ease-out infinite}
@@ -1191,8 +1206,8 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
 .muse-bubble:hover::before,.muse-bubble:hover::after{animation:none;opacity:0}  /* calm once opened or hovered */
 @keyframes muse-pulse{
   0%  {transform:scale(.35);opacity:0}
-  22% {opacity:.75}                        /* the shade fills, brightest near the body */
-  100%{transform:scale(2.4);opacity:0}     /* swollen and faded soft, well past the edge */
+  22% {opacity:.85}                        /* the shade fills, brightest near the body */
+  100%{transform:scale(1.6);opacity:0}     /* a clear bloom reaching past the orb's edge */
 }
 @media (prefers-reduced-motion: reduce){ .muse-bubble::before,.muse-bubble::after{animation:none;opacity:0} }
 
@@ -1566,7 +1581,7 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
 .art-intro-row{display:flex;align-items:flex-start;gap:16px}
 .art-intro-row > div:first-child{flex:1;min-width:0}
 .art-intro-actions{display:flex;gap:8px;flex:0 0 auto;flex-wrap:wrap;justify-content:flex-end}
-.art-intro-t{font-family:var(--f-display);font-size:20px;font-weight:600;color:var(--txt-0);margin-bottom:6px}
+.art-intro-t{font-family:"Spectral",Georgia,serif;font-size:25px;font-weight:600;letter-spacing:-.01em;color:var(--txt-0);margin-bottom:6px}
 .art-intro-d{font-size:13px;line-height:1.6;color:var(--txt-2);max-width:680px}
 /* mobile: stack the header so the title/intro get full width and the action
    buttons drop to their own full-width row instead of crushing the text column */
@@ -1859,7 +1874,7 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
   cursor:pointer;border:1px solid transparent;transition:background .12s,border-color .12s}
 .appconfirm-btn.ghost{background:transparent;border-color:var(--line);color:var(--txt-1)}
 .appconfirm-btn.ghost:hover{background:var(--bg-3);border-color:var(--line-2)}
-.appconfirm-btn.primary{background:var(--accent,oklch(0.72 0.15 250));color:#fff}
+.appconfirm-btn.primary{background:var(--accent);color:#1a1205}
 .appconfirm-btn.primary:hover{filter:brightness(1.08)}
 .appconfirm-btn.danger{background:oklch(0.62 0.2 25);color:#fff}
 .appconfirm-btn.danger:hover{filter:brightness(1.08)}
@@ -1976,6 +1991,17 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
   border-radius:8px;color:var(--txt-0);font:14px var(--f-ui);padding:10px 12px;outline:none;transition:border-color .12s}
 .auth-input:focus{border-color:var(--pos)}
 .auth-input::placeholder{color:var(--txt-3)}
+/* password field — show/hide toggle + a "forgot" link on the label row */
+.auth-lab-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.auth-forgot{background:0;border:0;cursor:pointer;padding:0;color:var(--txt-2);
+  font:600 11px var(--f-ui);transition:.12s}
+.auth-forgot:hover{color:var(--pos)}
+.auth-pw{position:relative}
+.auth-pw .auth-input{padding-right:40px}
+.auth-pw-toggle{position:absolute;top:50%;right:8px;transform:translateY(-50%);display:inline-flex;
+  align-items:center;justify-content:center;width:28px;height:28px;border:0;border-radius:7px;
+  background:transparent;color:var(--txt-3);cursor:pointer;transition:.12s}
+.auth-pw-toggle:hover{color:var(--txt-0);background:var(--bg-4)}
 .auth-submit{margin-top:4px;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:42px;
   background:var(--pos);color:#1a1205;font:650 13.5px var(--f-ui);border:0;border-radius:9px;cursor:pointer;transition:.12s}
 .auth-submit:hover:not(:disabled){filter:brightness(1.08)}
@@ -1990,6 +2016,41 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
 .auth-close{position:absolute;top:14px;right:14px;display:inline-flex;background:transparent;border:0;
   color:var(--txt-3);cursor:pointer;padding:4px;border-radius:6px}
 .auth-close:hover{color:var(--txt-0);background:var(--bg-4)}
+
+/* ---- light "Paper & Ink" auth variant — over the marketing landing page ----
+   Mirrors the homepage system: Paper panel, hairlines, mono labels, Carbon pill,
+   Rise/Fall tints for notice/error. The in-app (dark) modal is untouched. */
+.lb-overlay.auth-light{background:rgba(15,16,18,.38);backdrop-filter:blur(6px)}
+.auth-panel.light{--pos:#13955E;--neg:#D2493E;
+  background:#FCFCFB;border-color:#E8E8E5;border-radius:18px;box-shadow:0 24px 64px rgba(15,16,18,.16)}
+.auth-panel.light .auth-head{border-bottom-color:#E8E8E5;padding:24px 26px 18px}
+.auth-panel.light .auth-mark{font-family:var(--f-display);font-weight:700;letter-spacing:.14em;color:#0F1012}
+.auth-panel.light .auth-act{font-family:var(--f-mono);font-size:10px;letter-spacing:.22em;
+  text-transform:uppercase;color:#5D6066;margin-bottom:8px}
+.auth-panel.light .auth-title{font-family:var(--f-display);font-weight:600;font-size:22px;
+  letter-spacing:-.01em;color:#0F1012}
+.auth-panel.light .auth-sub{color:#5D6066;font-size:13px}
+.auth-panel.light .auth-body{padding:20px 26px 24px}
+.auth-panel.light .auth-lab{font-family:var(--f-mono);font-weight:500;font-size:10px;
+  letter-spacing:.14em;color:#5D6066}
+.auth-panel.light .auth-input{background:#fff;border-color:#E1E1DD;color:#0F1012;
+  border-radius:10px;padding:11px 13px}
+.auth-panel.light .auth-input:focus{border-color:#0F1012}
+.auth-panel.light .auth-input::placeholder{color:#9a9da3}
+.auth-panel.light .auth-submit{background:#0D0D0E;color:#fff;border-radius:999px;font:600 14px var(--f-ui)}
+.auth-panel.light .auth-submit:hover:not(:disabled){background:#26262a;filter:none}
+.auth-panel.light .auth-err{color:#B23E33;background:rgba(210,73,62,.07);border-color:rgba(210,73,62,.35)}
+.auth-panel.light .auth-notice{color:#0E7A4D;background:rgba(19,149,94,.07);border-color:rgba(19,149,94,.3)}
+.auth-panel.light .auth-forgot{color:#5D6066}
+.auth-panel.light .auth-forgot:hover{color:#0F1012}
+.auth-panel.light .auth-pw-toggle{color:#9a9da3}
+.auth-panel.light .auth-pw-toggle:hover{color:#0F1012;background:#F1F1EE}
+.auth-panel.light .auth-switch{color:#5D6066}
+.auth-panel.light .auth-link{color:#0F1012;text-decoration:underline;text-underline-offset:2px}
+.auth-panel.light .auth-close{color:#5D6066}
+.auth-panel.light .auth-close:hover{color:#0F1012;background:#F1F1EE}
+.auth-panel.light .auth-plan{color:#0E7A4D;background:rgba(19,149,94,.08);border-color:rgba(19,149,94,.3)}
+.auth-panel.light .auth-plan-note{color:#5D6066}
 
 .acct-signin{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;
   background:var(--bg-4);border:1px solid var(--line-2);color:var(--txt-1);font:600 12px var(--f-ui);cursor:pointer}
@@ -2114,6 +2175,39 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
 .nb-key-link:hover{color:var(--txt-0)}
 /* Nano Banana model + aspect controls */
 .nb-controls{display:flex;flex-wrap:wrap;gap:18px;margin:-6px 0 16px;padding:0 2px}
+/* ---- fixed ENGINE DOCK (desktop) — Model / Aspect / Resolution always in reach.
+   A slim 54px column (the MUSE bubble's width), right edge, vertically centered,
+   floating ABOVE the layout (high z-index, no content clearance). Collapsed it
+   shows three summary chips; clicking opens a flyout panel to the left, styled
+   to the homepage system (Paper surface, hairlines, mono slate labels, ink-pill
+   active states). Below 1100px the in-flow controls keep working as before. */
+.nb-dock{display:none}
+@media (min-width:1100px){
+  .art-scroll .nb-controls{display:none}
+  .nb-dock{display:block;position:fixed;right:22px;top:50%;transform:translateY(-50%);z-index:120}
+  .nb-dock-toggle{display:flex;flex-direction:column;align-items:stretch;gap:5px;width:54px;
+    padding:7px 6px;cursor:pointer;background:var(--bg-2);border:1px solid var(--line-2);
+    border-radius:999px;box-shadow:0 8px 28px rgba(15,16,18,.14);transition:.15s}
+  .nb-dock-toggle:hover{border-color:var(--line-3);transform:translateY(-1px)}
+  .nb-dock.open .nb-dock-toggle{border-color:var(--txt-0)}
+  .nb-dock-chip{display:block;font-family:var(--f-mono);font-size:8.5px;font-weight:600;
+    letter-spacing:.03em;text-align:center;color:var(--txt-2);background:var(--bg-3);
+    border:1px solid var(--line);border-radius:999px;padding:5px 0;white-space:nowrap}
+  .nb-dock-chip.model{background:var(--txt-0);color:var(--bg-2);border-color:var(--txt-0)}
+  .nb-dock-panel{position:absolute;right:64px;top:50%;transform:translateY(-50%);width:236px;
+    background:var(--bg-2);border:1px solid var(--line-2);border-radius:14px;
+    padding:14px 14px 16px;box-shadow:var(--shadow-pop)}
+  .nb-dock .nb-controls{display:block;margin:0;padding:0}
+  .nb-dock .nb-ctl-mtoggle{display:none}
+  .nb-dock .nb-ctl-body{display:flex;flex-direction:column;align-items:stretch;gap:14px}
+  .nb-dock .nb-ctl{display:flex;flex-direction:column;align-items:stretch;gap:6px}
+  .nb-dock .nb-ctl-row{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+  .nb-dock .nb-ctl:first-child .nb-seg{flex-direction:column;align-items:stretch}
+  .nb-dock .nb-seg{flex-wrap:wrap}
+  .nb-dock .nb-seg-btn{flex:1 1 auto;text-align:center;padding:6px 8px}
+  .nb-dock .nb-ctl-lab{color:var(--txt-2)}
+  .nb-dock .nb-seg-btn.on{background:var(--txt-0);color:var(--bg-1);box-shadow:none}
+}
 .nb-ctl-body{display:flex;flex-wrap:wrap;gap:18px;align-items:center}
 /* mobile: collapse Model/Aspect/Resolution into a dropdown */
 .nb-ctl-mtoggle{display:none}
@@ -2479,6 +2573,8 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 
 /* ── Storyboard (3×3 scene pages) ──────────────────────────────────────── */
 .sb-scene{margin:0 0 26px}
+.sb-scene.collapsed{margin:0 0 12px}
+.sb-scene:not(.collapsed) .shot-scene-fold svg{transform:rotate(90deg)}
 .sb-scene-head{display:flex;align-items:center;gap:11px;margin:0 0 12px;padding:9px 13px;
   background:var(--bg-1);border:1px solid var(--line-2);border-radius:10px}
 .sb-scene-no{font-family:var(--f-display);font-weight:700;font-size:16px;color:var(--txt-0);
@@ -2697,6 +2793,19 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   background:var(--bg-3);border:1px solid var(--line-2);font-size:11px;line-height:1.4;color:var(--txt-2)}
 .shot-loc-note svg{flex:0 0 auto;color:var(--txt-3);margin-top:1px}
 @media (max-width:560px){ .shot-grammar-grid{grid-template-columns:1fr} }
+/* 9-up sheet pagination */
+.pager{display:flex;align-items:center;justify-content:center;gap:6px;margin:22px 0 4px}
+.pager-btn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;cursor:pointer;
+  border:1px solid var(--line-2);background:var(--bg-2);color:var(--txt-1);border-radius:999px;transition:.12s}
+.pager-btn:hover:not(:disabled){background:var(--bg-4);color:var(--txt-0)}
+.pager-btn:disabled{opacity:.4;cursor:default}
+.pager-num{min-width:30px;height:30px;padding:0 6px;cursor:pointer;border:1px solid transparent;background:transparent;
+  color:var(--txt-2);border-radius:999px;font:600 12px var(--f-ui);font-variant-numeric:tabular-nums;transition:.12s}
+.pager-num:hover{color:var(--txt-0);background:var(--bg-3)}
+.pager-num.on{background:var(--txt-0);color:var(--bg-1);border-color:var(--txt-0)}
+.pager-count{font-family:var(--f-mono);font-size:11px;color:var(--txt-2);padding:0 4px;font-variant-numeric:tabular-nums}
+.pager-note{margin-left:10px;font-family:var(--f-mono);font-size:10px;letter-spacing:.05em;color:var(--txt-3)}
+
 /* batch confirm choice bar */
 .batch-choice{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1 1 100%;
   margin-top:2px;padding:9px 11px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:8px}
@@ -2790,7 +2899,7 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   text-align:center;padding:40px}
 .art-soon-ic{width:64px;height:64px;border-radius:16px;display:grid;place-items:center;background:var(--bg-2);
   border:1px solid var(--line);color:var(--txt-2)}
-.art-soon-t{font-family:var(--f-display);font-size:18px;font-weight:600;color:var(--txt-0)}
+.art-soon-t{font-family:"Spectral",Georgia,serif;font-size:22px;font-weight:600;letter-spacing:-.01em;color:var(--txt-0)}
 .art-soon-d{font-size:13px;line-height:1.6;color:var(--txt-2);max-width:440px}
 .art-soon-tag{font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--pos);
   border:1px solid var(--pos-line);border-radius:20px;padding:4px 11px;margin-top:4px}
@@ -3109,118 +3218,246 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 }
 @keyframes premiumRise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
-/* ===================== Commercial landing page (signed-out) ===================== */
-.landing{position:fixed;inset:0;overflow-y:auto;background:var(--bg-0);color:var(--txt-0);
-  font-family:var(--f-ui);z-index:40;scroll-behavior:smooth}
+/* ===================== Commercial landing page (signed-out) =====================
+   Self-contained LIGHT editorial design: white page, near-black ink, a hairline-
+   framed content column, pill buttons (black primary), light-gray rounded cards.
+   Scoped to .landing — the app's dark theme is untouched. The value-charge
+   palette (--pos/--neg) is re-tuned here for a light background. */
+.landing{position:fixed;inset:0;overflow-y:auto;z-index:40;scroll-behavior:smooth;
+  /* ---- WEBSITE PALETTE — "Paper & Ink" ----------------------------------
+     Neutral paper layers + near-black ink, with the story's two charges as
+     the only colour. Every landing style reads from these tokens. */
+  --lpw-bg:#FCFCFB;            /* Paper — the page */
+  --lpw-glass:rgba(252,252,251,.86);  /* Paper, frosted — sticky nav */
+  --lpw-card:#F6F6F4;          /* Bone — card fill */
+  --lpw-card-2:#F1F1EE;        /* Bone, pressed — hovers & faint chart grid */
+  --lpw-line:#E8E8E5;          /* Hairline — page grid & rules */
+  --lpw-line-2:#E1E1DD;        /* Hairline, firm — control borders */
+  --lpw-ink:#0F1012;           /* Ink — headlines & primary text */
+  --lpw-ink-2:#3C3F44;         /* Ink, soft — list/body text on white */
+  --lpw-sub:#5D6066;           /* Slate — secondary text */
+  --lpw-black:#0D0D0E;         /* Carbon — primary buttons, featured plan */
+  --pos:#13955E;               /* Rise — the story turning up */
+  --pos-bright:#5AD398;        /* Rise, lit — green on Carbon */
+  --neg:#D2493E;               /* Fall — the story turning down */
+  --pos-line:rgba(19,149,94,.35);
+  --lpw-accent:#E0742B;        /* Reel — warm cinematic orange, the hero accent */
+  background:var(--lpw-bg);color:var(--lpw-ink);font-family:var(--f-ui)}
+.landing{overflow-x:hidden}
 .landing::-webkit-scrollbar{width:10px}
-.landing::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:8px}
+.landing::-webkit-scrollbar-thumb{background:#dededa;border-radius:8px}
 
-.lp-nav{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;
-  gap:16px;padding:16px clamp(18px,5vw,56px);background:color-mix(in srgb,var(--bg-0) 86%,transparent);
-  backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-.lp-brand{display:flex;flex-direction:column;line-height:1.1}
-.lp-logo{font-family:var(--f-display);font-weight:700;font-size:20px;letter-spacing:.16em;color:var(--txt-0)}
+/* full-height grid rails at the column edges — run through hero, sections and
+   footer; every full-width horizontal rule crosses them in a "+" intersection */
+.lp-page{position:relative}
+.lp-rails{position:absolute;inset:0;pointer-events:none}
+.lp-rails::before,.lp-rails::after{content:"";position:absolute;top:0;bottom:0;width:1px;background:var(--lpw-line)}
+.lp-rails::before{left:max(0px,calc((100% - 1280px)/2))}
+.lp-rails::after{right:max(0px,calc((100% - 1280px)/2))}
+
+.lp-nav{position:sticky;top:0;z-index:5;background:var(--lpw-glass);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--lpw-line)}
+/* rail segments INSIDE the sticky nav, at the same x as .lp-rails — so the
+   vertical lines visibly cross the header and meet its bottom rule in a "+" */
+.lp-nav::before,.lp-nav::after{content:"";position:absolute;top:0;bottom:0;width:1px;
+  background:var(--lpw-line);z-index:-1}
+.lp-nav::before{left:max(0px,calc((100% - 1280px)/2))}
+.lp-nav::after{right:max(0px,calc((100% - 1280px)/2))}
+/* nav content aligns with the page column — SAME max-width AND inner padding as the
+   hero, so the logo sits exactly on the headline's left edge */
+.lp-nav-in{max-width:1280px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;
+  gap:16px;padding:13px clamp(20px,4vw,48px)}
+.lp-brand{display:flex;align-items:baseline;gap:12px;line-height:1.1}
+.lp-logo{font-family:var(--f-display);font-weight:700;font-size:19px;letter-spacing:.14em;color:var(--lpw-ink)}
 .lp-logo.sm{font-size:15px}
-.lp-brand-sub{font-size:10.5px;color:var(--txt-2);letter-spacing:.02em;margin-top:2px}
 .lp-nav-cta{display:flex;align-items:center;gap:10px}
+/* hamburger — hidden on desktop, shown below 560px */
+.lp-burger{display:none;flex-direction:column;justify-content:center;gap:5px;width:38px;height:38px;
+  padding:0 9px;border:1px solid var(--lpw-line-2);border-radius:10px;background:#fff;cursor:pointer}
+.lp-burger span{display:block;height:1.5px;width:100%;background:var(--lpw-ink);border-radius:2px;transition:.2s}
+.lp-burger.open span:nth-child(1){transform:translateY(6.5px) rotate(45deg)}
+.lp-burger.open span:nth-child(2){opacity:0}
+.lp-burger.open span:nth-child(3){transform:translateY(-6.5px) rotate(-45deg)}
+.lp-menu{display:none}
 
+/* pill buttons — black primary, white outlined ghost */
 .lp-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;
-  font-family:var(--f-ui);font-size:13px;font-weight:600;border-radius:var(--r-m);padding:9px 16px;
-  border:1px solid var(--line-2);background:transparent;color:var(--txt-0);transition:.14s;white-space:nowrap}
-.lp-btn.ghost:hover{border-color:var(--line-1,var(--txt-2));background:var(--bg-2)}
-.lp-btn.primary{background:var(--pos);border-color:var(--pos);color:var(--bg-0)}
-.lp-btn.primary:hover{filter:brightness(1.08);transform:translateY(-1px)}
-.lp-btn.big{font-size:15px;padding:13px 24px}
+  font-family:var(--f-ui);font-size:13.5px;font-weight:600;border-radius:999px;padding:10px 20px;
+  border:1px solid var(--lpw-line-2);background:#fff;color:var(--lpw-ink);transition:.14s;white-space:nowrap}
+.lp-btn.ghost:hover{background:var(--lpw-card-2);border-color:#d6d6d1}
+.lp-btn.primary{background:var(--lpw-black);border-color:var(--lpw-black);color:#fff}
+.lp-btn.primary:hover{background:#26262a;transform:translateY(-1px)}
+.lp-btn.big{font-size:15px;padding:13px 26px}
 
-.lp-hero{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(24px,5vw,64px);align-items:center;
-  padding:clamp(40px,7vw,96px) clamp(18px,5vw,56px) clamp(36px,5vw,72px);max-width:1240px;margin:0 auto}
-.lp-eyebrow{font-family:var(--f-mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;
-  color:var(--pos);margin-bottom:18px}
-.lp-h1{font-family:var(--f-display);font-weight:700;font-size:clamp(32px,4.6vw,56px);line-height:1.05;
-  letter-spacing:-.01em;color:var(--txt-0);margin:0 0 18px}
-.lp-lede{font-size:clamp(15px,1.5vw,18px);line-height:1.6;color:var(--txt-1);max-width:34em;margin:0 0 28px}
-.lp-hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px}
-.lp-hero-note{font-size:12px;color:var(--txt-2)}
+/* the content column (features onward) — verticals come from the full-height
+   .lp-rails; horizontal dividers span the full viewport via section ::after */
+.lp-frame{max-width:1280px;margin:0 auto}
 
-.lp-hero-art{display:flex;justify-content:center}
-.lp-hero-card{width:100%;max-width:560px;background:var(--bg-1);border:1px solid var(--line-2);
-  border-radius:var(--r-l,18px);padding:18px 18px 8px;box-shadow:0 28px 70px rgba(0,0,0,.5)}
-.lp-hero-card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
-.lp-hero-card-t{font-family:var(--f-display);font-weight:600;font-size:14px;color:var(--txt-0)}
-.lp-legend{display:flex;gap:12px}
-.lp-key{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--txt-2)}
-.lp-key::before{content:"";width:8px;height:8px;border-radius:50%}
-.lp-key.pos::before{background:var(--pos)}
-.lp-key.neg::before{background:var(--neg)}
-.lp-spine{width:100%;height:230px;display:block}
-.lp-spine-mid{stroke:var(--line-2);stroke-width:1;stroke-dasharray:3 5}
-.lp-spine-line{stroke:var(--pos);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
-.lp-spine-dot{stroke:var(--bg-1);stroke-width:2}
-.lp-spine-dot.pos{fill:var(--pos)}
-.lp-spine-dot.neg{fill:var(--neg)}
+.lp-hero{display:grid;grid-template-columns:1.2fr .8fr;gap:clamp(28px,5vw,72px);align-items:end;
+  max-width:1280px;margin:0 auto;
+  padding:clamp(48px,7vw,104px) clamp(20px,4vw,48px) clamp(28px,3.5vw,48px)}
+/* hero title in Spectral — the same serif as the section headings, so the
+   logo (Space Grotesk) + headlines (Spectral) read as one paired system */
+.lp-h1{font-family:"Spectral",Georgia,serif;font-weight:600;font-size:clamp(34px,5.4vw,72px);line-height:1.04;
+  letter-spacing:-.01em;color:var(--lpw-ink);margin:0 0 30px}
+/* the rotating hero word — re-mounted each tick, so the entrance replays.
+   Reel orange + Spectral italic: a serif title-card word inside the headline,
+   the page's one warm accent. */
+.lp-rotate{display:inline-block;white-space:nowrap;color:var(--lpw-accent);
+  font-style:italic;font-weight:600;letter-spacing:-.01em;
+  animation:lp-word-in .38s cubic-bezier(.2,.7,.3,1)}
+@keyframes lp-word-in{from{opacity:0;transform:translateY(.35em)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){ .lp-rotate{animation:none} }
+.lp-lede{font-size:clamp(16px,1.5vw,18px);line-height:1.65;color:var(--lpw-sub);max-width:30em;margin:0}
+.lp-hero-aside{padding-bottom:8px}
+.lp-hero-cta{display:flex;flex-wrap:wrap;gap:12px}
 
-.lp-section{max-width:1180px;margin:0 auto;padding:clamp(36px,5vw,72px) clamp(18px,5vw,56px)}
-.lp-sec-head{text-align:center;margin-bottom:clamp(28px,4vw,48px)}
-.lp-h2{font-family:var(--f-display);font-weight:700;font-size:clamp(24px,3vw,36px);letter-spacing:-.01em;
-  color:var(--txt-0);margin:0 0 12px}
-.lp-sec-sub{font-size:15px;line-height:1.55;color:var(--txt-2);max-width:32em;margin:0 auto}
-.lp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.lp-card{background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-m);padding:22px;
-  display:flex;flex-direction:column;gap:11px;transition:.15s}
-.lp-card:hover{border-color:var(--line-2);transform:translateY(-3px);background:var(--bg-2)}
-.lp-card-ic{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;
-  background:var(--bg-3);color:var(--pos);border:1px solid var(--line-2)}
-.lp-card-t{font-family:var(--f-display);font-weight:600;font-size:16px;color:var(--txt-0)}
-.lp-card-b{font-size:13px;line-height:1.55;color:var(--txt-2)}
+/* hero media — the 21:9 short-film placeholder, a full-width rule closes the hero */
+.lp-hero-media{position:relative;max-width:1280px;margin:0 auto;padding:0 clamp(20px,4vw,48px) clamp(40px,5vw,72px)}
+.lp-hero-media::after,.lp-section::after{content:"";position:absolute;left:50%;bottom:0;
+  transform:translateX(-50%);width:100vw;height:1px;background:var(--lpw-line)}
+/* a cinema frame on Carbon: centered play, film tag bottom-left, ratio badge top-right.
+   When the film exists, drop a <video> in here (same frame, object-fit:cover). */
+.lp-video{position:relative;aspect-ratio:21/9;border-radius:16px;overflow:hidden;
+  background:var(--lpw-black);border:1px solid var(--lpw-line);
+  display:flex;align-items:center;justify-content:center}
+.lp-video-play{display:grid;place-items:center;width:68px;height:68px;border-radius:50%;cursor:pointer;
+  background:#fff;color:var(--lpw-black);border:0;transition:.16s}
+.lp-video-play svg{margin-left:3px}
+.lp-video-play:hover{transform:scale(1.06)}
+.lp-video-badge{position:absolute;right:18px;top:14px;color:rgba(255,255,255,.6);
+  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em}
+/* viewfinder dressing: corner brackets + a live 24fps timecode */
+.lp-video-corners{position:absolute;inset:14px;pointer-events:none}
+.lp-video-corners::before,.lp-video-corners::after{content:"";position:absolute;width:16px;height:16px;
+  border:0 solid rgba(255,255,255,.4)}
+.lp-video-corners::before{left:0;top:0;border-top-width:1.5px;border-left-width:1.5px}
+.lp-video-corners::after{right:0;bottom:0;border-bottom-width:1.5px;border-right-width:1.5px}
+.lp-video-corners.b::before{left:auto;right:0;border-left-width:0;border-right-width:1.5px}
+.lp-video-corners.b::after{right:auto;left:0;border-right-width:0;border-left-width:1.5px}
+.lp-video-tc{position:absolute;left:18px;top:14px;color:rgba(255,255,255,.6);
+  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.08em;font-variant-numeric:tabular-nums}
 
-.lp-section.steps{padding-top:0}
-.lp-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
-.lp-step{padding:22px;border-left:2px solid var(--pos-line)}
-.lp-step-n{font-family:var(--f-mono);font-size:13px;color:var(--pos);margin-bottom:10px}
-.lp-step-t{font-family:var(--f-display);font-weight:600;font-size:17px;color:var(--txt-0);margin-bottom:7px}
-.lp-step-d{font-size:13px;line-height:1.55;color:var(--txt-2)}
+.lp-section{position:relative;padding:clamp(48px,6vw,88px) clamp(20px,4vw,48px)}
+.lp-sec-head{text-align:center;margin-bottom:clamp(30px,4vw,52px)}
+/* act labels — the page reads like a screenplay's structure */
+.lp-act{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--lpw-sub);margin-bottom:14px}
+/* section titles use Spectral — the serif that complements the Space Grotesk
+   logo (geometric grotesk + editorial serif, the classic display pairing) */
+.lp-h2{font-family:"Spectral",Georgia,serif;font-weight:600;font-size:clamp(28px,3.5vw,46px);
+  letter-spacing:-.01em;color:var(--lpw-ink);margin:0 0 12px}
+.lp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.lp-card{background:var(--lpw-card);border:1px solid transparent;border-radius:16px;padding:26px 24px;
+  display:flex;flex-direction:column;gap:12px;transition:.15s}
+.lp-card:hover{background:var(--lpw-card-2)}
+.lp-card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px}
+.lp-card-no{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;color:#b9b7ae}
+.lp-card-ic{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;
+  background:#fff;color:var(--lpw-ink);border:1px solid var(--lpw-line)}
+.lp-card-t{font-family:var(--f-display);font-weight:600;font-size:17px;color:var(--lpw-ink)}
+.lp-card-b{font-size:14.5px;line-height:1.6;color:var(--lpw-sub)}
 
-.lp-final{text-align:center;padding:clamp(48px,7vw,96px) 24px;
-  background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--pos) 7%,transparent))}
-.lp-final-sub{font-size:15px;color:var(--txt-2);margin:10px 0 26px}
+.lp-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:0}
+.lp-step{padding:6px 28px 6px;border-left:1px solid var(--lpw-line)}
+.lp-step:first-child{padding-left:0;border-left:0}
+.lp-step-n{font-family:var(--f-mono);font-size:12.5px;color:var(--lpw-sub);margin-bottom:12px}
+.lp-step-t{font-family:var(--f-display);font-weight:600;font-size:19px;color:var(--lpw-ink);margin-bottom:8px}
+.lp-step-d{font-size:14.5px;line-height:1.6;color:var(--lpw-sub)}
 
-.lp-foot{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
-  padding:24px clamp(18px,5vw,56px);border-top:1px solid var(--line);color:var(--txt-2)}
-.lp-foot-note{font-size:11.5px}
+/* closing band — heading left, actions right */
+.lp-final{display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;
+  padding:clamp(40px,5vw,64px) clamp(20px,4vw,48px)}
+.lp-final .lp-h2{margin:0}
+.lp-final-cta{display:flex;gap:12px;flex-wrap:wrap}
+
+.lp-foot{border-top:1px solid var(--lpw-line);color:var(--lpw-sub)}
+/* fixed band height (not padding) so the MUSE bubble's vertical centering below is exact */
+.lp-foot-in{max-width:1280px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;
+  gap:16px;flex-wrap:wrap;height:76px;padding:0 clamp(20px,4vw,48px)}
+.lp-foot-links{display:flex;align-items:center;gap:26px}
+.lp-foot-link{font-size:12.5px;color:var(--lpw-sub);text-decoration:none;transition:.12s}
+.lp-foot-link:hover{color:var(--lpw-ink)}
+
+/* MUSE bubble on the landing — center it inside the bottom-right grid CELL (the
+   square the right rail and the footer rule carve out), so it belongs to the grid.
+   Math: the right gutter is (100vw − scrollbar − 1280px)/2 wide (the .landing
+   scrollbar is styled at 10px, so it takes real space); the bubble is 54px, the
+   footer band 76px. Center: right = 10px + gutter/2 − 27px, bottom = (76−54)/2.
+   Applied only when the gutter is wide enough to hold the bubble with breathing
+   room (≥1430px viewports) — below that it keeps its default floating spot. */
+@media (min-width:1430px){
+  .landing ~ .muse-dock-wrap{right:calc((100vw - 1290px)/4 - 17px);bottom:11px}
+}
 
 @media (max-width:880px){
-  .lp-hero{grid-template-columns:1fr;text-align:left}
-  .lp-grid{grid-template-columns:1fr 1fr}
-  .lp-steps{grid-template-columns:1fr}
+  .lp-rails,.lp-nav::before,.lp-nav::after{display:none}
+  .lp-hero{grid-template-columns:1fr;align-items:start;gap:24px}
+  .lp-hero-aside{padding-bottom:0}
+  .lp-grid{grid-template-columns:1fr 1fr;gap:12px}
+  .lp-steps{grid-template-columns:1fr;gap:22px}
+  .lp-step{border-left:0;padding:0}
+  .lp-final{flex-direction:column;align-items:flex-start;gap:20px}
 }
 @media (max-width:560px){
   .lp-grid{grid-template-columns:1fr}
-  .lp-brand-sub{display:none}
+  /* nav: logo + hamburger; the inline CTAs move into the dropdown menu */
+  .lp-nav-in{padding:11px 18px}
+  .lp-nav-cta .lp-btn{display:none}
+  .lp-burger{display:flex}
+  .lp-menu{display:flex;flex-direction:column;gap:8px;padding:12px 18px 16px;border-top:1px solid var(--lpw-line);
+    background:var(--lpw-glass);backdrop-filter:blur(10px);animation:lp-word-in .22s ease}
+  .lp-menu-item{width:100%;text-align:center;cursor:pointer;border:1px solid var(--lpw-line-2);background:#fff;
+    color:var(--lpw-ink);border-radius:999px;padding:12px 18px;font:600 14.5px var(--f-ui)}
+  .lp-menu-item.primary{background:var(--lpw-black);border-color:var(--lpw-black);color:#fff}
+  .lp-btn{padding:9px 15px;font-size:13px}
+  .lp-btn.big{padding:13px 20px;font-size:14.5px}
+  /* a touch smaller play button on phones */
+  .lp-video-play{width:54px;height:54px}
+  .lp-video-play svg{width:18px;height:18px}
+  /* hero: tighter top, full-width stacked CTAs */
+  .lp-hero{padding-top:36px;padding-bottom:22px}
+  .lp-hero-cta{flex-direction:column;align-items:stretch;gap:10px}
+  .lp-hero-cta .lp-btn{width:100%}
+  .lp-lede{font-size:15.5px}
+  /* sections: a touch less air, comfortable card padding */
+  .lp-section{padding:44px 20px}
+  .lp-act{margin-bottom:11px}
+  .lp-card{padding:22px 20px}
+  /* pricing + footer stack cleanly */
+  .lp-tier{padding:24px 20px}
+  .lp-foot-in{flex-direction:column;align-items:flex-start;gap:14px;padding:24px 20px}
+  .lp-foot-links{gap:22px}
 }
 
 .lp-splash{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:16px;background:var(--bg-0);color:var(--txt-0)}
-.lp-splash .lp-logo{font-family:var(--f-display);font-weight:700;font-size:24px;letter-spacing:.18em;opacity:.85}
-.lp-splash-dot{width:8px;height:8px;border-radius:50%;background:var(--pos);animation:muse-orbpulse 1s ease-in-out infinite}
+  gap:16px;background:#fcfcfb;color:#0f1012}
+.lp-splash .lp-logo{font-family:var(--f-display);font-weight:700;font-size:24px;letter-spacing:.18em;opacity:.9;color:#0f1012}
+.lp-splash-dot{width:8px;height:8px;border-radius:50%;background:#13955e;animation:muse-orbpulse 1s ease-in-out infinite}
 
-/* Landing — pricing tiers */
-.lp-tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;align-items:stretch;max-width:1000px;margin:0 auto}
-.lp-tier{position:relative;background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-m);
-  padding:26px 22px;display:flex;flex-direction:column;gap:14px}
-.lp-tier.featured{border-color:var(--pos);background:var(--bg-2);box-shadow:0 18px 50px rgba(0,0,0,.45)}
-.lp-tier-tag{position:absolute;top:-11px;left:50%;transform:translateX(-50%);white-space:nowrap;
-  font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--bg-0);
-  background:var(--pos);padding:4px 11px;border-radius:20px}
-.lp-tier-name{font-family:var(--f-display);font-weight:600;font-size:17px;color:var(--txt-0)}
+/* Landing — pricing tiers (white hairline cards; the featured plan inverts to black) */
+.lp-tiers{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:stretch;max-width:1020px;margin:0 auto}
+.lp-tier{position:relative;background:#fff;border:1px solid var(--lpw-line);border-radius:18px;
+  padding:28px 24px;display:flex;flex-direction:column;gap:14px}
+.lp-tier.featured{background:var(--lpw-black);border-color:var(--lpw-black);color:#fff;box-shadow:0 18px 44px rgba(15,16,18,.18)}
+.lp-tier-tag{position:absolute;top:-12px;left:50%;transform:translateX(-50%);white-space:nowrap;
+  font-family:var(--f-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#0d0d0e;
+  background:#fff;border:1px solid #d9d9d4;padding:4px 12px;border-radius:20px}
+.lp-tier-name{font-family:var(--f-display);font-weight:600;font-size:17px;color:var(--lpw-ink)}
 .lp-tier-price{display:flex;align-items:baseline;gap:6px}
-.lp-tier-amt{font-family:var(--f-display);font-weight:700;font-size:34px;color:var(--txt-0)}
-.lp-tier-per{font-size:12px;color:var(--txt-2)}
-.lp-tier-blurb{font-size:13px;color:var(--txt-1)}
+.lp-tier-amt{font-family:var(--f-display);font-weight:600;font-size:36px;letter-spacing:-.02em;color:var(--lpw-ink)}
+.lp-tier-per{font-size:12px;color:var(--lpw-sub)}
+.lp-tier-blurb{font-size:14.5px;color:var(--lpw-sub)}
 .lp-tier-feats{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:9px;flex:1}
-.lp-tier-feats li{display:flex;align-items:flex-start;gap:8px;font-size:13px;line-height:1.45;color:var(--txt-1)}
+.lp-tier-feats li{display:flex;align-items:flex-start;gap:8px;font-size:14px;line-height:1.5;color:var(--lpw-ink-2)}
 .lp-tier-feats li svg{flex:none;margin-top:2px;color:var(--pos)}
+.lp-tier.featured .lp-tier-name,.lp-tier.featured .lp-tier-amt{color:#fff}
+.lp-tier.featured .lp-tier-per,.lp-tier.featured .lp-tier-blurb{color:rgba(255,255,255,.62)}
+.lp-tier.featured .lp-tier-feats li{color:rgba(255,255,255,.84)}
+.lp-tier.featured .lp-tier-feats li svg{color:var(--pos-bright)}
+.lp-tier.featured .lp-btn.primary{background:#fff;border-color:#fff;color:var(--lpw-black)}
+.lp-tier.featured .lp-btn.primary:hover{background:#ececea}
 .lp-btn.full{width:100%;justify-content:center;margin-top:4px}
-.lp-pricing-note{text-align:center;font-size:11px;color:var(--txt-2);margin-top:18px;opacity:.7}
 @media (max-width:880px){ .lp-tiers{grid-template-columns:1fr;max-width:420px} }
 
 /* auth modal — chosen-plan badge (from landing pricing CTA) */

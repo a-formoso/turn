@@ -11,10 +11,10 @@
 <script>
 /* Set appearance before first paint — avoids a flash and a load-time transition. */
 (function(){try{
-  var m=localStorage.getItem("turn-theme")||"dark";
+  var m=localStorage.getItem("turn-theme")||"light";
   var eff=m==="system"?((window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light"):m;
   document.documentElement.dataset.theme=eff;
-}catch(e){document.documentElement.dataset.theme="dark";}})();
+}catch(e){document.documentElement.dataset.theme="light";}})();
 </script>
 </head>
 <body>

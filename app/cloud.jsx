@@ -33,6 +33,10 @@ async function cloudSignOut(){
   const sb = sbClient(); if(!sb) return;
   try{ await sb.auth.signOut(); }catch(e){}
 }
+async function cloudResetPassword(email){
+  const sb = sbClient(); if(!sb) return { error:{ message:"Cloud not configured." } };
+  return sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+}
 async function cloudGetSession(){
   const sb = sbClient(); if(!sb) return null;
   try{ const { data } = await sb.auth.getSession(); return data ? data.session : null; }catch(e){ return null; }
@@ -49,6 +53,7 @@ function cloudUserId(session){ return session && session.user ? session.user.id 
 window.cloudSignUp = cloudSignUp;
 window.cloudSignIn = cloudSignIn;
 window.cloudSignOut = cloudSignOut;
+window.cloudResetPassword = cloudResetPassword;
 window.cloudGetSession = cloudGetSession;
 window.cloudOnAuth = cloudOnAuth;
 window.cloudUserEmail = cloudUserEmail;

@@ -112,22 +112,23 @@ function ViewNav({ room, view, setView, artView, setArtView, railOpen, inspOpen,
         title:"Story Editors — AI agents that refine your story: Story Doctor, Continuity Repair, Table-Read"},
         React.createElement(Icon.robot,{s:14}),React.createElement("span",{className:"vn-cta-lab"},"Story Editors")));
   return React.createElement("div",{className:"viewnav","aria-label":"Views"},
-    // LEFT zone — story-panel toggle (Writers' Room); empty in the Art Room. Balances the
-    // right zone so the tab strip stays horizontally centered in both rooms.
+    // LEFT zone — story-panel toggle. DRAWER MODES ONLY (hidden ≥1100px via CSS):
+    // on desktop the panels collapse/expand from inside (panel-collapse / CollapsedStrip).
     React.createElement("div",{className:"vn-side vn-left"},
-      !inArt && React.createElement("button",{className:`tb-icon ${railOpen?"on":""}`,onClick:onToggleRail,title:"Toggle story panel"},
+      !inArt && React.createElement("button",{className:`tb-icon vn-paneltoggle ${railOpen?"on":""}`,onClick:onToggleRail,title:"Toggle story panel"},
         React.createElement(Icon.panelLeft,{s:16}))),
-    // CENTER — the room's view tabs, always centered
-    React.createElement("div",{className:"segmented"},
-      nav.map(([id,lab,Ic])=>
-        React.createElement("button",{key:id,className:`seg ${cur===id?"on":""}`,onClick:()=>setCur(id),
-          title:(inArt && staleTabs && staleTabs[id]) ? (lab+" — the Lookbook changed since this was drafted") : lab},
-          React.createElement(Ic,{s:14}),React.createElement("span",{className:"seg-lab"},lab),
-          (inArt && staleTabs && staleTabs[id]) && React.createElement("span",{className:"seg-stale-dot"})))),
-    // RIGHT zone — the room's agent CTA, plus the inspector toggle (Writers' Room)
+    // CENTER — the room's view tabs WITH the room's agent CTA, centered as one unit
+    React.createElement("div",{className:"vn-center"},
+      React.createElement("div",{className:"segmented"},
+        nav.map(([id,lab,Ic])=>
+          React.createElement("button",{key:id,className:`seg ${cur===id?"on":""}`,onClick:()=>setCur(id),
+            title:(inArt && staleTabs && staleTabs[id]) ? (lab+" — the Lookbook changed since this was drafted") : lab},
+            React.createElement(Ic,{s:14}),React.createElement("span",{className:"seg-lab"},lab),
+            (inArt && staleTabs && staleTabs[id]) && React.createElement("span",{className:"seg-stale-dot"})))),
+      cta),
+    // RIGHT zone — the inspector toggle, drawer modes only (balances the left zone)
     React.createElement("div",{className:"vn-side vn-right"},
-      cta,
-      !inArt && React.createElement("button",{className:`tb-icon ${inspOpen?"on":""}`,onClick:onToggleInsp,title:"Toggle inspector"},
+      !inArt && React.createElement("button",{className:`tb-icon vn-paneltoggle ${inspOpen?"on":""}`,onClick:onToggleInsp,title:"Toggle inspector"},
         React.createElement(Icon.panelRight,{s:16}))));
 }
 window.ViewNav = ViewNav;
@@ -140,7 +141,7 @@ const ROOMS = [
 ];
 window.ROOMS = ROOMS;
 
-function RoomSwitcher({ room, setRoom }){
+function RoomSwitcher({ room, setRoom, hasStory }){
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
   React.useEffect(()=>{
@@ -148,6 +149,8 @@ function RoomSwitcher({ room, setRoom }){
     document.addEventListener("mousedown",h); return ()=>document.removeEventListener("mousedown",h);
   },[]);
   const cur = ROOMS.find(r=>r.id===room) || ROOMS[0];
+  // until a story exists, every room downstream of the Writers' Room is locked
+  const locked = (r)=> r.live && r.id!=="writers" && !hasStory;
   return React.createElement("div",{className:"room-switch",ref},
     React.createElement("button",{className:"room-btn",onClick:()=>setOpen(o=>!o)},
       React.createElement("span",{className:"room-btn-ic"},React.createElement(Icon[cur.icon]||Icon.script,{s:14})),
@@ -159,16 +162,19 @@ function RoomSwitcher({ room, setRoom }){
       React.createElement("div",{className:"room-menu-h"},"Production pipeline"),
       ROOMS.map((r,i)=>
         React.createElement("button",{key:r.id,
-          className:`room-item ${room===r.id?"on":""} ${r.live?"":"soon"}`,
+          className:`room-item ${room===r.id?"on":""} ${(r.live&&!locked(r))?"":"soon"}`,
+          title: locked(r) ? "Create a story first — this room works on your story" : undefined,
           onClick:()=>{ if(r.live){ setRoom(r.id); setOpen(false); } }},
           React.createElement("span",{className:"room-item-no"},i+1),
           React.createElement("span",{className:"room-item-ic"},React.createElement(Icon[r.icon]||Icon.script,{s:15})),
           React.createElement("span",{className:"room-item-t"},
             React.createElement("span",{className:"room-item-name"},r.label),
             React.createElement("span",{className:"room-item-phase"},r.phase)),
-          r.live
-            ? (room===r.id && React.createElement("span",{className:"room-item-dot"}))
-            : React.createElement("span",{className:"room-item-soon"},"Soon")))));
+          !r.live
+            ? React.createElement("span",{className:"room-item-soon"},"Soon")
+            : locked(r)
+              ? React.createElement("span",{className:"room-item-soon"},"Needs a story")
+              : (room===r.id && React.createElement("span",{className:"room-item-dot"}))))));
 }
 
 function ThemeToggle({ theme, onTheme }){
@@ -192,10 +198,10 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
         React.createElement(BrandMark,null),
         React.createElement("span",{className:"brand-name"},"T",React.createElement("b",null,"U"),"RN")),
       React.createElement("div",{className:"topbar-divider"}),
-      // project title first, then the department (room) switcher
+      // the department (room) switcher first, then the project title
       React.createElement("div",{className:"context-group"},
-        projectSlot || null,
-        React.createElement(RoomSwitcher,{room,setRoom}))),
+        React.createElement(RoomSwitcher,{room,setRoom,hasStory:(scenes||[]).length>0}),
+        projectSlot || null)),
 
     React.createElement("div",{className:"tb-right"},
       React.createElement(ThemeToggle,{theme,onTheme}),

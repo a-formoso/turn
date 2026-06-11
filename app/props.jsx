@@ -390,6 +390,8 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
     || (p.name||"").toLowerCase().indexOf(q)>=0
     || (p.ownerName||"").toLowerCase().indexOf(q)>=0;
   const shown = (sceneFilter ? list.filter(p=>inScene(p, sceneFilter)) : list).filter(matchesQuery);
+  // 9-up pagination; suspended while a batch runs so the queue can reach every card
+  const pager = usePager(shown.length, !!batchActiveId);
   // duplicate detection: map each prop id -> the set of ids it duplicates (same owner + object)
   const dupSets = (typeof findDuplicateProps==="function") ? findDuplicateProps(list) : {};
   const dupForId = {}; Object.values(dupSets).forEach(ids=> ids.forEach(id=>{ dupForId[id]=ids; }));
@@ -472,16 +474,13 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
         React.createElement("div",{style:{flex:1}},
           React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Props Master",
             React.createElement(window.InfoTip,{label:"About Props",
-              text:"Continuity objects \u2014 the things characters wear and carry, plus the set dressing the camera sees. Each gets its own multi-view reference sheet so the object stays identical in every shot. 'Master the props' runs the Props Master agent: on its own it derives every prop the script names (cast-owned + set dressing in the action), drafts each spec, dedups near-duplicates, and generates the sheets \u2014 run it before the cast so their props exist to reference. 'Draft all props' + 'Generate all props' stay as the manual paths."}))),
+              text:"Continuity objects \u2014 the things characters wear and carry, plus the set dressing the camera sees. Each gets its own multi-view reference sheet so the object stays identical in every shot. 'Design all props' builds every prop from the story in one pass \u2014 pulls missing items from the cast, drafts each spec, and maps every prop to its scenes; 'Generate all props' then renders the sheets."}))),
         React.createElement("div",{className:"art-intro-actions"},
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add prop"),
-          onPropsMaster && React.createElement("button",{className:"art-draftall",onClick:onPropsMaster,
-            title:"Props Master \u2014 derives every prop (cast-owned + set dressing named in the action), drafts each spec, dedups near-duplicates, and generates the reference sheets, on its own"},
-            React.createElement(Icon.robot,{s:14}),"Master the props"),
           React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!castHasProps),onClick:onDraftAll,
             title:"Build every prop from the story in one pass \u2014 pull missing items from the cast, draft each spec (object, significance, look dev) from the script, and map every prop to the scenes it appears in"},
-            React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Draft all props"),
+            React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all props"),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the reference sheet for every drafted prop \u2014 you choose whether to redo ones that already have a sheet"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all props")))),
@@ -516,12 +515,14 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
         batchActiveId?"Generating\u2026":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0"))))),
     list.length
       ? (shown.length
-          ? React.createElement("div",{className:"sheet-grid"},
-              shown.map(p=>React.createElement(PropSheet,{key:p.id,p,project,characters,scenes,onUpdate,onDelete,onDraft,
-                drafting:draftingId===p.id||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
-                batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
-                onTagOne,taggingScene:taggingSceneId===p.id,
-                dupIds:dupForId[p.id],onMerge:onMergeProps})))
+          ? React.createElement(React.Fragment,null,
+              React.createElement("div",{className:"sheet-grid"},
+                pager.slice(shown).map(p=>React.createElement(PropSheet,{key:p.id,p,project,characters,scenes,onUpdate,onDelete,onDraft,
+                  drafting:draftingId===p.id||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
+                  batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
+                  onTagOne,taggingScene:taggingSceneId===p.id,
+                  dupIds:dupForId[p.id],onMerge:onMergeProps}))),
+              React.createElement(PagerBar,{pager,noun:"prop"}))
           : q
             ? React.createElement("div",{className:"prop-empty"},
                 React.createElement("div",{className:"art-soon-ic"},React.createElement(Icon.search,{s:28})),
@@ -532,17 +533,17 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
                 React.createElement("button",{className:"art-draftall",style:{marginTop:16},onClick:()=>setQuery("")},"Clear search"))
             : React.createElement("div",{className:"prop-empty"},
                 React.createElement("div",{className:"art-soon-t"},"No props appear in this scene"),
-                React.createElement("div",{className:"art-soon-d"},"Nothing the cast wears or carries was found in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")+". Try another scene, or run \u201cDraft all props\u201d to re-map."),
+                React.createElement("div",{className:"art-soon-d"},"Nothing the cast wears or carries was found in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")+". Try another scene, or run \u201cDesign all props\u201d to re-map."),
                 React.createElement("button",{className:"art-draftall",style:{marginTop:16},onClick:()=>setSceneFilter("")},"Show all props")))
       : React.createElement("div",{className:"prop-empty"},
           React.createElement("div",{className:"art-soon-ic"},React.createElement(Icon.box,{s:30})),
           React.createElement("div",{className:"art-soon-t"},"No props yet"),
           React.createElement("div",{className:"art-soon-d"}, castHasProps
-            ? "Your cast already lists worn & carried items on their character sheets \u2014 \u201cDraft all props\u201d pulls them in, drafts each spec, and maps their scenes in one pass. Or add one by hand."
+            ? "Your cast already lists worn & carried items on their character sheets \u2014 \u201cDesign all props\u201d pulls them in, drafts each spec, and maps their scenes in one pass. Or add one by hand."
             : "Add a prop to start building its reference sheet \u2014 a weapon, a phone, a talisman, anything that recurs across scenes."),
           React.createElement("div",{style:{display:"flex",gap:8,marginTop:16}},
             castHasProps && React.createElement("button",{className:"art-draftall",disabled:draftingAll,onClick:onDraftAll},
-              React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Draft all props"),
+              React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all props"),
             React.createElement("button",{className:castHasProps?"art-draftall ghost":"art-draftall",onClick:onAdd},
               React.createElement(Icon.plus,{s:14}),castHasProps?"Add by hand":"Add your first prop"))));
 }

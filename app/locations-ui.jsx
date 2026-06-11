@@ -234,6 +234,8 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
   const sceneList = (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
   const inScene = (l, sid)=> Array.isArray(l.scenes) && l.scenes.indexOf(sid)>=0;
   const shown = sceneFilter ? list.filter(l=>inScene(l, sceneFilter)) : list;
+  // 9-up pagination; suspended while a batch runs so the queue can reach every card
+  const pager = usePager(shown.length, !!batchActiveId);
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s?s.no:sid; };
 
   // ---- batch generation ---- (eligible = drafted locations only; the spec is what
@@ -263,16 +265,13 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
         React.createElement("div",{style:{flex:1}},
           React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Production Designer (Location Scout)",
             React.createElement(window.InfoTip,{label:"About Locations",
-              text:"Every place the film visits, pulled straight from the script's sluglines. Each gets a multi-angle coverage plate \u2014 the same space from several views \u2014 so any shot set there matches its geometry, materials and light. 'Scout the locations' runs the Location Scout agent: on its own it pulls every place from the sluglines, drafts each one's spec + depth-grid staging, generates the plate, and adds the time-of-day variants the script calls for \u2014 plus a coverage check that flags any scene whose slugline location has no card yet. 'Draft all locations' + 'Generate all locations' stay as the manual paths."}))),
+              text:"Every place the film visits, pulled straight from the script's sluglines. Each gets a multi-angle coverage plate \u2014 the same space from several views \u2014 so any shot set there matches its geometry, materials and light. 'Design all locations' builds every place in one pass \u2014 pulls them from the sluglines, drafts each spec, and stages its depth grid; 'Generate all locations' then renders the plates."}))),
         React.createElement("div",{className:"art-intro-actions"},
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add location"),
-          onScout && React.createElement("button",{className:"art-draftall",onClick:onScout,
-            title:"Location Scout \u2014 pulls every place from the sluglines, drafts each spec + depth-grid staging, generates the plate, and adds the time-of-day variants the script needs, on its own"},
-            React.createElement(Icon.robot,{s:14}),"Scout the locations"),
           React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!scriptHasLocs),onClick:onDraftAll,
             title:"Build every location from the story in one pass \u2014 pull any missing places from the script's sluglines, draft each spec (the space, significance, look dev), and stage its depth grid"},
-            React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Draft all locations"),
+            React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all locations"),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the coverage plate for every drafted location \u2014 you choose whether to redo ones that already have a plate"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all locations"))),),
@@ -294,11 +293,13 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
         batchActiveId?"Generating\u2026":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")))),
     list.length
       ? (shown.length
-          ? React.createElement("div",{className:"sheet-grid"},
-              shown.map(l=>React.createElement(LocationSheet,{key:l.id,l,project,scenes,onUpdate,onDelete,onDraft,
-                drafting:draftingId===l.id||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
-                batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
-                onDraftStaging,draftingStage:draftingStageId===l.id})))
+          ? React.createElement(React.Fragment,null,
+              React.createElement("div",{className:"sheet-grid"},
+                pager.slice(shown).map(l=>React.createElement(LocationSheet,{key:l.id,l,project,scenes,onUpdate,onDelete,onDraft,
+                  drafting:draftingId===l.id||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
+                  batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
+                  onDraftStaging,draftingStage:draftingStageId===l.id}))),
+              React.createElement(PagerBar,{pager,noun:"location"}))
           : React.createElement("div",{className:"prop-empty"},
               React.createElement("div",{className:"art-soon-t"},"No locations in this scene"),
               React.createElement("button",{className:"art-draftall",style:{marginTop:16},onClick:()=>setSceneFilter("")},"Show all locations")))
@@ -306,11 +307,11 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
           React.createElement("div",{className:"art-soon-ic"},React.createElement(Icon.layers,{s:30})),
           React.createElement("div",{className:"art-soon-t"},"No locations yet"),
           React.createElement("div",{className:"art-soon-d"}, scriptHasLocs
-            ? "Your script's scene sluglines name the places this story visits \u2014 \u201cDraft all locations\u201d pulls them in, drafts each spec, and stages its depth grid in one pass. Or add one by hand."
+            ? "Your script's scene sluglines name the places this story visits \u2014 \u201cDesign all locations\u201d pulls them in, drafts each spec, and stages its depth grid in one pass. Or add one by hand."
             : "Add a location to start building its reference plate \u2014 a room, a street, a world."),
           React.createElement("div",{style:{display:"flex",gap:8,marginTop:16}},
             scriptHasLocs && React.createElement("button",{className:"art-draftall",disabled:draftingAll,onClick:onDraftAll},
-              React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Draft all locations"),
+              React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all locations"),
             React.createElement("button",{className:scriptHasLocs?"art-draftall ghost":"art-draftall",onClick:onAdd},
               React.createElement(Icon.plus,{s:14}),scriptHasLocs?"Add by hand":"Add your first location"))));
 }

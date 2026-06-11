@@ -449,6 +449,36 @@ function useBatchGen(){
 }
 window.useBatchGen = useBatchGen;
 
+/* ---- shared 9-up PAGINATION for the sheet grids (Props / Characters / Locations).
+   `suspend` (e.g. while a batch is running) shows EVERYTHING — the batch queue
+   advances by watching mounted cards, so paging mustn't unmount its targets. */
+const SHEETS_PER_PAGE = 9;
+function usePager(total, suspend){
+  const [page, setPage] = React.useState(0);
+  const pages = Math.max(1, Math.ceil(total/SHEETS_PER_PAGE));
+  React.useEffect(()=>{ if(page > pages-1) setPage(Math.max(0, pages-1)); },[pages, page]);
+  const slice = (arr)=> (suspend || total<=SHEETS_PER_PAGE) ? arr
+    : arr.slice(page*SHEETS_PER_PAGE, (page+1)*SHEETS_PER_PAGE);
+  return { page, setPage, pages, slice, active: !suspend && total>SHEETS_PER_PAGE, total };
+}
+function PagerBar({ pager, noun }){
+  if(!pager || !pager.active) return null;
+  const { page, setPage, pages, total } = pager;
+  const go = (p)=> setPage(Math.max(0, Math.min(pages-1, p)));
+  const nums = [];
+  for(let i=0;i<pages;i++) nums.push(i);
+  return React.createElement("div",{className:"pager"},
+    React.createElement("button",{className:"pager-btn",disabled:page===0,onClick:()=>go(page-1),"aria-label":"Previous page"},
+      React.createElement(Icon.chevL,{s:13})),
+    pages<=9
+      ? nums.map(i=>React.createElement("button",{key:i,className:"pager-num"+(i===page?" on":""),onClick:()=>go(i)}, i+1))
+      : React.createElement("span",{className:"pager-count"},(page+1)+" / "+pages),
+    React.createElement("button",{className:"pager-btn",disabled:page===pages-1,onClick:()=>go(page+1),"aria-label":"Next page"},
+      React.createElement(Icon.chevR,{s:13})),
+    React.createElement("span",{className:"pager-note"}, total+" "+(noun||"card")+(total!==1?"s":"")));
+}
+window.usePager = usePager; window.PagerBar = PagerBar;
+
 /* shared batch status / choice strip — render just under a tab's toolbar. `noun`
    is the singular card noun ("prop" / "character" / "location"). */
 function BatchBar({ batch, noun }){
@@ -1444,10 +1474,11 @@ function NbKeyBar(){
   // Proxied providers run server-side — the browser holds no key. Show an
   // informational strip instead of a key input. (Always for GPT Image; for Nano
   // Banana only when the image proxy is enabled.)
-  if(proxied) return React.createElement("div",{className:"nb-keybar set"},
+  // operator info only — the admin account sees the strip; everyone else nothing
+  if(proxied) return window.turnIsAdmin ? React.createElement("div",{className:"nb-keybar set"},
     React.createElement(Icon.check,{s:13}),
     React.createElement("span",null,label+" runs on your server"),
-    React.createElement("span",{className:"nb-key-note"},"\u00b7 no key needed in the browser; sign in to use it"));
+    React.createElement("span",{className:"nb-key-note"},"\u00b7 no key needed in the browser; sign in to use it")) : null;
   if(!editing && key) return React.createElement("div",{className:"nb-keybar set"},
     React.createElement(Icon.check,{s:13}),
     React.createElement("span",null,label+" connected"),
@@ -1549,6 +1580,40 @@ function NbControls(){
           onClick:()=>{ setResv(r); nbSetRes(r); }},r))))));
 }
 
+/* ENGINE DOCK — a compact floating widget in the MUSE bubble's 54px right-edge
+   column, vertically centered, floating ABOVE the layout (no content clearance).
+   Collapsed: three stacked chips summarising Model / Aspect / Resolution.
+   Click: a flyout panel (opens leftward) with the full NbControls. */
+function NbDock(){
+  const [open, setOpen] = React.useState(false);
+  const [, force] = React.useState(0);
+  const ref = React.useRef(null);
+  React.useEffect(()=>{
+    const h = ()=> force(x=>x+1);
+    window.addEventListener("nb-model-changed", h);
+    return ()=>window.removeEventListener("nb-model-changed", h);
+  },[]);
+  React.useEffect(()=>{
+    if(!open) return;
+    const h = e=>{ if(ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return ()=>document.removeEventListener("mousedown", h);
+  },[open]);
+  const model  = (typeof nbGetModel==="function") ? nbGetModel() : "";
+  const aspect = (typeof nbGetAspect==="function") ? nbGetAspect() : "16:9";
+  const resv   = (typeof nbGetRes==="function") ? nbGetRes() : "2K";
+  const short  = /pro/i.test(model) ? "PRO" : /gpt/i.test(model) ? "GPT" : "NB2";
+  return React.createElement("div",{className:"nb-dock"+(open?" open":""),ref:ref,"aria-label":"Image engine settings"},
+    React.createElement("button",{className:"nb-dock-toggle","aria-expanded":open?"true":"false",
+      title:"Image engine — model, aspect & resolution",onClick:()=>setOpen(o=>!o)},
+      React.createElement("span",{className:"nb-dock-chip model"},short),
+      React.createElement("span",{className:"nb-dock-chip"},aspect),
+      React.createElement("span",{className:"nb-dock-chip"},resv)),
+    // clicks inside the panel re-render the dock so the summary chips stay fresh
+    open && React.createElement("div",{className:"nb-dock-panel",onClick:()=>force(x=>x+1)},
+      React.createElement(NbControls,null)));
+}
+
 function ImageLightbox({ url, character, onClose }){
   const [res, setRes] = React.useState(()=> (typeof nbGetRes==="function") ? nbGetRes() : "2K");
   const [busy, setBusy] = React.useState(false);
@@ -1602,6 +1667,8 @@ function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, 
   }, [scenes, shots, beatsMap, list]);
   const inScene = (c, sid)=> !!(charsInSceneMap[sid] && charsInSceneMap[sid].has(c.id));
   const shown = sceneFilter ? list.filter(c=>inScene(c, sceneFilter)) : list;
+  // 9-up pagination; suspended while a batch runs so the queue can reach every card
+  const charPager = usePager(shown.length, !!batchActiveId);
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s?s.no:sid; };
   const draftedIds = (subset)=> subset.filter(c=>charVisualsDrafted(c)).map(c=>c.id);
   // eligible = drafted characters only (so a card with no look/wardrobe never makes a generic sheet)
@@ -1692,10 +1759,11 @@ function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, 
     window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,label:"these characters",dept:"characters"}),
     BatchBar && React.createElement(BatchBar,{batch,noun:"character"}),
     React.createElement("div",{className:"sheet-grid"},
-      shown.map(c=>React.createElement(CharacterSheet,{key:c.id,c,project,scenes,props,onUpdate,onDraft,
+      charPager.slice(shown).map(c=>React.createElement(CharacterSheet,{key:c.id,c,project,scenes,props,onUpdate,onDraft,
         drafting:draftingId===c.id||(draftingIds||[]).indexOf(c.id)>=0,onView:(url,ch)=>setView({url,character:ch}),
         batchActiveId,onBatchDone:batch.advance,onDelete:onDelete,
-        onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem}))));
+        onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem}))),
+    React.createElement(PagerBar,{pager:charPager,noun:"character"}));
 }
 
 function ArtComingSoon({ tab }){
@@ -1746,6 +1814,9 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
   },[artView, projId, (characters||[]).length, (props||[]).length, (locations||[]).length, (shots||[]).length, (lookbook||[]).length]);
 
   return React.createElement("div",{className:"artroom"},
+    // fixed engine dock — Model / Aspect / Resolution, always reachable while
+    // scrolling (desktop only; below 1100px the in-flow controls remain)
+    React.createElement(NbDock,null),
     artView==="lookbook" && LookbookView
       ? React.createElement(LookbookView,{project,lookbook,note:lookbookNote,
           onUpdate:onUpdateLookbook,onAdd:onAddLookbook,onDelete:onDeleteLookbook,onSetNote:onSetLookbookNote,onResearch,onClear:onClearLookbook})

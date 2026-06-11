@@ -605,7 +605,22 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
   const totalSheets = allSheetIds.length;
   const readySheets = allSheetIds.filter(id=>frames[id]).length;
 
-  const startAll = ()=>{ if(batchActiveId || !allSheetIds.length) return; batch.begin(allSheetIds, 0); };
+  // per-scene fold state (persisted) — long boards collapse to their scene headers.
+  // DEFAULT: everything folded except the first scene.
+  const [collapsed, setCollapsed] = React.useState(()=>{ try{ return JSON.parse(localStorage.getItem("turn_sb_collapsed")||"{}")||{}; }catch(e){ return {}; } });
+  React.useEffect(()=>{ try{ localStorage.setItem("turn_sb_collapsed", JSON.stringify(collapsed)); }catch(e){} },[collapsed]);
+  const toggleScene = (id)=> setCollapsed(c=>({ ...c, [id]: !c[id] }));
+  const foldSeeded = React.useRef(false);
+  React.useEffect(()=>{
+    if(foldSeeded.current || !ordered.length) return;
+    foldSeeded.current = true;
+    if(Object.keys(collapsed).length) return;   // a real fold state already exists
+    const m = {}; ordered.forEach((s,i)=>{ if(i>0) m[s.id]=true; });
+    setCollapsed(m);
+  },[ordered.length]);
+
+  // "Generate all sheets" advances by watching MOUNTED sheet cards — expand all first
+  const startAll = ()=>{ if(batchActiveId || !allSheetIds.length) return; setCollapsed({}); batch.begin(allSheetIds, 0); };
 
   // compose every sheet whose shots have frames — instant per sheet, no generation cost
   const [composingAll, setComposingAll] = React.useState(null);   // {i,total} | null
@@ -698,15 +713,19 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
     pagesByScene.map(({scene,pages})=>{
       const ctx = ctxFor(scene);
       const ln = ctx.location ? ctx.location.name : "";
-      return _sbEl("div",{className:"sb-scene",key:scene.id},
+      const open = !collapsed[scene.id];
+      return _sbEl("div",{className:"sb-scene"+(open?"":" collapsed"),key:scene.id},
         _sbEl("div",{className:"sb-scene-head"},
+          _sbEl("button",{className:"shot-scene-fold",onClick:()=>toggleScene(scene.id),
+            title:open?"Collapse this scene":"Expand this scene","aria-expanded":open?"true":"false"},
+            _sbEl(Icon.chevR,{s:15})),
           _sbEl("span",{className:"sb-scene-no"},String(scene.no).padStart(2,"0")),
-          _sbEl("span",{className:"sb-scene-title"},scene.title||"Untitled scene"),
+          _sbEl("span",{className:"sb-scene-title",onClick:()=>toggleScene(scene.id),style:{cursor:"pointer"}},scene.title||"Untitled scene"),
           ln && _sbEl("span",{className:"sb-scene-loc"},_sbEl(Icon.globe,{s:11}),ln),
           _sbEl("span",{className:"sb-scene-count"},
             clipMode ? (pages.length+" clip"+(pages.length!==1?"s":"")+" · "+shotsByScene[scene.id].length+" shots")
             : pages.length>1 ? (pages.length+" pages") : (shotsByScene[scene.id].length+" shots"))),
-        pages.map(page=> _sbEl(StoryboardPage,{key:page.id,project,scene,page,pageCount:pages.length,ctx,beatsMap,
+        open && pages.map(page=> _sbEl(StoryboardPage,{key:page.id,project,scene,page,pageCount:pages.length,ctx,beatsMap,
           onView:setView,jumpToShot,batchActiveId,onBatchDone:batch.advance})));
     }));
 }

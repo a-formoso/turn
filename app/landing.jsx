@@ -1,56 +1,71 @@
 /* landing.jsx — the commercial landing page shown to signed-out visitors INSTEAD of the
    app. Sells what TURN is (the departments / the Infinite Studio method) and drives sign-up.
    The actual app (spine, Writers' Room, Art Room, Agents) is never exposed until sign-in.
-   The floating MUSE teaser still rides on top (mounted by app.jsx) for a live taste. */
+   The floating MUSE teaser still rides on top (mounted by app.jsx) for a live taste.
+   DESIGN: light editorial look — white page, near-black ink, hairline-framed content
+   column, pill buttons (black primary) — independent of the app's dark theme. */
 
-/* a small decorative value-charge spine for the hero (pure SVG, not real data) */
-function HeroSpine(){
-  const pts = [12,30,22,58,40,74,55,46,70,88,86,52];   // y%, alternating turns
-  const n = pts.length, W = 520, H = 230, pad = 14;
-  const xs = i => pad + (i*(W-2*pad))/(n-1);
-  const ys = v => pad + ((100-v)/100)*(H-2*pad);
-  const line = pts.map((v,i)=> (i?"L":"M")+xs(i).toFixed(1)+" "+ys(v).toFixed(1)).join(" ");
-  const area = line+" L"+xs(n-1).toFixed(1)+" "+(H-pad)+" L"+xs(0).toFixed(1)+" "+(H-pad)+" Z";
-  return React.createElement("svg",{className:"lp-spine",viewBox:"0 0 "+W+" "+H,preserveAspectRatio:"none","aria-hidden":"true"},
-    React.createElement("defs",null,
-      React.createElement("linearGradient",{id:"lpg",x1:"0",y1:"0",x2:"0",y2:"1"},
-        React.createElement("stop",{offset:"0%","stopColor":"var(--pos)","stopOpacity":"0.30"}),
-        React.createElement("stop",{offset:"100%","stopColor":"var(--pos)","stopOpacity":"0"}))),
-    React.createElement("line",{x1:pad,y1:ys(50),x2:W-pad,y2:ys(50),className:"lp-spine-mid"}),
-    React.createElement("path",{d:area,fill:"url(#lpg)"}),
-    React.createElement("path",{d:line,className:"lp-spine-line",fill:"none"}),
-    pts.map((v,i)=>React.createElement("circle",{key:i,cx:xs(i),cy:ys(v),r:4,
-      className:"lp-spine-dot"+(v>=50?" pos":" neg")})));
+/* a live 24fps timecode for the film frame — quiet motion that says "camera" */
+function FilmTimecode(){
+  const [f, setF] = React.useState(0);
+  React.useEffect(()=>{
+    const t = setInterval(()=> setF(x=>x+1), 1000/24);
+    return ()=> clearInterval(t);
+  },[]);
+  const p = n => String(n).padStart(2,"0");
+  const fr = f%24, s = Math.floor(f/24)%60, m = Math.floor(f/1440)%60;
+  return React.createElement("span",{className:"lp-video-tc","aria-hidden":"true"},
+    "TC 00:"+p(m)+":"+p(s)+":"+p(fr));
+}
+
+/* hero media — a 21:9 video placeholder for the AI short film, dressed as a
+   viewfinder (corner brackets, running timecode, ratio badge). Swap the inner
+   placeholder for a <video> (same 21:9 frame) when the film is ready. */
+function HeroFilm(){
+  return React.createElement("div",{className:"lp-video","aria-label":"AI short film — coming soon"},
+    React.createElement("div",{className:"lp-video-corners","aria-hidden":"true"}),
+    React.createElement("div",{className:"lp-video-corners b","aria-hidden":"true"}),
+    React.createElement(FilmTimecode,null),
+    React.createElement("button",{className:"lp-video-play","aria-label":"Play the short film"},
+      React.createElement("svg",{width:22,height:22,viewBox:"0 0 24 24",fill:"currentColor","aria-hidden":"true"},
+        React.createElement("path",{d:"M8 5.5v13l11-6.5z"}))),
+    React.createElement("span",{className:"lp-video-badge"},"21:9"));
 }
 
 const LP_FEATURES = [
-  { icon:"spine",  title:"Value-Charge Spine",
-    body:"Plot every scene by its emotional charge end-to-end, so you can see at a glance which scenes truly turn — and which fall flat." },
-  { icon:"script", title:"Writers’ Room",
-    body:"Turn beats into a screenplay, scene by scene. Action and reaction, the controlling idea, desire against antagonism." },
-  { icon:"palette", title:"Art Room",
-    body:"Characters, props, locations, a style bible and a full shot list — canonical references so every frame stays consistent." },
-  { icon:"robot", title:"AI Agents",
-    body:"Story Doctor, Continuity Repair and Table-Read refine an existing story — each shows its reasoning and asks before changing a thing." },
-  { icon:"clapper", title:"Shot List & Storyboard",
-    body:"One beat, one shot. Size, angle, lens and move for every moment, rendered from your characters, locations and grade." },
-  { icon:"sparkles", title:"MUSE, your story guide",
-    body:"A built-in AI co-pilot that reads your spine and helps you fix what doesn’t turn. Try the taste in the corner — sign up to put it to work." },
+  { no:"01", icon:"script", title:"Development",
+    body:"Bring an idea. Develop it into a story, then a finished screenplay — scene by scene, draft by draft, until it reads right." },
+  { no:"02", icon:"palette", title:"Pre-Production",
+    body:"Design the film before you shoot it. Your cast, your places, your look — planned down to every single shot." },
+  { no:"03", icon:"clapper", title:"Production",
+    body:"Turn the plans into pictures. Storyboard the whole film from everything you’ve built — ready for the screen." },
 ];
 
+/* the hero's rotating word — what people make here. Remounts on each tick
+   (key change) so the entrance animation replays; ~1.8s per word. */
+const LP_WORDS = ["short films","commercials","TV series"];
+function RotatingWord(){
+  const [i, setI] = React.useState(0);
+  React.useEffect(()=>{
+    const t = setInterval(()=> setI(x=>(x+1)%LP_WORDS.length), 2200);
+    return ()=> clearInterval(t);
+  },[]);
+  return React.createElement("span",{className:"lp-rotate",key:LP_WORDS[i]}, LP_WORDS[i]);
+}
+
 const LP_STEPS = [
-  { n:"1", t:"Bring an idea", d:"A logline, a “what if”, a character, even just a vibe." },
-  { n:"2", t:"Architect the spine", d:"TURN develops it into a logline and builds the value-charge spine, scene by scene." },
-  { n:"3", t:"Grow the film", d:"Beats, script, cast, props, locations, style and shots — all flow from the spine." },
+  { n:"1", t:"Bring an idea", d:"A logline, a “what if” — or just hit surprise me." },
+  { n:"2", t:"Watch it take shape", d:"TURN builds your story scene by scene, structured to hold an audience." },
+  { n:"3", t:"Build the film", d:"Script, cast, places, shots — it all grows in one place." },
 ];
 
 /* Pricing — PLACEHOLDER amounts; set your real prices/limits here. */
 const LP_TIERS = [
-  { id:"free", name:"Free", price:"$0", per:"forever", blurb:"Try the studio.",
-    feats:["1 film","Value-charge spine, beats & script","MUSE — a taste","A few image generations"],
+  { id:"free", name:"Free", price:"$0", per:"forever", blurb:"Plant the seed.",
+    feats:["1 film","Story & screenplay tools","MUSE — a taste"],
     cta:"Start free" },
   { id:"pro", name:"Pro", price:"$19", per:"/ month", blurb:"Finish your film.", featured:true, tag:"Most popular",
-    feats:["Unlimited films","Full Art Room — characters, props, locations, style, shots","All AI Agents","MUSE, unlimited","High-resolution generations"],
+    feats:["Unlimited films","The full studio — every department","All AI Agents","MUSE, unlimited","High-resolution generations"],
     cta:"Choose Pro" },
   { id:"studio", name:"Studio", price:"$49", per:"/ month", blurb:"For working filmmakers.",
     feats:["Everything in Pro","Highest generation limits","Priority rendering","Early access to new features"],
@@ -59,81 +74,104 @@ const LP_TIERS = [
 
 function Landing({ onStart, onSignIn }){
   const Icn = (name, s)=> React.createElement(Icon[name] || Icon.sparkles, {s:s||18});
+  const [menuOpen, setMenuOpen] = React.useState(false);   // mobile hamburger menu
   return React.createElement("div",{className:"landing"},
+    React.createElement("div",{className:"lp-page"},
 
+    // full-height vertical rails at the column edges — they run through the hero,
+    // sections, and footer, crossing every horizontal rule in a "+" intersection
+    React.createElement("div",{className:"lp-rails","aria-hidden":"true"}),
+
+    // nav content is constrained to the SAME centered column as the page content,
+    // so the logo and buttons align with the headline / frame edges below
     React.createElement("header",{className:"lp-nav"},
-      React.createElement("div",{className:"lp-brand"},
-        React.createElement("span",{className:"lp-logo"},"TURN"),
-        React.createElement("span",{className:"lp-brand-sub"},"Story architecture for AI filmmakers")),
-      React.createElement("div",{className:"lp-nav-cta"},
-        React.createElement("button",{className:"lp-btn ghost",onClick:onSignIn},"Sign in"),
-        React.createElement("button",{className:"lp-btn primary",onClick:()=>onStart("free")},"Start free"))),
+      React.createElement("div",{className:"lp-nav-in"},
+        React.createElement("div",{className:"lp-brand"},
+          React.createElement("span",{className:"lp-logo"},"TURN")),
+        React.createElement("div",{className:"lp-nav-cta"},
+          React.createElement("button",{className:"lp-btn ghost",onClick:onSignIn},"Sign in"),
+          React.createElement("button",{className:"lp-btn primary",onClick:()=>onStart("free")},"Start creating for free")),
+        // mobile-only hamburger (the inline buttons hide below 560px)
+        React.createElement("button",{className:"lp-burger"+(menuOpen?" open":""),"aria-label":"Menu",
+          "aria-expanded":menuOpen?"true":"false",onClick:()=>setMenuOpen(o=>!o)},
+          React.createElement("span",null),React.createElement("span",null),React.createElement("span",null))),
+      menuOpen && React.createElement("div",{className:"lp-menu"},
+        React.createElement("button",{className:"lp-menu-item",onClick:()=>{ setMenuOpen(false); onSignIn(); }},"Sign in"),
+        React.createElement("button",{className:"lp-menu-item primary",onClick:()=>{ setMenuOpen(false); onStart("free"); }},"Start creating for free"))),
 
+    // hero — UNFRAMED (no hairlines), headline + CTAs left, supporting copy right
     React.createElement("section",{className:"lp-hero"},
       React.createElement("div",{className:"lp-hero-copy"},
-        React.createElement("div",{className:"lp-eyebrow"},"The Infinite Studio method"),
-        React.createElement("h1",{className:"lp-h1"},"Architect your film before you shoot a frame."),
-        React.createElement("p",{className:"lp-lede"},
-          "TURN turns an idea into a value-charge spine — every scene plotted by its emotional turn — then grows your beats, script, cast and shots from it. One studio, every department."),
+        React.createElement("h1",{className:"lp-h1"},"Bringing your",React.createElement("br",null),
+          React.createElement(RotatingWord,null)," to life."),
         React.createElement("div",{className:"lp-hero-cta"},
-          React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("free")},
-            Icn("sparkles",16),"Start free"),
-          React.createElement("button",{className:"lp-btn ghost big",onClick:onSignIn},"I have an account")),
-        React.createElement("div",{className:"lp-hero-note"},"Free to start · build your first film in minutes")),
-      React.createElement("div",{className:"lp-hero-art"},
-        React.createElement("div",{className:"lp-hero-card"},
-          React.createElement("div",{className:"lp-hero-card-top"},
-            React.createElement("span",{className:"lp-hero-card-t"},"Value-Charge Spine"),
-            React.createElement("span",{className:"lp-legend"},
-              React.createElement("span",{className:"lp-key pos"},"Positive"),
-              React.createElement("span",{className:"lp-key neg"},"Negative"))),
-          React.createElement(HeroSpine,null)))),
+          React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("free")},"Start creating for free"),
+          React.createElement("button",{className:"lp-btn ghost big",onClick:onSignIn},"Sign in"))),
+      React.createElement("div",{className:"lp-hero-aside"},
+        React.createElement("p",{className:"lp-lede"},
+          "TURN is your AI cinema studio machine: you bring the idea, we develop the story, write the screenplay, design the look, and build your movie, all in a few clicks!"))),
 
-    React.createElement("section",{className:"lp-section"},
-      React.createElement("div",{className:"lp-sec-head"},
-        React.createElement("h2",{className:"lp-h2"},"One studio, every department"),
-        React.createElement("p",{className:"lp-sec-sub"},"From the first value charge to the last shot — your whole film, in one place.")),
-      React.createElement("div",{className:"lp-grid"},
-        LP_FEATURES.map((f,i)=>React.createElement("div",{key:i,className:"lp-card"},
-          React.createElement("div",{className:"lp-card-ic"}, Icn(f.icon,20)),
-          React.createElement("div",{className:"lp-card-t"}, f.title),
-          React.createElement("div",{className:"lp-card-b"}, f.body))))),
+    // hero media — the 21:9 short-film placeholder, still outside the frame
+    React.createElement("section",{className:"lp-hero-media"},
+      React.createElement(HeroFilm,null)),
 
-    React.createElement("section",{className:"lp-section steps"},
-      React.createElement("div",{className:"lp-sec-head"},
-        React.createElement("h2",{className:"lp-h2"},"How it works")),
-      React.createElement("div",{className:"lp-steps"},
-        LP_STEPS.map((s,i)=>React.createElement("div",{key:i,className:"lp-step"},
-          React.createElement("div",{className:"lp-step-n"}, s.n),
-          React.createElement("div",{className:"lp-step-t"}, s.t),
-          React.createElement("div",{className:"lp-step-d"}, s.d))))),
+    // the hairline-framed column starts BELOW the hero (features onward)
+    React.createElement("div",{className:"lp-frame"},
 
-    React.createElement("section",{className:"lp-section pricing"},
-      React.createElement("div",{className:"lp-sec-head"},
-        React.createElement("h2",{className:"lp-h2"},"Simple pricing"),
-        React.createElement("p",{className:"lp-sec-sub"},"Start free. Upgrade when you’re ready to finish your film — cancel anytime.")),
-      React.createElement("div",{className:"lp-tiers"},
-        LP_TIERS.map((t,i)=>React.createElement("div",{key:i,className:"lp-tier"+(t.featured?" featured":"")},
-          t.tag && React.createElement("div",{className:"lp-tier-tag"}, t.tag),
-          React.createElement("div",{className:"lp-tier-name"}, t.name),
-          React.createElement("div",{className:"lp-tier-price"},
-            React.createElement("span",{className:"lp-tier-amt"}, t.price),
-            React.createElement("span",{className:"lp-tier-per"}, t.per)),
-          React.createElement("div",{className:"lp-tier-blurb"}, t.blurb),
-          React.createElement("ul",{className:"lp-tier-feats"},
-            t.feats.map((f,j)=>React.createElement("li",{key:j},
-              React.createElement(Icon.check,{s:13}), React.createElement("span",null,f)))),
-          React.createElement("button",{className:"lp-btn "+(t.featured?"primary":"ghost")+" full",onClick:()=>onStart(t.id)}, t.cta)))),
-      React.createElement("div",{className:"lp-pricing-note"},"Prices shown are placeholders — set your own in landing.jsx.")),
+      React.createElement("section",{className:"lp-section"},
+        React.createElement("div",{className:"lp-sec-head"},
+          React.createElement("div",{className:"lp-act"},"Act I · The studio"),
+          React.createElement("h2",{className:"lp-h2"},"One studio, every department")),
+        React.createElement("div",{className:"lp-grid"},
+          LP_FEATURES.map((f,i)=>React.createElement("div",{key:i,className:"lp-card"},
+            React.createElement("div",{className:"lp-card-top"},
+              React.createElement("div",{className:"lp-card-ic"}, Icn(f.icon,20)),
+              React.createElement("span",{className:"lp-card-no"}, f.no)),
+            React.createElement("div",{className:"lp-card-t"}, f.title),
+            React.createElement("div",{className:"lp-card-b"}, f.body))))),
 
-    React.createElement("section",{className:"lp-final"},
-      React.createElement("h2",{className:"lp-h2"},"Start building your film."),
-      React.createElement("p",{className:"lp-final-sub"},"Sign up free and architect your first spine today."),
-      React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("free")},
-        Icn("sparkles",16),"Start free")),
+      React.createElement("section",{className:"lp-section steps"},
+        React.createElement("div",{className:"lp-sec-head"},
+          React.createElement("div",{className:"lp-act"},"Act II · The process"),
+          React.createElement("h2",{className:"lp-h2"},"How it works")),
+        React.createElement("div",{className:"lp-steps"},
+          LP_STEPS.map((s,i)=>React.createElement("div",{key:i,className:"lp-step"},
+            React.createElement("div",{className:"lp-step-n"}, s.n),
+            React.createElement("div",{className:"lp-step-t"}, s.t),
+            React.createElement("div",{className:"lp-step-d"}, s.d))))),
+
+      React.createElement("section",{className:"lp-section pricing"},
+        React.createElement("div",{className:"lp-sec-head"},
+          React.createElement("div",{className:"lp-act"},"Act III · The price"),
+          React.createElement("h2",{className:"lp-h2"},"Simple pricing")),
+        React.createElement("div",{className:"lp-tiers"},
+          LP_TIERS.map((t,i)=>React.createElement("div",{key:i,className:"lp-tier"+(t.featured?" featured":"")},
+            t.tag && React.createElement("div",{className:"lp-tier-tag"}, t.tag),
+            React.createElement("div",{className:"lp-tier-name"}, t.name),
+            React.createElement("div",{className:"lp-tier-price"},
+              React.createElement("span",{className:"lp-tier-amt"}, t.price),
+              React.createElement("span",{className:"lp-tier-per"}, t.per)),
+            React.createElement("div",{className:"lp-tier-blurb"}, t.blurb),
+            React.createElement("ul",{className:"lp-tier-feats"},
+              t.feats.map((f,j)=>React.createElement("li",{key:j},
+                React.createElement(Icon.check,{s:13}), React.createElement("span",null,f)))),
+            React.createElement("button",{className:"lp-btn "+(t.featured?"primary":"ghost")+" full",onClick:()=>onStart(t.id)}, t.cta))))),
+
+      // closing band — heading left, actions right (like a product-platform strip)
+      React.createElement("section",{className:"lp-final"},
+        React.createElement("div",{className:"lp-final-copy"},
+          React.createElement("div",{className:"lp-act"},"Epilogue"),
+          React.createElement("h2",{className:"lp-h2"},"Start building your film.")),
+        React.createElement("div",{className:"lp-final-cta"},
+          React.createElement("button",{className:"lp-btn ghost big",onClick:onSignIn},"Sign in"),
+          React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("free")},"Start creating for free")))),
 
     React.createElement("footer",{className:"lp-foot"},
-      React.createElement("span",{className:"lp-logo sm"},"TURN"),
-      React.createElement("span",{className:"lp-foot-note"},"© TURN · Story architecture for AI filmmakers")));
+      React.createElement("div",{className:"lp-foot-in"},
+        React.createElement("span",{className:"lp-logo sm"},"TURN"),
+        React.createElement("nav",{className:"lp-foot-links","aria-label":"Legal"},
+          React.createElement("a",{className:"lp-foot-link",href:"#privacy"},"Privacy"),
+          React.createElement("a",{className:"lp-foot-link",href:"#terms"},"Terms"),
+          React.createElement("a",{className:"lp-foot-link",href:"#contact"},"Contact"))))));
 }
 window.Landing = Landing;
