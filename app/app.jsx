@@ -415,12 +415,29 @@ function App(){
     let alive = true;
     (async()=>{
       let list = await cloudListProjects();
+      // Read the session FRESH here — during sign-in the captured `isAdmin`
+      // can lag a render behind the session this bootstrap is running for.
+      const s = (typeof cloudGetSession==="function") ? await cloudGetSession() : null;
+      const adminBoot = (((typeof cloudUserEmail==="function" && cloudUserEmail(s))||"").toLowerCase()==="admin@infinitestudioai.com");
+      // LEGACY CLEANUP: before the demo was admin-gated, every new account was
+      // seeded with The Matrix. Remove the UNMODIFIED demo from non-admin accounts
+      // (same premise + scene count + first scene as the seed); anything the user
+      // actually edited is left alone.
+      if(!adminBoot){
+        for(const row of list.filter(r=>/^the matrix$/i.test(r.title||""))){
+          try{
+            const full = await cloudLoadProject(row.id);
+            const d = (full && full.doc) || {};
+            const pr = d.project || {};
+            const sc = Array.isArray(d.scenes) ? d.scenes : [];
+            const pristine = pr.premise===PROJECT.premise && sc.length===SCENES.length
+              && sc[0] && SCENES[0] && sc[0].title===SCENES[0].title;
+            if(pristine){ await cloudDeleteProject(row.id); list = list.filter(x=>x.id!==row.id); }
+          }catch(e){}
+        }
+      }
       if(!list.length){
         // admin's first project IS the Matrix demo; everyone else starts clean.
-        // Read the session FRESH here — during sign-in the captured `isAdmin`
-        // can lag a render behind the session this bootstrap is running for.
-        const s = (typeof cloudGetSession==="function") ? await cloudGetSession() : null;
-        const adminBoot = (((typeof cloudUserEmail==="function" && cloudUserEmail(s))||"").toLowerCase()==="admin@infinitestudioai.com");
         const created = adminBoot
           ? await cloudCreateProject("The Matrix", sampleDoc())
           : await cloudCreateProject("Untitled film", emptyDoc());
@@ -1235,7 +1252,15 @@ function App(){
       if(model.project){
         /* a new story identity (e.g. Adaptation) makes the old props irrelevant —
            clear them so sample-story props never bleed into a freshly built film */
-        if(model.project.title && project && model.project.title !== project.title){ setProps([]); setPropsSeeded(false); setVisualsSeeded(false); }
+        if(model.project.title && project && model.project.title !== project.title){
+          setProps([]); setPropsSeeded(false); setVisualsSeeded(false);
+          // keep the cloud ROW title in step with the film's new title, so the
+          // switcher doesn't keep saying "Untitled film" after a build
+          if(cloudMode && currentProjectId){
+            cloudRenameProject(currentProjectId, model.project.title);
+            setProjects(ps=>ps.map(pr=>pr.id===currentProjectId?{...pr, title:model.project.title}:pr));
+          }
+        }
         setProject({...model.project});
       }
       setBeatsMap({...model.beats});

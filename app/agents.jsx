@@ -320,20 +320,28 @@ async function agentAdaptation(ctx){
   const brief = (ctx.input||"").trim();
   if(!brief){ ctx.emit({k:"flag", t:"No logline provided. Type a logline or synopsis above and run again."}); ctx.emit({k:"done",t:"Nothing to build."}); return; }
   if(!ctx.ai.available){ ctx.emit({k:"flag", t:"The model isn't available, so a full spine can't be generated here."}); ctx.emit({k:"done",t:"Aborted."}); return; }
-  ctx.emit({k:"plan", t:"Designing a complete three-act spine from your logline \u2014 scenes, acts, and a value charge for each that turns."});
+  const _fwA = (typeof frameworkOf==="function") ? frameworkOf(window.turnProject) : null;
+  const _kishoA = !!(_fwA && _fwA.id==="kishotenketsu");
+  ctx.emit({k:"plan", t: _kishoA
+    ? "Designing a complete kish\u014dtenketsu spine from your logline \u2014 four movements (ki \u00b7 sh\u014d \u00b7 ten \u00b7 ketsu), with a value charge tracing each scene's movement."
+    : "Designing a complete three-act spine from your logline \u2014 scenes, acts, and a value charge for each that turns."});
   ctx.emit({k:"act", t:"Generating the scene breakdown\u2026"});
   const spine = await ctx.ai.buildSpine(brief);
   if(ctx.cancelled()) return;
   if(!spine){ ctx.emit({k:"flag", t:"The model didn't return a usable spine. Try a more concrete logline."}); ctx.emit({k:"done",t:"Aborted."}); return; }
   const turns = spine.scenes.filter(s=> Math.sign(s.openCharge)!==Math.sign(s.closeCharge) || Math.abs(s.closeCharge-s.openCharge)>=2).length;
-  ctx.emit({k:"observe", t:'"'+spine.title+'" \u2014 '+spine.scenes.length+" scenes across 3 acts, "+turns+" of them turning. Review below before it replaces the current project."});
+  const _actsN = _fwA ? Object.keys(_fwA.acts).length : 3;
+  const _isNew = !(ctx.model.scenes||[]).length;   // a fresh project has nothing to replace
+  ctx.emit({k:"observe", t:'"'+spine.title+'" \u2014 '+spine.scenes.length+" scenes across "+_actsN+" "+(_kishoA?"movements":"acts")+", "+turns+" of them "+(_kishoA?"moving":"turning")+". Review below before it "+(_isNew?"becomes your project.":"replaces the current project.")});
 
   const ok = await ctx.propose({
-    title:"Replace the project with \u201c"+spine.title+"\u201d",
-    reason:"This rebuilds the entire spine from your logline, then writes every scene's beats and screenplay. Your current scenes, beats and drafts will be cleared.",
-    rationale:spine.scenes.length+" new scenes \u00b7 "+turns+" turn cleanly \u00b7 beats + script written automatically",
-    list: spine.scenes.map((s,i)=>String(i+1).padStart(2,"0")+" \u00b7 Act "+["I","II","III"][s.act-1]+" \u00b7 "+s.title+"  ("+chargeStr(s.openCharge)+"\u2192"+chargeStr(s.closeCharge)+")"),
-    danger:true,
+    title:(_isNew?"Create the project \u201c":"Replace the project with \u201c")+spine.title+"\u201d",
+    reason:_isNew
+      ? "This builds the whole spine from your logline, then writes every scene's beats and screenplay."
+      : "This rebuilds the entire spine from your logline, then writes every scene's beats and screenplay. Your current scenes, beats and drafts will be cleared.",
+    rationale:spine.scenes.length+" new scenes \u00b7 "+turns+(_kishoA?" move cleanly":" turn cleanly")+" \u00b7 beats + script written automatically",
+    list: spine.scenes.map((s,i)=>String(i+1).padStart(2,"0")+" \u00b7 Act "+(["I","II","III","IV"][s.act-1]||s.act)+" \u00b7 "+s.title+"  ("+chargeStr(s.openCharge)+"\u2192"+chargeStr(s.closeCharge)+")"),
+    danger:!_isNew,
   });
   if(ctx.cancelled()) return;
   if(!ok){ ctx.emit({k:"flag", t:"Kept the existing project. Nothing changed."}); ctx.emit({k:"done",t:"Cancelled."}); return; }
@@ -1115,7 +1123,7 @@ const AGENTS = [
     run:agentContinuityRepair },
   { id:"adapt", name:"Adaptation", icon:"flask", kind:"build", needsInput:true, ideaStarters:true,
     inputLabel:"Logline or synopsis", inputPlaceholder:"e.g. A lighthouse keeper discovers the fog is erasing the town's memories \u2014 including her own.",
-    blurb:"Give it a logline and it architects a whole three-act spine \u2014 scenes, charges, beats, and screenplay, all written automatically. Blank page \u2192 finished draft.",
+    blurb:"Give it a logline and it architects the whole spine in your chosen framework \u2014 scenes, charges, beats, and screenplay, all written automatically. Blank page \u2192 finished draft.",
     run:agentAdaptation },
   { id:"tableread", name:"Table-Read", icon:"film", kind:"report",
     blurb:"Reads every drafted scene end-to-end and reports pacing, tone, and voice issues across the whole script \u2014 not scene by scene.",
