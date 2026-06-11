@@ -67,7 +67,7 @@ function TurnAudit({ scenes, selId, onSelect }){
             React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)"}},
               React.createElement("div",{style:{fontFamily:"var(--f-display)",fontSize:13,color:"var(--txt-0)",fontWeight:500}},s.title),
               React.createElement("div",{style:{fontFamily:"var(--f-mono)",fontSize:9.5,color:"var(--txt-3)",marginTop:2}},
-                `Act ${["I","II","III"][s.act-1]} · ${s.seq}`,KIND_LABEL[s.kind]?(" · "+KIND_LABEL[s.kind]):"")),
+                `Act ${["I","II","III","IV"][s.act-1]||s.act} · ${s.seq}`,KIND_LABEL[s.kind]?(" · "+KIND_LABEL[s.kind]):"")),
             React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)",display:"flex",alignItems:"center",gap:6}},
               React.createElement(ChargeChip,{value:s.openCharge}),
               React.createElement("span",{style:{color:"var(--txt-3)",display:"flex"}},React.createElement(Icon.arrowSmall,{s:11})),
@@ -1812,7 +1812,7 @@ function App(){
               view==="spine"?"Value-Charge Spine":view==="beats"?"Turn Audit":view==="script"?"Screenplay Draft":"Story Board"),
             React.createElement("div",{className:"canvas-sub"},
               view==="spine"?"The emotional charge of every scene, end to end":
-              view==="beats"?"If a scene doesn't turn, cut it":
+              view==="beats"?(((typeof fwAuditOf==="function")&&fwAuditOf().subline)||"If a scene doesn't turn, cut it"):
               view==="script"?"Subtext (beats) becomes text (screenplay)":"16 scenes across 3 acts")),
           view==="spine" && React.createElement("div",{className:"legend"},
             runtimeTotal>0 && React.createElement("div",{className:"legend-item",

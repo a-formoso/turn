@@ -65,7 +65,10 @@ function assignPlotPoints(scenes){
 }
 window.assignPlotPoints = assignPlotPoints;
 
+/* the audit rule is the FRAMEWORK's (frameworks.jsx via window.turnInfo) — no
+   second copy of the three-act arithmetic here; inline body = safety fallback */
 function sd_turnInfo(s){
+  if(typeof window.turnInfo==="function"){ try{ return window.turnInfo(s); }catch(e){} }
   const turned = Math.sign(s.openCharge)!==Math.sign(s.closeCharge) || Math.abs(s.closeCharge-s.openCharge)>=2;
   const exempt = s.kind==="resolution";
   return { turned, flagged: !turned && !exempt };

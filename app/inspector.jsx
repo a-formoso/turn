@@ -138,17 +138,20 @@ function ChargeEditor({ scene, onCharge, onUpdate }){
 
 function Verdict({ scene }){
   const { flagged } = turnInfo(scene);
+  // titles + flag icon come from the project's narrative framework (frameworks.jsx);
+  // three-act reads exactly as before. The detail lines stay charge-factual.
+  const aud = (typeof fwAuditOf==="function") ? fwAuditOf() : null;
   if(flagged) return React.createElement("div",{className:"verdict no"},
-    React.createElement("span",{className:"verdict-icn"},React.createElement(Icon.scissors,{s:18})),
+    React.createElement("span",{className:"verdict-icn"},React.createElement(Icon[(aud&&aud.flagIcon)||"scissors"]||Icon.scissors,{s:18})),
     React.createElement("div",null,
-      React.createElement("div",{className:"verdict-t"},"This scene doesn't turn"),
+      React.createElement("div",{className:"verdict-t"},(aud&&aud.flagTitle)||"This scene doesn't turn"),
       React.createElement("div",{className:"verdict-d"},
         `Opens and closes on the same charge (${chargeStr(scene.openCharge)} \u2192 ${chargeStr(scene.closeCharge)}). `,
-        "If a scene doesn't turn a value, it's exposition \u2014 recharge it or cut it.")));
+        (aud&&aud.flagDetail) || "If a scene doesn't turn a value, it's exposition \u2014 recharge it or cut it.")));
   return React.createElement("div",{className:"verdict ok"},
     React.createElement("span",{className:"verdict-icn"},React.createElement(Icon.check,{s:18})),
     React.createElement("div",null,
-      React.createElement("div",{className:"verdict-t"},"This scene turns"),
+      React.createElement("div",{className:"verdict-t"},(aud&&aud.okTitle)||"This scene turns"),
       React.createElement("div",{className:"verdict-d"},
         `${scene.openValue} (${chargeStr(scene.openCharge)}) \u2192 ${scene.closeValue} (${chargeStr(scene.closeCharge)}). `,
         "A value-charged condition reverses \u2014 the scene earns its place.")));

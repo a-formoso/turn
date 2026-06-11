@@ -2,8 +2,12 @@
 
 const COL_W = 138, GAP = 6, GRAPH_H = 300, PAD_T = 28, PAD_B = 30;
 
-/* shared turn logic — used by canvas, inspector, AI */
+/* shared turn logic — used by canvas, inspector, Audit and the agents.
+   The RULE lives in the project's narrative FRAMEWORK (app/frameworks.jsx);
+   three-act's registry entry is this classic rule, frozen. Signature unchanged
+   so every call site keeps working; the inline body is the safety fallback. */
 function turnInfo(sc){
+  if(typeof fwAuditOf==="function"){ try{ return fwAuditOf().rule(sc); }catch(e){} }
   const o = Math.sign(sc.openCharge), c = Math.sign(sc.closeCharge);
   const turned = (o !== c) || Math.abs(sc.closeCharge - sc.openCharge) >= 2;
   const exempt = sc.kind === "resolution";
@@ -53,10 +57,17 @@ function fmtClock(sec){ const m = Math.floor(sec/60), s = Math.round(sec%60); re
 window.sceneRuntime = sceneRuntime;
 window.fmtClock = fmtClock;
 
-const KIND_LABEL = {
+/* Milestone-kind labels. The CANONICAL vocabulary lives in the project's
+   narrative framework (frameworks.jsx `kinds`); this Proxy keeps every existing
+   `KIND_LABEL[kind]` lookup working while routing through it (three-act maps to
+   exactly these classic labels). */
+const KIND_LABEL_3ACT = {
   incite:"Inciting Incident", "act-climax":"Act Climax", midpoint:"Mid-Act Climax",
   crisis:"Crisis", "story-climax":"Story Climax", resolution:"Resolution",
 };
+const KIND_LABEL = new Proxy(KIND_LABEL_3ACT, {
+  get:(base, k)=> (typeof fwKindLabel==="function") ? (fwKindLabel(k) ?? base[k]) : base[k],
+});
 
 function ChargeChip({ value, label }){
   return React.createElement("span",{className:`chip ${chargeClass(value)}`},
@@ -168,8 +179,10 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
   React.useEffect(()=>{ try{ localStorage.setItem("turn_spine_collapsed", JSON.stringify(collapsed)); }catch(e){} },[collapsed]);
   const toggle = (act)=> setCollapsed(c=>({...c,[act]:!c[act]}));
   const COLLAPSED_W = 46;
-  const roman = (a)=> ["I","II","III"][a-1] || String(a);
-  const actNames = { 1:"Setup", 2:"Complication", 3:"Resolution" };
+  const roman = (a)=> ["I","II","III","IV"][a-1] || String(a);
+  // act names come from the project's narrative framework (Three-Act: Setup /
+  // Complication / Resolution; Kishōtenketsu: Ki / Shō / Ten / Ketsu)
+  const actName = (a)=> (typeof fwActName==="function") ? fwActName(a) : (({1:"Setup",2:"Complication",3:"Resolution"})[a] || ("Act "+a));
 
   const yFor = (charge) => {
     // charge -3..+3 -> y within graph (PAD_T..GRAPH_H-PAD_B)
@@ -226,7 +239,7 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
           onClick:()=>toggle(r.act),title:`Collapse Act ${roman(r.act)}`},
           React.createElement("span",{className:"act-fold-ic"},React.createElement(Icon.chevD,{s:11})),
           React.createElement("span",{className:"no"},`ACT ${roman(r.act)}`),
-          showFramework && React.createElement("span",{className:"nm"},actNames[r.act]),
+          showFramework && React.createElement("span",{className:"nm"},actName(r.act)),
           mins!=null && React.createElement("span",{className:"act-min",
             title:`Act ${roman(r.act)} estimated screen time (≈1 page/min)`},`≈${mins} min`),
           React.createElement("span",{className:"pct"},`${pct}%`));
@@ -345,7 +358,7 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
             border:"1px solid var(--line)",borderTop:0,borderRadius:"0 0 8px 8px",background:"var(--bg-2)"}},
           React.createElement(Icon.chevR,{s:14}),
           React.createElement("span",{className:"tree-act-no"},roman(c.act)),
-          React.createElement("span",{style:{writingMode:"vertical-rl",fontFamily:"var(--f-display)",fontSize:12,fontWeight:500,color:"var(--txt-2)"}},actNames[c.act]),
+          React.createElement("span",{style:{writingMode:"vertical-rl",fontFamily:"var(--f-display)",fontSize:12,fontWeight:500,color:"var(--txt-2)"}},actName(c.act)),
           React.createElement("span",{style:{fontFamily:"var(--f-mono)",fontSize:10,color:"var(--txt-3)"}},c.count));
         const s = c.s, ci = c.i;
         const { flagged } = turnInfo(s);
