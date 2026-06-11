@@ -65,8 +65,12 @@ window.cloudUserId = cloudUserId;
 async function cloudListProjects(){
   const sb = sbClient(); if(!sb) return [];
   try{
+    // show fields ride along (Phase 3): a SHOW is a project row whose doc carries
+    // isShow + bible; an EPISODE carries showId + episodeNo. PostgREST returns the
+    // jsonb ->> extracts as strings (or null).
     const { data, error } = await sb.from("turn_projects")
-      .select("id,title,updated_at,created_at").order("updated_at",{ ascending:false });
+      .select("id,title,updated_at,created_at,isShow:doc->>isShow,showId:doc->>showId,episodeNo:doc->>episodeNo")
+      .order("updated_at",{ ascending:false });
     if(error) return [];
     return data || [];
   }catch(e){ return []; }

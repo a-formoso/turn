@@ -355,13 +355,37 @@ function App(){
     setVisualsSeeded(!!d.visualsSeeded);
     setTimeout(()=>{ hydratingRef.current = false; setHydrationTick(t=>t+1); }, 500);
   };
+  // SERIES (Phase 3): the show's BIBLE is itself a project row ({isShow, bible});
+  // episodes are normal rows whose doc carries {showId, episodeNo}. On load, an
+  // episode merges the bible's shared departments (cast/locations/props/lookbook)
+  // into state, and the asset layer routes those entities' sheets to the show scope.
+  const [currentShowId, setCurrentShowId] = React.useState(null);
+  const [currentEpisodeNo, setCurrentEpisodeNo] = React.useState(null);
+  const bibleEntityIds = (bible)=> [].concat(
+    (bible.characters||[]).map(c=>c.id), (bible.locations||[]).map(l=>l.id),
+    (bible.props||[]).map(p=>p.id), (bible.lookbook||[]).map(r=>r.id)).filter(Boolean);
   const loadProjectIntoState = async (id)=>{
     const row = await cloudLoadProject(id);
     if(!row) return;
     const uid = (typeof cloudUserId==="function") ? cloudUserId(session) : null;
     if(typeof nbUseCloud==="function") nbUseCloud(id, uid);
     setCurrentProjectId(id);
-    applyDoc(row.doc||{});
+    const d = row.doc || {};
+    if(d.showId){
+      const bibleRow = await cloudLoadProject(d.showId);
+      const bible = (bibleRow && bibleRow.doc && bibleRow.doc.bible) || {};
+      setCurrentShowId(d.showId);
+      setCurrentEpisodeNo(d.episodeNo || null);
+      if(typeof nbUseShared==="function") nbUseShared(d.showId, bibleEntityIds(bible));
+      applyDoc({ ...d,
+        characters: bible.characters || [], locations: bible.locations || [],
+        props: bible.props || [], lookbook: bible.lookbook || [],
+        lookbookNote: bible.lookbookNote || "" });
+    } else {
+      setCurrentShowId(null); setCurrentEpisodeNo(null);
+      if(typeof nbUseShared==="function") nbUseShared(null);
+      applyDoc(d);
+    }
   };
   /* on sign-in: load the user's projects (creating a first one if needed) and open
      the most recent. On sign-out: drop cloud mode and fall back to local storage. */
@@ -398,7 +422,9 @@ function App(){
       }
       if(!alive) return;
       setProjects(list);
-      if(list[0]) await loadProjectIntoState(list[0].id);
+      // never auto-open a SHOW (bible) row — open the most recent episode/film
+      const openable = list.filter(p=>String(p.isShow)!=="true");
+      if(openable[0]) await loadProjectIntoState(openable[0].id);
     })().catch(()=>{});
     return ()=>{ alive=false; };
   },[bootUserId]);
@@ -410,6 +436,36 @@ function App(){
     setProjects(ps=>[created, ...ps]);
     await loadProjectIntoState(created.id);
   };
+  /* SERIES: turn the CURRENT project into episode 1 of a new show — its
+     departments become the show's shared bible. (Sheets generated before the
+     conversion stay readable via the asset layer's episode-scope fallback.) */
+  const makeShow = async ()=>{
+    if(!cloudMode || currentShowId) return;
+    const ok = await window.appConfirm({ title:"Turn this into a show?",
+      body:"“"+(project.title||"Untitled")+"” becomes Episode 1, and its cast, locations, props and lookbook become the show's shared BIBLE — every episode reads and writes the same world. Episodes keep their own scenes, script and shots.",
+      confirmLabel:"Create the show" });
+    if(!ok) return;
+    const show = await cloudCreateProject((project.title||"Untitled")+" — Show",
+      { isShow:true, bible:{ characters, locations, props, lookbook, lookbookNote } });
+    if(!show) return;
+    setProjects(ps=>[{ ...show, isShow:"true" }, ...ps]);
+    setCurrentShowId(show.id);
+    setCurrentEpisodeNo(1);
+    if(typeof nbUseShared==="function") nbUseShared(show.id, bibleEntityIds({ characters, locations, props, lookbook }));
+  };
+  /* a new EPISODE of a show: an empty story that shares the show's bible */
+  const createEpisode = async (showId)=>{
+    if(!cloudMode || !showId) return;
+    const sib = projects.filter(p=>p.showId===showId);
+    const nextNo = sib.reduce((m,p)=>Math.max(m, Number(p.episodeNo)||0), currentShowId===showId?(Number(currentEpisodeNo)||1):0) + 1;
+    const showRow = projects.find(p=>p.id===showId);
+    const base = ((showRow&&showRow.title)||"Show").replace(/ — Show$/,"");
+    const created = await cloudCreateProject(base+" — E"+String(nextNo).padStart(2,"0"),
+      { ...emptyDoc(), showId, episodeNo:nextNo, project:{ ...emptyDoc().project, title:base+" E"+String(nextNo).padStart(2,"0"), format:(project&&project.format)||"series" } });
+    if(!created) return;
+    setProjects(ps=>[{ ...created, showId, episodeNo:String(nextNo) }, ...ps]);
+    await loadProjectIntoState(created.id);
+  };
   const renameProject = async (id, title)=>{
     await cloudRenameProject(id, title);
     setProjects(ps=>ps.map(p=>p.id===id?{...p,title}:p));
@@ -419,8 +475,9 @@ function App(){
     const remaining = projects.filter(p=>p.id!==id);
     setProjects(remaining);
     if(id===currentProjectId){
-      if(remaining[0]) await loadProjectIntoState(remaining[0].id);
-      else { const created = await cloudCreateProject("Untitled film", emptyDoc()); if(created){ setProjects([created]); await loadProjectIntoState(created.id); } }
+      const openable = remaining.filter(p=>String(p.isShow)!=="true");
+      if(openable[0]) await loadProjectIntoState(openable[0].id);
+      else { const created = await cloudCreateProject("Untitled film", emptyDoc()); if(created){ setProjects([...remaining, created]); await loadProjectIntoState(created.id); } }
     }
   };
   const [agentLaunch, setAgentLaunch] = React.useState(null);   // {id, input} to auto-run an agent
@@ -437,11 +494,22 @@ function App(){
     saveTimer.current = setTimeout(()=>{
       if(hydratingRef.current) return;
       const doc = { scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded };
-      if(cloudMode){ if(typeof cloudSaveDoc==="function") cloudSaveDoc(currentProjectId, doc); }
+      if(cloudMode){
+        if(typeof cloudSaveDoc==="function"){
+          if(currentShowId){
+            // series episode: shared departments live in the SHOW's bible; the
+            // episode keeps its own story (scenes/beats/drafts/shots/…)
+            const { characters:_bc, locations:_bl, props:_bp, lookbook:_blb, lookbookNote:_bln, ...epDoc } = doc;
+            cloudSaveDoc(currentProjectId, { ...epDoc, showId:currentShowId, episodeNo:currentEpisodeNo });
+            cloudSaveDoc(currentShowId, { isShow:true,
+              bible:{ characters, locations, props, lookbook, lookbookNote } });
+          } else cloudSaveDoc(currentProjectId, doc);
+        }
+      }
       else { try{ localStorage.setItem(STORY_KEY, JSON.stringify(doc)); }catch(e){} }
     }, cloudMode ? 700 : 250);
     return ()=> clearTimeout(saveTimer.current);
-  },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, cloudMode, currentProjectId]);
+  },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, cloudMode, currentProjectId, currentShowId, currentEpisodeNo]);
 
   /* No story yet → the studio has nothing to work on: rooms beyond the Writers'
      Room stay locked, and story-dependent actions explain what to do instead. */
@@ -1666,7 +1734,9 @@ function App(){
         onSignIn:()=>setAuthOpen(true), onSignOut:signOut }),
       projectSlot: cloudMode ? React.createElement(ProjectSwitcher,{ projects, currentId:currentProjectId,
         formatLabel:(typeof formatOf==="function") ? formatOf(project).label : null,
-        onSwitch:switchProject, onCreate:createProject, onRename:renameProject, onDelete:deleteProject }) : null,
+        onSwitch:switchProject, onCreate:createProject, onRename:renameProject, onDelete:deleteProject,
+        onNewEpisode:createEpisode, onMakeShow:makeShow,
+        canMakeShow: !currentShowId && scenes.length>0 }) : null,
       railOpen,inspOpen,
       onToggleRail:toggleRail,
       onToggleInsp:toggleInsp}),

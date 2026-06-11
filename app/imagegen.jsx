@@ -134,7 +134,31 @@ let _nbUid = null;          // current cloud user id
 const _cloudUrlCache = new Map();    // entityId -> signed url
 const _cloudMetaCache = new Map();   // entityId -> meta
 function nbUseCloud(projectId, uid){ _nbBackend="cloud"; _nbProject=projectId; _nbUid=uid; _cloudUrlCache.clear(); _cloudMetaCache.clear(); if(typeof nbResetPrefetchAll==="function") nbResetPrefetchAll(); }
-function nbUseLocal(){ _nbBackend="local"; _nbProject=null; _nbUid=null; _cloudUrlCache.clear(); _cloudMetaCache.clear(); if(typeof nbResetPrefetchAll==="function") nbResetPrefetchAll(); }
+function nbUseLocal(){ _nbBackend="local"; _nbProject=null; _nbUid=null; _nbShared=null; _nbSharedIds=null; _cloudUrlCache.clear(); _cloudMetaCache.clear(); if(typeof nbResetPrefetchAll==="function") nbResetPrefetchAll(); }
+
+/* ── SHOW-SCOPED SHARED ASSETS (series) ───────────────────────────────────────
+   A show's bible entities (cast / locations / props / lookbook) are shared by
+   every episode, so their generated sheets live under the SHOW's bible-project
+   id, not the episode's. nbUseShared(showId, bibleEntityIds) declares which
+   entity ids are shared; _scopeFor(id) routes loads/commits/details for those
+   ids (and their "-variant" sub-slots) to the show scope. Reads fall back to
+   the episode scope so a project converted into a show keeps showing sheets it
+   generated before the conversion. */
+let _nbShared = null, _nbSharedIds = null;
+function nbUseShared(scopeId, ids){
+  _nbShared = scopeId || null;
+  _nbSharedIds = (scopeId && ids && ids.length) ? ids.slice() : null;
+  _cloudUrlCache.clear(); _cloudMetaCache.clear();
+  if(typeof nbResetPrefetchAll==="function") nbResetPrefetchAll();
+}
+function _scopeFor(id){
+  if(_nbShared && _nbSharedIds){
+    const s = String(id||"");
+    for(const b of _nbSharedIds){ if(s===b || s.indexOf(b+"-")===0) return _nbShared; }
+  }
+  return _nbProject;
+}
+window.nbUseShared = nbUseShared;
 function nbBackend(){ return _nbBackend; }
 window.nbUseCloud = nbUseCloud; window.nbUseLocal = nbUseLocal; window.nbBackend = nbBackend;
 
@@ -246,7 +270,10 @@ async function nbLoadImage(id){
       if(_cloudUrlCache.get(id)) return _cloudUrlCache.get(id);
     }
     if(typeof window.cloudAssetLoad!=="function") return "";
-    const r = await window.cloudAssetLoad(_nbProject, id);
+    const scope = _scopeFor(id);
+    let r = await window.cloudAssetLoad(scope, id);
+    // shared-scope miss → fall back to the episode scope (pre-conversion sheets)
+    if((!r || !r.path) && scope!==_nbProject){ r = await window.cloudAssetLoad(_nbProject, id); }
     return await cloudHydrate(id, r);
   }
   return localLoadImage(id);
@@ -267,8 +294,17 @@ async function nbPrefetch(ids){
   if(!ids.length) return;
   if(_nbBackend==="cloud"){
     if(typeof window.cloudAssetLoadMany!=="function") return;
+    // shared (bible) ids batch against the show scope; the rest against the episode
+    const sharedIds = ids.filter(id=>_scopeFor(id)!==_nbProject);
+    const ownIds = ids.filter(id=>_scopeFor(id)===_nbProject);
     let map = {};
-    try{ map = await window.cloudAssetLoadMany(_nbProject, ids) || {}; }catch(e){ return; }
+    try{
+      const batches = await Promise.all([
+        ownIds.length ? window.cloudAssetLoadMany(_nbProject, ownIds) : {},
+        sharedIds.length ? window.cloudAssetLoadMany(_nbShared, sharedIds) : {},
+      ]);
+      map = Object.assign({}, batches[0]||{}, batches[1]||{});
+    }catch(e){ return; }
     const got = [], urls = [];
     for(const id in map){ const u = await cloudHydrate(id, map[id]); if(u){ got.push(id); urls.push(u); } }
     if(got.length){ nbPreloadBytes(urls); window.dispatchEvent(new CustomEvent("nb-prefetched",{ detail:{ ids:got } })); }
@@ -292,7 +328,16 @@ async function nbPrefetchAll(){
   _prefetchAllPromise = (async()=>{
     if(typeof window.cloudAssetLoadAll!=="function") return;
     let map = {};
-    try{ map = await window.cloudAssetLoadAll(_nbProject) || {}; }catch(e){ return; }
+    try{
+      // episode scope + (for series) the show's shared bible scope, in one pass.
+      // The SHOW's entries win on collision — matching _scopeFor's read routing
+      // (a bible sheet regenerated post-conversion supersedes the episode copy).
+      const batches = await Promise.all([
+        window.cloudAssetLoadAll(_nbProject),
+        _nbShared ? window.cloudAssetLoadAll(_nbShared) : {},
+      ]);
+      map = Object.assign({}, batches[0]||{}, batches[1]||{});
+    }catch(e){ return; }
     const got = [];
     for(const id in map){ const u = await cloudHydrate(id, map[id]); if(u) got.push(id); }
     if(got.length) window.dispatchEvent(new CustomEvent("nb-prefetched",{ detail:{ ids:got } }));
@@ -346,11 +391,11 @@ async function localSetRefs(id, refs){ try{ (refs&&refs.length) ? await idbSet(n
 async function localGetHistory(id){ try{ return (await idbGet(nbHistKey(id)))||[]; }catch(e){ return []; } }
 async function localSetHistory(id, hist){ try{ (hist&&hist.length) ? await idbSet(nbHistKey(id), hist) : await idbDel(nbHistKey(id)); }catch(e){} }
 async function nbGetRefs(id){
-  if(_nbBackend==="cloud"){ const d = (typeof window.cloudLoadDetails==="function") ? await window.cloudLoadDetails(_nbProject, id) : null; return d ? d.refs : []; }
+  if(_nbBackend==="cloud"){ const d = (typeof window.cloudLoadDetails==="function") ? await window.cloudLoadDetails(_scopeFor(id), id) : null; return d ? d.refs : []; }
   return localGetRefs(id);
 }
 async function nbGetHistory(id){
-  if(_nbBackend==="cloud"){ const d = (typeof window.cloudLoadDetails==="function") ? await window.cloudLoadDetails(_nbProject, id) : null; return d ? d.history : []; }
+  if(_nbBackend==="cloud"){ const d = (typeof window.cloudLoadDetails==="function") ? await window.cloudLoadDetails(_scopeFor(id), id) : null; return d ? d.history : []; }
   return localGetHistory(id);
 }
 window.nbGetRefs = nbGetRefs;
@@ -470,7 +515,7 @@ window.nbSetCameo=nbSetCameo; window.nbClearCameo=nbClearCameo; window.nbListCam
 async function nbCommit(id, dataUrl, meta, refs, kind){
   if(_nbBackend==="cloud"){
     if(typeof window.cloudCommit!=="function") return { tier:"error", url:dataUrl };
-    const r = await window.cloudCommit(_nbProject, _nbUid, id, dataUrl, meta, refs, kind);
+    const r = await window.cloudCommit(_scopeFor(id), _nbUid, id, dataUrl, meta, refs, kind);
     if(r && r.url){
       _cloudUrlCache.set(id, r.url); _cloudMetaCache.set(id, meta||null);
       // we hold the bytes we just generated — warm the byte-cache directly so the
@@ -497,7 +542,7 @@ async function nbClearAsset(id){
     _cloudUrlCache.delete(id); _cloudMetaCache.delete(id);
     try{ await idbDel(nbCloudKey(id)); }catch(e){}   // drop the cached bytes too
     const old = _objUrls.get(id); if(old){ try{ URL.revokeObjectURL(old.url); }catch(e){} _objUrls.delete(id); }
-    if(typeof window.cloudClear==="function") await window.cloudClear(_nbProject, id);
+    if(typeof window.cloudClear==="function") await window.cloudClear(_scopeFor(id), id);
     return;
   }
   await localSetImage(id, "");
@@ -506,7 +551,7 @@ async function nbClearAsset(id){
 async function nbRevertAsset(id, index){
   if(_nbBackend==="cloud"){
     if(typeof window.cloudRevert!=="function") return null;
-    const r = await window.cloudRevert(_nbProject, _nbUid, id, index);
+    const r = await window.cloudRevert(_scopeFor(id), _nbUid, id, index);
     if(r){ _cloudUrlCache.set(id, r.url); _cloudMetaCache.set(id, r.meta||null); }
     return r;
   }
@@ -524,7 +569,7 @@ async function nbRevertAsset(id, index){
 }
 async function nbLoadDetailsAsset(id, currentUrl){
   if(_nbBackend==="cloud"){
-    if(typeof window.cloudLoadDetails==="function") return await window.cloudLoadDetails(_nbProject, id);
+    if(typeof window.cloudLoadDetails==="function") return await window.cloudLoadDetails(_scopeFor(id), id);
     return { id, url:currentUrl, meta:null, refs:[], history:[] };
   }
   const refs = await localGetRefs(id);
@@ -538,7 +583,7 @@ window.nbRevertAsset = nbRevertAsset; window.nbLoadDetailsAsset = nbLoadDetailsA
 async function nbDeleteHistoryEntry(id, index){
   if(_nbBackend==="cloud"){
     if(typeof window.cloudDeleteHistoryEntry!=="function") return false;
-    try{ return await window.cloudDeleteHistoryEntry(_nbProject, _nbUid, id, index); }catch(e){ return false; }
+    try{ return await window.cloudDeleteHistoryEntry(_scopeFor(id), _nbUid, id, index); }catch(e){ return false; }
   }
   const hist = await localGetHistory(id);
   if(index<0 || index>=hist.length) return false;

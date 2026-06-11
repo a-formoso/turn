@@ -97,9 +97,16 @@ without touching stored story data.
 
 ## Phase 3 — The Show layer (series / micro-drama)  *(large — the one structural change)*
 
-- **Schema:** new `turn_shows` table `{ id, owner, title, bible jsonb, created_at,
-  updated_at }` + nullable `turn_projects.show_id` and `episode_no` (additive,
-  backwards-compatible). RLS mirrors `turn_projects`.
+> **Built 2026-06-11, with one deliberate deviation from the spec below:** no new
+> table. A SHOW is a special `turn_projects` row (`doc.isShow` + `doc.bible`);
+> episodes are normal rows carrying `doc.showId` + `doc.episodeNo` in their jsonb.
+> Zero DDL/migration, RLS and the `turn_generations.project_id` FK work unchanged,
+> and the bible's shared sheets commit under the show row's id via the asset
+> layer's `nbUseShared(showId, bibleEntityIds)` scope (with episode-scope read
+> fallback so pre-conversion sheets stay visible). Deferred from the original
+> sketch: per-episode bible overrides (edits are always show-wide for now).
+
+- ~~**Schema:** new `turn_shows` table~~ *(superseded — see deviation note above)*
 - **The bible** holds the shared world: cast, locations, props, lookbook, grade presets.
   Episode docs keep their own scenes/beats/drafts/shots and **reference bible entities
   by id**. Hydration merges bible entities into the working state read-only-by-default

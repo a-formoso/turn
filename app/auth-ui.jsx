@@ -125,7 +125,7 @@ window.AccountChip = AccountChip;
 
 /* ProjectSwitcher — current film name + dropdown to switch / create / rename /
    delete projects. Only shown when signed in (cloud mode). */
-function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, onDelete, formatLabel }){
+function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, onDelete, formatLabel, onNewEpisode, onMakeShow, canMakeShow }){
   const [open, setOpen] = React.useState(false);
   const [renaming, setRenaming] = React.useState(null);   // id being renamed
   const [draft, setDraft] = React.useState("");
@@ -139,6 +139,30 @@ function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, on
 
   const current = (projects||[]).find(p=>p.id===currentId);
   const title = current ? current.title : "Loading\u2026";
+  // Phase 3 grouping: SHOW rows hold the shared bible; episodes nest beneath them
+  const shows = (projects||[]).filter(p=>String(p.isShow)==="true");
+  const episodesOf = (sid)=> (projects||[]).filter(p=>p.showId===sid)
+    .sort((a,b)=>(Number(a.episodeNo)||0)-(Number(b.episodeNo)||0));
+  const standalone = (projects||[]).filter(p=>String(p.isShow)!=="true" && !p.showId);
+
+  const row = (p)=> renaming===p.id
+    ? React.createElement("div",{key:p.id,className:"proj-rename"},
+        React.createElement("input",{className:"proj-rename-input",autoFocus:true,value:draft,
+          onChange:e=>setDraft(e.target.value),
+          onKeyDown:e=>{ if(e.key==="Enter"&&draft.trim()){ onRename(p.id,draft.trim()); setRenaming(null); }
+                         if(e.key==="Escape") setRenaming(null); }}),
+        React.createElement("button",{className:"proj-rename-ok",onClick:()=>{ if(draft.trim()){ onRename(p.id,draft.trim()); setRenaming(null); } }},
+          React.createElement(Icon.check,{s:13})))
+    : React.createElement("div",{key:p.id,className:"proj-row"+(p.id===currentId?" on":"")+(p.showId?" ep":"")},
+        React.createElement("button",{className:"proj-row-main",onClick:()=>{ onSwitch(p.id); setOpen(false); }},
+          React.createElement("span",{className:"proj-dot"}),
+          React.createElement("span",{className:"proj-row-name"},p.title)),
+        React.createElement("button",{className:"proj-row-act",title:"Rename",
+          onClick:()=>{ setRenaming(p.id); setDraft(p.title); }},
+          React.createElement(Icon.wand,{s:12})),
+        (projects.length>1) && React.createElement("button",{className:"proj-row-act danger",title:p.showId?"Delete episode":"Delete film",
+          onClick:async ()=>{ const ok=await window.appConfirm({title:"Delete \u201c"+p.title+"\u201d?",body:p.showId?"This removes the episode (the show's bible and other episodes stay).":"This removes the film and its sheets.",confirmLabel:"Delete",danger:true}); if(ok) onDelete(p.id); }},
+          React.createElement(Icon.trash,{s:12})));
 
   return React.createElement("div",{className:"proj-wrap",ref:ref},
     React.createElement("button",{className:"proj-btn"+(open?" open":""),onClick:()=>setOpen(o=>!o),title:"Switch film"},
@@ -149,24 +173,18 @@ function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, on
     open && React.createElement("div",{className:"proj-menu"},
       React.createElement("div",{className:"proj-menu-lab"},"Your films"),
       React.createElement("div",{className:"proj-list"},
-        (projects||[]).map(p=> renaming===p.id
-          ? React.createElement("div",{key:p.id,className:"proj-rename"},
-              React.createElement("input",{className:"proj-rename-input",autoFocus:true,value:draft,
-                onChange:e=>setDraft(e.target.value),
-                onKeyDown:e=>{ if(e.key==="Enter"&&draft.trim()){ onRename(p.id,draft.trim()); setRenaming(null); }
-                               if(e.key==="Escape") setRenaming(null); }}),
-              React.createElement("button",{className:"proj-rename-ok",onClick:()=>{ if(draft.trim()){ onRename(p.id,draft.trim()); setRenaming(null); } }},
-                React.createElement(Icon.check,{s:13})))
-          : React.createElement("div",{key:p.id,className:"proj-row"+(p.id===currentId?" on":"")},
-              React.createElement("button",{className:"proj-row-main",onClick:()=>{ onSwitch(p.id); setOpen(false); }},
-                React.createElement("span",{className:"proj-dot"}),
-                React.createElement("span",{className:"proj-row-name"},p.title)),
-              React.createElement("button",{className:"proj-row-act",title:"Rename",
-                onClick:()=>{ setRenaming(p.id); setDraft(p.title); }},
-                React.createElement(Icon.wand,{s:12})),
-              (projects.length>1) && React.createElement("button",{className:"proj-row-act danger",title:"Delete film",
-                onClick:async ()=>{ const ok=await window.appConfirm({title:"Delete \u201c"+p.title+"\u201d?",body:"This removes the film and its sheets.",confirmLabel:"Delete",danger:true}); if(ok) onDelete(p.id); }},
-                React.createElement(Icon.trash,{s:12}))))),
+        standalone.map(row),
+        shows.map(s=> React.createElement("div",{key:s.id,className:"proj-show"},
+          React.createElement("div",{className:"proj-show-head"},
+            React.createElement(Icon.layers,{s:12}),
+            React.createElement("span",{className:"proj-show-name"},s.title),
+            React.createElement("span",{className:"proj-show-tag"},"Show")),
+          episodesOf(s.id).map(row),
+          onNewEpisode && React.createElement("button",{className:"proj-newep",onClick:()=>{ onNewEpisode(s.id); setOpen(false); }},
+            React.createElement(Icon.plus,{s:12}),"New episode")))),
+      canMakeShow && onMakeShow && React.createElement("button",{className:"proj-new ghosted",onClick:()=>{ onMakeShow(); setOpen(false); },
+        title:"This film becomes Episode 1; its cast, locations, props and lookbook become the show's shared bible"},
+        React.createElement(Icon.layers,{s:13}),"Turn this film into a show"),
       React.createElement("button",{className:"proj-new",onClick:()=>{ onCreate("Untitled film"); setOpen(false); }},
         React.createElement(Icon.plus,{s:13}),"New film")));
 }

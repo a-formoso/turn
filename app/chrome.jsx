@@ -290,10 +290,10 @@ function LeftRail({ project, characters, scenes, selId, selChar, onSelect, onSel
             className:"char-row"+(selChar===c.id?" sel":""),
             onClick:()=>onSelectChar&&onSelectChar(c.id)},
             React.createElement("div",{className:"char-av",style:{background:c.color}},
-              c.name.split(" ").map(w=>w[0]).slice(0,2).join("")),
+              (c.name||"?").split(" ").map(w=>w[0]||"").slice(0,2).join("")),
             React.createElement("div",{className:"char-info"},
-              React.createElement("div",{className:"char-name"},c.name),
-              React.createElement("div",{className:"char-role"},c.role)),
+              React.createElement("div",{className:"char-name"},c.name||"Unnamed"),
+              React.createElement("div",{className:"char-role"},c.role||"")),
             React.createElement("span",{className:"char-drives",title:driven+" scene"+(driven!==1?"s":"")+" driven"},driven));
         })),
 

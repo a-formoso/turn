@@ -21,8 +21,8 @@
 const FORMATS = [
   { id:"film",        label:"Film",        icon:"film",    scenes:[14,18], sceneTarget:16, runtimeMin:15, aspect:"16:9",
     screenplay:"full",
-    blurb:"A complete short film — the full method.",
-    spineBrief:"a complete short film with a full dramatic arc",
+    blurb:"A complete film — the full 16-scene method.",
+    spineBrief:"a complete film with a full dramatic arc",
     stage:{ clipMax:15, aspect:"16:9" } },
 
   { id:"short",       label:"Short",       icon:"clapper", scenes:[6,10],  sceneTarget:8,  runtimeMin:5,  aspect:"16:9",

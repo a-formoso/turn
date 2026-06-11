@@ -2120,6 +2120,21 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
   background:var(--bg-2);border:1px solid var(--line-2);color:var(--txt-1);font:600 12px var(--f-ui);cursor:pointer}
 .proj-new:hover{background:var(--bg-3);color:var(--txt-0)}
 .proj-new svg{color:var(--pos)}
+.proj-new.ghosted{background:transparent;border-style:dashed}
+
+/* shows (series) — a group header with its episodes nested beneath */
+.proj-show{margin-top:8px;padding-top:6px;border-top:1px solid var(--line)}
+.proj-show-head{display:flex;align-items:center;gap:7px;padding:4px 9px 6px;color:var(--txt-2)}
+.proj-show-head svg{color:var(--txt-3)}
+.proj-show-name{flex:1;min-width:0;font:600 12px var(--f-display);color:var(--txt-1);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.proj-show-tag{font-family:var(--f-mono);font-size:8.5px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--txt-3);border:1px solid var(--line-2);border-radius:20px;padding:1px 7px}
+.proj-row.ep{margin-left:14px}
+.proj-newep{display:flex;align-items:center;gap:6px;width:calc(100% - 14px);margin:2px 0 4px 14px;
+  padding:6px 9px;border-radius:7px;background:transparent;border:1px dashed var(--line-2);
+  color:var(--txt-2);font:600 11px var(--f-ui);cursor:pointer}
+.proj-newep:hover{color:var(--txt-0);background:var(--bg-3)}
 
 /* edit sheet panel */
 .sheet-edit-panel{margin-top:8px;display:flex;flex-direction:column;gap:7px;
