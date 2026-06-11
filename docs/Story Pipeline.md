@@ -20,6 +20,13 @@ real authoring should always begin at Step 1.)
 
 ## The pipeline
 
+### 0. Format  *(added with owner approval, 2026-06-11)*
+The user first chooses **what we are making** — film · short · commercial · micro-drama ·
+series · documentary (the registry in `app/formats.jsx`; default **Film**, so one click
+preserves the classic flow). The format sets the spine's **target scene count and runtime**,
+the screenplay emphasis, and downstream room/Stage defaults. It changes the *size and
+dressing* of what's built — never the steps below.
+
 ### 1. Seed
 The user provides a seed: a logline, a premise, or a rough idea. Nothing is assumed beyond it.
 
@@ -52,10 +59,10 @@ The Resolution
 The synopsis is the source of truth the rest of the build derives from — including **unique,
 setting-appropriate character names** (never role-words like "Antagonist", never recycled sample names).
 
-### 3. Build the 16-scene spine
-From the synopsis, build a full 16-scene spine: the **scenes**, then the **premise**, **controlling
-idea**, **setting**, and **cast**, then **beats + screenplay** for every scene — threading continuity
-scene to scene.
+### 3. Build the spine to the format's target  *(wording amended with owner approval, 2026-06-11)*
+From the synopsis, build a full spine at the **format's target scene count** (Film = the
+classic 16): the **scenes**, then the **premise**, **controlling idea**, **setting**, and
+**cast**, then **beats + screenplay** for every scene — threading continuity scene to scene.
 
 ### 4. Structural core — the Spine
 Every story is a sequence of scenes, each carrying a **value charge** (opening → closing, e.g. +2 → −1).

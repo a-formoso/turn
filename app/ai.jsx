@@ -426,7 +426,7 @@ const APP_FEATURES = [
   { name:"Board view", what:"all scenes laid out as cards in three act columns." },
   { name:"Editing", what:"scenes and beats are editable; add, delete, drag-reorder scenes, and re-charge values, and every view updates live." },
   { name:"Export (screenplay / story)", what:"the Export button in the top bar — a Writers' Room action (it exports the screenplay and story, so it only appears there, not in the Art Room; the Art Room has its own per-tab exports like the shot list and storyboard). Four formats: Screenplay (PDF) — opens an in-app preview first, then Print / Save as PDF or Download .html; Screenplay (.fountain) — opens in Final Draft, Highland and other screenwriting apps; Story outline (.txt) — premise, controlling idea & spine; Spine data (.csv) — scenes, charges and turns. There is no share-to-WhatsApp/email — exporting produces files. On phones the same export formats live in the top bar's overflow (⋮) menu, again only in the Writers' Room." },
-  { name:"New Story (seed \u2192 research \u2192 synopsis \u2192 spine)", what:"the New Story button starts a fresh film from any kind of seed \u2014 a logline, a 'what if', a character, a theme, a title, an image/vibe, or 'surprise me'. It develops the seed into candidate loglines you pick from, then runs a Research \u2192 Synopsis stage: it researches the idea through the Three Pillars of Research (Memory \u2014 inward emotional truth; Imagination \u2014 living the characters' hours; Fact \u2014 the real time, place and the protagonist's role examined through four lenses: what happens, how it feels, what's frustrating, what's lovely) and writes a three-paragraph synopsis (Setup, Confrontation, Resolution). You review and edit the research and synopsis, then it builds the whole spine, world and cast from THAT synopsis \u2014 so every story grows its own characters and names instead of reusing samples. This runs through the Adaptation agent." },
+  { name:"New Story (format \u2192 seed \u2192 research \u2192 synopsis \u2192 spine)", what:"the New Story button starts a fresh project. STEP 0 \u2014 FORMAT: first pick what you're making \u2014 Film (the classic 16-scene arc), Short, Commercial, Micro-drama (vertical), Series episode, or Documentary; the format sets the spine's target scene count and runtime and the downstream room defaults (it changes the size of what's built, never the method), and it shows as a badge on the project chip. Then bring the idea: it starts from any kind of seed \u2014 a logline, a 'what if', a character, a theme, a title, an image/vibe, or 'surprise me'. It develops the seed into candidate loglines you pick from, then runs a Research \u2192 Synopsis stage: it researches the idea through the Three Pillars of Research (Memory \u2014 inward emotional truth; Imagination \u2014 living the characters' hours; Fact \u2014 the real time, place and the protagonist's role examined through four lenses: what happens, how it feels, what's frustrating, what's lovely) and writes a three-paragraph synopsis (Setup, Confrontation, Resolution). You review and edit the research and synopsis, then it builds the whole spine, world and cast from THAT synopsis \u2014 so every story grows its own characters and names instead of reusing samples. This runs through the Adaptation agent." },
   { name:"Story Editors (Writers' Room agents)", what:"the 'Story Editors' button (next to the centered tabs in the Writers' Room view bar) opens a panel of AI agents that REFINE an existing story. It needs a story to work on — pressed before any scenes exist, it explains that and offers to start New Story instead. The agents: Story Doctor (finds the weakest structural link — scenes that don't turn, soft peaks, flat runs, AND one-sided stretches of the controlling idea's argument (4+ consecutive scenes arguing the same side) — and proposes a fix, re-auditing until the spine holds), Continuity Repair (plants missing setups and pays off dangling threads, re-checking each time), and Table-Read (whole-script pacing/tone/voice critique, plus a per-character VOICE CHECK: it fingerprints every speaking character's voice in one line each and flags SWAPPABLE lines — dialogue that could be handed to another character without anyone noticing — quoting the line, naming who else could say it, and suggesting in one clause what would make it unmistakably the speaker's; verbatim lines repeated by two different speakers are always flagged; click any flag to jump to its scene). Each shows its reasoning and asks approval before changing anything. (MUSE is NOT in this panel — MUSE is the separate floating help assistant in the bottom-right corner; the Story Editors CHANGE your story, MUSE just answers questions.) Creating a story from scratch is NOT here — that's the 'New Story' button, which develops your idea into a logline and architects the full spine (it uses the same builder under the hood, so there's exactly ONE way to start a story). The 'Story Editors' panel is distinct from the 'Writers' Room', which is the story-development ROOM (spine/script) in the room switcher. There are ALSO agents in the Art Room, launched from their own tab (not this top-bar panel): the Visual Researcher ('Research the look' on the Lookbook tab) which autonomously writes the film's visual statement, gathers reference touchstones (palette, lighting, lens, texture) and renders a mood frame for each — and the Presets (colour) tab reads those references when it designs the palette, so the look propagates downstream, the Storyboard Director ('Direct storyboard' on the Storyboards tab) which autonomously boards the film with GPT Image 2, the Cinematographer / Colorist ('Light the film' on the Presets tab) which designs the colour system and color-scripts every scene, proposing it for approval with a rationale, the Shot Designer (run via the Coordinator, not a tab button) which audits coverage scene by scene and proposes the shots + anchor to land each turn for approval, the Casting Director ('Design the cast' on the Characters tab) which autonomously drafts each character's look, finds their appearance changes, and generates the master sheet + every state variant, the Props Master (run via the Coordinator, not a tab button) which autonomously derives every prop the script names — worn/carried by the cast plus the set dressing named in the action — drafts each spec, dedups near-duplicates, and generates the reference sheets, so they exist before the cast is designed, and the Location Scout / Production Designer (run via the Coordinator, not a tab button) which autonomously pulls every place from the sluglines, drafts each spec + depth-grid staging, generates the coverage plate and the time-of-day variants the script needs, and flags any scene whose slugline location has no card yet, and — above all of them — the Art Department Coordinator ('Run pre-production', the button on the right of the Art Room's view bar) which is a META-AGENT: it runs the whole pre-production pipeline in dependency order in one click — the lookbook first (it steers the look), then props, then the cast that references them, then locations, then the colour system, then shot coverage, then the storyboard — chaining the per-tab agents so you don't have to launch each yourself. It runs end to end WITHOUT stopping — the colour (Presets) and shot-coverage (Shots) steps, which are approval-gated when you run them individually, are applied AUTOMATICALLY here rather than waiting for your yes, so the whole pipeline completes in one click. You can still review or tweak anything in its tab afterwards. Press Stop anytime." },
   { name:"Undo agent changes", what:"after an agent applies changes, a floating Undo control (and a row in the Story Editors panel) lets you revert that run's changes to the whole story in one click; the last several runs are kept so you can undo them in turn." },
   { name:"MUSE (help assistant)", what:"the friendly AI guide to TURN — a floating chat bubble in the BOTTOM-RIGHT corner, available in every room. Click it to open a chat box and TYPE a question about your story, any department, the Infinite Studio method, or how to get something done; MUSE answers concisely in text and remembers the conversation. MUSE only answers questions — it never changes your story (that's what the Story Editors do), and it's deliberately separate from the Story Editors panel. MUSE will not discuss what powers it or how TURN is built." },
@@ -828,14 +828,25 @@ function normSpineScenes(rawScenes){
   }));
 }
 
-/* request one half of the spine; returns {title, scenes[]} or null */
-async function spineBatch(brief, part){
+/* request one half of the spine; returns {title, scenes[]} or null.
+   `fmt` (app/formats.jsx) sets the TOTAL scene count and the format brief \u2014
+   films keep the classic 16 with the exact act language below. */
+async function spineBatch(brief, part, fmt){
   const isFirst = part==="first";
-  const range = isFirst
-    ? "scenes 1\u20138: all of ACT I (4 scenes, ending on the Act I climax) and the first half of ACT II (4 scenes, building to the midpoint)"
-    : "scenes 9\u201316: the second half of ACT II (4 scenes, from after the midpoint to the Act II climax / lowest point) and all of ACT III (4 scenes: crisis, story climax, resolution)";
-  const prompt = "You are a story architect designing a 16-scene short-film spine with the Infinite Studio method. "+
-    "Generate ONLY "+range+". That is EXACTLY 8 scenes. "+
+  const isFilm = !fmt || fmt.id==="film";
+  const total = isFilm ? 16 : Math.max(3, fmt.sceneTarget||16);
+  const firstN = Math.ceil(total/2), secondN = total - firstN;
+  const count = isFirst ? firstN : secondN;
+  const range = isFilm
+    ? (isFirst
+      ? "scenes 1\u20138: all of ACT I (4 scenes, ending on the Act I climax) and the first half of ACT II (4 scenes, building to the midpoint)"
+      : "scenes 9\u201316: the second half of ACT II (4 scenes, from after the midpoint to the Act II climax / lowest point) and all of ACT III (4 scenes: crisis, story climax, resolution)")
+    : (isFirst
+      ? "scenes 1\u2013"+firstN+": the opening movement \u2014 establish the world fast and build to the midpoint turn"
+      : "scenes "+(firstN+1)+"\u2013"+total+": the second movement \u2014 from after the midpoint through the climax to the resolution");
+  const prompt = "You are a story architect designing the "+total+"-scene spine of "
+    +(isFilm ? "a short film" : fmt.spineBrief)+" with the Infinite Studio method. "+
+    "Generate ONLY "+range+". That is EXACTLY "+count+" scenes. "+
     "Each scene must TURN a value (opening and closing charge differ in sign or by >=2). Alternate positive/negative for rhythm. "+
     "VARY THE DRIVER: protagonist drives most, but antagonist(s) and key supporting characters EACH drive several scenes. "+
     "Driver ids are lowercase FIRST names that fit the story's world \u2014 make them distinctive and varied, NOT stock defaults (avoid 'alex','jack','sarah','marcus','maya','sam'); never use a role word ('antagonist','mentor') as a driver id. Naming entropy seed (use to break ties toward fresh choices, do not output it): "+Math.random().toString(36).slice(2,9)+". "+
@@ -854,16 +865,20 @@ async function spineBatch(brief, part){
   }catch(e){ return null; }
 }
 
-async function aiBuildSpine(brief){
+async function aiBuildSpine(brief, formatId){
   if(!aiAvailable()) return null;
+  // the project FORMAT sets the spine's target scene count (pipeline Step 0);
+  // films keep the classic 16-scene arc unchanged
+  const fmt = (window.FORMATS||[]).find(f=>f.id===(formatId||"film")) || null;
+  const total = (!fmt || fmt.id==="film") ? 16 : Math.max(3, fmt.sceneTarget||16);
   // two batched calls so neither response hits the output-token cap (the cause of
-  // short spines). Run in parallel, then stitch the halves into a full 16-scene arc.
-  const [a, b] = await Promise.all([ spineBatch(brief,"first"), spineBatch(brief,"second") ]);
+  // short spines). Run in parallel, then stitch the halves into the full arc.
+  const [a, b] = await Promise.all([ spineBatch(brief,"first",fmt), spineBatch(brief,"second",fmt) ]);
   let scenes = [].concat((a&&a.scenes)||[], (b&&b.scenes)||[]);
   // keep act order even if a batch drifted
   scenes.sort((x,y)=> x.act - y.act);
-  scenes = scenes.slice(0,16);
-  if(scenes.length < 6) return null; // batched build failed badly
+  scenes = scenes.slice(0,total);
+  if(scenes.length < Math.max(3, Math.floor(total*0.4))) return null; // batched build failed badly
   const title = (a&&a.title) || (b&&b.title) || "UNTITLED";
   return { title: scrubBrand(title.toString().slice(0,40)), scenes };
 }

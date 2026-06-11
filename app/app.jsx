@@ -1172,7 +1172,7 @@ function App(){
         plantLine:(s,f,m)=>window.aiPlantLine(s,f,m),
         tableRead:(sc,dr)=>window.aiTableRead(sc,dr),
         voiceCheck:(sc,dr)=>window.aiVoiceCheck(sc,dr),
-        buildSpine:(b)=>window.aiBuildSpine(b),
+        buildSpine:(b)=>window.aiBuildSpine(b, (project&&project.format)||"film"),
         buildStoryWorld:(b,sp)=>window.aiBuildStoryWorld(b,sp),
         authorScene:(s,p)=>window.aiAuthorScene(s,p,model.characters),
         draftScene:(s,b,p)=>window.aiDraftScene(s,b,p),
@@ -1662,6 +1662,7 @@ function App(){
       authSlot: React.createElement(AccountChip,{ session, cloudActive: cloudMode,
         onSignIn:()=>setAuthOpen(true), onSignOut:signOut }),
       projectSlot: cloudMode ? React.createElement(ProjectSwitcher,{ projects, currentId:currentProjectId,
+        formatLabel:(typeof formatOf==="function") ? formatOf(project).label : null,
         onSwitch:switchProject, onCreate:createProject, onRename:renameProject, onDelete:deleteProject }) : null,
       railOpen,inspOpen,
       onToggleRail:toggleRail,
@@ -1923,7 +1924,10 @@ function App(){
     newStoryOpen && React.createElement(NewStoryIntake,{
       onClose:()=>setNewStoryOpen(false),
       aiOn: (typeof aiAvailable==="function" && aiAvailable()),
-      onLaunch:(logline, synopsis)=>{ setNewStoryOpen(false);
+      onLaunch:(logline, synopsis, formatId)=>{ setNewStoryOpen(false);
+        // Step 0 (pipeline): the chosen FORMAT lands on the project; the spine
+        // builder and rooms read it via formatOf(project) (app/formats.jsx)
+        if(formatId) setProject(p=>({ ...p, format:formatId }));
         const brief = (typeof composeStoryBrief==="function") ? composeStoryBrief(logline, synopsis) : logline;
         setAgentLaunch({id:"adapt", input:brief}); setAgentsOpen(true); }}),
 

@@ -15,9 +15,10 @@ const SEED_TYPES = [
 ];
 
 function NewStoryIntake({ onClose, onLaunch, aiOn }){
+  const [format, setFormat] = React.useState("film");   // Step 0 — what are we making?
   const [seed, setSeed] = React.useState("logline");
   const [text, setText] = React.useState("");
-  const [step, setStep] = React.useState("seed");   // seed | loglines | synopsis
+  const [step, setStep] = React.useState("format");  // format | seed | loglines | synopsis
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState([]);
   const [chosen, setChosen] = React.useState("");
@@ -65,7 +66,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
     if(withSyn && syn){
       synOut = { ...syn, synopsis:{ setup:setup.trim(), confrontation:conf.trim(), resolution:reso.trim() } };
     }
-    onLaunch(l, synOut);
+    onLaunch(l, synOut, format);
   };
 
   const pillar = (label, body)=> body ? React.createElement("div",{className:"syn-pillar"},
@@ -84,7 +85,8 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
           React.createElement("div",null,
             React.createElement("div",{className:"ns-title"},"New Story"),
             React.createElement("div",{className:"ns-sub"},
-              step==="seed"?"Bring your idea in whatever shape it\u2019s in"
+              step==="format"?"What are we making?"
+              :step==="seed"?"Bring your idea in whatever shape it\u2019s in"
               :step==="loglines"?"Pick the logline to build from"
               :"Research \u2192 synopsis \u00b7 review before the spine builds"))),
         (typeof window.WritingModelPicker==="function") && React.createElement(window.WritingModelPicker,null),
@@ -93,7 +95,22 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
       !aiOn && React.createElement("div",{className:"ag-warn"},
         React.createElement(Icon.alert,{s:13}),"The model isn\u2019t available right now \u2014 idea development needs it."),
 
-      step==="seed"
+      step==="format"
+        ? React.createElement("div",{className:"ns-body"},
+            React.createElement("div",{className:"ns-seclab"},"Pick a format — it sets the size, not the method"),
+            React.createElement("div",{className:"ns-formats"},
+              (window.FORMATS||[]).map(f=>
+                React.createElement("button",{key:f.id,className:"ns-format "+(format===f.id?"on":""),
+                  onClick:()=>setFormat(f.id)},
+                  React.createElement(Icon[f.icon]||Icon.film,{s:16}),
+                  React.createElement("span",{className:"ns-format-name"},f.label),
+                  React.createElement("span",{className:"ns-format-blurb"},f.blurb)))),
+            React.createElement("div",{className:"ns-foot"},
+              React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Cancel"),
+              React.createElement("button",{className:"ns-btn primary",onClick:()=>setStep("seed")},
+                "Continue →")))
+
+        : step==="seed"
         ? React.createElement("div",{className:"ns-body"},
             React.createElement("div",{className:"ns-seclab"},"How did your idea arrive?"),
             React.createElement("div",{className:"ns-chips"},
@@ -110,7 +127,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
               React.createElement(Icon.sparkles,{s:15}),"MUSE will invent a few original loglines for you to choose from."),
             err && React.createElement("div",{className:"ns-err"},err),
             React.createElement("div",{className:"ns-foot"},
-              React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Cancel"),
+              React.createElement("button",{className:"ns-btn ghost",onClick:()=>setStep("format")},"← Back"),
               React.createElement("button",{className:"ns-btn primary",onClick:develop,disabled:loading||!aiOn},
                 loading?React.createElement(React.Fragment,null,
                   React.createElement("span",{className:"ns-spin"}),"Developing\u2026")

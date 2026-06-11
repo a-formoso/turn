@@ -125,7 +125,7 @@ window.AccountChip = AccountChip;
 
 /* ProjectSwitcher — current film name + dropdown to switch / create / rename /
    delete projects. Only shown when signed in (cloud mode). */
-function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, onDelete }){
+function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, onDelete, formatLabel }){
   const [open, setOpen] = React.useState(false);
   const [renaming, setRenaming] = React.useState(null);   // id being renamed
   const [draft, setDraft] = React.useState("");
@@ -144,6 +144,7 @@ function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, on
     React.createElement("button",{className:"proj-btn"+(open?" open":""),onClick:()=>setOpen(o=>!o),title:"Switch film"},
       React.createElement(Icon.film,{s:13}),
       React.createElement("span",{className:"proj-name"},title),
+      formatLabel && React.createElement("span",{className:"proj-format"},formatLabel),
       React.createElement(Icon.chevD,{s:12})),
     open && React.createElement("div",{className:"proj-menu"},
       React.createElement("div",{className:"proj-menu-lab"},"Your films"),
