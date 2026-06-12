@@ -1598,10 +1598,12 @@ function NbControls(){
                 "Off"),
               React.createElement("button",{className:"nb-seg-btn "+(ground?"on":""),
                 onClick:()=>{ setGround(true); nbSetGroundSearch&&nbSetGroundSearch(true); }},
-                "Web + images"))))),
-      /* GPT Image quality — high routinely exceeds the proxy's time window on
-         composite sheets (504, billed but no image), so it's a deliberate choice */
-      isGpt && React.createElement("div",{className:"nb-ctl-row",style:{marginTop:6}},
+                "Web + images")))))),
+    /* GPT Image quality — its own labelled control (high routinely exceeds the
+       proxy's time window on composite sheets: 504, billed but no image) */
+    isGpt && React.createElement("div",{className:"nb-ctl"},
+      React.createElement("span",{className:"nb-ctl-lab"},"Quality"),
+      React.createElement("div",{className:"nb-ctl-row"},
         React.createElement("div",{className:"nb-seg"},
           ["low","medium","high"].map(q=>React.createElement("button",{key:q,
             className:"nb-seg-btn "+(oaiQ===q?"on":""),
