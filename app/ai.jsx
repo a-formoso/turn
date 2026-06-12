@@ -1268,8 +1268,11 @@ function mapBibleEntry(e, character){
     renderStyle: clean(e.style,160),
     wardrobeMask: clean(e.mask,180),
     wardrobeInner: clean(e.inner,180),
-    accessories: clean(e.accessories,140),
-    props: clean(e.props,140),
+    // worn/carried items are CONTINUITY CANON once set: prop cards on the Props tab
+    // are linked to them by name, so a re-draft must never rename or re-describe
+    // them. Keep the existing text; the model only fills these for a blank field.
+    accessories: (character && String(character.accessories||"").trim()) ? character.accessories : clean(e.accessories,140),
+    props: (character && String(character.props||"").trim()) ? character.props : clean(e.props,140),
     signatureGesture: clean(e.gesture,140),
     height: clean(e.height||base.height,40),
     scaleClass: clean(e.scale||base.scaleClass,40),
@@ -1315,7 +1318,7 @@ function bibleBatchPrompt(ctx, chars){
     "face = shape + defining features. build = body type + what it says about them. "+
     "rationale = short clause tying the look to the character. texture = render/skin texture cues. "+
     "style = rendering style e.g. 'photoreal cinematic, 35mm'. mask = PUBLIC wardrobe (specific). inner = PRIVATE wardrobe (specific). "+
-    "accessories = worn items or 'none'. props = associated objects or 'none'. gesture = one signature tic. "+
+    "accessories = worn items or 'none'. props = associated objects or 'none' \u2014 if a character lists EXISTING items, repeat those names VERBATIM (they are continuity objects linked to prop sheets; never rename or re-describe them; you may append new items after). gesture = one signature tic. "+
     "height = e.g. '182 cm'. scale = 'Class A \u00b7 Human' unless non-human. palette = three colour NAMES [key, shadow, climax].\n"+
     'Return ONLY compact JSON: {"cast":[{"id":"...","age":"...","ethnicity":"...","skin":"...","eyes":"...","hair":"...","face":"...","build":"...","rationale":"...","texture":"...","style":"...","mask":"...","inner":"...","accessories":"...","props":"...","gesture":"...","height":"...","scale":"...","palette":["key","shadow","climax"]}]}';
 }
@@ -1336,7 +1339,10 @@ async function aiCastVisualBible(characters, scenes, project){
     let ctx = header + "\nCAST:\n";
     chars.forEach(c=>{ const driven=(scenes||[]).filter(s=>s.driver===c.id);
       ctx += "- id:"+c.id+" | "+c.name+" ("+(c.role||"")+")"+(c.conscious?(" \u2014 wants "+c.conscious):"")+
-        (driven.length?(" \u2014 drives: "+driven.map(s=>s.title).slice(0,4).join(", ")):"")+"\n"; });
+        (driven.length?(" \u2014 drives: "+driven.map(s=>s.title).slice(0,4).join(", ")):"")+"\n";
+      // existing worn/carried items ride along so the model repeats them verbatim
+      if(String(c.accessories||"").trim()) ctx += "    EXISTING worn items (repeat VERBATIM in accessories): "+c.accessories+"\n";
+      if(String(c.props||"").trim()) ctx += "    EXISTING carried items (repeat VERBATIM in props): "+c.props+"\n"; });
     ctx += _lookbookBlock(P);
     try{
       const res = await window.claude.complete({ messages:[{ role:"user", content:bibleBatchPrompt(ctx, chars) }] });

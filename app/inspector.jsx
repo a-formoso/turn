@@ -37,8 +37,10 @@ function splitListItems(value){
   return s
     .split(/\s*(?:,|;|\u00b7|\u2022|\n)\s*/)
     .map(p=> p.replace(/\u0000(\d+)\u0000/g, (_,i)=> stash[+i]||"") )
+    .map(p=>p.replace(/^(?:and|then|&)\s+/i,""))
     .map(p=>p.replace(/\.+$/,"").trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .reduce((acc,x)=> (typeof _mergeDanglingFragment==="function") ? _mergeDanglingFragment(acc,x) : (acc.push(x),acc), []);
 }
 
 /* The character `role` string packs up to three things the model emits together:

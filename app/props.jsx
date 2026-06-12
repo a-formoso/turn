@@ -48,10 +48,23 @@ function splitPropItems(text){
     .map(part=> part.replace(/\u0000(\d+)\u0000/g, (_,i)=> stash[+i]||"") )   // restore parens
     .map(x=> x.replace(/\.$/,"").trim())
     .map(x=> x.replace(/^[)\]\u2014\u2013\-\s]+/,"").trim())                  // drop leading stray bracket/dash debris
+    .map(x=> x.replace(/^(?:and|then|&)\s+/i,"").trim())                      // a prose split leaves "and a ..." — drop the conjunction
     .map(x=> /^\([^)]*$/.test(x) ? x+")" : x)                                 // close a dangling "(unfinished"
     .filter(x=> x && x.replace(/[^a-z0-9]/gi,"").length>1                     // need real content, not just punctuation
-      && !/^(none|n\/a|nil|various|misc\.?|etc\.?)$/i.test(x));
+      && !/^(none|n\/a|nil|various|misc\.?|etc\.?)$/i.test(x))
+    .reduce(_mergeDanglingFragment, []);
 }
+/* "A thin, unpolished silver band" splits into "A thin" + "unpolished silver band" —
+   the first fragment is an article + bare descriptor with no object in it, so it
+   belongs to the item that follows. Re-join it. */
+function _mergeDanglingFragment(acc, x, i, arr){
+  const prev = acc[acc.length-1];
+  const dangling = (s)=> /^(?:a|an|the)\s+\w+$/i.test(String(s||"").trim())
+    && !(typeof propHeadNoun==="function" && propHeadNoun(s));
+  if(prev!==undefined && dangling(prev)){ acc[acc.length-1] = prev+", "+x; return acc; }
+  acc.push(x); return acc;
+}
+window._mergeDanglingFragment = _mergeDanglingFragment;
 /* classify a prop as worn vs carried FROM ITS NAME, independent of which character
    field it was filed under. The visual-bible AI sometimes mis-files a handheld object
    (a phone, a gun) under a character's worn "accessories", or vice-versa; this is the

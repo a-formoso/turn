@@ -1080,31 +1080,60 @@ function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting
      no longer matches any worn/carried bullet above — i.e. leftovers from an old bad
      text-split like "Aud" or "Possessive)". Curated / hand-added props (fromCast not
      set) are never flagged, since they're allowed to exist without a matching bullet. */
-  const normName = s=> String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
-  const currentItemSet = React.useMemo(()=>{
-    const split = (typeof splitListItems==="function") ? splitListItems : (v=>String(v||"").split(","));
-    const set = new Set();
-    [...split(c.accessories), ...split(c.props)].forEach(it=>{ const n=normName(it); if(n) set.add(n); });
-    return set;
-  },[c.accessories, c.props]);
-  const orphanProps = ownedProps.filter(p=> p.fromCast && !currentItemSet.has(normName(p.name)));
-  /* Linked rows are driven by the WORN/CARRIED bullets (so the list always matches
-     the items listed above), each resolved to its matching prop card when one exists.
-     Owned props that match no bullet (orphans) are appended and flagged for cleanup. */
-  const linkedRows = React.useMemo(()=>{
+  // "And a silver ring" and "a silver ring" are the same item — strip the conjunction too
+  const normName = s=> String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").replace(/^(?:and-|then-)/,"").slice(0,40);
+  /* Resolve each WORN/CARRIED bullet to its prop card. Exact normalised-name match
+     first; when that fails (a re-draft re-worded the item, or the card was drafted
+     from older text) fall back to the OBJECT — same head noun, then strong word
+     overlap — so the link survives re-phrasings. Each card matches at most once. */
+  const linkInfo = React.useMemo(()=>{
     const split = (typeof splitListItems==="function") ? splitListItems : (v=>String(v||"").split(","));
     const byNorm = {};
     ownedProps.forEach(p=>{ const n=normName(p.name); if(!(n in byNorm)) byNorm[n]=p; });
-    const rows = [];
-    const addBullets = (text)=> split(text).forEach(it=>{
-      const n = normName(it); if(!n) return;
-      const prop = byNorm[n] || null;
-      rows.push({ key:"b-"+n+"-"+rows.length, name: prop?prop.name:it, prop, orphan:false });
+    const claimed = new Set();
+    /* descriptor words shared by MANY different objects — never evidence two
+       names mean the same thing (the object words have to do that) */
+    const STOP = new Set(["worn","carried","with","without","around","behind","over","under","left","right",
+      "thin","small","large","heavy","wide","long","short","black","white","grey","gray","dark","pale",
+      "vintage","simple","plain","portable","battered","tarnished","brushed","polished","unpolished",
+      "subtle","filled","wrapped","showing","holding","their","there","that","this","into","onto"]);
+    const wordsOf = (s)=> (String(s||"").toLowerCase().match(/[a-z]{4,}/g) || []).filter(w=>!STOP.has(w));
+    /* score every unclaimed card and take the best: shared object-words count
+       double, the card's head noun appearing in the bullet adds one. A score
+       under 3 (i.e. less than 2 shared words, or 1 word + the object noun) is
+       not evidence — better an honest "no sheet yet" than a wrong link. */
+    const fuzzyProp = (item)=>{
+      const toks = new Set(wordsOf(item));
+      const low = " "+String(item).toLowerCase()+" ";
+      let best=null, bestScore=0;
+      ownedProps.forEach(p=>{ if(claimed.has(p.id)) return;
+        const shared = wordsOf(p.name).filter(t=>toks.has(t)).length;
+        const candHead = (typeof propHeadNoun==="function") ? propHeadNoun(p.name) : "";
+        const headHit = candHead && low.indexOf(" "+candHead)>=0 ? 1 : 0;
+        const score = shared*2 + headHit;
+        if(score>=3 && score>bestScore){ best=p; bestScore=score; } });
+      return best;
+    };
+    /* two passes: every EXACT match claims its card first, then re-phrasings
+       fall back to the object — so a fuzzy match can never steal a card whose
+       exact bullet appears later in the list */
+    const bullets = [...split(c.accessories), ...split(c.props)].filter(it=>normName(it));
+    const match = bullets.map(it=>{
+      const exact = byNorm[normName(it)];
+      if(exact && !claimed.has(exact.id)){ claimed.add(exact.id); return exact; }
+      return null;
     });
-    addBullets(c.accessories); addBullets(c.props);
-    orphanProps.forEach(p=> rows.push({ key:"o-"+p.id, name:p.name, prop:p, orphan:true }));
-    return rows;
-  },[c.accessories, c.props, ownedProps.map(p=>p.id).join(","), orphanProps.length]);
+    bullets.forEach((it,i)=>{ if(match[i]) return;
+      const m = fuzzyProp(it); if(m){ claimed.add(m.id); match[i]=m; } });
+    const rows = bullets.map((it,i)=>(
+      { key:"b-"+normName(it)+"-"+i, name: match[i]?match[i].name:it, prop: match[i]||null, orphan:false }));
+    /* orphans = cast-derived cards no bullet claimed (even fuzzily) — true leftovers */
+    const orphans = ownedProps.filter(p=> p.fromCast && !claimed.has(p.id));
+    orphans.forEach(p=> rows.push({ key:"o-"+p.id, name:p.name, prop:p, orphan:true }));
+    return { rows, orphans };
+  },[c.accessories, c.props, ownedProps.map(p=>p.id).join(",")]);
+  const linkedRows = linkInfo.rows;
+  const orphanProps = linkInfo.orphans;
   const collectAttachments = async ()=>{
     const out = [];
     for(const p of wornProps){
