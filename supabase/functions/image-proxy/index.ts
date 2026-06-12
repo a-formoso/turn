@@ -106,6 +106,98 @@ Deno.serve(async (req) => {
   const task = body.task || "image";
   const messages: any[] = Array.isArray(body.messages) ? body.messages : [];
 
+  // ── task: WORLD (location consistency) — 360° skyboxes (Blockade Labs) and
+  // explorable 3D worlds (World Labs Marble). Both are ASYNC at the provider, and
+  // this function stays stateless: the client calls action:"start" to submit the
+  // job (returns an id) and then polls action:"status" every few seconds. Keys
+  // stay server secrets: BLOCKADE_API_KEY, WORLDLABS_API_KEY.
+  if (task === "world") {
+    const engine = (body.engine || "blockade").toString();
+    const action = (body.action || "start").toString();
+
+    if (engine === "blockade") {
+      const bkey = Deno.env.get("BLOCKADE_API_KEY");
+      if (!bkey) return json({ error: "Server is missing BLOCKADE_API_KEY. Get a key at skybox.blockadelabs.com/api, then: npx supabase secrets set BLOCKADE_API_KEY=... and redeploy image-proxy." }, 200);
+      const bh = { "x-api-key": bkey, "Content-Type": "application/json" };
+      try {
+        if (action === "styles") {
+          const r = await fetch("https://backend.blockadelabs.com/api/v1/skybox/styles", { headers: bh });
+          if (!r.ok) return json({ error: `Blockade styles error (${r.status}).` }, 200);
+          const arr = await r.json();
+          return json({ styles: (Array.isArray(arr) ? arr : []).map((s: any) => ({ id: s.id, name: s.name, model: s.model_version })) });
+        }
+        if (action === "start") {
+          let styleId = body.styleId;
+          if (!styleId) {
+            // default to a realistic style so film plates don't come back stylized
+            const r0 = await fetch("https://backend.blockadelabs.com/api/v1/skybox/styles", { headers: bh });
+            const arr = r0.ok ? await r0.json() : [];
+            const list = Array.isArray(arr) ? arr : [];
+            const pick = list.find((s: any) => /realistic/i.test(s.name || "")) || list[0];
+            if (!pick) return json({ error: "Couldn't load Blockade styles to pick a default." }, 200);
+            styleId = pick.id;
+          }
+          const payload: any = { skybox_style_id: styleId, prompt: (body.prompt || "").toString().slice(0, 1900) };
+          if (body.negativeText) payload.negative_text = String(body.negativeText).slice(0, 580);
+          if (body.initImageUrl) { payload.init_image = body.initImageUrl; payload.init_strength = body.initStrength || 0.5; }
+          const r = await fetch("https://backend.blockadelabs.com/api/v1/skybox", {
+            method: "POST", headers: bh, body: JSON.stringify(payload),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) return json({ error: (d && (d.error || d.message)) || `Blockade error (${r.status}).` }, 200);
+          const reqObj = d.request || d;
+          return json({ id: String(reqObj.id || ""), status: reqObj.status || "pending" });
+        }
+        // action === "status"
+        const r = await fetch(`https://backend.blockadelabs.com/api/v1/imagine/requests/${encodeURIComponent(body.id || "")}`, { headers: bh });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) return json({ error: (d && (d.error || d.message)) || `Blockade status error (${r.status}).` }, 200);
+        const q = d.request || d;
+        const st = q.status || "pending";
+        if (st === "error" || st === "abort") return json({ done: true, error: q.error_message || ("Blockade generation " + st + ".") });
+        return json({ done: st === "complete", status: st,
+          panoUrl: q.file_url || "", thumbUrl: q.thumb_url || "", depthUrl: q.depth_map_url || "" });
+      } catch (e) { return json({ error: "Proxy failed to reach Blockade Labs: " + (e?.message || e) }, 502); }
+    }
+
+    if (engine === "marble") {
+      const wkey = Deno.env.get("WORLDLABS_API_KEY");
+      if (!wkey) return json({ error: "Server is missing WORLDLABS_API_KEY. Get a key at platform.worldlabs.ai/api-keys, then: npx supabase secrets set WORLDLABS_API_KEY=... and redeploy image-proxy." }, 200);
+      const wh = { "WLT-Api-Key": wkey, "Content-Type": "application/json" };
+      try {
+        if (action === "start") {
+          const world_prompt: any = body.imageUrl
+            ? { type: "image", image_prompt: { source: "uri", uri: body.imageUrl }, ...(body.prompt ? { text_prompt: String(body.prompt).slice(0, 1900) } : {}) }
+            : { type: "text", text_prompt: String(body.prompt || "").slice(0, 1900) };
+          const r = await fetch("https://api.worldlabs.ai/marble/v1/worlds:generate", {
+            method: "POST", headers: wh,
+            body: JSON.stringify({ display_name: String(body.displayName || "TURN world").slice(0, 80), model: body.model || "marble-1.1", world_prompt }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) return json({ error: (d && (d.error?.message || d.message)) || `Marble error (${r.status}).` }, 200);
+          const opId = d.operation_id || d.id || (typeof d.name === "string" ? d.name.split("/").pop() : "");
+          if (!opId) return json({ error: "Marble accepted the job but returned no operation id." }, 200);
+          return json({ id: String(opId), status: "pending" });
+        }
+        // action === "status"
+        const r = await fetch(`https://api.worldlabs.ai/marble/v1/operations/${encodeURIComponent(body.id || "")}`, { headers: wh });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) return json({ error: (d && (d.error?.message || d.message)) || `Marble status error (${r.status}).` }, 200);
+        if (!d.done) return json({ done: false, status: "processing" });
+        if (d.error) return json({ done: true, error: d.error.message || "Marble generation failed." });
+        const w = (d.response && (d.response.world || d.response)) || {};
+        const a = w.assets || {};
+        return json({ done: true, status: "complete",
+          panoUrl: (a.imagery && a.imagery.pano_url) || "", thumbUrl: a.thumbnail_url || "",
+          splatUrls: (a.splats && a.splats.spz_urls) || null,
+          colliderUrl: (a.mesh && a.mesh.collider_mesh_url) || "",
+          caption: a.caption || "", worldId: w.id || w.world_id || "" });
+      } catch (e) { return json({ error: "Proxy failed to reach World Labs: " + (e?.message || e) }, 502); }
+    }
+
+    return json({ error: `World engine "${engine}" is not configured on this proxy.` }, 400);
+  }
+
   // ── task: TEXT completion (powers spec drafting, MUSE, and the agents) ────────
   // The client folds any system prompt into the user message, so we just pass the
   // messages through to the provider's chat API and return the completion text.
