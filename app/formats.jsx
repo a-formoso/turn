@@ -32,6 +32,7 @@ const FORMATS = [
     stage:{ clipMax:15, aspect:"16:9" } },
 
   { id:"commercial",  label:"Commercial",  icon:"bolt",    scenes:[3,5],   sceneTarget:4,  runtimeMin:1,  aspect:"16:9",
+    researchBrief:"FORMAT: COMMERCIAL — the 'protagonist' lens is the PRODUCT and the customer: research the product or brand promise at the story's center, the audience it must move and what they actually care about, and the category's visual & verbal codes (what every ad in this category does, so this one can break it).",
     screenplay:"light",
     blurb:"A product story in 30–60 seconds.",
     spineBrief:"a 30–60 second commercial — every scene sells one beat of the product story; end on the promise",
@@ -43,6 +44,7 @@ const FORMATS = [
       characters:{ title:"Talent (Casting)", tip:"The faces of the spot. Each gets a canonical reference sheet so they look identical in every frame." } } },
 
   { id:"microdrama",  label:"Micro-drama", icon:"user",    scenes:[6,8],   sceneTarget:7,  runtimeMin:2,  aspect:"9:16",
+    researchBrief:"FORMAT: MICRO-DRAMA — research the attention economy this must live in: a vertical, sound-on, seconds-long scroll; what about THIS premise stops the thumb, and what real-world texture makes the hook feel true rather than baity.",
     screenplay:"full",
     blurb:"Vertical episodes that hook in seconds.",
     spineBrief:"a vertical micro-drama episode — hook inside the first scene, a cliff at the end of every scene, shot for phones",
@@ -56,6 +58,7 @@ const FORMATS = [
     stage:{ clipMax:15, aspect:"16:9" } },
 
   { id:"documentary", label:"Documentary", icon:"globe",   scenes:[10,14], sceneTarget:12, runtimeMin:10, aspect:"16:9",
+    researchBrief:"FORMAT: DOCUMENTARY — the subject is REAL: research the actual world honestly (the type, the milieu, the era), what ACCESS to it would look like for a crew, and what is verifiable versus invented; never fabricate facts about real, named people.",
     screenplay:"interview",
     blurb:"Real subjects, a found structure.",
     spineBrief:"a documentary — real subjects and places; scenes are sequences of testimony, observation and archive, structured to turn like drama",

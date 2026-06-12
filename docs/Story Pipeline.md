@@ -37,10 +37,19 @@ the *size and telling* of what's built — never the steps below.
 ### 1. Seed
 The user provides a seed: a logline, a premise, or a rough idea. Nothing is assumed beyond it.
 
-### 2. Research → Synopsis  *(the new, defining step)*
-Before any structure is built, expand the seed into a **three-paragraph synopsis** using the
+### 2. Research → Synopsis  *(the new, defining step; amended 2026-06-12 by owner approval: framework-shaped synopsis, seed pass-through, format-aware research)*
+Before any structure is built, expand the seed into a synopsis using the
 **Three Pillars of Research** (the Infinite Studio research method). The assistant may **search the
-web** to gather real, grounding material for the Fact pillar.
+web** to gather real, grounding material for the Fact pillar. Three owner-approved rules:
+- **The writer's original seed rides along** into research and synopsis as canon — its names,
+  details and questions survive even when the chosen logline compressed them away.
+- **The research lenses are format-aware** (registry `researchBrief`): a commercial researches the
+  product, audience and category codes; a documentary researches the real subject, access and
+  verifiability; a micro-drama researches the scroll-stopping hook. Films keep the classic lenses.
+- **The synopsis takes the FRAMEWORK's shape** (registry `synopsis.paras`): three-act keeps the
+  classic three paragraphs below verbatim; Kishōtenketsu writes Ki / Shō / Ten / Ketsu;
+  Hero's Journey writes Departure / Initiation / Return; Story Circle writes You & Need /
+  Go & Search / Find & Take / Return & Change.
 
 - **Memory** — inward: honest, universal emotional truths the seed touches (family, betrayal, joy).
 - **Imagination** — living the characters' hours and days in the mind until scenes feel like déjà vu;
@@ -48,7 +57,7 @@ web** to gather real, grounding material for the Fact pillar.
 - **Fact** — outward: real historical, social, technical or place detail (web research allowed/encouraged)
   so the world is specific and cliché-proof.
 
-Output the synopsis in this exact shape:
+Output the synopsis in the framework's shape — for THREE-ACT, this exact classic shape:
 
 ```
 SYNOPSIS: [Title]

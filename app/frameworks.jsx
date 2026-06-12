@@ -36,7 +36,12 @@ const FRAMEWORKS = [
       // the big-beat kinds whose peaks the Doctor checks for softness — TODAY'S list, frozen
       bigKinds:["midpoint","story-climax","act-climax","crisis"] },
     doctorCriteria:"flag scenes that open and close on the same charge; strengthen weak act climaxes",
-    beatVocab:{ turnLabel:"the turn" } },
+    beatVocab:{ turnLabel:"the turn" },
+    /* research-stage synopsis shape (pipeline Step 2) — TODAY'S three paragraphs, frozen */
+    synopsis:{ shapeName:"classic design shape", paras:[
+      { key:"setup",         label:"The Setup",                       guide:"the world, the protagonist and the inciting situation." },
+      { key:"confrontation", label:"The Confrontation / Complication", guide:"escalating conflict, the midpoint turn, mounting stakes and cost." },
+      { key:"resolution",    label:"The Resolution",                  guide:"crisis, climax, and the irreversible final change." } ] } },
 
   { id:"kishotenketsu", label:"Kishōtenketsu", badge:"Kishōtenketsu", icon:"layers",
     blurb:"Four movements. The twist recontextualizes — no clash required.",
@@ -81,7 +86,12 @@ const FRAMEWORKS = [
       sceneRule:"Every scene MOVES: ki scenes plant a charged image or question; shō scenes deepen it (charges may drift, not clash); the ten scene SHIFTS the pattern hard (charge sign reversal or a jump of 2+); ketsu scenes settle. ",
       closer:"Continue naturally; the ten recontextualizes, the ketsu reconciles. ",
       actSpec:"a=act 1-4 (1=ki, 2=shō, 3=ten, 4=ketsu)" },
-    authorBrief:"FRAMEWORK: Kishōtenketsu — beats PRESENT and DEEPEN rather than clash; a scene's movement is a shift in understanding or pattern, not a conflict won or lost; the value charges trace mood and meaning, not victory." },
+    authorBrief:"FRAMEWORK: Kishōtenketsu — beats PRESENT and DEEPEN rather than clash; a scene's movement is a shift in understanding or pattern, not a conflict won or lost; the value charges trace mood and meaning, not victory.",
+    synopsis:{ shapeName:"kishōtenketsu's four movements — conflict is optional; the engine is curiosity and the re-read", paras:[
+      { key:"ki",    label:"Ki — Introduction",     guide:"the world, people and charged images, planted without forcing conflict." },
+      { key:"sho",   label:"Shō — Development",     guide:"what was planted deepens and accumulates meaning; let it breathe." },
+      { key:"ten",   label:"Ten — The Twist",       guide:"ONE recontextualizing revelation or perspective shift that makes everything before it re-read — not a fight, not an escalation." },
+      { key:"ketsu", label:"Ketsu — Reconciliation", guide:"the new understanding settles; calm and resonance, not victory." } ] } },
 
   /* Hero's Journey — the mythic round (approved by owner, 2026-06-12). A
      three-act SKIN: the turn rule is the classic one; what changes is the act
@@ -127,7 +137,11 @@ const FRAMEWORKS = [
       sceneRule:"Each scene must TURN a value (opening and closing charge differ in sign or by >=2). Alternate positive/negative for rhythm. Frame beats as stages of the journey — calls, thresholds, ordeals, transformation — and make every trial COST something. ",
       closer:"Continue naturally; the resurrection is the hardest test, and the elixir shows what the journey bought. ",
       actSpec:"a=act 1-3 (1=departure, 2=initiation, 3=return)" },
-    authorBrief:"FRAMEWORK: Hero's Journey — beats are stages of the mythic round: calls, refusals, thresholds, ordeals, resurrection; the value charges trace the descent and the return, and what each trial costs." },
+    authorBrief:"FRAMEWORK: Hero's Journey — beats are stages of the mythic round: calls, refusals, thresholds, ordeals, resurrection; the value charges trace the descent and the return, and what each trial costs.",
+    synopsis:{ shapeName:"the mythic round in three phases", paras:[
+      { key:"departure",  label:"The Departure",  guide:"the ordinary world, the call to adventure, a refusal, the mentor, and crossing the threshold." },
+      { key:"initiation", label:"The Initiation", guide:"tests, allies and enemies; the approach to the inmost cave; the ORDEAL at the journey's heart and what it costs; the reward and the road back." },
+      { key:"return",     label:"The Return",     guide:"the resurrection — the final, hardest test, proving the change — and the return with the elixir." } ] } },
 
   /* Story Circle — eight steps around the wheel (approved by owner, 2026-06-12).
      Four act bands of two steps each (you/need · go/search · find/take ·
@@ -169,7 +183,12 @@ const FRAMEWORKS = [
       sceneRule:"Each scene must TURN a value (opening and closing charge differ in sign or by >=2). Alternate positive/negative for rhythm. The descent into the unfamiliar always costs — every gain in the bottom half carries a price. ",
       closer:"Continue naturally; the take exacts the price, the return proves the change. ",
       actSpec:"a=act 1-4 (1=you/need, 2=go/search, 3=find/take, 4=return/change)" },
-    authorBrief:"FRAMEWORK: Story Circle — beats descend into the unfamiliar and climb back out: need, search, find, take, return, change; every gain carries a price and the value charges trace what it costs." },
+    authorBrief:"FRAMEWORK: Story Circle — beats descend into the unfamiliar and climb back out: need, search, find, take, return, change; every gain carries a price and the value charges trace what it costs.",
+    synopsis:{ shapeName:"the story circle — a descent for what they need and a return at a price", paras:[
+      { key:"comfort", label:"You & Need",      guide:"the comfort zone, who they are in it, and the want that disturbs it." },
+      { key:"descent", label:"Go & Search",     guide:"crossing into the unfamiliar and adapting to its rules." },
+      { key:"price",   label:"Find & Take",     guide:"getting what they wanted and paying its true, heavy price." },
+      { key:"home",    label:"Return & Change", guide:"coming home to the familiar world changed, master of both." } ] } },
 ];
 window.FRAMEWORKS = FRAMEWORKS;
 

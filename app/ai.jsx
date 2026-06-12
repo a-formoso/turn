@@ -432,7 +432,7 @@ const APP_FEATURES = [
   { name:"Board view", what:"all scenes laid out as cards in three act columns." },
   { name:"Editing", what:"scenes and beats are editable; add, delete, drag-reorder scenes, and re-charge values, and every view updates live." },
   { name:"Export (screenplay / story)", what:"the Export button in the top bar — a Writers' Room action (it exports the screenplay and story, so it only appears there, not in the Art Room; the Art Room has its own per-tab exports like the shot list and storyboard). Four formats: Screenplay (PDF) — opens an in-app preview first, then Print / Save as PDF or Download .html; Screenplay (.fountain) — opens in Final Draft, Highland and other screenwriting apps; Story outline (.txt) — premise, controlling idea & spine; Spine data (.csv) — scenes, charges and turns. There is no share-to-WhatsApp/email — exporting produces files. On phones the same export formats live in the top bar's overflow (⋮) menu, again only in the Writers' Room." },
-  { name:"New Story (format \u2192 seed \u2192 research \u2192 synopsis \u2192 spine)", what:"the New Story button starts a fresh project. STEP 0 \u2014 FORMAT: first pick what you're making \u2014 Film (the classic 16-scene arc), Short, Commercial, Micro-drama (vertical), Series episode, or Documentary; the format sets the spine's target scene count and runtime and the downstream room defaults (it changes the size of what's built, never the method), and it shows as a badge on the project chip. Step 0 has a second row \u2014 'How should it be told?' \u2014 choosing the NARRATIVE FRAMEWORK (Three-Act Turns or Kish\u014dtenketsu; see the 'Narrative frameworks' feature). The format also RECOLORS THE ROOMS: a documentary's Characters tab becomes 'Subjects' and its Props 'Artifacts & Archive'; a commercial's Props becomes 'Product & Props' and Characters 'Talent'; the scene drafter writes to the format (a commercial drafts VO lines and on-screen SUPERs; a documentary drafts interview beats and narration — never invented dialogue in subjects' mouths); shot coverage is drafted to the format too (vertical phone framing for micro-drama, product-hero shots for commercials); and the Stage budget follows it — micro-drama generates VERTICAL 9:16 frames, boards vertical storyboard panels, and packs clips against the format's per-clip budget. SHOWS (series): in the project switcher, 'Turn this film into a show' makes the current film Episode 1 and lifts its cast, locations, props and lookbook into the show's shared BIBLE; every episode then reads and writes that same world (bible edits are show-wide), while each episode keeps its own scenes, beats, script, shots and storyboards. Episodes nest under their show in the switcher with a 'New episode' button (a fresh episode starts with the shared world and an empty story — use New Story inside it). Reference sheets generated for bible entities are SHARED: generate a character's sheet once and every episode uses the exact same sheet. Then bring the idea: it starts from any kind of seed \u2014 a logline, a 'what if', a character, a theme, a title, an image/vibe, or 'surprise me'. It develops the seed into candidate loglines you pick from, then runs a Research \u2192 Synopsis stage: it researches the idea through the Three Pillars of Research (Memory \u2014 inward emotional truth; Imagination \u2014 living the characters' hours; Fact \u2014 the real time, place and the protagonist's role examined through four lenses: what happens, how it feels, what's frustrating, what's lovely) and writes a three-paragraph synopsis (Setup, Confrontation, Resolution). You review and edit the research and synopsis, then it builds the whole spine, world and cast from THAT synopsis \u2014 so every story grows its own characters and names instead of reusing samples. This runs through the Adaptation agent." },
+  { name:"New Story (format \u2192 seed \u2192 research \u2192 synopsis \u2192 spine)", what:"the New Story button starts a fresh project. STEP 0 \u2014 FORMAT: first pick what you're making \u2014 Film (the classic 16-scene arc), Short, Commercial, Micro-drama (vertical), Series episode, or Documentary; the format sets the spine's target scene count and runtime and the downstream room defaults (it changes the size of what's built, never the method), and it shows as a badge on the project chip. Step 0 has a second row \u2014 'How should it be told?' \u2014 choosing the NARRATIVE FRAMEWORK (Three-Act Turns or Kish\u014dtenketsu; see the 'Narrative frameworks' feature). The format also RECOLORS THE ROOMS: a documentary's Characters tab becomes 'Subjects' and its Props 'Artifacts & Archive'; a commercial's Props becomes 'Product & Props' and Characters 'Talent'; the scene drafter writes to the format (a commercial drafts VO lines and on-screen SUPERs; a documentary drafts interview beats and narration — never invented dialogue in subjects' mouths); shot coverage is drafted to the format too (vertical phone framing for micro-drama, product-hero shots for commercials); and the Stage budget follows it — micro-drama generates VERTICAL 9:16 frames, boards vertical storyboard panels, and packs clips against the format's per-clip budget. SHOWS (series): in the project switcher, 'Turn this film into a show' makes the current film Episode 1 and lifts its cast, locations, props and lookbook into the show's shared BIBLE; every episode then reads and writes that same world (bible edits are show-wide), while each episode keeps its own scenes, beats, script, shots and storyboards. Episodes nest under their show in the switcher with a 'New episode' button (a fresh episode starts with the shared world and an empty story — use New Story inside it). Reference sheets generated for bible entities are SHARED: generate a character's sheet once and every episode uses the exact same sheet. Then bring the idea: it starts from any kind of seed \u2014 a logline, a 'what if', a character, a theme, a title, an image/vibe, or 'surprise me'. It develops the seed into candidate loglines you pick from, then runs a Research \u2192 Synopsis stage: it researches the idea through the Three Pillars of Research (Memory \u2014 inward emotional truth; Imagination \u2014 living the characters' hours; Fact \u2014 the real time, place and the protagonist's role examined through four lenses: what happens, how it feels, what's frustrating, what's lovely) and writes the synopsis IN YOUR CHOSEN FRAMEWORK'S SHAPE \u2014 three-act gets the classic Setup / Confrontation / Resolution paragraphs, Kish\u014dtenketsu gets Ki / Sh\u014d / Ten / Ketsu, Hero's Journey gets Departure / Initiation / Return, Story Circle gets You & Need / Go & Search / Find & Take / Return & Change. Your ORIGINAL seed text rides along as canon (names and details you typed survive even if the logline compressed them away), and the research lenses adapt to the FORMAT (a commercial researches the product, audience and category codes; a documentary researches the real subject, access and verifiability; a micro-drama researches the scroll-stopping hook). You review and edit the research and synopsis, then it builds the whole spine, world and cast from THAT synopsis \u2014 so every story grows its own characters and names instead of reusing samples. This runs through the Adaptation agent." },
   { name:"Narrative frameworks (Three-Act / Kish\u014dtenketsu / Hero's Journey / Story Circle)", what:"orthogonal to format, New Story's Step 0 also asks HOW the story should be told \u2014 'How should it be told?' offers four narrative frameworks. HERO'S JOURNEY: the twelve-stage mythic round over three phases \u2014 Departure (Ordinary World, Call to Adventure, Refusal, Meeting the Mentor, Crossing the Threshold), Initiation (Tests/Allies/Enemies, Approach, the Ordeal, the Reward, the Road Back) and Return (Resurrection, Return with the Elixir); it keeps the classic every-scene-turns rule (the elixir scene is exempt) and the builder makes every trial cost something. STORY CIRCLE: eight steps around the wheel \u2014 you (comfort) \u00b7 need \u00b7 go \u00b7 search \u00b7 find \u00b7 take (the price) \u00b7 return \u00b7 change \u2014 over four act bands (You & Need / Go & Search / Find & Take / Return & Change); classic turn rule (the 'changed' scene exempt), built for episodic storytelling, so it pairs naturally with the Series format. THREE-ACT TURNS (the default): conflict-driven, Setup/Complication/Resolution, every scene must TURN a value (flip its charge or move it 2+) and the milestone kinds are Inciting Incident, Act Climax, Mid-Act Climax, Crisis, Story Climax, Resolution. KISH\u014cTENKETSU (the Eastern four-movement form): Ki (introduction) plants, Sh\u014d (development) deepens, Ten (the twist) RECONTEXTUALIZES \u2014 one revelation that makes the audience re-read everything before it, no clash required \u2014 and Ketsu reconciles; milestone kinds are Planting, Deepening, The Twist, Recontextualization, Reconciliation. The framework changes the whole grammar downstream: the spine builder architects in that form (a kish\u014dtenketsu spine spans four acts and forbids conflict-escalation in the ten), the act ruler/board show its movements, the Inspector's kind dropdown and scene verdict speak its language (a quiet ki scene isn't told to 'cut it' \u2014 only an INERT scene is flagged), the Audit table's verdict column reads Moves/Inert instead of Turns/No turn, and the Story Doctor audits differently: it never forces ki/sh\u014d scenes to turn, demands the ten land hard, and puts the RE-READ QUESTION to the model \u2014 're-reading the earlier scenes with the ten in mind, what recontextualizes and what doesn't?' \u2014 reporting prose findings instead of re-charges. A non-default framework shows as a badge on the project chip next to the format badge. All four frameworks keep the same primitives (value charges, beats, the controlling idea's argument) \u2014 they're interchangeable lenses inside the Infinite Studio method, and any format can use any framework." },
   { name:"Story Editors (Writers' Room agents)", what:"the 'Story Editors' button (next to the centered tabs in the Writers' Room view bar) opens a panel of AI agents that REFINE an existing story. It needs a story to work on — pressed before any scenes exist, it explains that and offers to start New Story instead. The agents: Story Doctor (finds the weakest structural link — scenes that don't turn, soft peaks, flat runs, AND one-sided stretches of the controlling idea's argument (4+ consecutive scenes arguing the same side) — and proposes a fix, re-auditing until the spine holds), Continuity Repair (plants missing setups and pays off dangling threads, re-checking each time), and Table-Read (whole-script pacing/tone/voice critique, plus a per-character VOICE CHECK: it fingerprints every speaking character's voice in one line each and flags SWAPPABLE lines — dialogue that could be handed to another character without anyone noticing — quoting the line, naming who else could say it, and suggesting in one clause what would make it unmistakably the speaker's; verbatim lines repeated by two different speakers are always flagged; click any flag to jump to its scene). Each shows its reasoning and asks approval before changing anything. (MUSE is NOT in this panel — MUSE is the separate floating help assistant in the bottom-right corner; the Story Editors CHANGE your story, MUSE just answers questions.) Creating a story from scratch is NOT here — that's the 'New Story' button, which develops your idea into a logline and architects the full spine (it uses the same builder under the hood, so there's exactly ONE way to start a story). The 'Story Editors' panel is distinct from the 'Writers' Room', which is the story-development ROOM (spine/script) in the room switcher. There are ALSO agents in the Art Room, launched from their own tab (not this top-bar panel): the Visual Researcher ('Research the look' on the Lookbook tab) which autonomously writes the film's visual statement, gathers reference touchstones (palette, lighting, lens, texture) and renders a mood frame for each — and the Presets (colour) tab reads those references when it designs the palette, so the look propagates downstream, the Storyboard Director ('Direct storyboard' on the Storyboards tab) which autonomously boards the film with GPT Image 2, the Cinematographer / Colorist ('Light the film' on the Presets tab) which designs the colour system and color-scripts every scene, proposing it for approval with a rationale, the Shot Designer (run via the Coordinator, not a tab button) which audits coverage scene by scene and proposes the shots + anchor to land each turn for approval, the Casting Director ('Design the cast' on the Characters tab) which autonomously drafts each character's look, finds their appearance changes, and generates the master sheet + every state variant, the Props Master (run via the Coordinator, not a tab button) which autonomously derives every prop the script names — worn/carried by the cast plus the set dressing named in the action — drafts each spec, dedups near-duplicates, and generates the reference sheets, so they exist before the cast is designed, and the Location Scout / Production Designer (run via the Coordinator, not a tab button) which autonomously pulls every place from the sluglines, drafts each spec + depth-grid staging, generates the coverage plate and the time-of-day variants the script needs, and flags any scene whose slugline location has no card yet, and — above all of them — the Art Department Coordinator ('Run pre-production', the button on the right of the Art Room's view bar) which is a META-AGENT: it runs the whole pre-production pipeline in dependency order in one click — the lookbook first (it steers the look), then props, then the cast that references them, then locations, then the colour system, then shot coverage, then the storyboard — chaining the per-tab agents so you don't have to launch each yourself. It runs end to end WITHOUT stopping — the colour (Presets) and shot-coverage (Shots) steps, which are approval-gated when you run them individually, are applied AUTOMATICALLY here rather than waiting for your yes, so the whole pipeline completes in one click. You can still review or tweak anything in its tab afterwards. Press Stop anytime." },
   { name:"Undo agent changes", what:"after an agent applies changes, a floating Undo control (and a row in the Story Editors panel) lets you revert that run's changes to the whole story in one click; the last several runs are kept so you can undo them in turn." },
@@ -1038,11 +1038,21 @@ window.aiSeedToLoglines = aiSeedToLoglines;
    what happens / how it feels / what's frustrating / what's lovely).
    Returns { title, research:{memory,imagination,fact{...}}, synopsis:{setup,confrontation,resolution} }.
    The model has no live web; it draws on its own world knowledge for the Fact pillar. */
-async function aiResearchSynopsis(logline){
+async function aiResearchSynopsis(logline, seedText, frameworkId, formatId){
   if(!aiAvailable()) return null;
   const L = String(logline||"").slice(0,1200).trim();
   if(!L) return null;
   const cl = (v,n)=> scrubBrand(String(v||"").trim()).slice(0,n);
+  // the writer's ORIGINAL seed: names, details and questions the one-line logline
+  // compressed away — they are canon and must survive into the synopsis
+  const seed = String(seedText||"").slice(0,1600).trim();
+  const seedBlock = (seed && seed!==L)
+    ? "\nTHE WRITER'S ORIGINAL SEED (its names, details and questions are CANON — keep them; the logline compressed them away):\n"+seed+"\n"
+    : "";
+  // format-routed research clause (formats.jsx) — a commercial researches the product
+  // and audience, a documentary the real subject; films keep the classic lenses
+  const fmtEntry = (window.FORMATS||[]).find(f=>f.id===formatId) || null;
+  const fmtClause = (fmtEntry && fmtEntry.researchBrief) ? ("\n"+fmtEntry.researchBrief+"\n") : "";
 
   // ---- CALL A: the Three Pillars of Research (its own complete() so the JSON
   // stays well under the 1024-token output cap). ----
@@ -1050,7 +1060,7 @@ async function aiResearchSynopsis(logline){
     "You are a story architect working in the Infinite Studio method. Research the LOGLINE below "+
     "using the Three Pillars, BEFORE any synopsis is written. Be concrete and specific \u2014 this grounding "+
     "must make the story feel true and cliche-proof:\n\n"+
-    "LOGLINE:\n"+L+"\n\n"+
+    "LOGLINE:\n"+L+"\n"+seedBlock+fmtClause+"\n"+
     "1) MEMORY (look inward): the honest, universal emotional truths this story touches \u2014 the felt human "+
     "experiences (e.g. grief, betrayal, first love, shame) any audience would recognise. 2-3 sentences.\n"+
     "2) IMAGINATION (live it): step into the characters' ordinary hours and days \u2014 textures, routines, small "+
@@ -1100,33 +1110,35 @@ async function aiResearchSynopsis(logline){
       " | what happens: "+rf.whatHappens+" | how it feels: "+rf.howItFeels+
       " | frustrating: "+rf.frustrating+" | lovely: "+rf.lovely+"\n";
   }
+  // the synopsis takes the FRAMEWORK's shape (frameworks.jsx synopsis.paras):
+  // three-act keeps today's three paragraphs verbatim; kishōtenketsu writes
+  // ki/shō/ten/ketsu; the journey and the circle write their own movements.
+  const fwEntry = (typeof frameworkOf==="function") ? frameworkOf({ framework:frameworkId }) : null;
+  const shape = (fwEntry && fwEntry.synopsis) || { shapeName:"classic design shape", paras:[
+    { key:"setup", label:"The Setup", guide:"the world, the protagonist and the inciting situation." },
+    { key:"confrontation", label:"The Confrontation / Complication", guide:"escalating conflict, the midpoint turn, mounting stakes and cost." },
+    { key:"resolution", label:"The Resolution", guide:"crisis, climax, and the irreversible final change." } ] };
+  const nWords = ["zero","one","two","three","four","five","six"][shape.paras.length] || String(shape.paras.length);
   const synopsisPrompt =
     "You are a story architect working in the Infinite Studio method. Using the LOGLINE and the prior "+
-    "RESEARCH below, write the SYNOPSIS as exactly three paragraphs in classic design shape.\n\n"+
-    "LOGLINE:\n"+L+"\n\n"+
+    "RESEARCH below, write the SYNOPSIS as exactly "+nWords+" paragraphs in "+shape.shapeName+".\n\n"+
+    "LOGLINE:\n"+L+"\n"+seedBlock+"\n"+
     (researchBrief ? ("RESEARCH (let it surface in the prose \u2014 specific, sensory, never generic):\n"+researchBrief+"\n") : "")+
-    "   \u2022 setup: the world, the protagonist and the inciting situation.\n"+
-    "   \u2022 confrontation: escalating conflict, the midpoint turn, mounting stakes and cost.\n"+
-    "   \u2022 resolution: crisis, climax, and the irreversible final change.\n"+
+    shape.paras.map(pg=>"   \u2022 "+pg.key+": "+pg.guide).join("\n")+"\n"+
     "Each paragraph 3-5 sentences, vivid and concrete.\n\n"+
-    'Return ONLY JSON: {"synopsis":{"setup":"...","confrontation":"...","resolution":"..."}}';
+    'Return ONLY JSON: {"synopsis":{'+shape.paras.map(pg=>'"'+pg.key+'":"..."').join(",")+'}}';
   // the call THROWS on transport/provider errors (billing, missing key) so the UI
   // shows the real reason; only an unusable reply returns null
   const resB = await window.claude.complete({ messages:[{ role:"user", content:synopsisPrompt }] });
   try{
     const b = extractJSON(resB);
     const syn = (b && (b.synopsis || b)) || {};
-    if(!(syn.setup||syn.confrontation||syn.resolution)) return null;
-    return {
-      title,
-      logline: L,
-      research,
-      synopsis:{
-        setup: cl(syn.setup,900),
-        confrontation: cl(syn.confrontation,900),
-        resolution: cl(syn.resolution,900),
-      },
-    };
+    const paras = shape.paras.map(pg=>({ key:pg.key, label:pg.label, text: cl(syn[pg.key],900) }));
+    if(!paras.some(pg=>pg.text)) return null;
+    const out = { title, logline: L, research, synopsis:{ paras } };
+    // legacy keys ride along so anything reading setup/confrontation/resolution keeps working
+    paras.forEach(pg=>{ out.synopsis[pg.key] = pg.text; });
+    return out;
   }catch(e){ return null; }
 }
 window.aiResearchSynopsis = aiResearchSynopsis;
@@ -1139,9 +1151,14 @@ function composeStoryBrief(logline, synopsis){
   if(synopsis && synopsis.synopsis){
     const s = synopsis.synopsis;
     b += "\n\nSYNOPSIS"+(synopsis.title?(" \u2014 "+synopsis.title):"")+":";
-    if(s.setup) b += "\nSetup: "+s.setup;
-    if(s.confrontation) b += "\nConfrontation: "+s.confrontation;
-    if(s.resolution) b += "\nResolution: "+s.resolution;
+    if(Array.isArray(s.paras) && s.paras.length){
+      // framework-shaped paragraphs (frameworks.jsx synopsis.paras)
+      s.paras.forEach(pg=>{ if(pg && pg.text) b += "\n"+(pg.label||pg.key)+": "+pg.text; });
+    } else {
+      if(s.setup) b += "\nSetup: "+s.setup;
+      if(s.confrontation) b += "\nConfrontation: "+s.confrontation;
+      if(s.resolution) b += "\nResolution: "+s.resolution;
+    }
     const f = synopsis.research && synopsis.research.fact;
     if(f && (f.world||f.role)){
       b += "\n\nWORLD & ROLE (researched, keep names/period/craft consistent with this):";

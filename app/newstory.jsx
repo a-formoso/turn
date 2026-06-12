@@ -27,9 +27,9 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
   // synopsis stage
   const [syn, setSyn] = React.useState(null);        // full research+synopsis object
   const [synLoading, setSynLoading] = React.useState(false);
-  const [setup, setSetup] = React.useState("");
-  const [conf, setConf] = React.useState("");
-  const [reso, setReso] = React.useState("");
+  // the synopsis paragraphs take the FRAMEWORK's shape (3 for three-act/journey,
+  // 4 for kishōtenketsu/circle) — editable [{key,label,text}]
+  const [paras, setParas] = React.useState([]);
   const [showResearch, setShowResearch] = React.useState(true);
   const cfg = SEED_TYPES.find(s=>s.id===seed) || SEED_TYPES[0];
   const needsText = seed !== "surprise";
@@ -52,9 +52,14 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
     if(!l){ setErr("Choose a logline first."); return; }
     setErr(""); setSynLoading(true);
     try{
-      const s = (typeof aiResearchSynopsis==="function") ? await aiResearchSynopsis(l) : null;
+      const s = (typeof aiResearchSynopsis==="function") ? await aiResearchSynopsis(l, text, framework, format) : null;
       if(s && s.synopsis){
-        setSyn(s); setSetup(s.synopsis.setup||""); setConf(s.synopsis.confrontation||""); setReso(s.synopsis.resolution||"");
+        setSyn(s);
+        setParas(Array.isArray(s.synopsis.paras) && s.synopsis.paras.length
+          ? s.synopsis.paras.map(pg=>({ ...pg, text: pg.text||"" }))
+          : [{key:"setup",label:"The Setup",text:s.synopsis.setup||""},
+             {key:"confrontation",label:"The Confrontation / Complication",text:s.synopsis.confrontation||""},
+             {key:"resolution",label:"The Resolution",text:s.synopsis.resolution||""}]);
         setShowResearch(true); setStep("synopsis");
       } else setErr("Couldn\u2019t research that into a synopsis \u2014 try again, or skip to build from the logline.");
     }catch(e){ setErr(String((e&&e.message)||"Something went wrong. Try again.")); }
@@ -65,7 +70,10 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
     const l=(chosen||"").trim(); if(!l) return;
     let synOut = null;
     if(withSyn && syn){
-      synOut = { ...syn, synopsis:{ setup:setup.trim(), confrontation:conf.trim(), resolution:reso.trim() } };
+      const edited = paras.map(pg=>({ ...pg, text:(pg.text||"").trim() }));
+      const synopsis = { paras: edited };
+      edited.forEach(pg=>{ synopsis[pg.key] = pg.text; });
+      synOut = { ...syn, synopsis };
     }
     onLaunch(l, synOut, format, framework);
   };
@@ -189,15 +197,10 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
                     React.createElement("div",{className:"syn-lens-v"},v)))))),
 
             React.createElement("div",{className:"syn-seclab"},"Synopsis \u2014 edit any paragraph before building"),
-            React.createElement("div",{className:"syn-para"},
-              React.createElement("div",{className:"syn-para-lab"},"The Setup"),
-              React.createElement("textarea",{className:"ns-input syn-input",value:setup,rows:3,onChange:e=>setSetup(e.target.value)})),
-            React.createElement("div",{className:"syn-para"},
-              React.createElement("div",{className:"syn-para-lab"},"The Confrontation / Complication"),
-              React.createElement("textarea",{className:"ns-input syn-input",value:conf,rows:3,onChange:e=>setConf(e.target.value)})),
-            React.createElement("div",{className:"syn-para"},
-              React.createElement("div",{className:"syn-para-lab"},"The Resolution"),
-              React.createElement("textarea",{className:"ns-input syn-input",value:reso,rows:3,onChange:e=>setReso(e.target.value)})),
+            paras.map((pg,i)=>React.createElement("div",{key:pg.key,className:"syn-para"},
+              React.createElement("div",{className:"syn-para-lab"},pg.label||pg.key),
+              React.createElement("textarea",{className:"ns-input syn-input",value:pg.text,rows:3,
+                onChange:e=>{ const v=e.target.value; setParas(ps=>ps.map((x,j)=>j===i?{...x,text:v}:x)); }}))),
             err && React.createElement("div",{className:"ns-err"},err),
             React.createElement("div",{className:"ns-foot"},
               React.createElement("button",{className:"ns-btn ghost",onClick:()=>setStep("loglines")},"\u2190 Back"),
