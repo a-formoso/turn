@@ -1014,8 +1014,11 @@ async function aiSeedToLoglines(seedType, text){
     "\n\nEach logline: ONE sentence, name the protagonist, their want, and the obstacle/twist. "+
     "Fresh, specific, cinematic \u2014 NEVER echo famous films or genre clich\u00e9s; surprise with the particular. "+
     'Return ONLY compact JSON: {"loglines":["...","...","..."]}.';
+  // the model call THROWS on transport/provider errors (billing, missing key,
+  // bad model id) so the UI can show the real reason instead of blaming the
+  // writer's input; only a parse failure below returns null ("couldn't shape it")
+  const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
   try{
-    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
     const j = extractJSON(res);
     let arr = (j && Array.isArray(j.loglines)) ? j.loglines : (Array.isArray(j)?j:null);
     if(!arr){ // salvage: split a plain-text response into sentences
@@ -1107,8 +1110,10 @@ async function aiResearchSynopsis(logline){
     "   \u2022 resolution: crisis, climax, and the irreversible final change.\n"+
     "Each paragraph 3-5 sentences, vivid and concrete.\n\n"+
     'Return ONLY JSON: {"synopsis":{"setup":"...","confrontation":"...","resolution":"..."}}';
+  // the call THROWS on transport/provider errors (billing, missing key) so the UI
+  // shows the real reason; only an unusable reply returns null
+  const resB = await window.claude.complete({ messages:[{ role:"user", content:synopsisPrompt }] });
   try{
-    const resB = await window.claude.complete({ messages:[{ role:"user", content:synopsisPrompt }] });
     const b = extractJSON(resB);
     const syn = (b && (b.synopsis || b)) || {};
     if(!(syn.setup||syn.confrontation||syn.resolution)) return null;

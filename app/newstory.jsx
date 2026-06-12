@@ -42,7 +42,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
       const outs = (typeof aiSeedToLoglines==="function") ? await aiSeedToLoglines(seed, text) : null;
       if(outs && outs.length){ setCandidates(outs); setChosen(outs[0]); setStep("loglines"); }
       else setErr("Couldn\u2019t shape that into a logline \u2014 try adding a detail or two.");
-    }catch(e){ setErr("Something went wrong. Try again."); }
+    }catch(e){ setErr(String((e&&e.message)||"Something went wrong. Try again.")); }
     setLoading(false);
   };
 
@@ -57,7 +57,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
         setSyn(s); setSetup(s.synopsis.setup||""); setConf(s.synopsis.confrontation||""); setReso(s.synopsis.resolution||"");
         setShowResearch(true); setStep("synopsis");
       } else setErr("Couldn\u2019t research that into a synopsis \u2014 try again, or skip to build from the logline.");
-    }catch(e){ setErr("Something went wrong. Try again."); }
+    }catch(e){ setErr(String((e&&e.message)||"Something went wrong. Try again.")); }
     setSynLoading(false);
   };
 
