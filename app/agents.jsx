@@ -992,7 +992,7 @@ async function agentVisualResearcher(ctx){
     ctx.emit({k:"flag", t:"The writing model isn't available — the Visual Researcher needs it to research the look."});
     ctx.emit({k:"done", t:"Aborted."}); return;
   }
-  ctx.emit({k:"plan", t:"Researching the film's visual language — writing the look statement, gathering reference touchstones (palette, lighting, lens, texture), then rendering a mood frame for each. The colour system (Presets) reads these references when it designs the palette downstream."});
+  ctx.emit({k:"plan", t:"Researching the film's visual language — writing the look statement, gathering reference touchstones across every department (palette, lighting, lens, texture, plus wardrobe for the cast and production design for props & sets), then rendering a mood frame for each. The colour system (Presets) reads these references when it designs the palette downstream; wardrobe and production design route to Characters, Props and Locations."});
 
   // 1) research: statement + reference entries, written through to the Colorist
   ctx.emit({k:"act", t:"Reading the story, writing the look statement, gathering references…"});

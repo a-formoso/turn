@@ -1597,9 +1597,12 @@ function App(){
       // Colorist's references (project.styleBible.refs) so the look propagates downstream.
       research: async ()=>{
         if(typeof window.aiResearchLookbook!=="function") return { statement:"", added:0 };
-        const r = await window.aiResearchLookbook(scenes, project);
+        // pass the existing cards so a re-run targets the GAPS (missing categories)
+        // instead of re-proposing the same six photographic touchstones
+        const r = await window.aiResearchLookbook(scenes, project, _lbWork);
         if(!r) return { statement:"", added:0 };
-        if(r.statement) setLookbookNote(r.statement);
+        // keep an existing statement — a gap-filling re-run shouldn't rewrite the north star
+        if(r.statement && !(lookbookNote||"").trim()) setLookbookNote(r.statement);
         const slug = (s)=> String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
         const seen = new Set(_lbWork.map(c=>slug(c.source)));
         const cards = (r.refs||[]).filter(e=>e.source && !seen.has(slug(e.source))).map((e,i)=>({
