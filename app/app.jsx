@@ -569,17 +569,17 @@ function App(){
     setCharacters(cs=>cs.filter(c=>c.id!==id));
     try{ if(typeof nbClearAsset==="function") nbClearAsset(id); }catch(e){}
   };
-  const [charDrafting, setCharDrafting] = React.useState(null);
+  const [charDrafting, setCharDrafting] = React.useState([]);   // array — parallel per-card drafting
   const draftCharacter = async (ch)=>{
-    if(charDrafting) return;
-    setCharDrafting(ch.id);
+    if((charDrafting||[]).includes(ch.id)) return;
+    setCharDrafting(ids=>[...(ids||[]), ch.id]);
     const driven = scenes.filter(s=>s.driver===ch.id);
     try{
       const res = (typeof aiDraftCharacter==="function") ? await aiDraftCharacter(ch, driven, project) : null;
       if(res) updateCharacter(ch.id, res);
       else if(window.turnToast) window.turnToast("Couldn't draft "+(ch.name||"the character")+" — the model returned nothing usable. Try again.");
     }catch(e){ if(window.turnToast) window.turnToast("Drafting failed: "+((e&&e.message)||e)); }
-    setCharDrafting(null);
+    setCharDrafting(ids=>(ids||[]).filter(x=>x!==ch.id));
   };
   const selectScene = (id)=>{ setSelId(id); setSelChar(null); setFocusBeat(null);
     // surface the selected scene's details — expand a collapsed inspector.
@@ -674,7 +674,7 @@ function App(){
 
   // ---- Art Room: PROPS ----
   const updateProp = (id,patch)=>setProps(ps=>ps.map(p=>p.id===id?{...p,...patch}:p));
-  const [draftingPropId, setDraftingPropId] = React.useState(null);
+  const [draftingPropId, setDraftingPropId] = React.useState([]);   // array — parallel per-card drafting
   const [draftingAllProps, setDraftingAllProps] = React.useState(false);
   const addProp = ()=>{
     const id = "prop-"+Date.now().toString(36);
@@ -721,13 +721,14 @@ function App(){
     });
   };
   const draftPropVisuals = async (pr)=>{
-    if(draftingPropId || !(typeof aiPropVisuals==="function")) return;
-    setDraftingPropId(pr.id);
+    if((draftingPropId||[]).includes(pr.id) || !(typeof aiPropVisuals==="function")) return;
+    setDraftingPropId(ids=>[...(ids||[]), pr.id]);
     try{
       const res = await aiPropVisuals(pr, characters, lbProject("props"));
       if(res) updateProp(pr.id, res);
-    }catch(e){}
-    setDraftingPropId(null);
+      else if(window.turnToast) window.turnToast("Couldn't draft "+(pr.name||"the prop")+" — the model returned nothing usable. Try again.");
+    }catch(e){ if(window.turnToast) window.turnToast("Drafting failed: "+((e&&e.message)||e)); }
+    setDraftingPropId(ids=>(ids||[]).filter(x=>x!==pr.id));
   };
   // "Draft all props" — the full props pipeline in one click:
   //   1) SYNC any missing cards from the cast (worn/carried, dedup by owner+name)
@@ -814,7 +815,8 @@ function App(){
 
   // ---- Art Room: LOCATIONS ----
   const updateLocation = (id,patch)=>setLocations(ls=>ls.map(l=>l.id===id?{...l,...patch}:l));
-  const [draftingLocId, setDraftingLocId] = React.useState(null);
+  // ARRAY of in-flight ids — each card drafts independently, in parallel
+  const [draftingLocId, setDraftingLocId] = React.useState([]);
   const [draftingAllLocs, setDraftingAllLocs] = React.useState(false);
   const [assigningStyles, setAssigningStyles] = React.useState(false);
   const addLocation = ()=>{
@@ -827,14 +829,14 @@ function App(){
     try{ if(typeof nbClearAsset==="function") nbClearAsset(id); }catch(e){}
   };
   const draftLocationVisuals = async (l)=>{
-    if(draftingLocId || !(typeof aiLocationVisuals==="function")) return;
-    setDraftingLocId(l.id);
+    if((draftingLocId||[]).includes(l.id) || !(typeof aiLocationVisuals==="function")) return;
+    setDraftingLocId(ids=>[...(ids||[]), l.id]);
     try{
       const fields = await aiLocationVisuals(l, scenes, lbProject("locations"));
       if(fields) setLocations(ls=>ls.map(x=>x.id===l.id?{...x, ...fields}:x));
       else if(window.turnToast) window.turnToast("Couldn't draft "+(l.name||"the location")+" — the model returned nothing usable. Try again.");
     }catch(e){ if(window.turnToast) window.turnToast("Drafting failed: "+((e&&e.message)||e)); }
-    setDraftingLocId(null);
+    setDraftingLocId(ids=>(ids||[]).filter(x=>x!==l.id));
   };
   // "Draft all locations" — the full locations pipeline in one click:
   //   1) PULL any missing places from the script's sluglines (+ refresh scene lists)
@@ -1899,7 +1901,7 @@ function App(){
         const charObj = selChar ? characters.find(c=>c.id===selChar) : null;
         const inspectorEl = charObj
           ? React.createElement(CharacterPanel,{character:charObj, scenes,
-              onUpdate:updateCharacter, onDraft:draftCharacter, drafting:charDrafting===charObj.id,
+              onUpdate:updateCharacter, onDraft:draftCharacter, drafting:(Array.isArray(charDrafting)?charDrafting.includes(charObj.id):charDrafting===charObj.id),
               onJumpScene:(id)=>selectScene(id), onClose:()=>setSelChar(null),
               onCollapse:()=>setInspOpen(false),
               onFollow:(id)=>{ setFollowChar(id); setView("spine");

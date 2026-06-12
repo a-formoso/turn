@@ -301,7 +301,7 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
           ? React.createElement(React.Fragment,null,
               React.createElement("div",{className:"sheet-grid"},
                 pager.slice(shown).map(l=>React.createElement(LocationSheet,{key:l.id,l,project,scenes,onUpdate,onDelete,onDraft,
-                  drafting:draftingId===l.id||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
+                  drafting:(Array.isArray(draftingId)?draftingId.includes(l.id):draftingId===l.id)||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
                   batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
                   onDraftStaging,draftingStage:draftingStageId===l.id}))),
               React.createElement(PagerBar,{pager,noun:"location"}))

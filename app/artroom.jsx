@@ -1791,7 +1791,7 @@ function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, 
     BatchBar && React.createElement(BatchBar,{batch,noun:"character"}),
     React.createElement("div",{className:"sheet-grid"},
       charPager.slice(shown).map(c=>React.createElement(CharacterSheet,{key:c.id,c,project,scenes,props,onUpdate,onDraft,
-        drafting:draftingId===c.id||(draftingIds||[]).indexOf(c.id)>=0,onView:(url,ch)=>setView({url,character:ch}),
+        drafting:(Array.isArray(draftingId)?draftingId.includes(c.id):draftingId===c.id)||(draftingIds||[]).indexOf(c.id)>=0,onView:(url,ch)=>setView({url,character:ch}),
         batchActiveId,onBatchDone:batch.advance,onDelete:onDelete,
         onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem}))),
     React.createElement(PagerBar,{pager:charPager,noun:"character"}));

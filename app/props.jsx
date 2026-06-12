@@ -536,7 +536,7 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
           ? React.createElement(React.Fragment,null,
               React.createElement("div",{className:"sheet-grid"},
                 pager.slice(shown).map(p=>React.createElement(PropSheet,{key:p.id,p,project,characters,scenes,onUpdate,onDelete,onDraft,
-                  drafting:draftingId===p.id||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
+                  drafting:(Array.isArray(draftingId)?draftingId.includes(p.id):draftingId===p.id)||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
                   batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
                   onTagOne,taggingScene:taggingSceneId===p.id,
                   dupIds:dupForId[p.id],onMerge:onMergeProps}))),
