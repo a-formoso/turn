@@ -577,7 +577,8 @@ function App(){
     try{
       const res = (typeof aiDraftCharacter==="function") ? await aiDraftCharacter(ch, driven, project) : null;
       if(res) updateCharacter(ch.id, res);
-    }catch(e){}
+      else if(window.turnToast) window.turnToast("Couldn't draft "+(ch.name||"the character")+" — the model returned nothing usable. Try again.");
+    }catch(e){ if(window.turnToast) window.turnToast("Drafting failed: "+((e&&e.message)||e)); }
     setCharDrafting(null);
   };
   const selectScene = (id)=>{ setSelId(id); setSelChar(null); setFocusBeat(null);
@@ -638,7 +639,7 @@ function App(){
         }
       }
       if(targets.length) markApplied("characters");
-    }catch(e){}
+    }catch(e){ if(window.turnToast) window.turnToast("Cast drafting failed: "+((e&&e.message)||e)); }
     setDraftingAllVisuals(false);
     setDraftingVisualIds([]);
   };
@@ -755,7 +756,7 @@ function App(){
         if(smap) setProps(ps=>ps.map(p=> smap[p.id] ? {...p, scenes: smap[p.id]} : p));
       }
       if(working.length) markApplied("props");
-    }catch(e){}
+    }catch(e){ if(window.turnToast) window.turnToast("Prop drafting failed: "+((e&&e.message)||e)); }
     setDraftingAllProps(false);
   };
   // Pull standalone prop cards out of the cast's existing "Props & accessories"
@@ -831,7 +832,8 @@ function App(){
     try{
       const fields = await aiLocationVisuals(l, scenes, lbProject("locations"));
       if(fields) setLocations(ls=>ls.map(x=>x.id===l.id?{...x, ...fields}:x));
-    }catch(e){}
+      else if(window.turnToast) window.turnToast("Couldn't draft "+(l.name||"the location")+" — the model returned nothing usable. Try again.");
+    }catch(e){ if(window.turnToast) window.turnToast("Drafting failed: "+((e&&e.message)||e)); }
     setDraftingLocId(null);
   };
   // "Draft all locations" — the full locations pipeline in one click:
@@ -869,7 +871,7 @@ function App(){
         if(Object.keys(sMap).length) setLocations(ls=>ls.map(l=> sMap[l.id] ? {...l, staging:sMap[l.id]} : l));
       }
       if(working.length) markApplied("locations");
-    }catch(e){}
+    }catch(e){ if(window.turnToast) window.turnToast("Location drafting failed: "+((e&&e.message)||e)); }
     setDraftingAllLocs(false);
   };
   // draft a location's depth-grid staging from the script
@@ -1511,7 +1513,9 @@ function App(){
       // drafted props that still need a sheet
       toGenerate: async (force)=>{
         const out=[];
-        for(const p of _propWork){ if(!_propDrafted(p)) continue; if(!force && await _grabImg(p.id)) continue; out.push(p); }
+        for(const p of _propWork){
+          if(p.fromSet && !p.ownerId) continue;   // set dressing lives in the location plates — don't spend sheets on it
+          if(!_propDrafted(p)) continue; if(!force && await _grabImg(p.id)) continue; out.push(p); }
         return out;
       },
       generateSheet: async (p)=>{

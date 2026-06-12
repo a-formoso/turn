@@ -1358,6 +1358,7 @@ async function aiCastVisualBible(characters, scenes, project){
   const batches = [];
   for(let i=0;i<characters.length;i+=2) batches.push(characters.slice(i,i+2));
 
+  let lastErr = null;
   const runBatch = async (chars)=>{
     let ctx = header + "\nCAST:\n";
     chars.forEach(c=>{ const driven=(scenes||[]).filter(s=>s.driver===c.id);
@@ -1378,7 +1379,7 @@ async function aiCastVisualBible(characters, scenes, project){
       arr.forEach((e,i)=>{ const id = idOf(e.id) || (chars[i] && chars[i].id);
         if(id) part[id] = mapBibleEntry(e, chars.find(c=>c.id===id)); });
       return part;
-    }catch(e){ return {}; }
+    }catch(e){ lastErr = e; return {}; }
   };
 
   const results = await Promise.all(batches.map(async (chars)=>{
@@ -1389,6 +1390,7 @@ async function aiCastVisualBible(characters, scenes, project){
   }));
   const out = {};
   results.forEach(part=>Object.assign(out, part));
+  if(!Object.keys(out).length && lastErr) throw lastErr;   // surface billing/key errors
   return Object.keys(out).length ? out : null;
 }
 window.aiCastVisualBible = aiCastVisualBible;
@@ -1414,6 +1416,7 @@ async function aiDesignPropBible(props, characters, project){
   const batches = [];
   for(let i=0;i<props.length;i+=3) batches.push(props.slice(i,i+3));
 
+  let lastErr = null;
   const runBatch = async (items)=>{
     let ctx = header + "\nPROPS (objects to design for the art department):\n";
     items.forEach(p=>{ const owner=(characters||[]).find(c=>c.id===p.ownerId);
@@ -1439,7 +1442,7 @@ async function aiDesignPropBible(props, characters, project){
       arr.forEach((e,i)=>{ const id = idOf(e.id) || (items[i] && items[i].id);
         if(id) part[id] = mapPropEntry(e); });
       return part;
-    }catch(e){ return {}; }
+    }catch(e){ lastErr = e; return {}; }
   };
 
   const results = await Promise.all(batches.map(async (items)=>{
@@ -1449,6 +1452,7 @@ async function aiDesignPropBible(props, characters, project){
   }));
   const out = {};
   results.forEach(part=>Object.assign(out, part));
+  if(!Object.keys(out).length && lastErr) throw lastErr;   // surface billing/key errors
   return Object.keys(out).length ? out : null;
 }
 window.aiDesignPropBible = aiDesignPropBible;
@@ -1483,6 +1487,7 @@ async function aiDesignLocationBible(locations, scenes, project){
   const batches = [];
   for(let i=0;i<locations.length;i+=3) batches.push(locations.slice(i,i+3));
 
+  let lastErr = null;
   const runBatch = async (items)=>{
     let ctx = header + "\nLOCATIONS (places the art department must design):\n";
     items.forEach(l=>{
@@ -1514,7 +1519,7 @@ async function aiDesignLocationBible(locations, scenes, project){
       arr.forEach((e,i)=>{ const id = idOf(e.id) || (items[i] && items[i].id);
         if(id) part[id] = mapLocEntry(e); });
       return part;
-    }catch(e){ return {}; }
+    }catch(e){ lastErr = e; return {}; }
   };
   const results = await Promise.all(batches.map(async (items)=>{
     let part = await runBatch(items);
@@ -1523,6 +1528,7 @@ async function aiDesignLocationBible(locations, scenes, project){
   }));
   const out = {};
   results.forEach(part=>Object.assign(out, part));
+  if(!Object.keys(out).length && lastErr) throw lastErr;   // surface billing/key errors
   return Object.keys(out).length ? out : null;
 }
 window.aiDesignLocationBible = aiDesignLocationBible;

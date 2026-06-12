@@ -323,7 +323,7 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
             React.createElement(EditText,{value:p.name,placeholder:"Prop name\u2026",onCommit:val=>onUpdate(p.id,{name:val})})),
           React.createElement("div",{className:"sheet-role"},
             React.createElement("span",{className:"prop-kind-badge "+(p.kind==="worn"?"worn":"carried")},p.kind||"carried"),
-            p.ownerName ? (" \u00b7 "+p.ownerName) : " \u00b7 unassigned"),
+            p.ownerName ? (" \u00b7 "+p.ownerName) : (p.fromSet ? " \u00b7 set dressing" : " \u00b7 unassigned")),
           (p.scenes!==undefined) && React.createElement("div",{className:"prop-scenes"},
             propScenes.length
               ? [ React.createElement("span",{key:"lab",className:"prop-scenes-lab"},"Scenes"),
@@ -461,7 +461,10 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
   // ---- batch generation ----
   // eligible = drafted props (so a hand-added, undrafted/gated card never makes a
   // generic image). Cards that already have a sheet are caught by the begin() partition.
-  const draftedIds = (subset)=> subset.filter(p=>propVisualsDrafted(p)).map(p=>p.id);
+  // set dressing with no owner doesn't earn a reference sheet by default — it
+  // lives in the location plates. Batches skip them; the per-card button remains.
+  const batchWorthy = (p)=> !(p.fromSet && !p.ownerId);
+  const draftedIds = (subset)=> subset.filter(p=>propVisualsDrafted(p) && batchWorthy(p)).map(p=>p.id);
   const startSceneBatch = ()=>{
     if(!sceneFilter || batchActiveId) return;
     const eligible = draftedIds(shown);
@@ -475,7 +478,7 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
     if(sceneFilter) setSceneFilter("");            // mount every card so the queue can reach each one
     batch.begin(eligible, list.length - eligible.length);
   };
-  const eligibleAll = list.filter(p=>propVisualsDrafted(p)).length;
+  const eligibleAll = list.filter(p=>propVisualsDrafted(p) && batchWorthy(p)).length;
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s?s.no:sid; };
 
   return React.createElement("div",{className:"art-scroll"},

@@ -68,3 +68,22 @@
   }
   window.ConfirmHost = ConfirmHost;
 })();
+
+
+/* turnToast(msg) — a small transient notice for background failures the user
+   would otherwise never see (e.g. a drafter hitting a provider billing error).
+   One at a time; auto-dismisses; click to dismiss. */
+window.turnToast = function(msg){
+  try{
+    let el = document.getElementById("turn-toast");
+    if(!el){
+      el = document.createElement("div"); el.id = "turn-toast";
+      el.addEventListener("click", ()=>{ el.classList.remove("on"); });
+      document.body.appendChild(el);
+    }
+    el.textContent = String(msg||"").slice(0, 280);
+    el.classList.add("on");
+    clearTimeout(el.__t);
+    el.__t = setTimeout(()=>{ el.classList.remove("on"); }, 9000);
+  }catch(e){}
+};
