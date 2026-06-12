@@ -3609,41 +3609,6 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   text-shadow:0 1px 6px rgba(0,0,0,.8);max-width:80%;text-align:center;line-height:1.5}
 
 
-/* ── Worlds: location World section + the Scout pano viewer ─────────────── */
-.loc-world{display:flex;flex-direction:column;gap:8px}
-.loc-world-ctas,.loc-world-row{display:flex;gap:8px;flex-wrap:wrap}
-.loc-world-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-2);
-  background:var(--bg-2);color:var(--txt-1);border-radius:var(--r-s);padding:7px 12px;
-  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.04em;cursor:pointer;text-decoration:none}
-.loc-world-btn:hover{border-color:var(--accent);color:var(--accent)}
-.loc-world-btn.alt{border-color:var(--accent);color:var(--accent)}
-.loc-world-btn.ghost{opacity:.75}
-.loc-world-busy{display:flex;align-items:center;gap:8px;font-family:var(--f-mono);font-size:11px;color:var(--txt-2);padding:6px 0}
-.loc-world-pano{width:100%;border-radius:var(--r-s);border:1px solid var(--line);cursor:pointer;display:block;aspect-ratio:2/1;object-fit:cover}
-.loc-world-views{display:flex;gap:6px;flex-wrap:wrap}
-.loc-world-view{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line-2);background:var(--bg-3);
-  color:var(--txt-2);border-radius:20px;padding:3px 10px;font-family:var(--f-mono);font-size:9.5px;cursor:pointer}
-.loc-world-view:hover{color:var(--accent);border-color:var(--accent)}
-.scout-overlay{position:fixed;inset:0;background:rgba(10,10,10,.78);z-index:340;display:flex;align-items:center;justify-content:center;padding:24px}
-.scout-modal{background:var(--bg-1);border:1px solid var(--line);border-radius:var(--r-l);width:min(1100px,96vw);
-  display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.45)}
-.scout-head{display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--line)}
-.scout-title{font-family:var(--f-display);font-size:14px;font-weight:600}
-.scout-meta{margin-left:auto;font-family:var(--f-mono);font-size:9.5px;color:var(--txt-3);letter-spacing:.05em}
-.scout-x{border:0;background:transparent;cursor:pointer;color:var(--txt-2);display:flex;padding:4px}
-.scout-stage{position:relative;width:100%;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.scout-stage canvas{width:100%!important;height:100%!important;display:block;cursor:grab}
-.scout-stage canvas:active{cursor:grabbing}
-.scout-loading,.scout-err{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  color:#bbb;font-family:var(--f-mono);font-size:11.5px;padding:20px;text-align:center}
-.scout-err{color:#e08b8b}
-.scout-foot{display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--line)}
-.scout-hint{font-family:var(--f-mono);font-size:9.5px;color:var(--txt-3)}
-.scout-take{margin-left:auto;display:inline-flex;align-items:center;gap:7px;border:0;background:var(--accent);color:#fff;
-  border-radius:var(--r-s);padding:9px 16px;font-family:var(--f-mono);font-size:11px;letter-spacing:.04em;cursor:pointer}
-.scout-take:disabled{opacity:.5;cursor:default}
-
-
 /* turnToast — transient global notice for background failures */
 #turn-toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(16px);
   max-width:min(620px,90vw);background:var(--bg-0);color:var(--txt-0);border:1px solid var(--accent);
@@ -3662,10 +3627,3 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .sb-lookbook-line:last-child{border-bottom:0}
 
 
-/* world CTAs — stacked label + sublabel so the two engines read differently */
-.loc-world-btn.stack{flex-direction:column;align-items:flex-start;gap:3px;padding:9px 14px}
-.loc-world-btn-t{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600}
-.loc-world-btn-sub{font-size:9px;color:var(--txt-3);letter-spacing:.03em}
-.loc-world-btn.stack.alt .loc-world-btn-sub{color:inherit;opacity:.7}
-/* the Scout fills the screen properly (portaled to body) */
-.scout-modal{width:min(1280px,96vw)}

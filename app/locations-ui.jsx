@@ -119,11 +119,6 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
       React.createElement(CardFold,{label:"Staging \u2014 Depth Grid",defaultOpen:false},
         React.createElement(StagingGrid,{l,onUpdate,onDraftStaging,draftingStage})),
 
-      React.createElement(CardFold,{label:"World \u2014 scout & frame inside the space",defaultOpen:false},
-        (typeof WorldSection!=="undefined")
-          ? React.createElement(WorldSection,{ l, project, onUpdate, onView })
-          : null),
-
       React.createElement(CardFold,{label:"Time-of-day variants",defaultOpen:false},
         React.createElement("div",{className:"loc-variants"},
           (l.variants||[]).length

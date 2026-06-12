@@ -1,5 +1,11 @@
 # Worlds Plan — explorable location spaces for shot consistency
 
+> **SHELVED 2026-06-12 by owner decision** — the feature was built, verified
+> live (Blockade + Marble), and then removed the same day: the pano scouting
+> flow didn't earn its place over the existing plates + anchors. The full
+> implementation lives in git history (428cb95…87a9dc3, removal commit after);
+> reviving it is a revert away. Provider keys may remain set server-side.
+
 *Spec for solving location consistency the way the user framed it (2026-06-12):
 "create a world from an image, walk inside it, frame a shot, take the shot
 with characters in it." Reference product: OpenArt's Create World (3D world →
