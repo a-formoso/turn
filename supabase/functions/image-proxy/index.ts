@@ -129,11 +129,18 @@ Deno.serve(async (req) => {
         if (action === "start") {
           let styleId = body.styleId;
           if (!styleId) {
-            // default to a realistic style so film plates don't come back stylized
+            // default to a CURRENT-model realistic style (Model 2 styles are
+            // deprecated and 400 on generation) — prefer Model 4, then Model 3,
+            // and cinematic/photoreal naming so film plates don't come back stylized
             const r0 = await fetch("https://backend.blockadelabs.com/api/v1/skybox/styles", { headers: bh });
             const arr = r0.ok ? await r0.json() : [];
-            const list = Array.isArray(arr) ? arr : [];
-            const pick = list.find((s: any) => /realistic/i.test(s.name || "")) || list[0];
+            const list = (Array.isArray(arr) ? arr : []).filter((s: any) => {
+              const m = String(s.model_version ?? s.model ?? "");
+              return m === "3" || m === "4";
+            });
+            const realish = (s: any) => /cinematic|photoreal|realis/i.test(s.name || "");
+            const pick = list.filter((s: any) => String(s.model_version ?? s.model) === "4").find(realish)
+              || list.find(realish) || list[0];
             if (!pick) return json({ error: "Couldn't load Blockade styles to pick a default." }, 200);
             styleId = pick.id;
           }
