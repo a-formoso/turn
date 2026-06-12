@@ -24,6 +24,43 @@ function assignPlotPoints(scenes){
   const idxByAct = (act)=> scenes.map((s,i)=>s.act===act?i:-1).filter(i=>i>=0);
   const set = (i,k)=>{ if(i>=0 && i<scenes.length) scenes[i].kind = k; };
   const fw = (typeof frameworkOf==="function") ? frameworkOf(window.turnProject) : null;
+  if(fw && fw.id==="herosjourney"){
+    const h1=idxByAct(1), h2=idxByAct(2), h3=idxByAct(3);
+    const used = new Set();
+    const mark = (i,k)=>{ if(i>=0 && !used.has(i)){ set(i,k); used.add(i); } };
+    if(h1.length){
+      mark(h1[0],"ordinary-world");
+      if(h1.length>=2) mark(h1[h1.length-1],"threshold");
+      if(h1.length>=3) mark(h1[Math.floor((h1.length-1)/2)],"call");
+      if(h1.length>=4) mark(h1[Math.floor((h1.length-1)/2)+1],"refusal");
+      if(h1.length>=5) mark(h1[h1.length-2],"mentor");
+    }
+    if(h2.length){
+      const mid = h2[Math.floor((h2.length-1)/2)];
+      mark(mid,"ordeal");
+      if(h2.length>=2) mark(h2[h2.length-1],"road-back");
+      if(h2.length>=3) mark(h2[0],"tests");
+      const mi = h2.indexOf(mid);
+      if(mi>0) mark(h2[mi-1],"approach");
+      if(mi>=0 && mi<h2.length-1) mark(h2[mi+1],"reward");
+    }
+    if(h3.length===1) mark(h3[0],"resurrection");
+    else if(h3.length>=2){ mark(h3[h3.length-1],"elixir"); mark(h3[h3.length-2],"resurrection"); }
+    scenes.forEach(s=>{ if(s.kind!=="normal") return;
+      s.plot = s.act===1 ? "Departure" : s.act===2 ? "Trials" : "Return"; });
+    return scenes;
+  }
+  if(fw && fw.id==="storycircle"){
+    const c1=idxByAct(1), c2=idxByAct(2), c3=idxByAct(3), c4=idxByAct(4);
+    if(c1.length){ set(c1[0],"you"); if(c1.length>=2) set(c1[c1.length-1],"need"); }
+    if(c2.length){ set(c2[0],"go"); if(c2.length>=2) set(c2[c2.length-1],"search"); }
+    if(c3.length===1) set(c3[0],"take");
+    else if(c3.length>=2){ set(c3[0],"find"); set(c3[c3.length-1],"take"); }
+    if(c4.length){ if(c4.length>=2) set(c4[0],"return"); set(c4[c4.length-1],"change"); }
+    scenes.forEach(s=>{ if(s.kind!=="normal") return;
+      s.plot = s.act===1 ? "Comfort" : s.act===2 ? "Searching" : s.act===3 ? "The Price" : "Coming Home"; });
+    return scenes;
+  }
   if(fw && fw.id==="kishotenketsu"){
     const k1=idxByAct(1), k2=idxByAct(2), k3=idxByAct(3), k4=idxByAct(4);
     if(k1.length) set(k1[0],"plant");
@@ -107,8 +144,9 @@ function auditSpine(scenes){
           msg:'"'+s.title+'" is the TEN but barely shifts ('+chargeStr(s.openCharge)+" \u2192 "+chargeStr(s.closeCharge)+"). The twist must break the pattern hard enough to make the audience re-read everything before it." });
     });
   } else {
+    const bigKinds = (typeof fwAuditOf==="function" && fwAuditOf().bigKinds) || ["midpoint","story-climax","act-climax","crisis"];
     scenes.forEach(s=>{
-      const big = ["midpoint","story-climax","act-climax","crisis"].includes(s.kind);
+      const big = bigKinds.includes(s.kind);
       if(big && Math.abs(s.closeCharge)<2 && !sd_turnInfo(s).flagged)
         issues.push({ kind:"weakpeak", sceneId:s.id, sceneNo:s.no, sev:1,
           msg:'"'+s.title+'" is a '+(KIND_LABEL[s.kind]||s.kind)+" but lands soft (close "+chargeStr(s.closeCharge)+"). A peak should hit \u00b13." });

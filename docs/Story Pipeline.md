@@ -20,13 +20,16 @@ real authoring should always begin at Step 1.)
 
 ## The pipeline
 
-### 0. Format & Framework  *(format added 2026-06-11; framework added 2026-06-11 by owner-delegated decision)*
+### 0. Format & Framework  *(format added 2026-06-11; framework added 2026-06-11 by owner-delegated decision; Hero's Journey + Story Circle added 2026-06-12 by owner approval)*
 The user first chooses **what we are making** — film · short · commercial · micro-drama ·
 series · documentary (the registry in `app/formats.jsx`; default **Film**, so one click
 preserves the classic flow) — and, on the same screen, **how it should be told**: the
 narrative FRAMEWORK (the registry in `app/frameworks.jsx`; default **Three-Act Turns**,
-the classic method; alternative: **Kishōtenketsu**, four movements where the *ten*
-recontextualizes rather than clashes). The format sets the spine's **target scene count
+the classic method; alternatives: **Kishōtenketsu**, four movements where the *ten*
+recontextualizes rather than clashes; **Hero's Journey**, the twelve-stage mythic round
+across Departure/Initiation/Return; **Story Circle**, eight steps — you · need · go ·
+search · find · take · return · change — over four act bands. Hero's Journey and Story
+Circle added 2026-06-12 with owner approval). The format sets the spine's **target scene count
 and runtime**, the screenplay emphasis, and downstream room/Stage defaults; the framework
 sets the **act bands, the audit question, and the build/doctor criteria**. Both change
 the *size and telling* of what's built — never the steps below.
@@ -67,7 +70,8 @@ setting-appropriate character names** (never role-words like "Antagonist", never
 From the synopsis, build a full spine at the **format's target scene count** (Film = the
 classic 16), using the **framework's act grammar** (Three-Act keeps today's exact build
 language; Kishōtenketsu builds four movements where the *ten* is a recontextualization,
-never a conflict escalation): the **scenes**, then the **premise**, **controlling idea**,
+never a conflict escalation; Hero's Journey builds the mythic round where every trial
+costs; Story Circle builds the descent-and-return where every gain carries a price): the **scenes**, then the **premise**, **controlling idea**,
 **setting**, and **cast**, then **beats + screenplay** for every scene — threading
 continuity scene to scene.
 

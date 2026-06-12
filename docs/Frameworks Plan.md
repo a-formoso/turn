@@ -123,9 +123,14 @@ charge-rule can't test "does the twist recontextualize?". So the audit splits:
   badge on the project chip (`THREE-ACT` / `KISHŌTENKETSU`).
 - **Shows**: framework lives per-EPISODE (episodes of one show may differ); the
   bible carries no framework.
-- **Out of scope for now**: Hero's Journey / beat-sheet presets (they're
-  threeact skins — add later as `acts`+`kinds` variants), per-scene framework
-  mixing, retroactive conversion of an existing story between frameworks
+- **Shipped 2026-06-12 (owner approval)**: **Hero's Journey** (three-act skin:
+  Departure/Initiation/Return acts, twelve stage milestones, classic turn rule,
+  elixir exempt) and **Story Circle** (four act bands of two steps each —
+  you/need · go/search · find/take · return/change — classic turn rule, change
+  exempt). Both are pure registry entries plus `assignPlotPoints` stage maps;
+  the spine builder reads any framework's `spine` grammar generically.
+- **Out of scope for now**: beat-sheet presets (trademarked brands), per-scene
+  framework mixing, retroactive conversion of an existing story between frameworks
   (charges survive, `act`/`kind` need remapping — ship as a Doctor proposal,
   not an automatic migration).
 

@@ -32,7 +32,9 @@ const FRAMEWORKS = [
       subline:"If a scene doesn't turn, cut it", flagIcon:"scissors",
       flagDetail:"If a scene doesn't turn a value, it's exposition — recharge it or cut it.",
       analysisTurned:" — the value has reversed. The scene turns.",
-      analysisFlat:" — unchanged. Flat exposition." },
+      analysisFlat:" — unchanged. Flat exposition.",
+      // the big-beat kinds whose peaks the Doctor checks for softness — TODAY'S list, frozen
+      bigKinds:["midpoint","story-climax","act-climax","crisis"] },
     doctorCriteria:"flag scenes that open and close on the same charge; strengthen weak act climaxes",
     beatVocab:{ turnLabel:"the turn" } },
 
@@ -76,8 +78,98 @@ const FRAMEWORKS = [
       intro:(total)=>"You are a story architect designing the "+total+"-scene spine of a KISHŌTENKETSU story with the Infinite Studio method — four movements: KI (introduction), SHŌ (development), TEN (twist/recontextualization), KETSU (reconciliation). Conflict is OPTIONAL; the engine is curiosity and the re-read, never a battle. ",
       firstRange:(firstN,total)=>"scenes 1–"+firstN+": the KI (plant the world, people and charged images — establish without forcing conflict) and the SHŌ (develop and deepen what was planted; let it breathe and accumulate meaning)",
       secondRange:(firstN,total)=>"scenes "+(firstN+1)+"–"+total+": the TEN (the twist — ONE recontextualizing revelation or perspective shift that makes the audience RE-READ everything before it; NOT a fight, NOT an escalation) and the KETSU (the reconciliation — settle the new understanding; calm and resonance, not victory)",
+      sceneRule:"Every scene MOVES: ki scenes plant a charged image or question; shō scenes deepen it (charges may drift, not clash); the ten scene SHIFTS the pattern hard (charge sign reversal or a jump of 2+); ketsu scenes settle. ",
+      closer:"Continue naturally; the ten recontextualizes, the ketsu reconciles. ",
       actSpec:"a=act 1-4 (1=ki, 2=shō, 3=ten, 4=ketsu)" },
     authorBrief:"FRAMEWORK: Kishōtenketsu — beats PRESENT and DEEPEN rather than clash; a scene's movement is a shift in understanding or pattern, not a conflict won or lost; the value charges trace mood and meaning, not victory." },
+
+  /* Hero's Journey — the mythic round (approved by owner, 2026-06-12). A
+     three-act SKIN: the turn rule is the classic one; what changes is the act
+     names (Departure / Initiation / Return), the twelve stage milestones and
+     the builder's grammar. */
+  { id:"herosjourney", label:"Hero's Journey", badge:"Hero's Journey", icon:"target",
+    blurb:"Twelve mythic stages. The hero leaves, transforms, returns.",
+    acts:{ 1:"Departure", 2:"Initiation", 3:"Return" },
+    kinds:{ "ordinary-world":"Ordinary World", call:"Call to Adventure", refusal:"Refusal of the Call",
+            mentor:"Meeting the Mentor", threshold:"Crossing the Threshold", tests:"Tests, Allies, Enemies",
+            approach:"Approach to the Inmost Cave", ordeal:"The Ordeal", reward:"The Reward",
+            "road-back":"The Road Back", resurrection:"Resurrection", elixir:"Return with the Elixir",
+            // legacy three-act kinds still label sensibly if they appear
+            incite:"Call to Adventure", "act-climax":"Crossing the Threshold", midpoint:"The Ordeal",
+            crisis:"The Road Back", "story-climax":"Resurrection", resolution:"Return with the Elixir" },
+    kindOpts:[["normal","Scene"],["ordinary-world","Ordinary World"],["call","Call to Adventure"],
+      ["refusal","Refusal of the Call"],["mentor","Meeting the Mentor"],["threshold","Crossing the Threshold"],
+      ["tests","Tests, Allies, Enemies"],["approach","Approach to the Inmost Cave"],["ordeal","The Ordeal"],
+      ["reward","The Reward"],["road-back","The Road Back"],["resurrection","Resurrection"],
+      ["elixir","Return with the Elixir"]],
+    audit:{
+      // the classic turn rule — the journey is conflict-driven; the elixir is exempt
+      rule:(sc)=>{
+        const o = Math.sign(sc.openCharge), c = Math.sign(sc.closeCharge);
+        const turned = (o !== c) || Math.abs(sc.closeCharge - sc.openCharge) >= 2;
+        const exempt = sc.kind === "elixir" || sc.kind === "resolution";
+        return { turned, flagged: !turned && !exempt, exempt };
+      },
+      okTitle:"This scene turns", flagTitle:"This scene doesn't turn",
+      okBadge:"Turns", flagBadge:"No turn",
+      subline:"Depart · Initiate · Return — every stage turns",
+      flagIcon:"scissors",
+      flagDetail:"If a scene doesn't turn a value, it's exposition — recharge it or cut it.",
+      analysisTurned:" — the value has reversed. The scene turns.",
+      analysisFlat:" — unchanged. Flat exposition.",
+      bigKinds:["threshold","ordeal","road-back","resurrection"] },
+    doctorCriteria:"the ordeal must cost something real; the resurrection must prove the change the journey bought; flag a refusal that doesn't raise the stakes",
+    beatVocab:{ turnLabel:"the turn" },
+    spine:{
+      intro:(total)=>"You are a story architect designing the "+total+"-scene spine of a HERO'S JOURNEY story with the Infinite Studio method — the mythic round in three phases: DEPARTURE (the hero leaves the ordinary world), INITIATION (trials, the ordeal at the journey's heart, the reward), RETURN (the road back, resurrection, the elixir brought home). ",
+      firstRange:(firstN,total)=>"scenes 1–"+firstN+": the DEPARTURE (ordinary world, the call to adventure, a refusal, meeting the mentor, crossing the threshold) and the opening trials of the INITIATION (tests, allies and enemies; approaching the inmost cave)",
+      secondRange:(firstN,total)=>"scenes "+(firstN+1)+"–"+total+": the heart of the INITIATION (the ORDEAL — a death-and-rebirth at the journey's center — then the reward and the road back) and the RETURN (the RESURRECTION — the final, hardest test, proving the change — and the return with the elixir)",
+      sceneRule:"Each scene must TURN a value (opening and closing charge differ in sign or by >=2). Alternate positive/negative for rhythm. Frame beats as stages of the journey — calls, thresholds, ordeals, transformation — and make every trial COST something. ",
+      closer:"Continue naturally; the resurrection is the hardest test, and the elixir shows what the journey bought. ",
+      actSpec:"a=act 1-3 (1=departure, 2=initiation, 3=return)" },
+    authorBrief:"FRAMEWORK: Hero's Journey — beats are stages of the mythic round: calls, refusals, thresholds, ordeals, resurrection; the value charges trace the descent and the return, and what each trial costs." },
+
+  /* Story Circle — eight steps around the wheel (approved by owner, 2026-06-12).
+     Four act bands of two steps each (you/need · go/search · find/take ·
+     return/change), so the existing I–IV ruler carries it. Built for episodic
+     storytelling — pairs naturally with the Series format. */
+  { id:"storycircle", label:"Story Circle", badge:"Story Circle", icon:"history",
+    blurb:"Eight steps. Descend for what you need, pay, come back changed.",
+    acts:{ 1:"You & Need", 2:"Go & Search", 3:"Find & Take", 4:"Return & Change" },
+    kinds:{ you:"Comfort Zone", need:"The Need", go:"Crossing Over", search:"The Search",
+            find:"The Find", take:"The Price", "return":"The Road Home", change:"Changed",
+            // legacy three-act kinds still label sensibly if they appear
+            incite:"The Need", "act-climax":"Crossing Over", midpoint:"The Find",
+            crisis:"The Price", "story-climax":"The Road Home", resolution:"Changed" },
+    kindOpts:[["normal","Scene"],["you","Comfort Zone"],["need","The Need"],["go","Crossing Over"],
+      ["search","The Search"],["find","The Find"],["take","The Price"],["return","The Road Home"],
+      ["change","Changed"]],
+    audit:{
+      // the classic turn rule — the circle runs on want and cost; "changed" is exempt
+      rule:(sc)=>{
+        const o = Math.sign(sc.openCharge), c = Math.sign(sc.closeCharge);
+        const turned = (o !== c) || Math.abs(sc.closeCharge - sc.openCharge) >= 2;
+        const exempt = sc.kind === "change" || sc.kind === "resolution";
+        return { turned, flagged: !turned && !exempt, exempt };
+      },
+      okTitle:"This scene turns", flagTitle:"This scene doesn't turn",
+      okBadge:"Turns", flagBadge:"No turn",
+      subline:"You · Need · Go · Search · Find · Take · Return · Change",
+      flagIcon:"scissors",
+      flagDetail:"If a scene doesn't turn a value, it's exposition — recharge it or cut it.",
+      analysisTurned:" — the value has reversed. The scene turns.",
+      analysisFlat:" — unchanged. Flat exposition.",
+      bigKinds:["go","find","take","return"] },
+    doctorCriteria:"the take must exact a real price for the find; the change must be measurable against scene one's comfort; flag a search that doesn't adapt",
+    beatVocab:{ turnLabel:"the turn" },
+    spine:{
+      intro:(total)=>"You are a story architect designing the "+total+"-scene spine of a STORY CIRCLE story with the Infinite Studio method — eight steps around the wheel: a character in a zone of COMFORT (you) WANTS something (need), enters an UNFAMILIAR situation (go), ADAPTS to it (search), GETS what they wanted (find), PAYS a heavy price for it (take), RETURNS to the familiar (return), having CHANGED (change). The top of the circle is order; the bottom is chaos. ",
+      firstRange:(firstN,total)=>"scenes 1–"+firstN+": the top of the circle — YOU and NEED (act 1: establish the comfort zone and the want that disturbs it) then GO and SEARCH (act 2: crossing into the unfamiliar and adapting to its rules, road-of-trials style)",
+      secondRange:(firstN,total)=>"scenes "+(firstN+1)+"–"+total+": the bottom of the circle and home — FIND and TAKE (act 3: getting what they wanted and paying its true, heavy price) then RETURN and CHANGE (act 4: coming back to the familiar world changed, master of both)",
+      sceneRule:"Each scene must TURN a value (opening and closing charge differ in sign or by >=2). Alternate positive/negative for rhythm. The descent into the unfamiliar always costs — every gain in the bottom half carries a price. ",
+      closer:"Continue naturally; the take exacts the price, the return proves the change. ",
+      actSpec:"a=act 1-4 (1=you/need, 2=go/search, 3=find/take, 4=return/change)" },
+    authorBrief:"FRAMEWORK: Story Circle — beats descend into the unfamiliar and climb back out: need, search, find, take, return, change; every gain carries a price and the value charges trace what it costs." },
 ];
 window.FRAMEWORKS = FRAMEWORKS;
 
