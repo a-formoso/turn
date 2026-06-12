@@ -307,7 +307,7 @@ window.InfoTip = InfoTip;
 /* StyleBibleView — the Style Bible as a full Art Room TAB (not a modal). Reuses the
    film-strip + preset cards. "Assign from script" writes the scene→preset map
    (scene-level, the source of truth); characters / locations / shots merely READ it. */
-function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSetScenePreset, onAddRefImages, onRemoveRefImage, onColorist, lookbookStale, onApplyLookbook }){
+function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSetScenePreset, onAddRefImages, onRemoveRefImage, onColorist, lookbookBrief, lookbookStale, onApplyLookbook }){
   const { presets, sceneStyles, refs, refImages } = styleBibleOf(project);
   const scenesFor = (pid)=> (scenes||[]).filter(s=>sceneStyles[s.id]===pid).sort((a,b)=>(a.no||0)-(b.no||0));
   const assignedCount = (scenes||[]).filter(s=>sceneStyles[s.id]).length;
@@ -324,6 +324,16 @@ function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSet
             title:"Cinematographer / Colorist \u2014 designs your colour system and color-scripts every scene, with a rationale, for your approval"},
             React.createElement(Icon.palette,{s:14}),"Light the film")))),
     window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,label:"this palette",dept:"colorist"}),
+    /* the Lookbook's colorist-routed references, made VISIBLE here — the Colorist
+       reads these live when it designs the palette, merged with the field below */
+    (lookbookBrief||"").trim() && React.createElement("div",{className:"sb-lookbook"},
+      React.createElement("div",{className:"sb-lookbook-head"},
+        React.createElement(Icon.image,{s:12}),
+        React.createElement("span",null,"From the Lookbook"),
+        React.createElement("span",{className:"sb-lookbook-note"},"feeds the Colorist when it designs the palette \u2014 run \u2018Light the film\u2019 to apply")),
+      React.createElement("div",{className:"sb-lookbook-body"},
+        (lookbookBrief||"").split("\n").filter(Boolean).slice(0,8).map((line,i)=>
+          React.createElement("div",{key:i,className:"sb-lookbook-line"},line)))),
     onSetRefs && React.createElement(StyleRefsField,{value:refs,onCommit:onSetRefs,onAssign,assigning,assignDisabled:assigning||!(scenes||[]).length,
       refImages,onAddRefImages,onRemoveRefImage}),
     React.createElement("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",margin:"2px 0 14px"}},

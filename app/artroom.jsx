@@ -1868,6 +1868,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
           lookbookStale:!!_stale.locations,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("locations")})
       : artView==="stylebible" && window.StyleBibleView
       ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage,onColorist,
+          lookbookBrief:(typeof lookbookBriefFor==="function") ? lookbookBriefFor("colorist", lookbook, lookbookNote) : "",
           lookbookStale:!!_stale.stylebible,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("colorist")})
       : artView==="shots" && window.ShotList
       ? React.createElement(window.ShotList,{project,scenes,characters,props,locations,shots,beatsMap,

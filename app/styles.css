@@ -3651,3 +3651,12 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   letter-spacing:.02em;z-index:400;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
   box-shadow:0 12px 40px rgba(0,0,0,.25);cursor:pointer}
 #turn-toast.on{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto}
+
+
+/* Presets tab — the Lookbook's colorist-routed brief, made visible */
+.sb-lookbook{border:1px solid var(--line);border-radius:var(--r-m);background:var(--bg-1);padding:12px 14px;margin:0 0 14px}
+.sb-lookbook-head{display:flex;align-items:center;gap:7px;font-family:var(--f-mono);font-size:10px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--txt-2);margin-bottom:8px}
+.sb-lookbook-note{margin-left:auto;text-transform:none;letter-spacing:.02em;color:var(--txt-3);font-size:9.5px}
+.sb-lookbook-line{font-size:12px;color:var(--txt-1);line-height:1.55;padding:2px 0;border-bottom:1px dashed var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sb-lookbook-line:last-child{border-bottom:0}
