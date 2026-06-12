@@ -274,7 +274,7 @@ function WorldSection({ l, project, onUpdate, onView }){
             React.createElement("button",{className:"loc-world-btn ghost",onClick:()=>create(world.engine||"blockade"),
               title:"Regenerate the world plate"},React.createElement(Icon.redo,{s:13}),"Redo"),
             world.splatUrls && React.createElement("a",{className:"loc-world-btn ghost",
-              href:(world.splatUrls.full||world.splatUrls["500k"]||world.splatUrls["100k"]||Object.values(world.splatUrls)[0])||"#",
+              href:(world.splatUrls.full_res||world.splatUrls.full||world.splatUrls["500k"]||world.splatUrls["100k"]||Object.values(world.splatUrls)[0])||"#",
               target:"_blank",rel:"noreferrer",title:"Download the 3D gaussian-splat file (Marble)"},
               React.createElement(Icon.download,{s:13}),"3D splat")),
           views.length>0 && React.createElement("div",{className:"loc-world-views"},
