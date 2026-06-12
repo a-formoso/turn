@@ -158,6 +158,9 @@ function WorldScout({ l, project, onClose, onTakeView }){
         camera.position.set(0,0,0.001);
         const tex = await new Promise((res,rej)=>{ new THREE.TextureLoader().load(src, res, undefined, rej); });
         tex.colorSpace = THREE.SRGBColorSpace || undefined;
+        // anisotropic filtering — the single biggest sharpness win on a pano
+        // sphere, where most of the image is viewed at grazing angles
+        try{ tex.anisotropy = renderer.capabilities.getMaxAnisotropy(); }catch(e){}
         const geo = new THREE.SphereGeometry(50, 64, 48); geo.scale(-1,1,1);   // inward-facing
         scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map:tex })));
         const st = { renderer, camera, scene, yaw:0, pitch:0 };
@@ -191,8 +194,12 @@ function WorldScout({ l, project, onClose, onTakeView }){
     const st = stRef.current; if(!st || taking) return;
     setTaking(true);
     try{
-      st.render();
+      // capture at 2× the CSS size regardless of the display's pixel ratio,
+      // so views are shot-reference quality even on a 1:1 monitor
+      const prevRatio = st.renderer.getPixelRatio();
+      try{ st.renderer.setPixelRatio(2); st.render(); }catch(e){}
       const dataUrl = st.renderer.domElement.toDataURL("image/jpeg", 0.92);
+      try{ st.renderer.setPixelRatio(prevRatio); st.render(); }catch(e){}
       await onTakeView(dataUrl, { yaw:st.yaw, pitch:st.pitch, fov:st.camera.fov });
     }catch(e){ setErr(String((e&&e.message)||e)); }
     setTaking(false);
@@ -283,7 +290,14 @@ function WorldSection({ l, project, onUpdate, onView }){
               React.createElement(Icon.download,{s:13}),"3D splat")),
           views.length>0 && React.createElement("div",{className:"loc-world-views"},
             views.map(v=>React.createElement("button",{key:v.id,className:"loc-world-view",
-              title:"Open this saved view",onClick:()=>onView && onView(v.id, (l.name||"Location")+" — "+v.name)},
+              title:"Open this saved view",
+              onClick:async ()=>{
+                // resolve the ASSET to a displayable URL (the lightbox wants a URL, not an id)
+                let u = (typeof nbGetImage==="function") ? nbGetImage(v.id) : "";
+                if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(v.id); }catch(e){} }
+                if(u && onView) onView(u, (l.name||"Location")+" — "+v.name);
+                else if(window.turnToast) window.turnToast("This view's image isn't available — retake it from the Scout.");
+              }},
               React.createElement(Icon.camera,{s:11}), v.name)))),
     scout && React.createElement(WorldScout,{ l, project, onClose:()=>setScout(false), onTakeView:takeView }));
 }
