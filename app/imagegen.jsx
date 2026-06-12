@@ -10,6 +10,13 @@
 const NB_KEY = "turn-nanobanana-key";
 const NB_MODEL_KEY = "turn-nb-model";
 const NB_AR_KEY = "turn-nb-aspect";
+/* GPT Image quality (openai only): "high" routinely outruns the Edge Function
+   gateway's wall-clock limit on 6-panel composite sheets → 504 → no image but a
+   billed generation. Default MEDIUM; the dock exposes the knob when GPT is active. */
+const OAI_Q_KEY = "turn-oai-quality";
+function nbGetOaiQuality(){ try{ const q=localStorage.getItem(OAI_Q_KEY)||"medium"; return ["low","medium","high"].indexOf(q)>=0?q:"medium"; }catch(e){ return "medium"; } }
+function nbSetOaiQuality(q){ try{ localStorage.setItem(OAI_Q_KEY,q); }catch(e){} }
+window.nbGetOaiQuality = nbGetOaiQuality; window.nbSetOaiQuality = nbSetOaiQuality;
 const NB_RES_KEY = "turn-nb-res";
 
 /* selectable models. provider:"google" → Nano Banana (Gemini), which runs directly
@@ -706,7 +713,7 @@ async function proxyGenerate(prompt, opts, provider){
   const model = opts.model || nbGetModel();
   const aspect = opts.aspectRatio || nbGetAspect();
   const imageSize = opts.imageSize || nbGetRes();
-  const quality = opts.quality || "high";
+  const quality = opts.quality || nbGetOaiQuality();
   // reference images (for image-edit mode) → data URLs the proxy can rebuild
   const refs = [];
   if(opts.referenceImage) refs.push(opts.referenceImage);

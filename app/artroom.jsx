@@ -1535,6 +1535,8 @@ function NbControls(){
   const models = window.NB_MODELS || [];
   const aspects = window.NB_ASPECTS || ["16:9","21:9"];
   const isFlash = model === "gemini-3.1-flash-image";
+  const isGpt = /^gpt-image/.test(model||"");
+  const [oaiQ, setOaiQ] = React.useState(()=> (typeof nbGetOaiQuality==="function") ? nbGetOaiQuality() : "medium");
   const modelLabel = (models.find(m=>m.id===model)||{}).label || model || "Model";
 
   /* close tooltip on outside click */
@@ -1596,7 +1598,15 @@ function NbControls(){
                 "Off"),
               React.createElement("button",{className:"nb-seg-btn "+(ground?"on":""),
                 onClick:()=>{ setGround(true); nbSetGroundSearch&&nbSetGroundSearch(true); }},
-                "Web + images")))))),
+                "Web + images"))))),
+      /* GPT Image quality — high routinely exceeds the proxy's time window on
+         composite sheets (504, billed but no image), so it's a deliberate choice */
+      isGpt && React.createElement("div",{className:"nb-ctl-row",style:{marginTop:6}},
+        React.createElement("div",{className:"nb-seg"},
+          ["low","medium","high"].map(q=>React.createElement("button",{key:q,
+            className:"nb-seg-btn "+(oaiQ===q?"on":""),
+            title: q==="high" ? "Slowest — composite sheets may time out at the proxy" : (q==="medium" ? "Recommended — fits the proxy window" : "Fastest"),
+            onClick:()=>{ setOaiQ(q); nbSetOaiQuality&&nbSetOaiQuality(q); }}, q))))),
     React.createElement("div",{className:"nb-ctl"},
       React.createElement("span",{className:"nb-ctl-lab"},"Aspect"),
       React.createElement("div",{className:"nb-seg"},
