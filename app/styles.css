@@ -3660,3 +3660,12 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .sb-lookbook-note{margin-left:auto;text-transform:none;letter-spacing:.02em;color:var(--txt-3);font-size:9.5px}
 .sb-lookbook-line{font-size:12px;color:var(--txt-1);line-height:1.55;padding:2px 0;border-bottom:1px dashed var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sb-lookbook-line:last-child{border-bottom:0}
+
+
+/* world CTAs — stacked label + sublabel so the two engines read differently */
+.loc-world-btn.stack{flex-direction:column;align-items:flex-start;gap:3px;padding:9px 14px}
+.loc-world-btn-t{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600}
+.loc-world-btn-sub{font-size:9px;color:var(--txt-3);letter-spacing:.03em}
+.loc-world-btn.stack.alt .loc-world-btn-sub{color:inherit;opacity:.7}
+/* the Scout fills the screen properly (portaled to body) */
+.scout-modal{width:min(1280px,96vw)}

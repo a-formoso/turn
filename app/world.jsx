@@ -201,7 +201,9 @@ function WorldScout({ l, project, onClose, onTakeView }){
   // canvas aspect = the project's format aspect (the frame IS the viewport)
   const aspect = (typeof aspectFor==="function") ? aspectFor(project) : "16:9";
   const ratio = aspect==="9:16" ? "9 / 16" : aspect==="21:9" ? "21 / 9" : "16 / 9";
-  return React.createElement("div",{className:"scout-overlay",onClick:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
+  // PORTAL to <body>: the card's transformed/scrolling ancestors would otherwise
+  // turn position:fixed into card-relative and shrink the viewer to card width
+  return ReactDOM.createPortal(React.createElement("div",{className:"scout-overlay",onClick:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
     React.createElement("div",{className:"scout-modal"},
       React.createElement("div",{className:"scout-head"},
         React.createElement(Icon.globe,{s:15}),
@@ -214,7 +216,7 @@ function WorldScout({ l, project, onClose, onTakeView }){
       React.createElement("div",{className:"scout-foot"},
         React.createElement("span",{className:"scout-hint"},"The frame is the canvas — what you see is the shot."),
         React.createElement("button",{className:"scout-take",disabled:!ready||taking,onClick:takeView},
-          React.createElement(Icon.camera,{s:14}), taking?"Saving view…":"Take view"))));
+          React.createElement(Icon.camera,{s:14}), taking?"Saving view…":"Take view")))), document.body);
 }
 window.WorldScout = WorldScout;
 
@@ -259,12 +261,14 @@ function WorldSection({ l, project, onUpdate, onView }){
           React.createElement("span",{className:"ns-spin"}), busy)
       : !world
       ? React.createElement("div",{className:"loc-world-ctas"},
-          React.createElement("button",{className:"loc-world-btn",onClick:()=>create("blockade"),
-            title:"Blockade Labs — a 360° plate of this location (~30-60s)"},
-            React.createElement(Icon.globe,{s:13}),"Create 360° world"),
-          React.createElement("button",{className:"loc-world-btn alt",onClick:()=>create("marble"),
-            title:"World Labs Marble — an explorable 3D world (~5 min); also yields the 360° plate"},
-            React.createElement(Icon.layers,{s:13}),"Create 3D world"))
+          React.createElement("button",{className:"loc-world-btn stack",onClick:()=>create("blockade"),
+            title:"A 360° panorama plate of this location — the fast, cheap engine"},
+            React.createElement("span",{className:"loc-world-btn-t"},React.createElement(Icon.globe,{s:13}),"360° world"),
+            React.createElement("span",{className:"loc-world-btn-sub"},"one panorama · ~1 min")),
+          React.createElement("button",{className:"loc-world-btn stack alt",onClick:()=>create("marble"),
+            title:"A fully explorable 3D world — also yields the 360° plate, plus a downloadable 3D file"},
+            React.createElement("span",{className:"loc-world-btn-t"},React.createElement(Icon.layers,{s:13}),"3D world"),
+            React.createElement("span",{className:"loc-world-btn-sub"},"explorable + panorama · ~5 min")))
       : React.createElement("div",{className:"loc-world-have"},
           panoThumb && React.createElement("img",{className:"loc-world-pano",src:panoThumb,alt:"world plate",
             onClick:()=>setScout(true),title:"Open the scout"}),
