@@ -884,7 +884,8 @@ function App(){
     try{
       const staging = await aiDraftStaging(l, scenes, project);
       if(staging) setLocations(ls=>ls.map(x=>x.id===l.id?{...x, staging}:x));
-    }catch(e){}
+      else if(window.turnToast) window.turnToast("Couldn't stage "+(l.name||"the location")+" — the model returned nothing usable. Try again.");
+    }catch(e){ if(window.turnToast) window.turnToast("Staging failed: "+((e&&e.message)||e)); }
     setDraftingStageId(null);
   };
   // derive locations from the script's sluglines; dedups against existing
