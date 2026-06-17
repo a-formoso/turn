@@ -1,11 +1,11 @@
 /* storyboard.jsx — The Art Room ▸ Storyboard.
-   Each SCENE becomes one 3×3 storyboard PAGE: a single composite image of up to 9
+   Each SCENE becomes one 2×2 storyboard PAGE: a single composite image of up to 4
    numbered panels, generated in one pass with GPT Image 2 (the shots' grammar +
-   action + dialogue become the per-panel prompt, and the scene's character sheets +
-   location plate ride along as references so people/place stay consistent across
-   panels). Until generated, the page shows a 3×3 grid of LABELLED panel guides so you
+   action + dialogue become the per-panel prompt, and the scene's character sheets,
+   prop sheets + location plate ride along as references so people/place/objects stay consistent across
+   panels). Until generated, the page shows a 2×2 grid of LABELLED panel guides so you
    know what each panel should depict; click a guide to edit that shot in the Shot
-   List. A scene with >9 shots paginates into extra pages. */
+   List. A scene with >4 shots paginates into extra pages. */
 
 const _sbEl = React.createElement;
 /* Sheet GRID format. GPT Image 2's 16:9 request actually returns a 1536×1024 (3:2) canvas,
@@ -13,18 +13,16 @@ const _sbEl = React.createElement;
      "2x2" — 4 cells of 768×512: panel image 768×432 (exact 16:9) + 80px strip. Default —
              best per-panel resolution; halves of the sheet are its two panel rows
              (made for video generators that condition on frames, e.g. Seedance).
-     "3x3" — 9 cells of 512×341: panel image 512×288 (exact 16:9) + 53px strip. Denser.
-   The page size (4 or 9 shots per sheet) follows the grid. Persisted per browser;
+   Storyboards are fixed to 2×2 so each panel keeps the strongest 16:9 consistency.
    window.SB_PAGE_SIZE tracks the live value for the Storyboard Director (app.jsx). */
-const SB_GRIDS = { "2x2":4, "3x3":9 };
-function sbGridSaved(){ try{ const g=localStorage.getItem("turn_sb_grid"); return SB_GRIDS[g]?g:"2x2"; }catch(e){ return "2x2"; } }
-window.SB_PAGE_SIZE = SB_GRIDS[sbGridSaved()];
+const SB_GRIDS = { "2x2":4 };
+function sbGridSaved(){ return "2x2"; }
+window.SB_PAGE_SIZE = 4;
 
 /* the grid shape a page paints to: the chosen grid when known, else derived from the
    panel count (≤4 panels read best as 2 columns; 1 panel needs no grid at all) */
 function sbGridShape(N, grid){
   if(grid==="2x2") return { cols:2, rows:2 };
-  if(grid==="3x3") return { cols:3, rows:3 };
   const cols = N<=1 ? 1 : (N<=4 ? 2 : 3);
   return { cols, rows:Math.ceil(Math.max(1,N)/cols) };
 }
@@ -44,6 +42,19 @@ function sbBeatRow(beatsMap, sh){
 function sbInFrame(sh, ctx){
   const ids = (typeof inFrameCast==="function") ? inFrameCast(sh, ctx.scene, Object.values(ctx.charById||{})) : (sh.subjects||[]);
   return ids.map(id=>ctx.charById[id]).filter(Boolean).map(c=>c.name);
+}
+
+function sbPropIdsForPage(scene, shots, ctx){
+  const out=[], seen=new Set();
+  let ledger = {};
+  try{ ledger = (typeof sceneContinuityLedger==="function")
+    ? sceneContinuityLedger(scene, shots, ctx.charById, ctx.propById) : {}; }catch(e){}
+  (shots||[]).forEach(sh=>{
+    const own = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, ctx.charById, ctx.propById) : ((sh&&sh.props)||[]);
+    const ids = [].concat(own||[], (ledger && ledger[sh.id]) || []);
+    ids.forEach(id=>{ if(id && !seen.has(id)){ seen.add(id); out.push(id); } });
+  });
+  return out;
 }
 
 /* a brief beat title for the panel label: prefer the beat's dramatic intention
@@ -183,7 +194,7 @@ function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap, opts){
     task: "a cinematic STORYBOARD SHEET as ONE single image \u2014 a "+rows+"\u00d7"+cols+" grid of "+N+" sequential panels (read left-to-right, top-to-bottom) depicting ONE CONTINUOUS scene",
     setting: setting || undefined,
     continuous_take: "the panels are one continuous take broken into "+N+" sequential frames \u2014 the camera moves naturally around the action, same place, one unbroken flow of time \u2014 NOT "+N+" unrelated images",
-    video_clip: opts.clip ? ("THIS SHEET BOARDS ONE SINGLE VIDEO CLIP of about "+(opts.clip.dur||window.CLIP_MAX_SECONDS||15)+" seconds \u2014 the "+N+" panels are its keyframes IN ORDER: stage the action and camera so motion flows seamlessly from each panel into the next, one unbroken take, no time jumps") : undefined,
+    video_clip: opts.clip ? ("THIS SHEET BOARDS ONE SINGLE VIDEO CLIP of about "+(opts.clip.dur||window.CLIP_MAX_SECONDS||15)+" seconds \u2014 stage the action and camera so motion flows seamlessly from panel to panel, one unbroken take, no time jumps") : undefined,
     style: {
       base: "cinematic"+(genre?(", "+genre+" tone"):"")+", live-action, photorealistic, lifelike, subtle 35mm film grain",
       grade: _clean(grade) || undefined,
@@ -206,7 +217,7 @@ function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap, opts){
         : undefined,
     },
     annotation_strip: "UNDER EACH panel a thin off-white annotation strip carrying FOUR short lines of production notes in a clean, high-contrast sans-serif font (legible at the rendered grid size), formatted as screenplay slug lines: CAMERA (framing, angle & lens), MOTION (the camera movement), ACTION (what the subject does), PERFORMANCE (how the moment is played \u2014 or the spoken line on dialogue panels); 2\u20139 words per line, NEVER full sentences",
-    panels_rule: "DRAW each panel from its `staging` (the full description of what happens) — the `camera`/`motion`/`action`/`performance` lines are ONLY the short text for the baked annotation strip, not the limit of what to depict. Every object listed in a panel's `props_in_frame` MUST be clearly visible, held and used EXACTLY as the staging says (e.g. a doll clutched to the chest) — never drop a named prop.",
+    panels_rule: "DRAW each panel from its `staging` (the full description of what happens) — the `camera`/`motion`/`action`/`performance` lines are ONLY the short text for the baked annotation strip, not the limit of what to depict. Every object listed in a panel's `props_in_frame` MUST be clearly visible, held and used EXACTLY as the staging says (e.g. a doll clutched to the chest). Once a prop is established with an in-frame character, keep it present in later panels with that character unless that panel explicitly says it is dropped, destroyed, handed off, taken away, hidden, stowed, or leaves frame.",
     panels: panels,
     character_lock: cast.length ? {
       rule: "every character appears IDENTICAL across all "+N+" panels (same face, build, hair, wardrobe, key props); the attached reference sheets are additional identity anchors \u2014 match them precisely",
@@ -229,7 +240,7 @@ window.buildStoryboardPagePrompt = buildStoryboardPagePrompt;
 /* ============================================================================
    COMPOSE FROM SHOT FRAMES — the zero-cost path. The Shot List already renders
    per-shot frames with the anchor-consistency machinery; the sheet is then just
-   a VIEW over work already paid for: the frames laid into a 3×3 grid on a
+   a VIEW over work already paid for: the frames laid into a 2×2 grid on a
    canvas, with the CAMERA / MOTION / ACTION / PERFORMANCE strips drawn as REAL
    text (always legible, always correct — the thing image models can't do).
    Per-panel repair comes free: regenerate one shot in the Shot List, recompose.
@@ -279,8 +290,7 @@ async function composeStoryboardSheet(scene, page, ctx, beatsMap){
     urls.push(u || "");
   }
   if(!urls.some(Boolean)) return null;
-  // layout — same grid shape as the painted sheet (page.grid: 2×2 / 3×3, else derived
-  // from the panel count) in the FORMAT's native frame (16:9, or vertical 9:16 for
+  // layout — same 2×2 grid shape as the painted sheet in the FORMAT's native frame (16:9, or vertical 9:16 for
   // micro-drama), an annotation strip under each: CAMERA + MOTION one line each,
   // ACTION + PERFORMANCE up to TWO wrapped lines (fixed slots — 6 rows — so every
   // panel's strip is the same height)
@@ -352,14 +362,12 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
     buildFinal: ()=> (typeof buildStoryboardPagePrompt==="function")
       ? buildStoryboardPagePrompt(scene, page.shots, ctx, beatsMap, { grid:page.grid, ...(page.clip?{clip:{dur:page.dur}}:{}) }) : "",
     // A composite is one heavy image (a whole panel grid) — keep the reference set LEAN
-    // so the proxy doesn't time out. Priority: the shots' ALREADY-RENDERED frames (the
-    // boards the Shot List shows — panel i must match frame i, so the painted sheet tells
-    // the SAME story), then the location plate; character sheets only when no frames
-    // exist yet to carry the identities.
+    // so the proxy doesn't time out. GPT Image 2 should paint the sheet as one cohesive
+    // pass, so Shot List frames are intentionally NOT used as GPT reference images.
     attachments: async (gopts)=>{
       const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
         if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; };
-      const out=[], seen=new Set(); let chars=0, frames=0;
+      const out=[], seen=new Set(); let chars=0, props=0;
       // PREV-SHEET CHAINING (Part 3): the previous page's rendered sheet leads the reference
       // set as the continuity anchor, so a manually-generated sheet continues the same cast
       // looks, world and grade across pages/scenes — matching the Storyboard Director agent.
@@ -374,33 +382,28 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
         const opt = editRefOptions.find(o=>o.id===rid);
         out.push({ url:u, note:(opt && opt.note) || "requested reference" }); seen.add(rid);
       }
-      const shots = page.shots||[];
-      for(let i=0;i<shots.length && frames<6;i++){
-        const u = await grab(shots[i].id);
-        if(u){ out.push({url:u, note:"panel "+(i+1)+"'s keyframe"}); frames++; }
-      }
       if(ctx.location && !seen.has(ctx.location.id)){ const u=await grab(ctx.location.id); if(u) out.push({url:u, note:(ctx.location.name||"the location")+" plate"}); }
-      if(!frames){
-        // everyone in frame across the page's shots — derived from each shot's action
-        // text (inFrameCast), capped to keep the reference set lean
-        const ids = [];
-        const _chars = Object.values(ctx.charById||{});
-        shots.forEach(sh=>{ const inc=(typeof inFrameCast==="function")?inFrameCast(sh, scene, _chars):(sh.subjects||[]);
-          inc.forEach(id=>{ if(ids.indexOf(id)<0) ids.push(id); }); });
-        for(const id of ids){ if(chars>=4) break; if(seen.has(id)) continue; seen.add(id);
-          const c=ctx.charById[id]; if(!c) continue;
-          const u=await grab(id); if(u){ out.push({url:u, note:c.name+"'s character sheet"}); chars++; } }
-      }
+      // everyone in frame across the page's shots — derived from each shot's action
+      // text (inFrameCast), capped to keep the reference set lean
+      const shots = page.shots||[];
+      const ids = [];
+      const _chars = Object.values(ctx.charById||{});
+      shots.forEach(sh=>{ const inc=(typeof inFrameCast==="function")?inFrameCast(sh, scene, _chars):(sh.subjects||[]);
+        inc.forEach(id=>{ if(ids.indexOf(id)<0) ids.push(id); }); });
+      for(const id of ids){ if(chars>=4) break; if(seen.has(id)) continue; seen.add(id);
+        const c=ctx.charById[id]; if(!c) continue;
+        const u=await grab(id); if(u){ out.push({url:u, note:c.name+"'s character sheet"}); chars++; } }
+      for(const id of sbPropIdsForPage(scene, shots, ctx)){ if(props>=4) break; if(seen.has(id)) continue; seen.add(id);
+        const p=ctx.propById[id]; if(!p) continue;
+        const u=await grab(id); if(u){ out.push({url:u, note:(p.name||"Prop")+" prop sheet"}); props++; } }
       return out;
     },
-    // the model receives the images as an ORDERED list with no captions — the mapping
-    // (which image is which panel's keyframe) has to ride in the prompt, by position
+    // the model receives the images as an ORDERED list with no captions — identify each
+    // reference by purpose so the prompt can keep location and character identity stable
     attachmentsText: (attach)=> "REFERENCE IMAGES, IN ORDER: "
       +(attach||[]).map((a,i)=>"image "+(i+1)+" = "+(a.note||"reference")).join("; ")+". "
-      +"A panel KEYFRAME is that panel's already-rendered film frame: the matching panel must MATCH it exactly "
-      +"(same characters, faces, wardrobe, staging, lighting, grade), re-rendered into the sheet's grid. "
-      +"Panels without a keyframe stay visually CONTINUOUS with those that have one. "
-      +"The location plate and any character sheets keep the place and every recurring character IDENTICAL across all panels.",
+      +"Use these only as identity and location anchors. Paint the storyboard sheet as ONE cohesive single-pass image; "
+      +"the location plate, character sheets and prop sheets keep the place, recurring characters and carried objects IDENTICAL across all panels.",
   });
   const GPT2 = (window.NB_MODELS||[]).find(m=>/gpt-image/i.test(m.id));
   // quality:"medium" is the timeout fix — a whole-grid composite at the default "high"
@@ -440,7 +443,7 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
   React.useEffect(()=>{ let alive=true; (async()=>{ if(alive) await loadHalves(); })(); return ()=>{ alive=false; }; },[sid]);
 
   // WHAT WENT INTO THIS SHEET — the reference images recorded when the displayed
-  // image was generated (panel keyframes, location plate, character sheets), shown
+  // image was generated (location plate, character sheets, prop sheets), shown
   // as chips so the prompt's ingredients are visible at a glance.
   const [usedRefs, setUsedRefs] = React.useState(null);
   React.useEffect(()=>{
@@ -454,8 +457,8 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
   },[gen.genUrl]);
 
   // BUILT FROM — the reference images this sheet locks to, as small thumbnails (click to
-  // enlarge): the panel keyframes (shot frames), the location plate, in-frame character
-  // sheets, plus any user-ADDED references. Recomputed live so they're always displayable.
+  // enlarge): the location plate, in-frame character sheets and prop sheets, plus any user-ADDED
+  // references. Recomputed live so they're always displayable.
   const [refImgs, setRefImgs] = React.useState([]);   // auto influences, DERIVED from Characters/Props/Locations
   const _sbRefKey = [page.id, gen.genUrl||"", (page.shots||[]).map(s=>s.id).join(","),
     (ctx.location&&ctx.location.id)||""].join("|");
@@ -466,19 +469,19 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
         if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u||""; };
       const out=[], seen=new Set();
       const shots = page.shots||[];
-      for(let i=0;i<shots.length && out.length<6;i++){ const u=await grab(shots[i].id); if(u){ out.push({ url:u, label:"Panel "+(i+1)+" keyframe", kind:"anchor" }); seen.add(shots[i].id); } }
       if(ctx.location){ const u=await grab(ctx.location.id); if(u){ out.push({ url:u, label:(ctx.location.name||"Location")+" plate", kind:"location" }); seen.add(ctx.location.id); } }
       const ids=[]; const _chars=Object.values(ctx.charById||{});
       shots.forEach(sh=>{ const inc=(typeof inFrameCast==="function")?inFrameCast(sh, scene, _chars):(sh.subjects||[]); inc.forEach(id=>{ if(ids.indexOf(id)<0) ids.push(id); }); });
       for(const id of ids){ if(seen.has(id)) continue; const c=ctx.charById[id]; if(!c) continue; const u=await grab(id); if(u){ out.push({ url:u, label:c.name, kind:"character" }); seen.add(id); } }
+      for(const id of sbPropIdsForPage(scene, shots, ctx)){ if(seen.has(id)) continue; const p=ctx.propById[id]; if(!p) continue; const u=await grab(id); if(u){ out.push({ url:u, label:p.name||"Prop", kind:"prop" }); seen.add(id); } }
       if(alive){ setRefImgs(out); }
     })();
     return ()=>{ alive=false; };
   },[_sbRefKey]);
 
-  // optional EXTRA REFERENCES for sheet/panel edits — the scene's characters (their
-  // sheets) and the location plate, opt-in chips on the edit panels so an edit can be
-  // pinned to the canon designs.
+  // optional EXTRA REFERENCES for sheet/panel edits — the scene's characters, props
+  // and location plate, opt-in chips on the edit panels so an edit can be pinned to
+  // the canon designs.
   const [editRefSel, setEditRefSel] = React.useState([]);
   const editRefOptions = React.useMemo(()=>{
     const seen = new Set(), out = [];
@@ -486,9 +489,13 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
       if(seen.has(cid)) return; seen.add(cid);
       const c = ctx.charById[cid]; if(c) out.push({ id:c.id, label:c.name, note:c.name+"'s character sheet" });
     }));
+    sbPropIdsForPage(scene, page.shots||[], ctx).forEach(pid=>{
+      if(seen.has(pid)) return; seen.add(pid);
+      const p = ctx.propById[pid]; if(p) out.push({ id:p.id, label:p.name||"Prop", note:(p.name||"Prop")+" prop sheet" });
+    });
     if(ctx.location) out.push({ id:ctx.location.id, label:(ctx.location.name||"Location")+" plate", note:(ctx.location.name||"the location")+" location plate" });
     return out;
-  },[page.shots, ctx]);
+  },[scene, page.shots, ctx]);
   const toggleEditRef = (rid)=> setEditRefSel(sel=> sel.indexOf(rid)>=0 ? sel.filter(x=>x!==rid) : [...sel, rid]);
   const editRefChips = (key)=> editRefOptions.length>0 && _sbEl("div",{key, className:"sb-editrefs"},
     _sbEl("span",{className:"sb-editrefs-lab"},"Reference:"),
@@ -729,7 +736,7 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
             title:"Lay the shots' already-generated frames into the sheet — instant, no image model involved"},
             "Compose from frames instead")))),
     /* BUILT FROM — reference images this sheet locks to, as small thumbnails (click to
-       enlarge); DERIVED purely from the in-frame Characters, Props & Locations + panel keyframes */
+       enlarge); DERIVED from the in-frame Characters, Props and Locations, without Shot-frame keyframes */
     refImgs.length>0 && _sbEl("div",{className:"shot-refs sb-refs"},
       _sbEl("div",{className:"shot-refs-lab"}, _sbEl(Icon.layers,{s:11}),"Built from — derived from Characters, Props & Locations"),
       _sbEl("div",{className:"shot-refs-row"},
@@ -868,37 +875,20 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
   const propById = React.useMemo(()=>{ const m={}; (props||[]).forEach(p=>m[p.id]=p); return m; },[props]);
   const ctxFor = (scene)=>({ scene, location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null, charById, propById, project, locations:locations||[] });
 
-  // board mode: SCENE sheets (chunks of 9) or CLIP boards (one sheet per clip
-  // sequence — the Shot List's shared partition, one generated video clip each)
-  const [boardMode, setBoardMode] = React.useState(()=>{ try{ return localStorage.getItem("turn_sb_mode")||"scene"; }catch(e){ return "scene"; } });
-  React.useEffect(()=>{ try{ localStorage.setItem("turn_sb_mode", boardMode); }catch(e){} },[boardMode]);
-  const clipMode = boardMode==="clips" && typeof sceneSequences==="function";
-
-  // sheet grid: 2×2 is the default + the only option unless the denser 3×3 is opted in
-  // (3×3 packs 9 lower-res panels per sheet). Drives the page size; the Director follows
-  // via window.SB_PAGE_SIZE.
-  const [allow3x3, setAllow3x3] = React.useState(()=>{ try{ return localStorage.getItem("turn_sb_allow3x3")==="1"; }catch(e){ return false; } });
-  React.useEffect(()=>{ try{ localStorage.setItem("turn_sb_allow3x3", allow3x3?"1":"0"); }catch(e){} },[allow3x3]);
-  const [sbGrid, setSbGrid] = React.useState(()=>{ const g=sbGridSaved(); return g; });
-  // keep the wall on 2×2 unless 3×3 is opted in (so a stale saved 3×3 can't override the default)
-  React.useEffect(()=>{ if(!allow3x3 && sbGrid!=="2x2") setSbGrid("2x2"); },[allow3x3, sbGrid]);
-  React.useEffect(()=>{ try{ localStorage.setItem("turn_sb_grid", sbGrid); }catch(e){} window.SB_PAGE_SIZE = SB_GRIDS[sbGrid]; },[sbGrid]);
-  const pageSize = SB_GRIDS[sbGrid];
+  // Storyboards are fixed to scene sheets in a 2×2 grid. This keeps every panel in
+  // the strongest 16:9 geometry.
+  const sbGrid = "2x2";
+  const pageSize = 4;
+  React.useEffect(()=>{ window.SB_PAGE_SIZE = 4; },[]);
 
   // scene -> its pages (scene mode: chunks of the grid's page size; clip mode: one page per sequence)
   const pagesByScene = React.useMemo(()=> ordered
     .filter(s=>(shotsByScene[s.id]||[]).length)
     .map(scene=>({
       scene,
-      pages: clipMode
-        ? sceneSequences(shotsByScene[scene.id]||[], (typeof clipMaxFor==="function")?clipMaxFor(project):15).map(g=>({
-            id:"sbclip-"+scene.id+"-"+g.index, index:g.index, shots:g.shots, start:g.start, dur:g.dur, clip:true }))
-        // grid in the page id → 2×2 and 3×3 sheets cache separately (a 3×3 sheet covers a
-        // different shot set than a 2×2 page-0 would); legacy 3×3 ids stay unchanged so
-        // sheets generated before the toggle existed keep showing in 3×3 mode
-        : sbChunk(shotsByScene[scene.id]||[], pageSize).map((shots,index)=>({
-            id:"sbpage-"+scene.id+(sbGrid==="2x2"?"-2x2":"")+"-"+index, index, shots, start:index*pageSize, grid:sbGrid }))
-    })), [ordered, shotsByScene, clipMode, pageSize, sbGrid]);
+      pages: sbChunk(shotsByScene[scene.id]||[], pageSize).map((shots,index)=>({
+        id:"sbpage-"+scene.id+"-2x2-"+index, index, shots, start:index*pageSize, grid:sbGrid }))
+    })), [ordered, shotsByScene, pageSize, sbGrid]);
   const allSheetIds = React.useMemo(()=> pagesByScene.flatMap(g=>g.pages.map(p=>"sbsheet-"+p.id)), [pagesByScene]);
   // prev-sheet chaining (Part 3): each sheet's continuity anchor is the one before it in
   // story order (across pages AND scenes), so manual per-card generation continues the look.
@@ -1011,25 +1001,11 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
         _sbEl("div",{style:{flex:1}},
           _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboard Director",
             _sbEl(window.InfoTip,{label:"About the Storyboard",
-              text:"Each scene becomes one storyboard SHEET — a header bar (project · scene · title · page) over a single composite image drawn by GPT Image 2 in one pass (the 'Cinematic Storyboard Grid'): a grid of the scene's panels rendered as one continuous take, with locked characters + location and a baked CAM / MOVE / MOOD·VOICE annotation strip under each panel. References (the shots' rendered frames, the location plate, character sheets) ride along for consistency. The grid toggle sets the page: 2×2 (four exact 16:9 panels — best resolution, halves split cleanly for video generators) or 3×3 (nine panels, denser); scenes paginate accordingly. The Scenes/Clips toggle switches the board unit: CLIP boards make one sheet per clip sequence from the Shot List's Clips strip — the panels of one generated video clip (≤15s), the hand-off unit for the Stage. 'Direct storyboard' hands the whole board to the Storyboard Director agent: it thinks through each scene's panels with the writing model, then renders every sheet with GPT Image 2 on its own."})),
+              text:"Each scene becomes storyboard SHEETS — 2×2 pages of four exact 16:9 panels drawn by GPT Image 2 in one cohesive pass. The sheet uses the location plate, in-frame character sheets and prop sheets for identity, geography and object continuity, while the shot text supplies action, camera and performance notes. Scenes paginate every four shots: a 5-beat scene becomes one full 2×2 page plus a second chained 2×2 page with beat 5 in the first cell and the remaining cells matte-empty, preserving every panel's 16:9 frame. Each 2×2 sheet can be split into top/bottom halves for the Stage."})),
           _sbEl("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",marginTop:4}},
             readySheets+" of "+totalSheets+" sheet"+(totalSheets!==1?"s":"")+" generated")),
         _sbEl("div",{className:"art-intro-actions"},
-          _sbEl("div",{className:"sb-mode",role:"group","aria-label":"Board by"},
-            _sbEl("button",{className:"sb-mode-btn"+(clipMode?"":" on"),onClick:()=>setBoardMode("scene"),
-              title:"One sheet per scene — pages of 4 (2×2 grid) or 9 (3×3 grid) panels, set by the grid toggle"},"Scenes"),
-            _sbEl("button",{className:"sb-mode-btn"+(clipMode?" on":""),onClick:()=>setBoardMode("clips"),
-              title:"One board per CLIP — the Shot List's clip sequences (one generated video clip each, ≤"+(window.CLIP_MAX_SECONDS||15)+"s), the hand-off unit for the Stage"},"Clips")),
-          !clipMode && _sbEl("div",{className:"sb-mode",role:"group","aria-label":"Sheet grid"},
-            _sbEl("button",{className:"sb-mode-btn"+(sbGrid==="2x2"?" on":""),onClick:()=>setSbGrid("2x2"),
-              title:"2×2 — four panels per sheet, each an EXACT 16:9 frame (768×432 on GPT's 1536×1024 canvas) at the best per-panel resolution; the sheet's halves are its two panel rows, ready for video generators"},"2×2"),
-            allow3x3
-              ? _sbEl("button",{className:"sb-mode-btn"+(sbGrid==="3x3"?" on":""),onClick:()=>setSbGrid("3x3"),
-                  title:"3×3 — nine panels per sheet (512×288 each, exact 16:9); denser pages, lower per-panel resolution"},"3×3")
-              : _sbEl("button",{className:"sb-mode-btn ghost",
-                  title:"Enable the denser 3×3 grid (nine lower-resolution panels per sheet). 2×2 is recommended for the best per-panel quality.",
-                  onClick:()=>{ setAllow3x3(true); setSbGrid("3x3"); }},"+ 3×3")),
-          onDirect && !clipMode && _sbEl("button",{className:"art-draftall",disabled:!!batchActiveId||!totalSheets,onClick:onDirect,
+          onDirect && _sbEl("button",{className:"art-draftall",disabled:!!batchActiveId||!totalSheets,onClick:onDirect,
             title:"Storyboard Director — an agent thinks through each scene's panels with the writing model, then renders every sheet with GPT Image 2"},
             _sbEl(Icon.robot,{s:14}),"Direct storyboard"),
           _sbEl("button",{className:"art-draftall ghost",disabled:!!batchActiveId||!!composingAll||!totalSheets,onClick:composeAll,
@@ -1062,8 +1038,7 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
           _sbEl("span",{className:"sb-scene-title",onClick:()=>toggleScene(scene.id),style:{cursor:"pointer"}},scene.title||"Untitled scene"),
           ln && _sbEl("span",{className:"sb-scene-loc"},_sbEl(Icon.globe,{s:11}),ln),
           _sbEl("span",{className:"sb-scene-count"},
-            clipMode ? (pages.length+" clip"+(pages.length!==1?"s":"")+" · "+shotsByScene[scene.id].length+" shots")
-            : pages.length>1 ? (pages.length+" pages") : (shotsByScene[scene.id].length+" shots"))),
+            pages.length>1 ? (pages.length+" pages") : (shotsByScene[scene.id].length+" shots"))),
         open && pages.map(page=> _sbEl(StoryboardPage,{key:page.id,project,scene,page,pageCount:pages.length,ctx,beatsMap,
           onView:setView,jumpToShot,batchActiveId,onBatchDone:batch.advance,prevSheetId:prevSheetOf["sbsheet-"+page.id]})));
     }));

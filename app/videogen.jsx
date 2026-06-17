@@ -158,7 +158,7 @@ async function seedanceGenerate(id, opts){
     const st = await vidProxy("poll", { model, statusUrl:sub.statusUrl, responseUrl:sub.responseUrl });
     if(opts.onStatus && st.status) opts.onStatus(st.status);
     if(st.status==="COMPLETED" && st.videoUrl){
-      const meta = { hash, model, durationMs:opts.durationMs||0, seed:st.seed||null, prompt:promptText };
+      const meta = { hash, model, durationMs:opts.durationMs||0, aspectRatio, seed:st.seed||null, prompt:promptText };
       if(id) await vidCommit(id, st.videoUrl, meta);
       return { videoUrl:st.videoUrl, seed:st.seed||null, cached:false };
     }

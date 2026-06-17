@@ -76,6 +76,49 @@ window.sceneTransition = sceneTransition;
 window.sceneCarry = sceneCarry;
 window.autoDraftScene = autoDraftScene;
 
+function _spClean(t){
+  return String(t||"").replace(/\s+/g," ").trim();
+}
+function _spShort(t, max){
+  const s = _spClean(t);
+  const n = max || 72;
+  return s.length > n ? s.slice(0, n-1).trim()+"…" : s;
+}
+function screenplayBeatExcerpt(screenplay, beatN, max){
+  const blocks = ((screenplay&&screenplay.blocks)||[]).filter(b=>Number(b.beat)===Number(beatN));
+  if(!blocks.length) return "";
+  const pieces = [];
+  for(let i=0;i<blocks.length;i++){
+    const b = blocks[i] || {};
+    const txt = _spClean(b.text);
+    if(!txt) continue;
+    if(b.type==="scene") continue;
+    if(b.type==="char"){
+      const next = blocks[i+1] || {};
+      if((next.type==="dia" || next.type==="paren") && _spClean(next.text)){
+        pieces.push(txt+": "+_spClean(next.text));
+        continue;
+      }
+    }
+    if(b.type==="paren") continue;
+    pieces.push(txt);
+    if(pieces.join(" ").length >= (max||72)) break;
+  }
+  if(!pieces.length){
+    const slug = blocks.find(b=>b.type==="scene" && _spClean(b.text));
+    if(slug) pieces.push(_spClean(slug.text));
+  }
+  return _spShort(pieces.join(" "), max||72);
+}
+function screenplayBeatNumbers(screenplay, beats){
+  const nums = new Set();
+  ((beats&&beats.rows)||[]).forEach(r=>nums.add(Number(r.n)));
+  ((screenplay&&screenplay.blocks)||[]).forEach(b=>{ if(b.beat!=null) nums.add(Number(b.beat)); });
+  return Array.from(nums).filter(n=>Number.isFinite(n)).sort((a,b)=>a-b);
+}
+window.screenplayBeatExcerpt = screenplayBeatExcerpt;
+window.screenplayBeatNumbers = screenplayBeatNumbers;
+
 /* professional-completeness audit: which required screenplay elements is this scene
    missing? Returns a short list of human labels (empty = scene is complete). */
 function sceneMissing(scene, drafts){
@@ -285,7 +328,8 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
   const hb = history || {back:[],fwd:[]};
   if(screenplay){
     const groupByBeat = (blocks)=>{ const m={}, order=[]; blocks.forEach(b=>{ if(!m[b.beat]){m[b.beat]=[];order.push(b.beat);} m[b.beat].push(b); }); return {m,order}; };
-    const { m:fg, order } = groupByBeat(screenplay.blocks);
+    const { m:fg } = groupByBeat(screenplay.blocks);
+    const order = screenplayBeatNumbers(screenplay, beats);
     // mark a character cue as (CONT'D) when the same speaker returns after intervening action
     const contdSet = buildContdSet(screenplay.blocks);
     const slugCount = screenplay.blocks.filter(b=>b.type==="scene").length;
@@ -342,20 +386,25 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       React.createElement("div",{className:`script-body ${justPolished?"just-polished":""} ${editing?"editing":""}`,onMouseLeave:()=>!editing&&setActiveBeat(null)},
         order.map(n=>{
           const r = beatRow(n);
+          const scriptBeat = screenplayBeatExcerpt(screenplay, n, 88);
+          const missingScript = !!r && !scriptBeat;
           const on = activeBeat===n;
-          return React.createElement("div",{key:n,className:`sp-seg ${on?"on":""}`},
+          return React.createElement("div",{key:n,className:`sp-seg ${on?"on":""} ${missingScript?"missing-script":""}`},
             React.createElement("div",{className:`sp-gut ${on?"on":""}`,
-              title:"Open this beat in the Beats panel",
+              title:(r ? ((r.drive&&r.drive.a)||("Beat "+n))+" / "+((r.react&&r.react.a)||"Reaction")+"\n" : "")+
+                (scriptBeat ? ("Screenplay: "+scriptBeat) : "No screenplay text is assigned to this beat"),
               onMouseEnter:()=>setActiveBeat(n),
               onClick:()=>{ setActiveBeat(n); onBeatFocus && onBeatFocus(n); }},
               React.createElement("div",{className:"bnum"},n),
-              r && React.createElement("div",{className:"blab"},r.drive.a),
-              r && React.createElement("div",{className:"bsub"},"\u2197 "+r.react.a)),
+              React.createElement("div",{className:"blab"}, r ? r.drive.a : "Unmapped beat"),
+              React.createElement("div",{className:"bsub"}, scriptBeat ? ("\u2192 "+scriptBeat) : "No screenplay text")),
             React.createElement("div",{className:"sp-page"},
               React.createElement("div",{className:"sp-page-inner"},
-                (fg[n]||[]).map((b,i)=> editing
+                (fg[n]||[]).length
+                  ? (fg[n]||[]).map((b,i)=> editing
                   ? React.createElement(EditableBlock,{key:i,b,onCommit:(t)=>commitEdit(b,t)})
-                  : React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:scene.no})))));
+                  : React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:scene.no}))
+                  : React.createElement("div",{className:"spb-action spb-missing"},"No screenplay text assigned to this beat."))));
         })),
       transOut && React.createElement(TransitionBar,{trans:transOut,out:true,
         fromTo:`to Sc.${String(nextScene.no).padStart(2,"0")} ${nextScene.title}`}));

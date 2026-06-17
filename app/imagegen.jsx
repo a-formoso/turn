@@ -550,16 +550,19 @@ async function nbClearAsset(id){
     try{ await idbDel(nbCloudKey(id)); }catch(e){}   // drop the cached bytes too
     const old = _objUrls.get(id); if(old){ try{ URL.revokeObjectURL(old.url); }catch(e){} _objUrls.delete(id); }
     if(typeof window.cloudClear==="function") await window.cloudClear(_scopeFor(id), id);
+    try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, ids:[id], url:"" } })); }catch(e){}
     return;
   }
   await localSetImage(id, "");
   localSetMeta(id, null);
+  try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, ids:[id], url:"" } })); }catch(e){}
 }
 async function nbRevertAsset(id, index){
   if(_nbBackend==="cloud"){
     if(typeof window.cloudRevert!=="function") return null;
     const r = await window.cloudRevert(_scopeFor(id), _nbUid, id, index);
     if(r){ _cloudUrlCache.set(id, r.url); _cloudMetaCache.set(id, r.meta||null); }
+    if(r){ try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, ids:[id], url:r.url } })); }catch(e){} }
     return r;
   }
   const history = await localGetHistory(id);
@@ -572,6 +575,7 @@ async function nbRevertAsset(id, index){
   localSetMeta(id, chosen.meta||null);
   await localSetRefs(id, chosen.refs||[]);
   await localSetHistory(id, newHist.slice(0,12));
+  try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, ids:[id], url:chosen.url } })); }catch(e){}
   return { url:chosen.url, meta:chosen.meta||null };
 }
 async function nbLoadDetailsAsset(id, currentUrl){

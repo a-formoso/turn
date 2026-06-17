@@ -529,6 +529,18 @@ function inFrameProps(sh, scene, charById, propById){
 }
 window.inFrameProps = inFrameProps;
 
+function propMentionedInText(p, text){
+  const name = String(p&&p.name||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ");
+  const words = name.split(/\s+/).filter(w=>w.length>=4 && !/^[0-9]+$/.test(w));
+  if(!words.length) return false;
+  const t = " "+String(text||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ")+" ";
+  return words.filter(w=>t.indexOf(" "+w+" ")>=0).length >= Math.min(2, words.length);
+}
+function propLeavesFrameInText(p, text){
+  if(!propMentionedInText(p, text)) return false;
+  return /\b(drops?|dropped|discard(?:s|ed)?|throws?|thrown|toss(?:es|ed)?|releases?|lets go|sets down|puts down|hands? off|hands? over|gives? (?:it )?to|taken away|takes away|snatches?|stolen|breaks?|broken|shatters?|destroy(?:s|ed)?|burn(?:s|ed)?|stows?|pockets?|hides?|hidden|leaves? behind|lost)\b/i.test(String(text||""));
+}
+
 /* CONTINUITY LEDGER — the carry-forward fix. inFrameProps reads only THIS beat's text, so
    a prop established in beat 1 (Vanya's doll) silently vanishes from beat 2 if beat 2's
    action doesn't re-name it. This rolls a running "what each in-frame character was
@@ -544,10 +556,18 @@ function sceneContinuityLedger(scene, sceneShots, charById, propById){
   ordered.forEach(sh=>{
     const cast = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, chars) : ((sh&&sh.subjects)||[]);
     const here = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, charById, propById) : ((sh&&sh.props)||[]);
+    const text = [sh&&sh.action, sh&&sh.composition, sh&&sh.dialogue].filter(Boolean).join(" ");
     const cf = [];
-    cast.forEach(cid=>{ const s=held[cid]; if(s) s.forEach(pid=>{ if(here.indexOf(pid)<0 && cf.indexOf(pid)<0) cf.push(pid); }); });
+    cast.forEach(cid=>{ const s=held[cid]; if(s) Array.from(s).forEach(pid=>{
+      const p = (propById||{})[pid];
+      if(propLeavesFrameInText(p, text)){ s.delete(pid); return; }
+      if(here.indexOf(pid)<0 && cf.indexOf(pid)<0) cf.push(pid);
+    }); });
     ledger[sh.id] = cf;
     here.forEach(pid=>{ const p=(propById||{})[pid]; const owner=p&&p.ownerId; if(owner){ (held[owner]=held[owner]||new Set()).add(pid); } });
+    here.forEach(pid=>{ const p=(propById||{})[pid]; const owner=p&&p.ownerId; const s=owner&&held[owner];
+      if(s && propLeavesFrameInText(p, text)) s.delete(pid);
+    });
   });
   return ledger;
 }

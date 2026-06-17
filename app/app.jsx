@@ -1710,10 +1710,10 @@ function App(){
       location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null,
       charById, propById, project });
 
-    // page size + grid follow the Storyboards tab's grid toggle (2×2 → 4/page, 3×3 → 9/page);
-    // page ids mirror the tab's (grid-tagged for 2×2) so the Director's sheets land on its cards
-    const SB = (window.SB_PAGE_SIZE||9);
-    const sbGrid = SB===4 ? "2x2" : (SB===9 ? "3x3" : undefined);
+    // Storyboards are fixed to 2×2 sheets, so the Director lands in the same slots
+    // as the visible Storyboards tab.
+    const SB = 4;
+    const sbGrid = "2x2";
     const chunk = (arr,n)=>{ const o=[]; for(let i=0;i<(arr||[]).length;i+=n) o.push(arr.slice(i,i+n)); return o; };
     const pages = [];
     ordered.filter(s=>(shotsByScene[s.id]||[]).length).forEach(scene=>{
@@ -2202,8 +2202,10 @@ function App(){
       room==="stage"
         ? (scenes.length===0
           ? React.createElement("div",{className:"canvas"}, emptyCanvas())
-          : React.createElement(window.StageView,{key:(cloudMode?currentProjectId:"local"),
-              project,scenes,shots,characters,locations,props,beatsMap}))
+            : React.createElement(window.StageView,{key:(cloudMode?currentProjectId:"local"),
+                project,scenes,shots,characters,locations,props,beatsMap,drafts,
+                onVoiceAll:voiceAllLines,voicingLines,onCancelVoiceAll:cancelVoiceAll,
+                onVoiceLine:voiceLine}))
       : room==="art"
         ? (scenes.length===0
           // hard gate: the Art Room is downstream of the story, so with no scenes

@@ -344,6 +344,7 @@ Deno.serve(async (req) => {
           generate_audio: body.generateAudio !== false,
         };
         if (Array.isArray(body.image_urls) && body.image_urls.length) input.image_urls = body.image_urls;
+        if (Array.isArray(body.video_urls) && body.video_urls.length) input.video_urls = body.video_urls;
         if (Array.isArray(body.audio_urls) && body.audio_urls.length) input.audio_urls = body.audio_urls;
         if (body.image_url) input.image_url = String(body.image_url);
         if (body.end_image_url) input.end_image_url = String(body.end_image_url);
