@@ -156,6 +156,115 @@ function useViewport(){
   return vp;
 }
 
+/* ============================================================================
+   THE FILM BIBLE — one canonical JSON the whole studio reads from.
+
+   This is a DETERMINISTIC PROJECTION of the live story state, never a second
+   AI-authored copy: a generated parallel doc would itself drift and contradict
+   the data it's meant to guard. Instead it RESOLVES the continuity graph from
+   the single source of truth (the project doc) — props (worn/carried) tied to
+   their owning characters, characters tied to the scenes they appear in, set
+   dressing tied to its location — so every department reads the same relations
+   and the AI can't go off-brand or contradict itself across tabs. Exposed on
+   window for the Admin JSON viewer and any external/Stage consumer. ---------- */
+function buildFilmBible(doc){
+  doc = doc || {};
+  const project = doc.project || {};
+  const scenes = doc.scenes || [];
+  const characters = doc.characters || [];
+  const props = doc.props || [];
+  const locations = doc.locations || [];
+  const drafts = doc.drafts || {};
+  const lookbook = doc.lookbook || [];
+  const ordered = scenes.slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const noOf = {}; ordered.forEach(s=>{ noOf[s.id]=s.no; });
+  const charById = {}; characters.forEach(c=>{ charById[c.id]=c; });
+  const undef = (x)=>{ const v=(x==null?"":String(x)).trim(); return v||undefined; };
+  const appears = (typeof scenesWhereCharacterAppears==="function") ? scenesWhereCharacterAppears : (()=>[]);
+  const locForScene = (sid)=> (typeof locationForScene==="function") ? locationForScene(locations, sid) : null;
+  const sb = (typeof styleBibleOf==="function") ? styleBibleOf(project) : {};
+
+  // ---- resolve the edges once ----
+  const scenesOfChar = {};                 // charId -> [sceneNo], by story order
+  characters.forEach(c=>{ scenesOfChar[c.id] = appears(c.id, c.name, ordered, drafts).map(id=>noOf[id]).filter(n=>n!=null); });
+  const shotsOfScene = {}; (doc.shots||[]).forEach(sh=>{ (shotsOfScene[sh.sceneId]=shotsOfScene[sh.sceneId]||[]).push(sh); });
+  // ONE authoritative roster — sceneRoster (honours a hand-authored scene.cast, else the
+  // union of driver + script presence + every shot's in-frame cast). The same function the
+  // rest of the pipeline reads, so the bible can't disagree with what the shots reference.
+  const charsInScene = (s)=> (typeof sceneRoster==="function")
+    ? sceneRoster(s, characters, drafts, shotsOfScene[s.id]||[])
+    : (s.driver && charById[s.driver] ? [s.driver] : []);
+  const sceneNosOfProp = (p)=> (Array.isArray(p.scenes)?p.scenes:[]).map(id=>noOf[id]).filter(n=>n!=null);
+  const envPropsOfLoc = (l)=> props.filter(p=> !p.ownerId && !p.ownerName && (p.kind||"carried")!=="worn"
+    && (p.locationId ? p.locationId===l.id
+        : (Array.isArray(p.scenes) && p.scenes.length
+            && Array.from(new Set(p.scenes.map(sid=>{const m=locForScene(sid);return m?m.id:"";}).filter(Boolean))).join()===l.id)))
+    .map(p=>p.name);
+
+  return {
+    film: {
+      title: undef(project.title), genre: undef(project.genre), logline: undef(project.logline||project.premise),
+      controlling_idea: (project.controllingIdea && Object.keys(project.controllingIdea).length) ? project.controllingIdea : undefined,
+      setting: project.setting || undefined,
+      format: undef(project.formatId), framework: undef(project.frameworkId),
+    },
+    look: {
+      visual_statement: undef(doc.lookbookNote),
+      film_stock: undef(sb.filmStock && sb.filmStock!=="none" ? sb.filmStock : ""),
+      references: undef((sb.refs||"")),
+      palette_presets: (sb.presets||[]).map(p=>({ id:p.id, name:p.name, palette:p.palette })),
+      lookbook: lookbook.filter(c=>(c.note||"").trim()).map(c=>({ source:c.source, category:c.category, note:c.note })),
+    },
+    characters: characters.map(c=>({
+      id: c.id, name: c.name, role: undef(c.role),
+      wants: undef(c.conscious), fear: undef(c.unconscious), arc: undef(c.arc),
+      physique: (c.physique && Object.keys(c.physique).length) ? c.physique : undefined,
+      wardrobe: undef(c.wardrobeMask||c.wardrobe),
+      worn: undef(c.accessories), carried: undef(c.props),
+      appears_in_scenes: scenesOfChar[c.id],
+      appearance_states: (c.states||[]).map(s=>s.label).filter(Boolean),
+      sheet_id: c.id,
+    })),
+    props: props.map(p=>{
+      const o = { id:p.id, name:p.name, type:(p.kind||"carried") };
+      if(p.ownerName||p.ownerId){ o[(p.kind==="worn")?"worn_by":"carried_by"] = p.ownerName || (charById[p.ownerId]||{}).name || p.ownerId; }
+      else { const L = p.locationId ? locations.find(x=>x.id===p.locationId) : null; if(L) o.fixture_of_location = L.name; }
+      o.form = undef(p.form); o.material = undef(p.material);
+      // a worn prop with no stored map is present wherever its owner is — resolve it here
+      // so the bible is complete even for props seeded before worn-mapping existed.
+      let sc = sceneNosOfProp(p);
+      if(!sc.length && (p.kind||"carried")==="worn" && (p.ownerId||p.ownerName)){
+        const oc = charById[p.ownerId]; sc = appears(p.ownerId, (oc&&oc.name)||p.ownerName, ordered, drafts).map(id=>noOf[id]).filter(n=>n!=null);
+      }
+      o.scenes = sc; o.sheet_id = p.id;
+      return o;
+    }),
+    locations: locations.map(l=>({
+      id: l.id, name: l.name, int_ext: l.intExt||"INT",
+      times: l.times || undefined,
+      scenes: ordered.filter(s=>{ const m=locForScene(s.id); return m&&m.id===l.id; }).map(s=>s.no),
+      environment_props: (()=>{ const e=envPropsOfLoc(l); return e.length?e:undefined; })(),
+      sheet_id: l.id,
+    })),
+    scenes: ordered.map(s=>{
+      const loc = locForScene(s.id);
+      const preset = (typeof scenePreset==="function") ? scenePreset(project, s.id) : null;
+      return {
+        no: s.no, id: s.id, title: undef(s.title), slug: undef(s.loc),
+        value_charge: (typeof s.charge==="number") ? s.charge : undefined,
+        driver: s.driver ? ((charById[s.driver]||{}).name || s.driver) : undefined,
+        characters: charsInScene(s).map(id=>(charById[id]||{}).name||id),
+        cast_authored: (Array.isArray(s.cast) && s.cast.length) ? true : undefined,
+        props: props.filter(p=>Array.isArray(p.scenes)&&p.scenes.indexOf(s.id)>=0).map(p=>p.name),
+        location: loc ? loc.name : undefined,
+        preset: preset ? preset.name : undefined,
+        summary: undef(s.summary),
+      };
+    }),
+  };
+}
+window.buildFilmBible = buildFilmBible;
+
 function App(){
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const saved = React.useRef(loadStory()).current;
@@ -186,7 +295,10 @@ function App(){
   // NAV_KEY — read synchronously so it's correct on first paint. applyDoc never
   // re-applies room, so cloud hydration can't flip it (that flip was the old flash).
   const [room, setRoom] = React.useState(()=> nav.room || "writers");
-  const [artView, setArtView] = React.useState(()=> nav.artView || (saved && saved.artView) || "props");
+  const [artView, setArtView] = React.useState(()=>{
+    const v = nav.artView || (saved && saved.artView) || "characters";
+    return v==="voices" ? "characters" : v;   // Voices is no longer a tab — it lives on the character card
+  });
   // once-per-story guard so auto-seeding the Props tab from the cast doesn't
   // re-add props the user has deliberately deleted.
   const [propsSeeded, setPropsSeeded] = React.useState(()=> !!(saved && saved.propsSeeded));
@@ -195,12 +307,20 @@ function App(){
   // opens (not re-drafted on every visit), plus the set of character ids currently
   // being drafted so each card can show its own inline "Drafting…" status.
   const [visualsSeeded, setVisualsSeeded] = React.useState(()=> !!(saved && saved.visualsSeeded));
+  // RECENTLY DELETED (restore bin): deleting a character/prop/location moves the full
+  // object here (with its scenes + spec + generated sheet kept) so it can be restored.
+  const _emptyTrash = ()=>({ characters:[], props:[], locations:[] });
+  const [trash, setTrash] = React.useState(()=> (saved && saved.trash) || _emptyTrash());
   const [draftingVisualIds, setDraftingVisualIds] = React.useState([]);
   const [draftingVisualId, setDraftingVisualId] = React.useState(null);
   const [view, setView] = React.useState(()=> nav.view || (saved && saved.view) || "spine");
   const vp = useViewport();
-  const railDrawer = vp !== "desktop";   // tablet + mobile: rail overlays as a drawer
-  const inspDrawer = vp === "mobile";    // mobile only: inspector overlays as a drawer
+  // both side panels use the SAME mechanics: in-layout (a persistent collapsed strip when
+  // closed, pushes the canvas when open) on tablet + desktop; an overlay drawer only on
+  // mobile. Previously the rail drawered on tablet too — it overlaid the hero and vanished
+  // when closed, unlike the inspector.
+  const railDrawer = vp === "mobile";
+  const inspDrawer = vp === "mobile";
   const [aiOpen, setAiOpen] = React.useState(()=> typeof window!=="undefined" && window.innerWidth>=1100);
   const [railOpen, setRailOpen] = React.useState(()=> typeof window==="undefined" || window.innerWidth>=1100);
   const [inspOpen, setInspOpen] = React.useState(()=> typeof window==="undefined" || window.innerWidth>=700);
@@ -250,23 +370,32 @@ function App(){
   if(staleDepts.props) staleTabs.props = true;
   if(staleDepts.locations) staleTabs.locations = true;
   if(staleDepts.colorist) staleTabs.stylebible = true;
-  // re-draft + regenerate one department from the updated Lookbook (confirm first; agent runs in force mode)
-  const applyLookbook = async (dept)=>{
-    const label = { characters:"Characters", props:"Props", locations:"Locations", colorist:"Presets" }[dept] || dept;
+  // re-draft one department from the updated Lookbook (confirm first; agent runs in force
+  // mode). mode "full" (default) also regenerates the sheets; mode "draft" re-drafts the
+  // specs only and leaves every generated image untouched — regenerate later, when ready.
+  const applyLookbook = async (dept, mode)=>{
+    const draftOnly = mode==="draft";
+    const label = { characters:"Characters", props:"Props", locations:"Locations", colorist:"Styles" }[dept] || dept;
     let ok = true;
     if(typeof window.appConfirm==="function"){
-      ok = await window.appConfirm({ title:"Re-draft & regenerate "+label+"?",
-        body:"This re-drafts every spec in "+label+" from the updated Lookbook and regenerates its sheets. It overwrites the current specs, including any manual edits.",
-        confirmLabel:"Re-draft & regenerate", danger:true });
+      ok = await window.appConfirm(draftOnly
+        ? { title:"Re-draft "+label+" specs?",
+            body:"This re-drafts every spec in "+label+" from the updated Lookbook — overwriting the current specs, including any manual edits — but leaves all generated images untouched. Regenerate them whenever you're ready.",
+            confirmLabel:"Re-draft only", danger:true }
+        : { title:"Re-draft & regenerate "+label+"?",
+            body:"This re-drafts every spec in "+label+" from the updated Lookbook and regenerates its sheets. It overwrites the current specs, including any manual edits.",
+            confirmLabel:"Re-draft & regenerate", danger:true });
     }
     if(!ok) return;
-    if(dept==="characters"){ setCastingForce(true); setCastingOpen(true); }
-    else if(dept==="props"){ setPropsMasterForce(true); setPropsMasterOpen(true); }
-    else if(dept==="locations"){ setLocScoutForce(true); setLocScoutOpen(true); }
+    const f = draftOnly ? "draft" : true;
+    if(dept==="characters"){ setCastingForce(f); setCastingOpen(true); }
+    else if(dept==="props"){ setPropsMasterForce(f); setPropsMasterOpen(true); }
+    else if(dept==="locations"){ setLocScoutForce(f); setLocScoutOpen(true); }
     else if(dept==="colorist"){ setColoristOpen(true); }
   };
   const [researchOpen, setResearchOpen] = React.useState(false);   // Visual Researcher (Lookbook)
   const [coordOpen, setCoordOpen] = React.useState(false);   // Art Department Coordinator (meta-agent)
+  const [coordConfirm, setCoordConfirm] = React.useState(false);  // cost/scope preview gate before it runs
   const [newStoryOpen, setNewStoryOpen] = React.useState(false);
 
   // ---- cloud auth (Supabase) ----
@@ -304,6 +433,7 @@ function App(){
 
   // ---- cloud projects + doc sync ----
   const [projects, setProjects] = React.useState([]);
+  const [homeOpen, setHomeOpen] = React.useState(false);   // Home / Dashboard (film wall)
   const [currentProjectId, setCurrentProjectId] = React.useState(null);
   const cloudMode = !!(session && currentProjectId);
   // ADMIN — demo upkeep account. The Matrix sample story (and "Reset to sample story")
@@ -314,6 +444,12 @@ function App(){
   // expose the current project for format-aware helpers with no project param
   // (e.g. the scene drafter reads formatOf(window.turnProject).screenplayBrief)
   React.useEffect(()=>{ window.turnProject = project; },[project]);
+  // live cast on a global so the scene drafter can read each character's canonical
+  // pronouns (castPronounBlock) — the root-cause fix for bible<->script gender drift.
+  React.useEffect(()=>{ window.turnCast = characters; },[characters]);
+  // the CONTINUITY GRAPH, exposed for prompt builders that have no props/scenes/locations
+  // params (e.g. the location plate folds in the environment props it owns — locations.jsx)
+  React.useEffect(()=>{ window.turnContinuity = { props, scenes, locations }; },[props, scenes, locations]);
   const hydratingRef = React.useRef(false);
   // bumped when a hydration pass finishes — lets effects that are gated on
   // hydratingRef (auto-seed) re-run once the doc has settled, even if the user
@@ -326,7 +462,8 @@ function App(){
   const emptyDoc = ()=>({ scenes:[], characters:[], props:[], locations:[], lookbook:[], lookbookNote:"", lookbookApplied:{}, shots:[],
     project:{ title:"Untitled film", genre:"", logline:"", controllingIdea:{} },
     drafts:{}, beatsMap:{}, history:{}, continuityMap:{},
-    selId:null, room:"writers", view:"spine", artView:"props", propsSeeded:false, locsSeeded:false, visualsSeeded:false, blank:true });
+    selId:null, room:"writers", view:"spine", artView:"lookbook", propsSeeded:false, locsSeeded:false, visualsSeeded:false,
+    trash:{ characters:[], props:[], locations:[] }, blank:true });
   /* The Matrix sample as a full project doc — used ONLY to seed the admin
      account's first project (the demo lives in the admin account by default). */
   const sampleDoc = ()=>({ scenes:SCENES, characters:CHARACTERS, props:(window.PROPS_SEED||[]), locations:[], lookbook:[], lookbookNote:"", lookbookApplied:{}, shots:[],
@@ -359,6 +496,9 @@ function App(){
     setPropsSeeded(!!d.propsSeeded);
     setLocsSeeded(!!d.locsSeeded);
     setVisualsSeeded(!!d.visualsSeeded);
+    setTrash(d.trash && typeof d.trash==="object"
+      ? { characters:d.trash.characters||[], props:d.trash.props||[], locations:d.trash.locations||[] }
+      : _emptyTrash());
     setTimeout(()=>{ hydratingRef.current = false; setHydrationTick(t=>t+1); }, 500);
   };
   // SERIES (Phase 3): the show's BIBLE is itself a project row ({isShow, bible});
@@ -374,7 +514,9 @@ function App(){
     const row = await cloudLoadProject(id);
     if(!row) return;
     const uid = (typeof cloudUserId==="function") ? cloudUserId(session) : null;
-    if(typeof nbUseCloud==="function") nbUseCloud(id, uid);
+    if(typeof nbUseCloud==="function") nbUseCloud(id, uid);   // re-scope the image cache to this film
+    if(typeof window.vgResetAll==="function") window.vgResetAll();   // and clear voice/video caches
+    if(typeof window.vidResetAll==="function") window.vidResetAll();
     setCurrentProjectId(id);
     const d = row.doc || {};
     if(d.showId){
@@ -392,6 +534,12 @@ function App(){
       if(typeof nbUseShared==="function") nbUseShared(null);
       applyDoc(d);
     }
+    // A project with no story can't live in the (locked) Art Room — applyDoc
+    // deliberately never re-applies the room, so creating or switching to a blank
+    // project while in the Art Room would otherwise strand the user there. Force the
+    // Writers' Room so a new story always begins on the spine. (Only ever pulls TOWARD
+    // writers — never flashes into art — so it doesn't reintroduce the load-flash bug.)
+    if(!((d.scenes||[]).length)){ setRoom("writers"); setView("spine"); }
   };
   /* on sign-in: load the user's projects (creating a first one if needed) and open
      the most recent. On sign-out: drop cloud mode and fall back to local storage. */
@@ -458,6 +606,32 @@ function App(){
     if(!created) return;
     setProjects(ps=>[created, ...ps]);
     await loadProjectIntoState(created.id);
+    setArtView("lookbook");   // a fresh film opens the Art Room on the Lookbook (front of the pipeline)
+  };
+  /* Home screen: mint an AI poster for a film from its title + logline and persist it
+     onto doc.cover, so the film wall shows real key art. Routes through the same image
+     proxy as the rest of the studio (no key in the browser). */
+  const generatePoster = async (proj)=>{
+    if(!proj || !proj.id) return;
+    const prompt = (typeof window.posterPrompt==="function")
+      ? window.posterPrompt(proj)
+      : ("Cinematic movie poster key art for the film “"+(proj.title||"Untitled film")+"”. "+
+         "A single striking hero image; bold cinematic composition. NO text anywhere.");
+    let url = await window.nbGenerate(prompt, { aspectRatio:"9:16", quality:"medium" });
+    if(!url) throw new Error("The poster came back empty — try again.");
+    if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 640, 0.82); }catch(e){} }
+    if(typeof window.cloudSaveCover==="function") await window.cloudSaveCover(proj.id, url);
+    setProjects(ps=>ps.map(p=>p.id===proj.id?{ ...p, cover:url }:p));
+    return url;
+  };
+  /* Home wall: the user dragged films into a new order. Stamp each a sequential
+     homeOrder (so the custom arrangement wins over the created-date default) in state
+     immediately, and persist each onto its doc so it survives reload / syncs devices. */
+  const reorderProjects = (orderedIds)=>{
+    if(!orderedIds || !orderedIds.length) return;
+    const pos = Object.fromEntries(orderedIds.map((id,i)=>[id,i]));
+    setProjects(ps=> ps.map(p=> pos[p.id]!=null ? { ...p, ord:pos[p.id] } : p));   // stamp position; HomeScreen sorts by it
+    orderedIds.forEach((id,i)=>{ if(typeof window.cloudSaveOrder==="function") window.cloudSaveOrder(id, i); });
   };
   /* SERIES: turn the CURRENT project into episode 1 of a new show — its
      departments become the show's shared bible. (Sheets generated before the
@@ -512,27 +686,59 @@ function App(){
 
   // persist the editable story so a browser refresh / reopen keeps the user's work
   const saveTimer = React.useRef(null);
+  const projectsRef = React.useRef(projects); projectsRef.current = projects;   // latest rows, for save-time meta
   React.useEffect(()=>{
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(()=>{
       if(hydratingRef.current) return;
-      const doc = { scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded };
+      const doc = { scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash };
+      // The full-doc overwrite would otherwise wipe the Home-wall metadata (the poster and
+      // the user's manual order) that lives on the doc but NOT in story state — carry it over.
+      const meta = (projectsRef.current||[]).find(p=>p.id===currentProjectId) || {};
+      const keep = {};
+      if(meta.cover) keep.cover = meta.cover;
+      if(meta.ord!=null) keep.homeOrder = Number(meta.ord);
       if(cloudMode){
         if(typeof cloudSaveDoc==="function"){
           if(currentShowId){
             // series episode: shared departments live in the SHOW's bible; the
             // episode keeps its own story (scenes/beats/drafts/shots/…)
             const { characters:_bc, locations:_bl, props:_bp, lookbook:_blb, lookbookNote:_bln, ...epDoc } = doc;
-            cloudSaveDoc(currentProjectId, { ...epDoc, showId:currentShowId, episodeNo:currentEpisodeNo });
+            cloudSaveDoc(currentProjectId, { ...epDoc, showId:currentShowId, episodeNo:currentEpisodeNo, ...keep });
             cloudSaveDoc(currentShowId, { isShow:true,
               bible:{ characters, locations, props, lookbook, lookbookNote } });
-          } else cloudSaveDoc(currentProjectId, doc);
+          } else cloudSaveDoc(currentProjectId, { ...doc, ...keep });
         }
       }
       else { try{ localStorage.setItem(STORY_KEY, JSON.stringify(doc)); }catch(e){} }
     }, cloudMode ? 700 : 250);
     return ()=> clearTimeout(saveTimer.current);
-  },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, cloudMode, currentProjectId, currentShowId, currentEpisodeNo]);
+  },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash, cloudMode, currentProjectId, currentShowId, currentEpisodeNo]);
+
+  /* Write-through: the Presets (Colorist) "Visual references" field auto-fills from the
+     Lookbook — the colorist brief goes INTO the editable field itself (no labels/markers),
+     re-syncing on every lookbook change (research, card edits, statement edits, clear),
+     for as long as the user hasn't taken the field over: styleBible.lookbookSynced remembers
+     the last auto-fill, and once refs differs from it (the user edited), syncs stop and the
+     user's text wins. WYSIWYG — whatever the field shows is exactly what the Colorist reads.
+     Legacy docs (an in-field "[Lookbook references]" marker block, or the interim separate
+     lookbookRefs field) are folded into this shape here. hydrationTick re-runs the pass
+     once after a doc settles (migration). */
+  React.useEffect(()=>{
+    if(hydratingRef.current) return;
+    if(typeof lookbookBriefFor!=="function") return;
+    const brief = lookbookBriefFor("colorist", lookbook, lookbookNote).replace(/^Overall look: /,"");
+    setProject(p=>{
+      const sb = (p.styleBible)||{};
+      const manual = (typeof mergeLookbookIntoRefs==="function") ? mergeLookbookIntoRefs(sb.refs||"", "") : (sb.refs||"");
+      const owned = !!manual.trim() && manual !== (sb.lookbookSynced||"");
+      const next = owned ? manual : brief;
+      if((sb.refs||"")===next && (sb.lookbookSynced||"")===brief && sb.lookbookRefs===undefined) return p;
+      const out = { ...sb, refs:next, lookbookSynced:brief };
+      delete out.lookbookRefs;   // interim field from the previous sync design
+      return { ...p, styleBible:out };
+    });
+  },[lookbook, lookbookNote, hydrationTick]);
 
   /* No story yet → the studio has nothing to work on: rooms beyond the Writers'
      Room stay locked, and story-dependent actions explain what to do instead. */
@@ -556,6 +762,21 @@ function App(){
     setHistory({}); setContinuityMap(CONTINUITY||{}); setSelId("s4"); setSelChar(null); setPropsSeeded(false); setLocsSeeded(false); setVisualsSeeded(false);
   };
 
+  // "New Story" — NON-destructive. It never deletes the current film. In cloud mode it
+  // spins up a FRESH blank film (additive — the current one stays in the project switcher);
+  // for a single local project it just shows a clean canvas. Either way it lands the user in
+  // the Writers' Room on the empty "Start your film" canvas. Deleting a film is a deliberate,
+  // separate action — the project switcher's per-film Delete.
+  const startNewStory = async ()=>{
+    if(cloudMode && typeof createProject==="function"){
+      await createProject();          // new blank film; the current film is left untouched
+    } else {
+      applyDoc(emptyDoc());           // single local project → clean canvas
+      setArtView("lookbook");         // Art Room defaults to the Lookbook for a fresh film
+    }
+    setRoom("writers"); setView("spine");   // always land on the clean "Start your film" canvas
+  };
+
   // ---- character handlers ----
   const updateCharacter = (id,patch)=>setCharacters(cs=>cs.map(c=>c.id===id?{...c,...patch}:c));
   // add a character BY HAND (not from the script) — gets a manual flag so its sheet
@@ -565,9 +786,26 @@ function App(){
     setCharacters(cs=>[...cs, { id, name:"New character", role:"",
       color:"linear-gradient(135deg,#6a6f7a,#262a30)", conscious:"", unconscious:"", arc:"", manual:true }]);
   };
+  // SOFT DELETE: move the full character into the restore bin (its scenes are scene-side
+  // and untouched, so restoring the same id re-links them). The generated sheet is KEPT
+  // (no nbClearAsset) so a restore brings the art back too; it's purged only on "Delete
+  // forever". A new trash entry stamps when it was deleted.
+  const _trashStamp = (obj)=> ({ ...obj, _deletedAt:new Date().toISOString() });
   const deleteCharacter = (id)=>{
-    setCharacters(cs=>cs.filter(c=>c.id!==id));
-    try{ if(typeof nbClearAsset==="function") nbClearAsset(id); }catch(e){}
+    const c = (characters||[]).find(x=>x.id===id); if(!c) return;
+    setCharacters(cs=>cs.filter(x=>x.id!==id));
+    setTrash(t=>({ ...t, characters:[ _trashStamp(c), ...(t.characters||[]).filter(x=>x.id!==id) ] }));
+  };
+  const restoreCharacter = (id)=>{
+    const item = (trash.characters||[]).find(x=>x.id===id); if(!item) return;
+    const { _deletedAt, ...clean } = item;
+    setCharacters(cs=> cs.some(c=>c.id===id) ? cs : [...cs, clean]);
+    setTrash(t=>({ ...t, characters:(t.characters||[]).filter(x=>x.id!==id) }));
+  };
+  const purgeCharacter = (id)=>{
+    const item = (trash.characters||[]).find(x=>x.id===id);
+    setTrash(t=>({ ...t, characters:(t.characters||[]).filter(x=>x.id!==id) }));
+    try{ if(typeof nbClearAsset==="function"){ nbClearAsset(id); (item&&item.states||[]).forEach(st=>nbClearAsset(id+":"+st.id)); } }catch(e){}
   };
   const [charDrafting, setCharDrafting] = React.useState(null);
   const draftCharacter = async (ch)=>{
@@ -597,6 +835,48 @@ function App(){
       if(res) updateCharacter(ch.id, res);
     }catch(e){}
     setDraftingVisualId(null);
+  };
+  // Generate a character's MASTER sheet headlessly (used to guarantee a prop's owner has a
+  // sheet BEFORE the prop is generated, so the prop matches the character — mirrors the
+  // Casting Director's generateMaster: combined prompt + worn-prop refs + cameo + model).
+  const _imgOf = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
+    if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u||""; };
+  const generateCharMaster = async (c)=>{
+    if(!c || typeof window.nbGenerate!=="function" || typeof window.nbCommit!=="function") return "";
+    let prompt = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project, props) : (c.name||"character reference sheet");
+    const refs=[]; for(const p of (props||[]).filter(p=>p.ownerId===c.id && p.kind!=="carried")){ const u=await _imgOf(p.id); if(u) refs.push(u); }
+    let cameo=[]; if(typeof nbGetCameoAngles==="function"){ try{ cameo=nbGetCameoAngles(c.id)||[]; }catch(e){} }
+    if(!cameo.length && typeof nbLoadCameoAngles==="function"){ try{ cameo=await nbLoadCameoAngles(c.id)||[]; }catch(e){} }
+    if(refs.length) prompt += " The additional prop reference image(s) show items this character wears/carries — match them EXACTLY.";
+    if(cameo.length) prompt += " Keep the FACE, bone structure and skin tone identical to the locked-likeness reference; only wardrobe and condition change.";
+    const extra=[...refs, ...cameo];
+    const gpt2 = (window.NB_MODELS||[]).find(m=>/gpt-image/i.test(m.id));
+    const m0 = (typeof nbGetMeta==="function")?nbGetMeta(c.id):null;
+    const model = (m0&&m0.modelId) || (gpt2&&gpt2.id) || ((typeof nbGetModel==="function")?nbGetModel():undefined);
+    const gopts = { aspectRatio:"16:9", ...(model?{model}:{}), ...(extra.length?{extraImages:extra}:{}) };
+    let url; try{ url=await window.nbGenerate(prompt, gopts); }
+    catch(e){ if(/no image/i.test(String((e&&e.message)||e))) url=await window.nbGenerate(prompt, gopts); else throw e; }
+    const meta = { modelId:model, aspect:"16:9", iso:new Date().toISOString(), prompt, agent:"Prop owner pre-gen" };
+    const kind = (typeof slotAssetKind==="function") ? slotAssetKind("charref-"+c.id) : "character";
+    await window.nbCommit(c.id, url, meta, [], kind);
+    try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:c.id, url } })); }catch(e){}
+    return url;
+  };
+  // Guarantee a prop is "created with its character's sheet": if the owner has no generated
+  // sheet yet, draft its spec (if needed) and generate its master FIRST, so the prop's own
+  // generation can reference it. No-op for ownerless props or owners already sheeted.
+  const ensureOwnerSheet = async (prop)=>{
+    if(!prop || !prop.ownerId) return;
+    const c = (characters||[]).find(x=>x.id===prop.ownerId);
+    if(!c) return;
+    if(await _imgOf(c.id)) return;                       // owner already has a sheet
+    let cc = c;
+    if(typeof window.charVisualsDrafted==="function" && !window.charVisualsDrafted(cc) && typeof aiCharacterVisuals==="function"){
+      try{ const patch = await aiCharacterVisuals(cc, scenes.filter(s=>s.driver===cc.id), lbProject("characters"));
+        if(patch){ updateCharacter(cc.id, patch); cc = { ...cc, ...patch }; } }catch(e){}
+    }
+    try{ await generateCharMaster(cc); }
+    catch(e){ if(typeof window.appToast==="function") window.appToast("Couldn't generate "+(c.name||"the owner")+"'s sheet first: "+((e&&e.message)||"error"),"error"); }
   };
   const [draftingAllVisuals, setDraftingAllVisuals] = React.useState(false);
   // "Draft all characters" — fills the spec ONLY for characters that haven't been
@@ -672,7 +952,17 @@ function App(){
   };
 
   // ---- Art Room: PROPS ----
-  const updateProp = (id,patch)=>setProps(ps=>ps.map(p=>p.id===id?{...p,...patch}:p));
+  const updateProp = (id,patch)=>{
+    // RENAME SYNC (prop card → character): renaming a prop in the Props tab also renames
+    // the matching worn/carried bullet on its owner's character card, so the two never drift.
+    if(patch && Object.prototype.hasOwnProperty.call(patch,"name")){
+      const prev = (props||[]).find(p=>p.id===id);
+      if(prev && prev.ownerId && String(prev.name||"").trim() !== String(patch.name||"").trim()){
+        syncCharBulletRename(prev.ownerId, prev.name, patch.name);
+      }
+    }
+    setProps(ps=>ps.map(p=>p.id===id?{...p,...patch}:p));
+  };
   const [draftingPropId, setDraftingPropId] = React.useState(null);
   const [draftingAllProps, setDraftingAllProps] = React.useState(false);
   const addProp = ()=>{
@@ -681,19 +971,31 @@ function App(){
       form:"", material:"", detail:"", renderStyle:"", negativePrompt:"", manual:true }]);
   };
   const deleteProp = (id)=>{
-    setProps(ps=>ps.filter(p=>p.id!==id));
+    const p = (props||[]).find(x=>x.id===id); if(!p) return;
+    setProps(ps=>ps.filter(x=>x.id!==id));
+    setTrash(t=>({ ...t, props:[ _trashStamp(p), ...(t.props||[]).filter(x=>x.id!==id) ] }));
+  };
+  const restoreProp = (id)=>{
+    const item = (trash.props||[]).find(x=>x.id===id); if(!item) return;
+    const { _deletedAt, ...clean } = item;
+    setProps(ps=> ps.some(p=>p.id===id) ? ps : [...ps, clean]);
+    setTrash(t=>({ ...t, props:(t.props||[]).filter(x=>x.id!==id) }));
+  };
+  const purgeProp = (id)=>{
+    setTrash(t=>({ ...t, props:(t.props||[]).filter(x=>x.id!==id) }));
     try{ if(typeof nbClearAsset==="function") nbClearAsset(id); }catch(e){}
   };
   // merge a set of duplicate prop cards (same owner + same object) into ONE: keep the
   // richest card (most scenes, then one with a generated sheet, then longest name),
   // union the scene coverage, backfill any empty spec fields from the others, and
   // delete the rest. Non-destructive to the survivor's own image/spec.
-  const mergeProps = (ids)=>{
+  const mergeProps = (ids, survivorId)=>{
     const set = (props||[]).filter(p=> ids.indexOf(p.id)>=0);
     if(set.length<2) return;
     const hasImg = (id)=> (typeof nbGetImage==="function") ? !!nbGetImage(id) : false;
     const score = (p)=> ((p.scenes||[]).length*100) + (hasImg(p.id)?40:0) + Math.min((p.name||"").length,30);
-    const survivor = set.slice().sort((a,b)=> score(b)-score(a))[0];
+    // the user can pick which card survives (its art + spec win); otherwise keep the richest.
+    const survivor = (survivorId && set.find(p=>p.id===survivorId)) || set.slice().sort((a,b)=> score(b)-score(a))[0];
     const others = set.filter(p=>p.id!==survivor.id);
     // union scenes (only if scene-mapping has happened on any of them)
     const anyScenes = set.some(p=>p.scenes!==undefined);
@@ -719,6 +1021,33 @@ function App(){
       return victims.length ? ps.filter(p=>!victims.includes(p)) : ps;
     });
   };
+  const _normPropName = s=> String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
+  // RENAME SYNC (character bullet → prop card): editing a worn/carried item on a
+  // character card renames the matching prop card (keeping its sheet), the mirror of
+  // removeOwnedProp. Match on owner + normalised name, same as seeding/removal.
+  const renameOwnedProp = (charId, oldText, newText)=>{
+    const from = _normPropName(oldText), to = String(newText||"").trim();
+    if(!charId || !from || !to) return;
+    setProps(ps=>ps.map(p=> (p.ownerId===charId && _normPropName(p.name)===from && p.name!==to) ? {...p, name:to} : p));
+  };
+  // RENAME SYNC (prop card → character bullet): replace the matching worn/carried item
+  // in the owner's accessories/props text, preserving every other item.
+  const syncCharBulletRename = (charId, oldName, newName)=>{
+    const from = _normPropName(oldName), to = String(newName||"").trim();
+    if(!charId || !from || !to) return;
+    const replaceIn = (text)=>{
+      const items = (typeof splitListItems==="function") ? splitListItems(text) : String(text||"").split(/\s*,\s*/).filter(Boolean);
+      let changed=false;
+      const next = items.map(it=>{ if(_normPropName(it)===from && it.trim()!==to){ changed=true; return to; } return it; });
+      return changed ? next.join(", ") : null;
+    };
+    setCharacters(cs=>cs.map(c=>{
+      if(c.id!==charId) return c;
+      const a = replaceIn(c.accessories), pr = replaceIn(c.props);
+      if(a==null && pr==null) return c;
+      return { ...c, ...(a!=null?{accessories:a}:{}), ...(pr!=null?{props:pr}:{}) };
+    }));
+  };
   const draftPropVisuals = async (pr)=>{
     if(draftingPropId || !(typeof aiPropVisuals==="function")) return;
     setDraftingPropId(pr.id);
@@ -740,7 +1069,7 @@ function App(){
       // 1) sync from cast
       let working = props;
       if(typeof propsFromCast==="function"){
-        const derived = propsFromCast(characters, props);
+        const derived = propsFromCast(characters, props, scenes, drafts);
         if(derived.length){ working = [...props, ...derived]; setProps(working); setPropsSeeded(true); }
       }
       // 2) draft specs
@@ -763,7 +1092,7 @@ function App(){
   // what's already in the tab, so it's safe to call repeatedly.
   const seedPropsFromCast = React.useCallback(()=>{
     if(typeof propsFromCast!=="function") return;
-    const derived = propsFromCast(characters, props);
+    const derived = propsFromCast(characters, props, scenes, drafts);
     setPropsSeeded(true);
     if(derived.length) setProps(ps=>[...ps, ...derived]);
   },[characters, props]);
@@ -822,8 +1151,20 @@ function App(){
       architecture:"", materials:"", lighting:"", significance:"", renderStyle:"", negativePrompt:"", variants:[], manual:true }]);
   };
   const deleteLocation = (id)=>{
-    setLocations(ls=>ls.filter(l=>l.id!==id));
-    try{ if(typeof nbClearAsset==="function") nbClearAsset(id); }catch(e){}
+    const l = (locations||[]).find(x=>x.id===id); if(!l) return;
+    setLocations(ls=>ls.filter(x=>x.id!==id));
+    setTrash(t=>({ ...t, locations:[ _trashStamp(l), ...(t.locations||[]).filter(x=>x.id!==id) ] }));
+  };
+  const restoreLocation = (id)=>{
+    const item = (trash.locations||[]).find(x=>x.id===id); if(!item) return;
+    const { _deletedAt, ...clean } = item;
+    setLocations(ls=> ls.some(l=>l.id===id) ? ls : [...ls, clean]);
+    setTrash(t=>({ ...t, locations:(t.locations||[]).filter(x=>x.id!==id) }));
+  };
+  const purgeLocation = (id)=>{
+    const item = (trash.locations||[]).find(x=>x.id===id);
+    setTrash(t=>({ ...t, locations:(t.locations||[]).filter(x=>x.id!==id) }));
+    try{ if(typeof nbClearAsset==="function"){ nbClearAsset(id); (item&&item.variants||[]).forEach(v=>nbClearAsset(id+"-"+v.id)); } }catch(e){}
   };
   const draftLocationVisuals = async (l)=>{
     if(draftingLocId || !(typeof aiLocationVisuals==="function")) return;
@@ -936,11 +1277,9 @@ function App(){
     try{
       const sb = (typeof styleBibleOf==="function") ? styleBibleOf(project) : {};
       const seed = (sb.presets&&sb.presets.length) ? sb.presets : (window.STYLE_PRESETS_DEFAULT||[]);
-      // fold the Colorist's lookbook references into the references the palette is designed from
-      const lbText = (typeof lookbookBriefFor==="function") ? lookbookBriefFor("colorist", lookbook, lookbookNote) : "";
-      const mergedRefs = [((sb.refs)||"").trim(), lbText].filter(Boolean).join("\n");
-      const projForDesign = mergedRefs ? {...project, styleBible:{...(project.styleBible||{}), refs:mergedRefs}} : project;
-      const res = await aiAssignSceneStyles(scenes, seed, drafts, projForDesign);
+      // the Lookbook's colorist brief is auto-synced into styleBible.lookbookRefs (see the
+      // write-through effect); aiAssignSceneStyles reads it alongside the manual refs.
+      const res = await aiAssignSceneStyles(scenes, seed, drafts, project);
       applyStyleResult(res, seed);
       if(res) markApplied("colorist");
     }catch(e){}
@@ -967,6 +1306,53 @@ function App(){
   // that doesn't have one yet (non-destructive); per-scene re-draft replaces one scene.
   const updateShot = (id,patch)=> setShots(ss=>ss.map(s=>s.id===id?{...s,...patch}:s));
   const deleteShot = (id)=>{ setShots(ss=>ss.filter(s=>s.id!==id)); try{ if(typeof nbClearAsset==="function") nbClearAsset(id); }catch(e){} };
+
+  // ── Phase 2: line audio = the cut clock ──────────────────────────────────────
+  // Render a shot's dialogue through its speaker's LOCKED voice; the MEASURED
+  // duration becomes the shot's `dur`, which re-clocks the Stage automatically
+  // (shotDur prefers dur → sceneSequences / cut-rhythm / runtime all re-partition).
+  const [voicingLines, setVoicingLines] = React.useState(null);   // {done,total} during the batch
+  const voicingCancel = React.useRef(false);
+  const cancelVoiceAll = ()=>{ voicingCancel.current = true; };
+  const resolveLineSpeaker = (shot)=>{
+    const scene = scenes.find(s=>s.id===shot.sceneId);
+    const ids = (typeof inFrameCast==="function") ? inFrameCast(shot, scene, characters) : (shot.subjects||[]);
+    const inFrame = (ids||[]).map(id=>characters.find(c=>c.id===id)).filter(Boolean);
+    const hasVoice = (c)=> !!(c && c.voiceLock && c.voiceLock.voiceId);
+    return inFrame.find(hasVoice)
+        || (scene && characters.find(c=>c.id===scene.driver && hasVoice(c)))
+        || inFrame[0] || (scene && characters.find(c=>c.id===scene.driver)) || null;
+  };
+  const voiceOneLine = async (shot)=>{
+    const text = String(shot.dialogue||"").trim();
+    if(!text) return { skipped:true };
+    const spk = resolveLineSpeaker(shot);
+    if(!spk || !spk.voiceLock || !spk.voiceLock.voiceId)
+      throw new Error("No locked voice for "+((spk&&spk.name)||"the speaker")+" — lock one on their character card (the Voice button, Characters tab).");
+    const r = await window.elGenerate(shot.id, text, { voiceId:spk.voiceLock.voiceId, settings:spk.voiceLock.defaults });
+    const durSec = Math.max(0.6, Math.round(((r.durationMs||0)/1000 + 0.4)*10)/10);   // measured + lead/tail pad
+    updateShot(shot.id, { dur:durSec, lineAudio:{ durationMs:r.durationMs||0, voiceId:spk.voiceLock.voiceId,
+      speakerId:spk.id, speaker:spk.name, text,
+      hash:(typeof window.vgHash==="function" ? window.vgHash(text, spk.voiceLock.voiceId, spk.voiceLock.defaults) : "") } });
+    return { ok:true, durSec, cached:r.cached };
+  };
+  const voiceLine = async (shot)=>{
+    try{ const r = await voiceOneLine(shot); if(r && r.ok && !r.cached && typeof window.appToast==="function") window.appToast("Voiced — "+r.durSec+"s","success"); }
+    catch(e){ if(typeof window.appToast==="function") window.appToast(String((e&&e.message)||"Voice render failed."),"error"); }
+  };
+  const voiceAllLines = async ()=>{
+    const lines = shots.filter(s=>String(s.dialogue||"").trim());
+    if(!lines.length){ if(typeof window.appToast==="function") window.appToast("No dialogue lines to voice yet."); return; }
+    voicingCancel.current=false; setVoicingLines({ done:0, total:lines.length });
+    let failed=0;
+    for(let i=0;i<lines.length;i++){
+      if(voicingCancel.current) break;
+      try{ await voiceOneLine(lines[i]); }catch(e){ failed++; }
+      setVoicingLines({ done:i+1, total:lines.length });
+    }
+    setVoicingLines(null);
+    if(failed && typeof window.appToast==="function") window.appToast(failed+" line"+(failed>1?"s":"")+" couldn't be voiced — check those characters have a locked voice.","error");
+  };
   const addShot = (sceneId)=>{
     const loc = (typeof locationForScene==="function") ? locationForScene(locations, sceneId) : null;
     const sc = scenes.find(s=>s.id===sceneId);
@@ -1082,7 +1468,7 @@ function App(){
   const newId = ()=>"s"+(++uidRef.current);
   const renum = (arr)=>arr.map((s,i)=>({...s,no:i+1}));
   // human label describing a draft's provenance
-  const labelOf = (v)=> !v ? null : v.polished ? "MUSE polish" : (v.ai ? "MUSE draft" : (v.auto ? "Structural draft" : "Original draft"));
+  const labelOf = (v)=> !v ? null : v.edited ? "Manual edit" : v.polished ? "MUSE polish" : (v.ai ? "MUSE draft" : (v.auto ? "Structural draft" : "Original draft"));
   // replace a scene's draft, pushing the old version onto its history stack
   const commitVersion = (id, next)=>{
     const prev = drafts[id];
@@ -1324,14 +1710,17 @@ function App(){
       location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null,
       charById, propById, project });
 
-    const SB = (window.SB_PAGE_SIZE||12);
+    // page size + grid follow the Storyboards tab's grid toggle (2×2 → 4/page, 3×3 → 9/page);
+    // page ids mirror the tab's (grid-tagged for 2×2) so the Director's sheets land on its cards
+    const SB = (window.SB_PAGE_SIZE||9);
+    const sbGrid = SB===4 ? "2x2" : (SB===9 ? "3x3" : undefined);
     const chunk = (arr,n)=>{ const o=[]; for(let i=0;i<(arr||[]).length;i+=n) o.push(arr.slice(i,i+n)); return o; };
     const pages = [];
     ordered.filter(s=>(shotsByScene[s.id]||[]).length).forEach(scene=>{
       const groups = chunk(shotsByScene[scene.id]||[], SB);
       groups.forEach((chunkShots,index)=> pages.push({
-        scene, index, pageCount:groups.length,
-        pageId:"sbpage-"+scene.id+"-"+index, shots:chunkShots, ctxFor:ctxFor(scene) }));
+        scene, index, pageCount:groups.length, grid:sbGrid,
+        pageId:"sbpage-"+scene.id+(sbGrid==="2x2"?"-2x2":"")+"-"+index, shots:chunkShots, ctxFor:ctxFor(scene) }));
     });
 
     const GPT2 = (window.NB_MODELS||[]).find(m=>/gpt-image/i.test(m.id));
@@ -1417,7 +1806,7 @@ function App(){
         if(adds.length) updateCharacter(c.id, { states: merged });
         return merged; },
       generateMaster: async (c)=>{
-        let prompt = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project) : "";
+        let prompt = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project, props) : "";
         const refs=[];
         for(const p of (props||[]).filter(p=>p.ownerId===c.id && p.kind!=="carried")){ const u=await _grabImg(p.id); if(u) refs.push(u); }
         const cameo = await _cameoOf(c.id);
@@ -1426,7 +1815,7 @@ function App(){
         const extra=[...refs, ...cameo];
         return _genCharImage(c.id, prompt, { model:_modelFor(c), ...(extra.length?{ extraImages:extra }:{}) }); },
       generateState: async (c, st, baseUrl)=>{
-        const base = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project) : "";
+        const base = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project, props) : "";
         const prompt = base + " APPEARANCE STATE — "+(st.label||"variant")+": "+(st.change||"")
           + ". Render the character in THIS changed state consistently across every panel, keeping the EXACT same face, hair, skin tone and body as the reference; only the described change differs.";
         const cameo = await _cameoOf(c.id);
@@ -1434,6 +1823,12 @@ function App(){
         if(baseUrl) opts.referenceImage = baseUrl;
         if(cameo.length) opts.extraImages = cameo;
         return _genCharImage(c.id+":"+st.id, prompt, opts); },
+      // worn props of this character that ALREADY have a generated sheet — the trigger for
+      // the Coordinator's "wear props" pass (re-generate the master so it wears them exactly).
+      wornPropsWithSheets: async (c)=>{
+        const worn = (props||[]).filter(p=>p && p.ownerId===c.id && p.kind!=="carried");
+        const out=[]; for(const p of worn){ const u=await _grabImg(p.id); if(u) out.push(p); }
+        return out; },
     };
 
     // ---- Props Master surface (Props tab agent): derive → draft → dedup → generate ----
@@ -1465,7 +1860,7 @@ function App(){
       // pull the cast's own worn/carried items in (dedup handled by propsFromCast)
       deriveCast: ()=>{
         if(typeof propsFromCast!=="function") return 0;
-        const add = propsFromCast(characters, _propWork);
+        const add = propsFromCast(characters, _propWork, scenes, drafts);
         if(add.length){ _propWork = [..._propWork, ...add]; setProps(ps=>[...ps, ...add]); setPropsSeeded(true); }
         return add.length;
       },
@@ -1479,12 +1874,17 @@ function App(){
         const seen = new Set(_propWork.map(p=>headOf(p.name)));   // skip an object the cast (or a prior card) already owns
         const slug = (n)=> (typeof propSlug==="function") ? propSlug(n) : String(n||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
         const cards = [];
+        // fixture-of link: ownerless set dressing whose scenes ALL resolve to one location
+        // belongs to that location (it renders into the location plate); an object whose
+        // scenes span locations is mobile — likely hand-carried — so it is NOT pinned.
+        const locIdOf = (sid)=>{ const L=(typeof locationForScene==="function")?locationForScene(locations, sid):null; return L?L.id:""; };
         found.forEach((e,i)=>{
           const h = headOf(e.name); if(seen.has(h)) return; seen.add(h);
           const kind = (typeof classifyPropKind==="function" && classifyPropKind(e.name)) || "carried";
+          const locIds = Array.from(new Set((e.sceneIds||[]).map(locIdOf).filter(Boolean)));
           cards.push({ id:"prop-set-"+slug(e.name)+"-"+i, name:e.name.replace(/^\w/, m=>m.toUpperCase()),
             kind, ownerId:"", ownerName:"", form:"", material:"", detail:"", renderStyle:"", negativePrompt:"",
-            scenes:e.sceneIds||[], fromSet:true });
+            scenes:e.sceneIds||[], fromSet:true, locationId:(locIds.length===1?locIds[0]:"") });
         });
         if(cards.length){ _propWork = [..._propWork, ...cards]; setProps(ps=>[...ps, ...cards]); }
         return cards.length;
@@ -1609,7 +2009,7 @@ function App(){
           id:"look-"+slug(e.source).slice(0,24)+"-"+i, source:e.source, category:e.category||"Palette", note:e.note||"", negativePrompt:"" }));
         if(cards.length){ _lbWork = [..._lbWork, ...cards]; setLookbook(ls=>[...ls, ...cards]); }
         // No write-through: the Colorist reads the lookbook LIVE (see art.designStyles), so the
-        // references propagate downstream without mutating the Presets tab's persisted data.
+        // references propagate downstream without mutating the Styles tab's persisted data.
         return { statement:r.statement||"", added:cards.length };
       },
       toGenerate: async ()=>{
@@ -1621,6 +2021,8 @@ function App(){
     };
 
     return { input, emit, propose, cancelled, project, force: !!force,
+      // "Re-draft only": re-draft every spec from the Lookbook but leave generated images alone
+      draftOnly: force==="draft",
       ai:{ available: (typeof aiAvailable==="function" && aiAvailable()) },
       art:{
         pages,
@@ -1633,22 +2035,17 @@ function App(){
         markApplied: (dept)=> markApplied(dept),
         // ---- Cinematographer / Colorist tools (Style Bible agent) ----
         scenesLite: ordered.map(s=>({ id:s.id, no:s.no, title:s.title })),
-        // the Colorist's references = the user's manual Presets refs PLUS the live Lookbook
-        // (statement + reference notes), folded in here so the lookbook drives the palette
-        // without a fragile write-through into another tab's persisted data.
+        // the Colorist's references = the Presets refs field, which the write-through effect
+        // keeps auto-filled from the Lookbook until the user takes it over — WYSIWYG: the
+        // field is exactly what the Colorist reads.
         references: ()=>{ const sb=(typeof styleBibleOf==="function")?styleBibleOf(project):{};
-          const lbText=(typeof composeLookbookRefs==="function")?lookbookBriefFor("colorist", lookbook, lookbookNote):"";
-          const refs=[(sb.refs||"").trim(), lbText].filter(Boolean).join("\n");
-          return { refs, refImages:sb.refImages||[] }; },
+          return { refs:(sb.refs||"").trim(), refImages:sb.refImages||[] }; },
         designStyles: async ()=>{ const sb=(typeof styleBibleOf==="function")?styleBibleOf(project):{};
           const seed=(sb.presets&&sb.presets.length)?sb.presets:(window.STYLE_PRESETS_DEFAULT||[]);
-          const lbText=(typeof composeLookbookRefs==="function")?lookbookBriefFor("colorist", lookbook, lookbookNote):"";
-          const mergedRefs=[((sb.refs)||"").trim(), lbText].filter(Boolean).join("\n");
-          const projForDesign = mergedRefs ? {...project, styleBible:{...(project.styleBible||{}), refs:mergedRefs}} : project;
-          return window.aiAssignSceneStyles(scenes, seed, drafts, projForDesign); },
+          return window.aiAssignSceneStyles(scenes, seed, drafts, project); },
         applyStyles: (res)=> applyStyleResult(res),
         // ---- Storyboard Director tools ----
-        buildPrompt:(p)=> (typeof buildStoryboardPagePrompt==="function") ? buildStoryboardPagePrompt(p.scene, p.shots, {...(p.ctxFor||{}), _lookbookBrief:(typeof lookbookBriefFor==="function"?lookbookBriefFor("storyboard", lookbook, lookbookNote):"")}, beatsMap) : "",
+        buildPrompt:(p)=> (typeof buildStoryboardPagePrompt==="function") ? buildStoryboardPagePrompt(p.scene, p.shots, {...(p.ctxFor||{}), _lookbookBrief:(typeof lookbookBriefFor==="function"?lookbookBriefFor("storyboard", lookbook, lookbookNote):"")}, beatsMap, { grid:p.grid }) : "",
         directorNotes:(p, priorMemo)=>{ const cf={...(p.ctxFor||{}), _lookbookBrief:(typeof lookbookBriefFor==="function"?lookbookBriefFor("storyboard", lookbook, lookbookNote):"")}; return window.aiDirectorNotes(p.scene, p.shots, beatsMap, ()=>cf, priorMemo); },
         // append the cross-scene continuity block to whatever prompt (LLM-optimized or deterministic)
         withContinuity:(prompt, memo, hasPrev)=>{
@@ -1753,6 +2150,16 @@ function App(){
 
   return React.createElement("div",{className:`app vp-${vp} ${densClass} ${premiumClass}`},
     window.ConfirmHost && React.createElement(window.ConfirmHost,null),
+    homeOpen && cloudMode && typeof window.HomeScreen!=="undefined" && React.createElement(window.HomeScreen,{
+      projects, currentId:currentProjectId,
+      onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
+      onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
+      onDelete: deleteProject,
+      onGeneratePoster: generatePoster,
+      onReorder: reorderProjects,
+      onClose: ()=>setHomeOpen(false),
+      accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
+        onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }),
     t.grain && React.createElement("div",{style:{position:"fixed",inset:0,pointerEvents:"none",zIndex:50,
       opacity:.025,mixBlendMode:"overlay",
       backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")"}}),
@@ -1762,7 +2169,10 @@ function App(){
     React.createElement(TopBar,{view,setView,room,setRoom:guardedSetRoom,artView,setArtView,project,scenes,drafts,
       onReset: isAdmin ? resetStory : null,
       onToggleAI:toggleAI,
-      onNewStory:()=>setNewStoryOpen(true),
+      onNewStory:startNewStory,
+      onHome: cloudMode ? (()=>setHomeOpen(true)) : null,
+      // ADMIN ONLY: inspect the whole continuity JSON (the Film Bible) the studio reads from
+      onViewBible: isAdmin ? (()=> buildFilmBible({ project, scenes, characters, props, locations, shots, drafts, beatsMap, lookbook, lookbookNote })) : null,
       theme,onTheme:setTheme,
       authSlot: React.createElement(AccountChip,{ session, cloudActive: cloudMode,
         onSignIn:()=>setAuthOpen(true), onSignOut:signOut }),
@@ -1781,7 +2191,7 @@ function App(){
     React.createElement(ViewNav,{room,view,setView,artView,setArtView,staleTabs,
       hiddenTabs:(typeof tabHidden==="function") ? Object.fromEntries((window.ART_TABS||[]).map(t=>[t.id, tabHidden(project, t.id)])) : null,
       railOpen,inspOpen,onToggleRail:toggleRail,onToggleInsp:toggleInsp,
-      onCoordinate:async ()=>{ if(await requireStory("Art Department Coordinator")) setCoordOpen(true); },
+      onCoordinate:async ()=>{ if(await requireStory("Art Department Coordinator")) setCoordConfirm(true); },
       onAgents:async ()=>{ if(await requireStory("Story Editors")) setAgentsOpen(true); }}),
 
     authOpen && React.createElement(AuthModal,{ initialMode:authMode, plan:intendedPlan,
@@ -1789,12 +2199,19 @@ function App(){
       onAuthed:(s)=>{ if(s) setSession(s); }}),
 
     React.createElement("div",{className:"body"},
-      room==="art"
+      room==="stage"
+        ? (scenes.length===0
+          ? React.createElement("div",{className:"canvas"}, emptyCanvas())
+          : React.createElement(window.StageView,{key:(cloudMode?currentProjectId:"local"),
+              project,scenes,shots,characters,locations,props,beatsMap}))
+      : room==="art"
         ? (scenes.length===0
           // hard gate: the Art Room is downstream of the story, so with no scenes
           // show the onboarding instead of empty (and partly broken) tabs.
           ? React.createElement("div",{className:"canvas"}, emptyCanvas())
-          : React.createElement(ArtRoom,{key:(cloudMode?currentProjectId:"local"),artView,setArtView,project,characters,scenes,props,
+          : React.createElement(ArtRoom,{key:(cloudMode?currentProjectId:"local"),artView,setArtView,project,characters,scenes,props,drafts,trash,
+            onRestoreChar:restoreCharacter,onPurgeChar:purgeCharacter,onRestoreProp:restoreProp,onPurgeProp:purgeProp,
+            onRestoreLoc:restoreLocation,onPurgeLoc:purgeLocation,onEnsureOwner:ensureOwnerSheet,
             onDirectStoryboard:()=>setDirectorOpen(true),
             onDirectScene:(sceneId)=>setSceneDirLaunch({ sceneId: sceneId||null }),
             onColorist:()=>setColoristOpen(true),
@@ -1808,7 +2225,7 @@ function App(){
             staleTabs,onApplyLookbook:applyLookbook,
             onUpdateChar:updateCharacter,onDraftVisuals:draftCharacterVisuals,onDraftAllVisuals:draftAllVisuals,
             draftingVisualId,draftingAllVisuals,draftingVisualIds,onAddCharacter:addCharacter,onDeleteCharacter:deleteCharacter,
-            onSuggestStates:suggestCharacterStates,suggestingStatesId,onRemoveOwnedItem:removeOwnedProp,
+            onSuggestStates:suggestCharacterStates,suggestingStatesId,onRemoveOwnedItem:removeOwnedProp,onRenameOwnedItem:renameOwnedProp,
             onUpdateProp:updateProp,onDraftProp:draftPropVisuals,onDraftAllProps:draftAllProps,
             onAddProp:addProp,onDeleteProp:deleteProp,draftingPropId,draftingAllProps,onMergeProps:mergeProps,
             onSeedFromCast:seedPropsFromCast,castHasProps:(typeof castHasProps==="function" && castHasProps(characters)),
@@ -1882,7 +2299,7 @@ function App(){
           drafts, scenes, onSelectScene:selectScene, onPolish:polishScene,
           onDraftOne:draftOne, onDraftAll:draftAll, drafting, total:scenes.length,
           history: sel ? (history[sel.id]||{back:[],fwd:[]}) : {back:[],fwd:[]},
-          labelOf, onRevert:revertVersion, onRedo:redoVersion, continuityMap, project,
+          labelOf, onRevert:revertVersion, onRedo:redoVersion, onEditScene:commitVersion, continuityMap, project,
           // click a beat in the Script gutter → reveal it in the Inspector's Beats tab
           onBeatFocus:(n)=>{ setSelChar(null); setInspTab("beats"); setFocusBeat(n);
             if(!inspDrawer) setInspOpen(true); }}),
@@ -1900,7 +2317,7 @@ function App(){
               onCollapse:()=>setInspOpen(false),
               onFollow:(id)=>{ setFollowChar(id); setView("spine");
                 if(inspDrawer) setInspOpen(false); }})
-          : React.createElement(Inspector,{scene:sel,beats,onCharge,onUpdate:updateScene,characters,scenes,
+          : React.createElement(Inspector,{scene:sel,beats,draft:(sel?drafts[sel.id]:null),onCharge,onUpdate:updateScene,characters,scenes,
               onAddScene:addScene,onDeleteScene:deleteScene,onMove:moveScene,onBeats:setBeatsFor,
               sceneIndex:scenes.findIndex(s=>s.id===selId),sceneCount:scenes.length,
               onCollapse:()=>setInspOpen(false),project,
@@ -1951,15 +2368,14 @@ function App(){
     // Cinematographer / Colorist — gated agent (proposes the colour system for approval);
     // its idle screen shows the current visual references so you can add taste before it runs.
     coloristOpen && React.createElement(AgentsPanel,{
-      initialAgentId:"colorist", single:true, viewLabel:"View Presets",
+      initialAgentId:"colorist", single:true, viewLabel:"View Styles",
       ctxFactory:artAgentCtxFactory,
       onClose:()=>setColoristOpen(false),
       onView:()=>{ setArtView("stylebible"); setColoristOpen(false); },
       issues:{}, undoCount:0,
       aiOn: (typeof aiAvailable==="function" && aiAvailable()),
       introExtra: (()=>{ const sb=(typeof styleBibleOf==="function")?styleBibleOf(project):{};
-        const lbText=(typeof composeLookbookRefs==="function")?lookbookBriefFor("colorist", lookbook, lookbookNote):"";
-        const refs=[(sb.refs||"").trim(), lbText].filter(Boolean).join("\n"); const imgs=sb.refImages||[];
+        const refs=(sb.refs||"").trim(); const imgs=sb.refImages||[];
         if(!refs && !imgs.length) return React.createElement("div",{className:"ag-coloref empty"},
           React.createElement(Icon.image,{s:13}), "No visual references yet — research the look in the Lookbook tab, or add films, photographers or reference images here, to steer the palette.");
         return React.createElement("div",{className:"ag-coloref"},
@@ -2022,6 +2438,11 @@ function App(){
     // Art Department Coordinator — the meta-agent that runs the whole pre-production
     // pipeline in dependency order (props → cast → locations → colour → shots → storyboard),
     // launched from the Art Room's "Run pre-production" button in the view bar.
+    // #2 — cost/scope preview before the Coordinator spends: confirm, then launch
+    coordConfirm && window.CoordConfirm && React.createElement(window.CoordConfirm,{
+      project, characters, props, locations, shots, scenes,
+      onCancel:()=>setCoordConfirm(false),
+      onConfirm:()=>{ setCoordConfirm(false); setCoordOpen(true); }}),
     coordOpen && React.createElement(AgentsPanel,{
       initialAgentId:"coordinator", autoStart:true, single:true, viewLabel:"View Storyboards",
       ctxFactory:artAgentCtxFactory,
@@ -2035,11 +2456,20 @@ function App(){
       onClose:()=>setNewStoryOpen(false),
       aiOn: (typeof aiAvailable==="function" && aiAvailable()),
       onLaunch:(logline, synopsis, formatId, frameworkId)=>{ setNewStoryOpen(false);
+        // A new story always starts in the Writers' Room on the spine — the story is
+        // built first; pre-production (the Art Room) comes after. Without this, launching
+        // New Story from the Art Room would leave the user staring at empty art tabs.
+        setRoom("writers"); setView("spine");
         // Step 0 (pipeline): the chosen FORMAT and FRAMEWORK land on the project;
         // the spine builder, rooms and audit read them via formatOf/frameworkOf
-        if(formatId || frameworkId) setProject(p=>({ ...p,
-          ...(formatId?{format:formatId}:{}), ...(frameworkId?{framework:frameworkId}:{}) }));
         const brief = (typeof composeStoryBrief==="function") ? composeStoryBrief(logline, synopsis) : logline;
+        // persist the logline + the composed brief (synopsis + research) so the user can
+        // review later EXACTLY what the spine, beats and cast were built from — and see
+        // where anything deviated. Saved at build time; never overwritten by later edits.
+        setProject(p=>({ ...p,
+          ...(formatId?{format:formatId}:{}), ...(frameworkId?{framework:frameworkId}:{}),
+          logline: (logline||"").trim() || p.logline,
+          sourceBrief: brief, sourceBriefAt: new Date().toISOString() }));
         setAgentLaunch({id:"adapt", input:brief}); setAgentsOpen(true); }}),
 
     // MUSE — the floating help assistant, available in every room (separate from Agents).

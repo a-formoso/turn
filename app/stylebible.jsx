@@ -64,9 +64,13 @@ function styleBibleOf(project){
   return {
     presets: (sb.presets && sb.presets.length) ? sb.presets : STYLE_PRESETS_DEFAULT,
     sceneStyles: sb.sceneStyles || {},
-    // free-text visual references ("Her, Blade Runner 2049") that guide bespoke
-    // palette design — see aiAssignSceneStyles.
+    // free-text visual references that guide bespoke palette design (see
+    // aiAssignSceneStyles) — auto-filled from the Lookbook by the write-through effect
+    // in app.jsx until the user edits the field, then theirs.
     refs: sb.refs || "",
+    // the last auto-filled lookbook brief — refs !== lookbookSynced means the user took
+    // the field over (syncs stop; also lets the Visual Researcher skip self-fed refs).
+    lookbookSynced: sb.lookbookSynced || "",
     // uploaded reference images: [{ id, thumb (small dataURL), colors:[hex] }].
     // The model is text-only, so we sample each image's palette client-side and feed
     // those hues into the design prompt.

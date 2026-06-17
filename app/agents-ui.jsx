@@ -3,7 +3,7 @@
    and gates every change behind an Approve / Reject proposal card. */
 
 function AgentIcon({ name, s=18 }){
-  const map = { stethoscope:Icon.target, link:Icon.layers, flask:Icon.flask, film:Icon.film, board:Icon.board, palette:Icon.palette, userScan:Icon.userScan, box:Icon.box, globe:Icon.globe, robot:Icon.robot, image:Icon.image, clapper:Icon.clapper };
+  const map = { stethoscope:Icon.target, link:Icon.layers, flask:Icon.flask, film:Icon.film, board:Icon.board, palette:Icon.palette, userScan:Icon.userScan, box:Icon.box, globe:Icon.globe, robot:Icon.robot, image:Icon.image, clapper:Icon.clapper, clipboard:Icon.eye };
   const Ic = map[name] || Icon.sparkles;
   return React.createElement(Ic,{s});
 }
@@ -173,13 +173,20 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
   // (e.g. the Storyboard Director) auto-starts straight away.
   React.useEffect(()=>{ if(autoStart && (!agent.needsInput || (initialInput||"").trim())){ const t=setTimeout(()=>start(),60); return ()=>clearTimeout(t); } },[]);
 
+  // ALL Writers' Room agents run on Claude (art agents keep the writing-model picker).
+  const isArt = agent.room === "art";
+  const _MODELS = window.WRITING_MODELS || [];
+  const _mid = isArt ? (typeof window.getWritingModelId==="function" ? window.getWritingModelId() : "") : "claude-opus-4-8";
+  const modelLabel = (_MODELS.find(m=>m.id===_mid)||{}).label || _mid || "model";
   const start = async ()=>{
     cancelled.current = false;
     setTrace([]); setPending(null); setStatus("running");
+    const prevForce = window.__forceWritingModel;
+    if(!isArt) window.__forceWritingModel = "claude-opus-4-8";   // pin Writers' Room agents to Claude
     const ctx = ctxFactory({
       input: inputRef.current,
       agentName: agent.name,
-      force: !!force,
+      force: force,   // false | true | "draft" (re-draft specs but skip image generation)
       emit:(step)=> setTrace(tr=>[...tr, step]),
       propose:(card)=> new Promise(res=>{ setPending(card); setStatus("waiting");
         resolver.current = (val)=>{ resolver.current=null; setPending(null); setStatus("running"); res(val); }; }),
@@ -187,6 +194,7 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
     });
     try{ await agent.run(ctx); }
     catch(e){ setTrace(tr=>[...tr,{k:"flag",t:"The agent hit an error and stopped: "+(e.message||e)}]); }
+    finally{ window.__forceWritingModel = prevForce; }
     if(!cancelled.current) setStatus("done");
   };
 
@@ -199,7 +207,8 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
       React.createElement("button",{className:"ag-x",onClick:onBack,title:"All agents"},React.createElement(Icon.chevL,{s:16})),
       React.createElement("span",{className:"ag-runner-ic"},React.createElement(AgentIcon,{name:agent.icon,s:16})),
       React.createElement("div",{className:"ag-runner-t"},
-        React.createElement("div",{className:"ag-runner-name"},agent.name),
+        React.createElement("div",{className:"ag-runner-name"},agent.name,
+          React.createElement("span",{className:"ag-runner-model",title:"Model running this agent"}, modelLabel)),
         React.createElement("div",{className:"ag-runner-sub"},
           status==="idle"?"Ready":status==="done"?"Finished":status==="waiting"?"Awaiting your approval":"Working\u2026")),
       React.createElement("button",{className:"ag-x",onClick:onClose,title:"Close"},React.createElement(Icon.x,{s:16}))),
@@ -253,7 +262,7 @@ function AgentsPanel({ onClose, onView, ctxFactory, aiOn, undoCount, undoLabel, 
     React.createElement("div",{className:"ag-panel"},
       active
         ? React.createElement(AgentRunner,{agent:active,ctxFactory,onClose,onView,single,viewLabel,introExtra,
-            force: !!force && active.id===initialAgentId,
+            force: active.id===initialAgentId ? force : false,
             onBack: single ? onClose : ()=>{ setAuto(false); setActive(null); },
             initialInput: active.id===initialAgentId ? initialInput : "",
             autoStart: auto && active.id===initialAgentId})

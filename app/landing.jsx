@@ -41,9 +41,10 @@ const LP_FEATURES = [
     body:"Turn the plans into pictures. Storyboard the whole film from everything you’ve built — ready for the screen." },
 ];
 
-/* the hero's rotating word — what people make here. Remounts on each tick
-   (key change) so the entrance animation replays; ~1.8s per word. */
-const LP_WORDS = ["short films","commercials","TV series"];
+/* the hero's rotating phrase — the FOUR narrative structures a film can be told
+   in (the launch differentiation: one idea, four ways). Remounts on each tick
+   (key change) so the entrance animation replays; ~2.2s per phrase. */
+const LP_WORDS = ["a three-act drama","a hero’s journey","a story circle","a kishōtenketsu"];
 function RotatingWord(){
   const [i, setI] = React.useState(0);
   React.useEffect(()=>{
@@ -54,9 +55,9 @@ function RotatingWord(){
 }
 
 const LP_STEPS = [
-  { n:"1", t:"Bring an idea", d:"A logline, a “what if” — or just hit surprise me." },
-  { n:"2", t:"Watch it take shape", d:"TURN builds your story scene by scene, structured to hold an audience." },
-  { n:"3", t:"Build the film", d:"Script, cast, places, shots — it all grows in one place." },
+  { n:"1", t:"Bring an idea", d:"A logline, a “what if” — or just talk it through out loud." },
+  { n:"2", t:"Choose how it’s told", d:"Three-act, hero’s journey, story circle or kishōtenketsu — your idea, your structure." },
+  { n:"3", t:"Build the film", d:"Story, script, cast, places, shots — it all grows in one place." },
 ];
 
 /* Pricing — PLACEHOLDER amounts; set your real prices/limits here. */
@@ -102,14 +103,14 @@ function Landing({ onStart, onSignIn }){
     // hero — UNFRAMED (no hairlines), headline + CTAs left, supporting copy right
     React.createElement("section",{className:"lp-hero"},
       React.createElement("div",{className:"lp-hero-copy"},
-        React.createElement("h1",{className:"lp-h1"},"Bringing your",React.createElement("br",null),
-          React.createElement(RotatingWord,null)," to life."),
+        React.createElement("h1",{className:"lp-h1"},"Your film, told",React.createElement("br",null),
+          "as ",React.createElement(RotatingWord,null),"."),
         React.createElement("div",{className:"lp-hero-cta"},
           React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("free")},"Start creating for free"),
           React.createElement("button",{className:"lp-btn ghost big",onClick:onSignIn},"Sign in"))),
       React.createElement("div",{className:"lp-hero-aside"},
         React.createElement("p",{className:"lp-lede"},
-          "TURN is your AI cinema studio machine: you bring the idea, we develop the story, write the screenplay, design the look, and build your movie, all in a few clicks!"))),
+          "TURN is your AI film studio: bring an idea, choose one of four classic story structures, and watch it grow — a story spine built to hold an audience, a finished screenplay, a designed cast and world, and a storyboarded film."))),
 
     // hero media — the 21:9 short-film placeholder, still outside the frame
     React.createElement("section",{className:"lp-hero-media"},

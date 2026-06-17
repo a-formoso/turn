@@ -143,6 +143,29 @@ function ScriptBlock({ b, contd, sceneNo }){
   return React.createElement("div",{className:BLOCK_CLASS[type]||"spb-action"}, text);
 }
 
+/* EDIT MODE: a single screenplay block as a directly-editable line. Uncontrolled
+   contentEditable — React never manages its text (no children in the vdom), so
+   re-renders mid-typing can't reset the caret; the raw text is pushed in via a ref
+   effect on mount and after each committed change. Commits on blur only when changed. */
+function EditableBlock({ b, onCommit }){
+  const ref = React.useRef(null);
+  const raw = b.text || "";
+  React.useEffect(()=>{ if(ref.current && ref.current.innerText !== raw) ref.current.innerText = raw; },[raw]);
+  const cls = (BLOCK_CLASS[b.type]||"spb-action") + " sp-editable";
+  const commit = ()=>{
+    if(!ref.current) return;
+    const v = ref.current.innerText.replace(/ /g," ").replace(/\n+$/,"");
+    if(v !== raw) onCommit(v);
+  };
+  // single-line block types blur on Enter; action/dialogue allow line breaks
+  const oneLine = b.type==="scene" || b.type==="char" || b.type==="paren" || b.type==="trans";
+  return React.createElement("div",{
+    ref, className:cls, contentEditable:true, suppressContentEditableWarning:true,
+    spellCheck:true, "data-ph":"…", onBlur:commit,
+    onKeyDown:(e)=>{ if(oneLine && e.key==="Enter"){ e.preventDefault(); e.currentTarget.blur(); } }
+  });
+}
+
 /* the (CONT'D) bookkeeping the main page does, reusable for any block list */
 function buildContdSet(blocks){
   const set = new Set(); let last = null;
@@ -203,7 +226,7 @@ function ContinuityReport({ report, onJump, onClose, currentId }){
 }
 
 function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, onDraftAll, onPolish, drafting, total,
-                     history, labelOf, onRevert, onRedo, continuityMap, project, onBeatFocus }){
+                     history, labelOf, onRevert, onRedo, onEditScene, continuityMap, project, onBeatFocus }){
   const CONT = continuityMap || (window.TURN_DATA||{}).CONTINUITY || {};
   const FACTS = (window.TURN_DATA||{}).FACTS || {};
   const live = typeof aiAvailable==="function" && aiAvailable();
@@ -212,7 +235,8 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
   const [polishing, setPolishing] = React.useState(false);
   const [polishWait, setPolishWait] = React.useState(false);
   const [justPolished, setJustPolished] = React.useState(false);
-  React.useEffect(()=>{ setActiveBeat(null); setPolishing(false); setPolishWait(false); setJustPolished(false); },[scene && scene.id]);
+  const [editing, setEditing] = React.useState(false);
+  React.useEffect(()=>{ setActiveBeat(null); setPolishing(false); setPolishWait(false); setJustPolished(false); setEditing(false); },[scene && scene.id]);
 
   if(!scene) return React.createElement("div",{className:"script-scroll"},
     React.createElement("div",{className:"script-empty"},
@@ -285,26 +309,37 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       React.createElement(Icon.wand,{s:14}),
       polishWait ? "MUSE is writing\u2026" : (isPolished ? "Re-polish" : "Polish with MUSE"));
 
-    // version history (revert / redo) — appears once a scene has other versions
+    // undo / redo — one linear history of the scene's screenplay states (manual edits,
+    // MUSE polishes and drafts all push onto the same stack). Appears once there's history.
     if(hb.back.length || hb.fwd.length){
       const prevLabel = hb.back.length ? labelOf(hb.back[hb.back.length-1]) : null;
       const nextLabel = hb.fwd.length ? labelOf(hb.fwd[0]) : null;
       versionUI = React.createElement("div",{className:"ver-ctl"},
         React.createElement("button",{className:"ver-btn",disabled:!hb.back.length||polishing,
-          title: prevLabel?("Revert to "+prevLabel):"Nothing to revert to",
+          title: prevLabel?("Undo — back to "+prevLabel):"Nothing to undo",
           onClick:()=>!polishing&&onRevert(scene.id)},
-          React.createElement(Icon.undo,{s:13}), prevLabel?("Revert to "+prevLabel):"Revert"),
-        React.createElement("button",{className:"ver-btn icon",disabled:!hb.fwd.length||polishing,
-          title: nextLabel?("Redo to "+nextLabel):"Nothing to redo",
+          React.createElement(Icon.undo,{s:13}), "Undo"),
+        React.createElement("button",{className:"ver-btn",disabled:!hb.fwd.length||polishing,
+          title: nextLabel?("Redo — forward to "+nextLabel):"Nothing to redo",
           onClick:()=>!polishing&&onRedo(scene.id)},
-          React.createElement(Icon.redo,{s:13})));
+          React.createElement(Icon.redo,{s:13}), "Redo"));
     }
+
+    // EDIT: rewrite one block's raw text and commit it as a new version (so Undo/Redo
+    // covers manual edits too). Matches the block by identity in the canonical block list.
+    const commitEdit = (b, newText)=>{
+      if(!onEditScene) return;
+      const gi = screenplay.blocks.indexOf(b);
+      if(gi<0) return;
+      const nextBlocks = screenplay.blocks.map((x,j)=> j===gi ? {...x, text:newText} : x);
+      onEditScene(scene.id, { ...screenplay, blocks:nextBlocks, edited:true, polished:false, ai:false, auto:false });
+    };
 
     const beatRow = (n)=> beats && beats.rows.find(r=>r.n===n);
     body = React.createElement(React.Fragment,null,
       polishWait && React.createElement("div",{className:"polish-note"},
         React.createElement(Icon.wand,{s:12}),"MUSE is rewriting the prose \u2014 beats stay locked, only the words change\u2026"),
-      React.createElement("div",{className:`script-body ${justPolished?"just-polished":""}`,onMouseLeave:()=>setActiveBeat(null)},
+      React.createElement("div",{className:`script-body ${justPolished?"just-polished":""} ${editing?"editing":""}`,onMouseLeave:()=>!editing&&setActiveBeat(null)},
         order.map(n=>{
           const r = beatRow(n);
           const on = activeBeat===n;
@@ -318,11 +353,20 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
               r && React.createElement("div",{className:"bsub"},"\u2197 "+r.react.a)),
             React.createElement("div",{className:"sp-page"},
               React.createElement("div",{className:"sp-page-inner"},
-                (fg[n]||[]).map((b,i)=>React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:scene.no})))));
+                (fg[n]||[]).map((b,i)=> editing
+                  ? React.createElement(EditableBlock,{key:i,b,onCommit:(t)=>commitEdit(b,t)})
+                  : React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:scene.no})))));
         })),
       transOut && React.createElement(TransitionBar,{trans:transOut,out:true,
         fromTo:`to Sc.${String(nextScene.no).padStart(2,"0")} ${nextScene.title}`}));
   }
+
+  // EDIT toggle — only when there's a draft to edit and the parent supports committing
+  const editBtn = (screenplay && onEditScene) ? React.createElement("button",
+    { className:`draft-btn sm ${editing?"":"ghost"}`, onClick:()=>setEditing(e=>!e), disabled:polishing,
+      title: editing?"Finish editing the screenplay":"Edit the screenplay text directly" },
+    React.createElement(editing?Icon.check:Icon.pencil,{s:14}),
+    editing ? "Done editing" : "Edit") : null;
 
   const missing = (typeof sceneMissing==="function") ? sceneMissing(scene, drafts) : [];
   const header = React.createElement("div",{className:"script-head"},
@@ -337,7 +381,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       noteText &&
         React.createElement("div",{className:"script-note"},React.createElement(Icon.layers,{s:12}),noteText)),
     React.createElement("div",{className:"script-tools"},
-      contBtn, versionUI, polishUI, control,
+      contBtn, versionUI, editBtn, polishUI, control,
       React.createElement("div",{className:"script-scenestep"},
         React.createElement("button",{className:"panel-collapse",onClick:()=>go(-1),disabled:idx<=0,
           style:{opacity:idx<=0?.4:1}},React.createElement(Icon.chevL,{s:14})),

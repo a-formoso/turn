@@ -267,30 +267,39 @@ function CameoModal({ character, onClose, onSaved }){
       let poseState = null;
       let sizeState_ = sizeState;
       if(yawSignal !== null){
-        if(key==="front"){       if(Math.abs(yawSignal) > 0.18) poseState = "front"; }
-        else if(key==="left"){   if(yawSignal < 0.30)            poseState = "left"; }
-        else if(key==="right"){  if(yawSignal > -0.30)           poseState = "right"; }
-      } else if(key!=="front"){
-        // no face box yet -> can't safely confirm a ¾ turn; require manual capture
-        poseState = key;
+        if(key==="front"){       if(Math.abs(yawSignal) > 0.20) poseState = "front"; }
+        else if(key==="left"){   if(yawSignal < 0.20)            poseState = "left"; }
+        else if(key==="right"){  if(yawSignal > -0.20)           poseState = "right"; }
       }
-      const ready = bright && still && face && !sizeState_ && !poseState;
+      // Auto must PROGRESS through all three angles. FRONT insists on a forward-facing
+      // pose (so it's actually frontal). The ¾ angles can't be verified reliably (the yaw
+      // heuristic is noisy and FaceDetector is often absent), so pose there is ADVISORY,
+      // not a hard block — otherwise Auto stalls forever after the first capture. Instead
+      // the ¾ angles use a LONGER steady hold (~1.8s) so there's time to turn into the
+      // pose the on-screen cue asks for; manual "Capture now" is always available too.
+      const poseBlocks = (key==="front") && poseState==="front";
+      const need = (key==="front") ? NEED : NEED*2;
+      const ready = bright && still && face && !sizeState_ && !poseBlocks;
       steadyRef.current = ready ? steadyRef.current+1 : 0;
-      const prog = Math.min(1, steadyRef.current/NEED);
+      const prog = Math.min(1, steadyRef.current/need);
       setDet({ face, bright, still, prog, size:sizeState, pose:poseState });
-      if(steadyRef.current>=NEED) doCapture(key);
+      if(steadyRef.current>=need) doCapture(key);
     };
     raf = requestAnimationFrame(loop);
     return ()=>{ stopped=true; cancelAnimationFrame(raf); };
   },[phase]);
 
+  // upload lands in the ACTIVE slot (the one highlighted / labelled on the button), so a
+  // profile photo goes to ¾ Left/Right when that slot is selected — not always Front.
+  // After it lands, stay on that slot (don't jump back to an empty Front) so the user sees
+  // their upload took, then picks the next angle themselves.
   const onPickFile = (e)=>{
     const f = e.target.files && e.target.files[0]; if(!f) return;
+    const targetKey = CAMEO_ANGLES[activeIdxRef.current].key;
     const rd = new FileReader();
     rd.onload = ()=>{ const img=new Image(); img.onload=()=>{
       const { url, out } = cameoCropToDataUrl(img, img.width, img.height);
-      const next = { ...shots, [activeAngle.key]:url };
-      setShots(next); setDims({w:out,h:out}); setActiveIdx(nextEmpty(next));
+      setShots(s=>({ ...s, [targetKey]:url })); setDims({w:out,h:out});
     }; img.src = rd.result; };
     rd.readAsDataURL(f);
     e.target.value = "";
@@ -305,8 +314,9 @@ function CameoModal({ character, onClose, onSaved }){
       const angles = CAMEO_ANGLES.filter(a=>shots[a.key]).map(a=>({ label:a.label, url:shots[a.key] }));
       await nbSetCameo(character.id, { angles, consent:true, sync:sync && cloudReady,
         source:"webcam", subject:subject.trim(), w:dims.w, h:dims.h });
-      try{ const el=document.getElementById("charref-"+character.id);
-        if(el && typeof el._ingestDataUrl==="function") await el._ingestDataUrl(angles[0].url); }catch(e){}
+      // NOTE: locking does NOT overwrite the character's design sheet — it stores the
+      // face-lock reference. The likeness is applied on the next "Regenerate sheet"
+      // (the sheet's useImageGen carries cameoId and folds the angles in as face anchors).
       onSaved && onSaved({ angles, sync });
       onClose && onClose();
     }catch(e){ setErr((e&&e.message)||"Couldn't save the cameo."); setSaving(false); }
@@ -407,8 +417,9 @@ function CameoModal({ character, onClose, onSaved }){
 
       React.createElement("div",{className:"cameo-acts"},
         (liveOk || phase==="denied" || phase==="nocam") && React.createElement("button",
-          {className:"cameo-btn ghost",onClick:()=>fileRef.current&&fileRef.current.click()},
-          React.createElement(Icon.image,{s:14}),"Upload"),
+          {className:"cameo-btn ghost",onClick:()=>fileRef.current&&fileRef.current.click(),
+           title:"Upload a photo into the "+activeAngle.label+" slot (click another slot above to change the target)"},
+          React.createElement(Icon.image,{s:14}),"Upload ",activeAngle.label),
         liveOk && React.createElement("button",{className:"cameo-autopill"+(auto?" on":""),
           onClick:()=>setAuto(a=>!a),
           title:auto?"Auto-capture on \u2014 snaps when the shot looks good":"Auto-capture off \u2014 capture manually"},

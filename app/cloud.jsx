@@ -69,12 +69,36 @@ async function cloudListProjects(){
     // isShow + bible; an EPISODE carries showId + episodeNo. PostgREST returns the
     // jsonb ->> extracts as strings (or null).
     const { data, error } = await sb.from("turn_projects")
-      .select("id,title,updated_at,created_at,isShow:doc->>isShow,showId:doc->>showId,episodeNo:doc->>episodeNo")
+      .select("id,title,updated_at,created_at,isShow:doc->>isShow,showId:doc->>showId,episodeNo:doc->>episodeNo,cover:doc->>cover,fmt:doc->project->>format,logline:doc->project->>logline,ord:doc->>homeOrder")
       .order("updated_at",{ ascending:false });
     if(error) return [];
     return data || [];
   }catch(e){ return []; }
 }
+/* persist a film's poster (a downscaled data URL) onto its doc.cover, merging so the
+   rest of the story doc is untouched. Used by the Home screen's poster generator. */
+async function cloudSaveCover(id, cover){
+  const sb = sbClient(); if(!sb || !id) return;
+  try{
+    const { data } = await sb.from("turn_projects").select("doc").eq("id", id).single();
+    const doc = (data && data.doc) || {};
+    doc.cover = cover || "";
+    await sb.from("turn_projects").update({ doc }).eq("id", id);
+  }catch(e){}
+}
+window.cloudSaveCover = cloudSaveCover;
+/* persist a film's manual position on the Home wall onto doc.homeOrder (merged), so a
+   user-arranged order survives reload and rides along in cloudListProjects (`ord`). */
+async function cloudSaveOrder(id, order){
+  const sb = sbClient(); if(!sb || !id) return;
+  try{
+    const { data } = await sb.from("turn_projects").select("doc").eq("id", id).single();
+    const doc = (data && data.doc) || {};
+    doc.homeOrder = order;
+    await sb.from("turn_projects").update({ doc }).eq("id", id);
+  }catch(e){}
+}
+window.cloudSaveOrder = cloudSaveOrder;
 async function cloudCreateProject(title, doc){
   const sb = sbClient(); if(!sb) return null;
   const session = await cloudGetSession();

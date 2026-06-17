@@ -34,7 +34,6 @@ function gradeOverlay(preset){
   if(p.length<3) return "transparent";
   return "linear-gradient(180deg, "+p[2]+" 0%, "+p[2]+" 10%, "+p[1]+" 34%, "+p[0]+" 70%, "+p[0]+" 100%)";
 }
-
 /* a neutral, grayscale cinematic reference frame (interior-with-window comp);
    when `preset` is given it is colour-graded, otherwise shown ungraded. */
 function StyleStill({ preset, label }){
@@ -81,7 +80,7 @@ function PresetCard({ preset, sceneList, count }){
         preset.name),
       React.createElement("span",{className:"sb-card-count"+(count?"":" zero")},
         count? (count+" scene"+(count!==1?"s":"")) : "unused")),
-    // before -> after
+    // before -> after on the abstract reference still (CSS grade preview, no real frames)
     React.createElement("div",{className:"sb-beforeafter"},
       React.createElement(StyleStill,{label:"Ungraded"}),
       React.createElement("div",{className:"sb-arrow"},React.createElement(Icon.send?Icon.send:Icon.sparkles,{s:16})),
@@ -131,7 +130,9 @@ function StyleFilmStrip({ scenes, project, presets, onSetScenePreset }){
   return React.createElement("div",{className:"sb-strip-wrap"},
     React.createElement("div",{className:"sb-strip-head"},
       React.createElement("span",{className:"sb-strip-title"},"Across the film",
-        editable && React.createElement("span",{className:"sb-strip-hint"}," (click a scene to set its style)")),
+        React.createElement("span",{className:"sb-strip-count"},
+          " · "+presets.length+" preset"+(presets.length!==1?"s":"")+" · "+(sorted.length-unassigned)+" of "+sorted.length+" scenes styled"),
+        editable && React.createElement("span",{className:"sb-strip-hint"}," — click a scene to set its style")),
       unassigned>0 && React.createElement("span",{className:"sb-strip-warn"},
         React.createElement(Icon.alert,{s:12}), unassigned+" scene"+(unassigned!==1?"s":"")+" with no style yet")),
     React.createElement("div",{className:"sb-strip"},
@@ -263,12 +264,14 @@ function StyleRefsField({ value, onCommit, onAssign, assigning, assignDisabled, 
   return React.createElement("div",{style:{margin:"0 0 16px"}},
     React.createElement("div",{style:{display:"flex",alignItems:"center",gap:6,fontFamily:"var(--f-mono)",fontSize:11,
       letterSpacing:".06em",textTransform:"uppercase",color:"var(--txt-3)",marginBottom:6}},
-      React.createElement(Icon.sparkles,{s:12}),"Visual references — optional look targets"),
+      React.createElement(Icon.sparkles,{s:12}),"Visual references — optional look targets",
+      React.createElement(InfoTip,{label:"About visual references",
+        text:"Auto-filled from your Lookbook (and re-synced when it changes) until you edit it — then your version wins. Add films, photographers or paintings you love, then Save and click “Light the film” above — the Colorist translates their cinematography (palette, light, lens, texture) into this film's looks."})),
     React.createElement("div",{className:"sb-refbar"},
-      React.createElement("input",{type:"text",value:v,
-        placeholder:"e.g. Her, Blade Runner 2049, Gregory Crewdson",
+      React.createElement("textarea",{value:v,rows:3,
+        placeholder:"Auto-filled from your Lookbook as you research the look — or write your own (films, photographers, paintings: e.g. Her, Blade Runner 2049, Gregory Crewdson)",
         onChange:e=>{ setV(e.target.value); if(saved) setSaved(false); }, onBlur:commit,
-        onKeyDown:e=>{ if(e.key==="Enter"){ e.preventDefault(); commit(); e.target.blur(); } }}),
+        onKeyDown:e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); commit(); e.target.blur(); } }}),
       onAddRefImages && React.createElement("button",{className:"sb-refbar-btn",disabled:imgs.length>=8,
         onClick:()=>fileRef.current&&fileRef.current.click(),
         title:imgs.length>=8?"Up to 8 reference images":"Add reference image(s) — TURN samples their palette to steer the film's grade"},
@@ -278,10 +281,8 @@ function StyleRefsField({ value, onCommit, onAssign, assigning, assignDisabled, 
         saved && React.createElement(Icon.check,{s:14}), saved?"Saved":"Save")),
     React.createElement("input",{type:"file",accept:"image/*",multiple:true,ref:fileRef,style:{display:"none"},onChange:onFiles}),
     imgs.length>0 && React.createElement(StyleRefImages,{refImages,onRemoveRefImage}),
-    React.createElement("div",{style:{fontSize:11.5,color:saved?"var(--pos)":"var(--txt-3)",marginTop:6,lineHeight:1.5}},
-      saved
-        ? "Saved — now click “Light the film” above to design the palette from these references."
-        : "Reference names/images of films, photographers or paintings you love, then Save and click “Light the film” above — the Colorist translates their cinematography (palette, light, lens, texture) into this film's looks."));
+    saved && React.createElement("div",{style:{fontSize:11.5,color:"var(--pos)",marginTop:6,lineHeight:1.5}},
+      "Saved — now click “Light the film” above to design the palette from these references."));
 }
 
 /* InfoTip — a small "i" icon that reveals help text on hover (desktop) or tap
@@ -326,8 +327,6 @@ function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSet
     window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,label:"this palette",dept:"colorist"}),
     onSetRefs && React.createElement(StyleRefsField,{value:refs,onCommit:onSetRefs,onAssign,assigning,assignDisabled:assigning||!(scenes||[]).length,
       refImages,onAddRefImages,onRemoveRefImage}),
-    React.createElement("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",margin:"2px 0 14px"}},
-      presets.length+" preset"+(presets.length!==1?"s":"")+" \u00b7 "+assignedCount+" of "+(scenes||[]).length+" scenes assigned"),
     React.createElement(StyleFilmStrip,{scenes,project,presets,onSetScenePreset}),
     React.createElement("div",{className:"sb-grid",style:{marginTop:16}},
       presets.map(p=>React.createElement(PresetCard,{key:p.id,preset:p,sceneList:scenesFor(p.id),count:scenesFor(p.id).length}))));

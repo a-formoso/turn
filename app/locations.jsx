@@ -172,6 +172,26 @@ function locVisualDefaults(l){
 }
 window.locVisualDefaults = locVisualDefaults;
 
+/* Render-style text per key — location cards use the SAME dropdown options as the cast
+   (window.CHAR_RENDER_STYLE_OPTIONS, incl. "Surprise me ✨"); picking a concrete key
+   writes this place-tuned recipe into l.renderStyle, which the plate builder feeds into
+   render.style. "surprise" is AI-invented per location (aiSurpriseStyleText). */
+const LOC_RENDER_TEXT = {
+  photoreal: "photoreal cinematic establishing photography, wide lens, natural depth, sharp focus, realistic light",
+  render3d:  "stylized 3D environment render, cinematic lighting, physically-based materials, atmospheric depth",
+  anime:     "anime background art, painterly cel-shaded environment, clean linework, soft gradient skies, no photoreal texture",
+  flat:      "flat vector landscape, bold geometric shapes, minimal flat shading, limited palette, no photoreal texture",
+  horror:    "low-key cinematic horror cinematography of the place, hard cold side light, deep atmospheric blacks, fog and haze, desaturated cold green-teal grade",
+  ghibli:    "soft hand-painted Studio Ghibli-style 2D background, fine warm linework, gentle painterly cel shading, warm earthy naturalistic palette, nostalgic light",
+  animated3d:"polished animated-feature 3D environment render, soft warm global illumination, appealing clean PBR materials, idealized finish, no noise",
+  stopmotion:"photograph of a real handmade miniature stop-motion set, felt/wood/clay at tiny scale, soft practical studio light, faint tilt-shift miniature depth",
+  claymation:"photograph of a real plasticine claymation miniature set, rounded clay forms with tool marks, soft practical light, faint tilt-shift miniature depth",
+  adv1960s:  "1960s painted commercial illustration of the place, airbrushed gouache, vintage halftone print texture, mid-century mustard/avocado/teal palette",
+  gaganime:  "1990s gag-anime 2D cartoon background, thick bold black outlines, flat high-saturation colors, simple graphic shapes, sticker-poster finish",
+  pixelart:  "retro 16/32-bit pixel-art environment, hard square pixels, no anti-aliasing, limited indexed palette, dithered skies and shadows, crisp pixel grid",
+};
+window.LOC_RENDER_TEXT = LOC_RENDER_TEXT;
+
 function locVisualsDrafted(l){ return !!((l.architecture||"").trim() && (l.lighting||"").trim()); }
 window.locVisualsDrafted = locVisualsDrafted;
 
@@ -272,32 +292,81 @@ function buildLocationRefPrompt(l, project, opts){
   const intExt = l.intExt || "INT";
   const time = opts.time || (l.times&&l.times[0]) || "";
 
-  let s = "Master LOCATION design reference plate \u2014 "+(l.name||"Location")+" ("+intExt+"). ";
-  s += arch ? ("ARCHITECTURE & LAYOUT: "+arch+". ") : "";
-  s += materials ? ("Materials & palette: "+materials+". ") : "";
-  s += lighting ? ("Lighting & atmosphere: "+lighting+". ") : "";
-  s += significance ? ("Dramatic role: "+significance+". ") : "";
-  s += time ? ("Time of day: "+time+". ") : "";
-  if(tone) s += tone+" tone. ";
-  // canonical depth-grid staging (when filled) — spatially-explicit landmark layer
-  if(typeof buildStagingClause==="function"){ const st = buildStagingClause(l); if(st) s += st; }
-  // The coverage plate stays GRADE-NEUTRAL on purpose: it's the canonical geometry /
-  // materials / light reference every shot conforms to. A scene's Style Bible grade is
-  // applied downstream at the shot, never baked into this multi-angle reference.
-  s += "RENDER STYLE: "+v.renderStyle.replace(/\.$/,"")+". ";
-  s += "Compose the sheet as a 3\u00d72 grid (3 columns, 2 rows) of six panels, all of the SAME space. ";
-  s += "Top row: (1) establishing wide; (2) reverse angle from the opposite side; "
-     + "(3) view toward the LEFT side of the frame (camera panned to show what sits on the viewer's left as they look into the space). ";
-  s += "Bottom row: (4) view toward the RIGHT side of the frame (camera panned to show what sits on the viewer's right); "
-     + "(5) high looking-down or ceiling view; (6) a signature material / detail close-up. ";
-  s += "(\u2018Left\u2019 and \u2018right\u2019 always mean the side of the camera frame, never a character's left/right.) ";
-  s += "Print a SMALL caption in the top-left corner of each panel with its number and title, exactly: "
-     + "\u201c1 Establishing wide\u201d, \u201c2 Reverse angle\u201d, \u201c3 View left\u201d, \u201c4 View right\u201d, \u201c5 Looking down\u201d, \u201c6 Material detail\u201d. ";
-  s += "Consistent architecture, scale, materials and light across ALL panels \u2014 the SAME identical "
-     + "space from different angles, empty of people. Crisp, photoreal, sharp focus. --ar 16:9";
-  return s;
+  /* JSON environment spec (the director's template as a key:value spec, 2026-06):
+     EXACTLY 4 views in a 2\u00d72 grid \u2014 wide establishing front, high-angle three-quarter
+     overview, two close-ups of the key stations \u2014 no text baked in. The depth grid's
+     landmarks fill `fixtures`; ownerless set dressing LINKED to this location (the
+     fixture-of relationship: explicit locationId, or every mapped scene resolves here)
+     renders as `environment_props`, so abandoned objects & furniture live in the plate.
+     Owned or multi-location objects are NEVER baked in \u2014 they travel with people.
+     Stays GRADE-NEUTRAL: the scene's Style Bible grade applies downstream at the shot. */
+  const st = stagingOf(l);
+  const clean = (x)=>String(x||"").replace(/\.$/,"").trim();
+  const fixtures = [];
+  if(clean(st.bg.center)) fixtures.push({ what: clean(st.bg.center), position: "center background \u2014 the primary landmark" });
+  if(clean(st.mid.left))  fixtures.push({ what: clean(st.mid.left),  position: "along the left side" });
+  if(clean(st.mid.right)) fixtures.push({ what: clean(st.mid.right), position: "along the right side" });
+  if(clean(st.fg.left))   fixtures.push({ what: clean(st.fg.left),   position: "near foreground left" });
+  if(clean(st.fg.right))  fixtures.push({ what: clean(st.fg.right),  position: "near foreground right" });
+  const mainStation = clean(st.bg.center) || "the space's primary, most story-relevant feature";
+  const secondStation = clean(st.mid.left) || clean(st.mid.right) || clean(st.fg.left) || clean(st.fg.right) || "a signature material detail of the space";
+  const envProps = locationEnvironmentProps(l).map(p=>({
+    name: p.name,
+    description: [clean(p.form), clean(p.material)].filter(Boolean).join("; ") || undefined,
+  }));
+  const spec = {
+    task: "professional environment reference sheet \u2014 ONE single real space rendered from 4 angles",
+    location: {
+      name: l.name||"Location",
+      type: intExt==="EXT" ? "exterior" : "interior",
+      space: arch || undefined,
+      walls_surfaces_palette: materials || undefined,
+      floor_ground_plane: clean(st.floor) || undefined,
+      lighting: lighting || undefined,
+      time_of_day: time ? time.toLowerCase() : undefined,
+      scale: clean(st.scaleClass) || undefined,
+      reads_as: significance || undefined,
+      tone: tone || undefined,
+    },
+    fixtures: fixtures.length ? fixtures : undefined,
+    environment_props: envProps.length ? envProps : undefined,
+    views: {
+      layout: "exactly 4 views in a 2x2 grid",
+      top_left: "wide establishing front shot at eye level with symmetrical centered composition",
+      top_right: "high-angle three-quarter overview shot from an elevated corner perspective looking down into the space showing depth and spatial layout",
+      bottom_left: "close-up of "+mainStation,
+      bottom_right: "close-up of "+secondStation,
+      rule: "each view a distinctly different camera angle and composition \u2014 the SAME identical space, consistent architecture, scale, materials and light across all views",
+    },
+    render: {
+      style: v.renderStyle.replace(/\.$/,""),
+      rules: ["no people","no text, no labels, no typography, no captions, no watermarks",
+        "photorealistic commercial photography","8k ultra detailed","consistent lighting across all views","clean layout","hyper realistic"],
+    },
+  };
+  return "Render this environment reference sheet EXACTLY as specified by this JSON spec (continuity fields are binding):\n"+JSON.stringify(spec, null, 1);
 }
 window.buildLocationRefPrompt = buildLocationRefPrompt;
+
+/* the set dressing a location OWNS (the fixture-of relationship): ownerless, not worn,
+   and either explicitly linked (p.locationId) or every mapped scene resolves to this
+   location. Objects whose scenes span locations are mobile (someone moves them) and
+   are excluded \u2014 they belong at the shot, not baked into the set. */
+function locationEnvironmentProps(l){
+  const C = window.turnContinuity || {};
+  const props = C.props||[], locations = C.locations||[];
+  const locIdOf = (sid)=>{ const m=(typeof locationForScene==="function")?locationForScene(locations, sid):null; return m?m.id:""; };
+  return props.filter(p=>{
+    if(p.ownerId || p.ownerName) return false;
+    if((p.kind||"carried")==="worn") return false;
+    if(p.locationId) return p.locationId===l.id;
+    const sc = Array.isArray(p.scenes) ? p.scenes : [];
+    if(!sc.length) return false;
+    const ids = Array.from(new Set(sc.map(locIdOf).filter(Boolean)));
+    return ids.length===1 && ids[0]===l.id;
+  }).slice(0,6);
+}
+window.locationEnvironmentProps = locationEnvironmentProps;
 
 function combinedLocationPrompt(l, project, opts){
   const master = buildLocationRefPrompt(l, project, opts);
@@ -318,7 +387,7 @@ function buildLocationVariantPrompt(l, project, opts){
   s += lighting ? (lighting+". ") : "";
   // grade-neutral, like the master plate — the scene grade is applied at the shot.
   s += "RENDER STYLE: "+v.renderStyle.replace(/\.$/,"")+". ";
-  s += "Single wide cinematic frame, the same space and architecture, empty of people, photoreal, sharp focus. --ar 16:9";
+  s += "Single wide cinematic frame, the same space and architecture, empty of people, photoreal, sharp focus.";
   const neg = (l.negativePrompt||v.negativePrompt||"").trim();
   return neg ? (s+" AVOID: "+neg.replace(/\.$/,"")+".") : s;
 }
@@ -350,7 +419,7 @@ function buildLocationFromPhotoPrompt(l, project){
      + "Bottom row: (4) view toward the RIGHT side of the frame; (5) looking down; (6) a material detail. "
      + "(\u2018Left\u2019/\u2018right\u2019 mean the camera-frame side, not a character's.) "
      + "Print a small caption in the top-left of each panel with its number and title. "
-     + "Consistent architecture and light across all panels, empty of people, photoreal, sharp focus. --ar 16:9";
+     + "Consistent architecture and light across all panels, empty of people, photoreal, sharp focus.";
   return s;
 }
 window.buildLocationFromPhotoPrompt = buildLocationFromPhotoPrompt;

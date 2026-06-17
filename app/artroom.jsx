@@ -11,10 +11,12 @@
 
 const ART_TABS = [
   { id:"lookbook",   label:"Lookbook",   icon:"image" },
-  { id:"props",      label:"Props",      icon:"box" },
+  // Characters BEFORE Props: a worn prop must match its owner's look, so the character is
+  // generated first and the prop references THAT sheet (not the other way around).
   { id:"characters", label:"Characters", icon:"user" },
+  { id:"props",      label:"Props",      icon:"box" },
   { id:"locations",  label:"Locations",  icon:"globe" },
-  { id:"stylebible", label:"Presets", icon:"layers" },
+  { id:"stylebible", label:"Styles", icon:"layers" },
   { id:"shots",      label:"Shots",  icon:"film" },
   { id:"storyboard", label:"Storyboards", icon:"board" },
 ];
@@ -46,31 +48,229 @@ window.charVisualDefaults = charVisualDefaults;
 /* resolve a visual field with legacy fallback (old sheets used look/wardrobe) */
 function vfield(c, key, legacy){ return (c[key] && c[key].trim()) ? c[key] : (legacy && c[legacy] ? c[legacy] : ""); }
 
-/* deterministic 10-panel master-grid reference prompt, assembled from the fields */
-function buildCharRefPrompt(c, project){
+/* Render-style presets for the character sheet — the user picks one per character from a
+   dropdown; "surprise" is AI-invented per character (see aiSurpriseRenderStyle). These are
+   GENERALISED (no character-specific materials) so they apply to any cast member; each owns
+   its own background + the no-text rules. The character's OWN palette/materials are honoured
+   via "this character's own …" phrasing rather than hard-coded props. */
+const CHAR_RENDER_STYLES = {
+  photoreal: {
+    rendering: "hyperrealistic photography, full-frame sensor look, fine grain, no illustration or painterly quality",
+    lens: "85mm portrait rendering for the hero close-up with shallow depth of field; ~50mm full-length framing for the turnaround poses, subject sharp head-to-toe",
+    lighting: "soft cinematic key from upper left with gentle fill and a subtle rim to separate the figure from the background \u2014 controlled and even enough that detail reads cleanly in every view",
+    surface_texture: "photoreal micro-detail true to THIS character's own skin, fabrics and materials \u2014 visible pores and fine wrinkles, fabric nap, leather grain, specular glints on metal/glass, wear and grime where the design calls for it, individual stray hairs",
+    color_grade: "filmic, slightly desaturated; honour the character's own palette; warm low-contrast highlights, cool soft shadows",
+    background: "seamless off-white studio sweep, even and near-shadowless, with a soft contact shadow under the feet",
+    rules: ["no text, labels, watermarks, annotations, typography or captions","photorealistic, 8k, ultra-detailed","natural skin and fabric texture","clean, evenly divided panel layout"]
+  },
+  render3d: {
+    rendering: "high-quality stylized 3D character render, animated-feature quality; physically-based shading (PBR), soft subsurface scattering on skin, ray-traced soft shadows and global illumination, gentle ambient occlusion in seams and folds",
+    engine_look: "offline render aesthetic (Arnold / RenderMan / Octane / Redshift) \u2014 clean, polished, high-sample, no noise",
+    materials: "stylized PBR materials true to THIS character's own design \u2014 fabrics with soft sheen, supple creased leather, refractive glass, translucent gems, wet/crusted grime and subtle worn-edge wear where the design calls for it",
+    lighting: "soft three-point studio render lighting \u2014 broad key from upper left, gentle fill, cool rim to separate the figure from the background; warm bounce, cinematic but even enough to read every panel",
+    color_grade: "rich but muted; honour the character's own palette; soft filmic contrast, slight warm bias in highlights",
+    background: "seamless soft neutral light-grey studio sweep with a gentle gradient and a soft grounded contact shadow under the feet",
+    rules: ["no text, labels, watermarks, annotations, typography or captions","clean high-sample render, no render noise or fireflies","consistent shaders and lighting across all panels","clean, evenly divided panel layout"]
+  },
+  anime: {
+    rendering: "high-quality color anime / cel-shaded illustration; clean confident ink line art with consistent line weight, flat color fills, two-to-three tone cel shading with crisp shadow shapes",
+    linework: "clean black or dark-brown outlines, slightly heavier on outer contours, finer for interior detail; minimal hatching reserved for fabric folds and skin creases",
+    shading: "hard-edged cel shadows from an upper-left light, soft ambient fill, simple specular glints \u2014 no photoreal gradients",
+    color_grade: "anime palette drawn from THIS character's own colours; low saturation suited to the story's tone",
+    background: "flat off-white / very light neutral panel background, even and clean; a simple soft contact shadow under the feet",
+    rules: ["no text, labels, watermarks, annotations, typography or captions","high-resolution, sharp clean line art","consistent cel-shading across all panels","clean, evenly divided panel layout"]
+  },
+  flat: {
+    rendering: "clean flat vector / graphic illustration; solid color fills, simplified geometric forms, crisp shapes, no rendered texture",
+    shape_language: "bold readable silhouettes, rounded confident forms; minimal detail reduced to essential shapes",
+    outline: "optional thin clean uniform outline OR outline-free overlapping flat shapes \u2014 consistent choice across all panels",
+    shading: "flat \u2014 at most one darker tone per color for simple shadow shapes; no gradients, no rendered light, no texture",
+    palette: "tight limited palette (6\u20138 flat colors) drawn from THIS character's own colours, with one or two saturated accents",
+    background: "single flat solid color or a simple flat geometric ground (light neutral or soft warm tone); a small flat shadow shape under the feet; no studio sweep, no texture",
+    rules: ["no text, labels, watermarks, annotations, typography or captions","perfectly flat color, crisp clean edges, scalable vector quality","consistent palette, shapes and outline treatment across all panels","clean, evenly divided panel layout"]
+  },
+  horror: {
+    "rendering": "hyperrealistic cinematic photography pushed to horror; full-frame look, fine grain, deep filmic blacks, no illustration or cartoon quality",
+    "lighting": "low-key chiaroscuro — a single hard cold source (moonlight or distant lantern) raking from the side, deep crushed shadows swallowing most of the figure, a thin cold rim for separation, the amber staff-knot the only warm accent; large areas of pure darkness",
+    "atmosphere": "damp marsh haze and low ground fog, faint volumetric light shafts, particulate in the air, a sense of cold wet stillness",
+    "color_grade": "desaturated and cold — sickly green-teal shadows, muted earth midtones, crushed inky blacks; the lone warm amber glow for contrast; grim and oppressive",
+    "surface_texture": "photoreal damp, grimy detail — clammy skin sheen, wet leather, beaded moisture on glass, mud-slick boots; texture readable only where the light catches",
+    "framing": "tense cinematic horror composition — figure emerging from darkness, heavy negative space, unease in the empty dark around her",
+    "background": "deep near-black foggy marsh void rather than a clean studio sweep; the figure lit out of the dark; a faint cold ground haze under the feet",
+    "rules": ["no text, labels, watermarks, annotations, typography or captions","low-key cinematic horror lighting, deep atmospheric blacks","atmospheric dread, not gore or graphic injury","consistent lighting, fog and grade across all panels","evenly divided panel layout, figures readable despite the dark"]
+  },
+  ghibli: {
+    "rendering": "soft hand-painted 2D cel animation look; delicate thin organic linework, gentle cel shading with soft painterly edges, a warm hand-drawn quality — not hard-edged graphic cel, not photoreal, not 3D",
+    "linework": "fine, soft, slightly irregular hand-drawn lines; light brown or muted dark outlines rather than heavy black; line that breathes and varies gently",
+    "shading": "simple soft cel shadows with feathered edges and a warm ambient fill; gentle painterly transitions, no hard graphic blocks",
+    "color_grade": "warm naturalistic earthy palette — soft moss and sap greens, gentle browns, oat-cream, muted amber; slightly desaturated, sunlit, nostalgic",
+    "texture": "subtle hand-painted softness and faint paper/cel warmth; a quiet, still, pastoral mood",
+    "background": "soft, simple, lightly hand-painted pale ground (warm cream or gentle sky-tone) so the figure reads cleanly; a soft contact shadow under the feet — uncluttered, but painterly rather than flat",
+    "rules": ["no text, labels, watermarks, annotations, typography or captions","soft hand-drawn warmth, gentle naturalistic detail","consistent line, palette and shading across all panels","clean, evenly divided panel layout"]
+  },
+  animated3d: {
+    "rendering": "high-quality animated-feature 3D render; appealing stylized character, physically-based shading with soft subsurface scattering, clean polished surfaces, ray-traced soft shadows and warm global illumination",
+    "engine_look": "polished animated-movie pipeline render (RenderMan / Arnold quality) — clean, high-sample, idealized, no noise",
+    "lighting": "soft, warm, flattering animated-feature lighting — broad key, generous bounce fill, gentle rim, an appealing glow; the 'every frame looks beautiful' look; even enough to read every panel",
+    "materials": "stylized PBR with appeal — soft fuzzy wool, supple rounded leather, cheerfully refractive glass vials, glowing translucent amber, simplified clean mud; gentle worn-edge wear",
+    "expression_and_appeal": "lively acting and personality in face and pose; squash-stretch-friendly appealing forms; charm prioritized over grit",
+    "color_grade": "warm, inviting, slightly saturated earthy palette — moss green, mud brown, oat-cream, warm amber; soft cheerful contrast",
+    "background": "seamless soft warm light-cream studio sweep with a gentle gradient and a soft grounded contact shadow under the feet",
+    "rules": ["no text, labels, watermarks, annotations, typography or captions","clean high-sample render, appealing animated-feature finish, no noise","lively expression and personality, not a stiff neutral sculpt","consistent shaders and lighting across all panels","clean, evenly divided panel layout"]
+  },
+  stopmotion: {
+    "rendering": "photograph of a real handmade stop-motion puppet on a miniature set — NOT a digital CG render, not a drawing; tactile physical materials captured by a real camera",
+    "construction": "visible handmade craft — sculpted silicone skin with faint mould/replacement seams, real felted wool and fabric at true tiny scale with weave and hand-stitching, needle-felted hair, real leather and glass, an armature-posable feel",
+    "imperfection": "lovingly handmade quality — faint fingerprints or tool marks, fabric fuzz, tiny irregular stitches, soft sculpt softness; charming, not flawless",
+    "photography": "macro / miniature photography — shallow real depth of field, soft practical studio set lighting (gentle key, warm fill, subtle rim), a faint tilt-shift miniature feel, real catchlights and contact shadows",
+    "color_grade": "warm, tactile, slightly filmic earthy palette — moss green, mud brown, oat-cream, warm amber; cozy handmade contrast",
+    "background": "simple soft miniature-set backdrop or a clean neutral surface the puppet stands on, evenly and warmly lit; a real soft contact shadow under the feet; shallow background focus",
+    "rules": ["no text, labels, watermarks, annotations, typography or captions","real handmade puppet materials and craft texture, visible at macro scale","physical photographed look, not digital CG smoothness","consistent puppet, lighting and lens across all panels","clean, evenly divided panel layout"]
+  },
+  adv1960s: {
+    "rendering": "1960s painted commercial illustration — smooth confident gouache/airbrush rendering, idealized stylized figure, clean optimistic finish; NOT photographic, NOT modern digital",
+    "illustration_handling": "soft airbrushed gouache gradients with crisp painted highlights and confident edges; gentle outline where useful; tidy, aspirational, mid-century commercial polish",
+    "print_process": "vintage offset-print look — visible halftone dot texture, slight color-registration offset, subtle ink-on-paper grain, faintly aged warm paper stock",
+    "palette": "classic mid-century limited palette — mustard yellow, avocado and moss green, burnt orange, teal, warm cream, chocolate brown, soft coral; muted-but-warm, cheerful",
+    "lighting": "bright, even, flattering ad-illustration light — wholesome and clean, soft idealized modeling, no harsh shadow",
+    "background": "flat warm cream or soft mid-century color-block panel, lightly textured like aged print stock; a simple painted shadow grounding the feet; clean and uncluttered (no text)",
+    "rules": ["no text, labels, watermarks, annotations, typography, captions or logos","authentic mid-century gouache illustration with halftone print texture","cheerful, idealized, aspirational ad-art tone","consistent palette, halftone and rendering across all panels","clean, evenly divided panel layout"]
+  },
+  claymation: {
+    "rendering": "photograph of a real claymation / plasticine puppet on a miniature set — NOT a digital CG render, not a drawing; soft physical clay captured by a real camera",
+    "construction": "modeling-clay / plasticine craft — rounded smooth-sculpted simplified forms, visible thumbprints and sculpting-tool marks, soft matte-to-glossy clay sheen, the subtle handmade wobble of re-sculpted stop-motion clay",
+    "imperfection": "lovingly handmade clay quality — fingerprints, tool grooves, tiny surface irregularities, soft uneven edges; charming, never flawless or machined",
+    "photography": "macro / miniature photography — shallow real depth of field, soft practical studio set lighting (gentle key, warm fill, subtle rim), real catchlights and contact shadows, a faint tilt-shift miniature feel",
+    "color_grade": "warm, tactile, slightly matte earthy palette — muted moss green, mud brown, oat-cream, warm amber; cozy handmade contrast",
+    "background": "simple soft miniature-set backdrop or a clean warm surface the puppet stands on, evenly and warmly lit; a real soft contact shadow under the feet; shallow background focus",
+    "rules": ["no text, labels, watermarks, annotations, typography or captions","real plasticine clay craft — fingerprints and tool marks visible at macro scale","rounded, simplified, handmade clay forms, not digital CG smoothness","consistent clay puppet, lighting and lens across all panels","clean, evenly divided panel layout"]
+  },
+  gaganime: {
+    "rendering": "playful 1990s Japanese gag-anime cartoon concept-art sheet — flat 2D cel-shaded illustration with bold black outlines, not claymation, not photography, not CG",
+    "construction": "clean vector-like cartoon construction — oversized rounded chibi proportions, simplified shapes, soft bulbous forms, minimal internal detail, thick confident ink outlines, flat high-saturation color fills, simple graphic shadow shapes",
+    "imperfection": "handmade cartoon charm through expressive asymmetry, slightly wobbly line rhythm, exaggerated comic proportions, playful simplified wrinkles and features; clean but not sterile",
+    "linework": "very thick black outer contours with thinner simple interior lines; rounded cartoon silhouettes; no fine realistic rendering",
+    "shading": "flat cel shading with one or two simple shadow shapes per form; no painterly blending, no realistic texture, no photographic lighting",
+    "photography": "not photographed — illustrated poster-sheet presentation with a crisp, sticker-like finish; dynamic low-angle hero framing for the portrait and clean turnaround panels",
+    "color_grade": "bright, warm, high-saturation cartoon palette — moss green robe, mud brown apron, warm olive-tan skin, glowing amber accents, cyan/blue graphic highlights, warm orange sunset backdrop; cheerful comic contrast",
+    "background": "stylized flat cartoon backdrop with warm orange sunset gradient, simple coastal atmosphere, simplified suspension bridge and city skyline shapes; clean graphic panel dividers; no realistic miniature-set depth of field",
+    "typography": "optional bold graffiti-style title lettering only if requested, with yellow fill, cyan outline, and heavy black drop shadow; otherwise keep the sheet free of labels and captions",
+    "rules": ["2D gag-anime cartoon concept-art sheet","thick bold black outlines","flat high-saturation cel-shaded colors","oversized rounded chibi proportions","simple expressive face with huge oval eyes and tiny mouth","minimal detail, soft rounded shapes, sticker-poster aesthetic","consistent same character design across all panels","clean evenly divided concept-sheet layout","no photorealism, no clay, no plasticine, no 3D render, no realistic anatomy"]
+  },
+  pixelart: {
+    "rendering": "detailed retro pixel art; hard square pixels, NO anti-aliasing, crisp pixel edges, drawn on a clear pixel grid (16/32-bit JRPG / PC-98 fidelity, not chunky 8-bit)",
+    "pixel_scale": "consistent medium-resolution pixel grid across all panels; the hero portrait may use a slightly larger sprite but the same pixel size",
+    "palette": "tight limited indexed palette (a warm lo-fi set) — moss greens, warm tans and browns, oat-cream, iron-grey, amber, with a couple of cool shadow tones; cohesive and nostalgic",
+    "shading": "stepped flat shading within the palette, with ordered/checkerboard DITHERING for gradients and soft transitions; pixel-cluster highlights; no smooth gradients",
+    "outline": "selective dark pixel outlines on outer contours and key forms; clean, consistent",
+    "mood": "cozy, warm, nostalgic lo-fi atmosphere",
+    "background": "simple flat or softly dithered warm-neutral pixel background so the sprites read clearly; a small pixel contact shadow under the feet; uncluttered",
+    "rules": ["no text, labels, watermarks, annotations, typography, captions or UI elements","authentic hard-edged pixel art with dithering and a limited palette","consistent pixel scale, palette and dithering across all panels","clean, evenly divided panel layout"]
+  }
+};
+window.CHAR_RENDER_STYLES = CHAR_RENDER_STYLES;
+const CHAR_RENDER_STYLE_OPTIONS = [
+  { key:"photoreal",  label:"Photoreal / cinematic" },
+  { key:"render3d",   label:"Stylized 3D render" },
+  { key:"anime",      label:"Anime / manga" },
+  { key:"flat",       label:"Flat vector / graphic" },
+  { key:"horror",     label:"Cinematic horror" },
+  { key:"ghibli",     label:"Studio Ghibli" },
+  { key:"animated3d", label:"Animated feature 3D" },
+  { key:"stopmotion", label:"Stop-motion" },
+  { key:"claymation", label:"Claymation" },
+  { key:"adv1960s",   label:"1960s advertising" },
+  { key:"gaganime",   label:"90s gag-anime" },
+  { key:"pixelart",   label:"Retro pixel-art" },
+  { key:"surprise",   label:"Surprise me \u2728" },
+];
+window.CHAR_RENDER_STYLE_OPTIONS = CHAR_RENDER_STYLE_OPTIONS;
+
+/* the resolved render block for a character: the picked preset, or an AI-invented bespoke
+   block for "surprise" (stored on c.surpriseRender), falling back to photoreal. */
+function charRenderBlock(c){
+  const key = (c && c.renderStyleKey) || "photoreal";
+  if(key==="surprise" && c && c.surpriseRender && c.surpriseRender.render) return c.surpriseRender.render;
+  return CHAR_RENDER_STYLES[key] || CHAR_RENDER_STYLES.photoreal;
+}
+window.charRenderBlock = charRenderBlock;
+
+/* JSON character spec (the director's concept-art template as a key:value spec,
+   2026-06): full-body turnaround (front/side/back), a 3-portrait face grid top right,
+   four detail close-ups bottom right, neutral grey studio sweep, NO text on the sheet. The
+   `physique` object and `wardrobe` block are the continuity database fields the rest
+   of the pipeline matches on (shot prompts, prop worn_by links). Inherited from the
+   Story: role + conscious desire, the script-drafted physique, bodyRationale, wardrobe
+   + accessories (continuity canon), height/scale, genre/period tone. NOTE
+   "true-to-design anatomy", not "real human proportions" \u2014 the cast includes
+   non-humans, and humanizing them is exactly the drift to avoid. */
+function buildCharRefPrompt(c, project, props){
   const P = project || {};
   const v = charVisualDefaults(c);
+  const clean = (x)=>String(x||"").replace(/\.$/,"").trim();
   const body = vfield(c,"coreBody","look");
-  const texture = c.materialTexture || "natural skin pore texture, subsurface scattering, soft cinematic studio lighting, high detail";
-  const style = c.renderStyle || "photoreal cinematic, 35mm, natural film grain, shallow depth of field";
+  const texture = c.materialTexture || "natural skin pore texture, subsurface scattering, high detail";
   const mask = vfield(c,"wardrobeMask","wardrobe");
-  const acc = (c.accessories && !/^none$/i.test(c.accessories.trim())) ? (", accessories: "+c.accessories.replace(/\.$/,"")) : "";
+  const acc = (c.accessories && !/^none$/i.test(c.accessories.trim())) ? clean(c.accessories) : "";
+  // WORN PROPS baked into the TEXT: fold every worn prop this character owns (with its
+  // form & material from the prop card) into the accessories, so the sheet renders the
+  // character WEARING them from the first generation — no separate prop image needed.
+  const _norm = (s)=> String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+  const worn = (props||[]).filter(p=> p && p.ownerId===c.id && p.kind!=="carried" && clean(p.name));
+  const propDesc = (p)=>{ const tail=[clean(p.form), clean(p.material)].filter(Boolean).join(", ");
+    return clean(p.name) + (tail ? (" ("+tail+")") : ""); };
+  const wornDescs = worn.map(propDesc).filter(Boolean);
+  const wornKeys = new Set(worn.map(p=>_norm(p.name)));
+  // any accessories-text items NOT already covered by a worn-prop card (so nothing is lost)
+  const accExtra = (typeof splitListItems==="function" ? splitListItems(acc) : (acc?[acc]:[]))
+    .filter(it=> it && !wornKeys.has(_norm(it)));
+  const accAll = [...wornDescs, ...accExtra];
   const period = P.setting && P.setting.period ? P.setting.period.split(/[\u2014,]/)[0].trim() : "";
   const tone = [P.genre, period].filter(Boolean).join(", ");
-  // role descriptor connects the look back to who the character is
-  const who = [c.role, c.conscious && c.conscious.replace(/\.$/,"")].filter(Boolean).join(" \u00b7 ");
-  let s = "Master character design reference sheet \u2014 "+(c.name||"Character")+". ";
-  s += "PHYSICAL IDENTITY: "+(who?who+". ":"")+(body?(body.replace(/\.$/,"")+". "):"")
-     +(c.bodyRationale?("("+c.bodyRationale.replace(/\.$/,"")+"). "):"");
-  s += "Skin & texture: "+texture.replace(/\.$/,"")+". ";
-  s += mask ? ("Wearing "+mask.replace(/\.$/,"")+acc+". ") : "";
-  if(tone) s += tone+" tone. ";
-  s += "Character is "+v.height+" tall ("+v.scaleClass+"). ";
-  s += "RENDER STYLE: "+style.replace(/\.$/,"")+". ";
-  s += "10-panel 5x2 grid. Top row: full-body front (0\u00b0), 3/4 front (45\u00b0), profile (90\u00b0), 3/4 back (135\u00b0), back (180\u00b0). ";
-  s += "Bottom row: close-up headshots \u2014 neutral front, neutral profile, joy, anger, grief. ";
-  s += "Solid light grey background, a vertical height-measurement bar on the left, soft even studio lighting, the SAME identical face and identity across every panel, sharp focus. --ar 16:9";
-  return s;
+  const F = c.physique || {};
+  const phys = {
+    apparent_age: clean(F.age)||undefined, ethnicity: clean(F.ethnicity)||undefined,
+    skin: clean(F.skin)||undefined, eyes: clean(F.eyes)||undefined, hair: clean(F.hair)||undefined,
+    face: clean(F.face)||undefined, build: clean(F.build)||undefined,
+  };
+  const hasPhys = Object.values(phys).some(Boolean);
+  const spec = {
+    task: "character concept art sheet",
+    character: {
+      name: c.name||"Character",
+      role: c.role||undefined,
+      wants: clean(c.conscious)||undefined,
+      physique: hasPhys ? phys : undefined,
+      description: (!hasPhys && body) ? clean(body) : undefined,
+      why_this_look: clean(c.bodyRationale)||undefined,
+      height: v.height, scale: v.scaleClass,
+      skin_surface_texture: clean(texture),
+      tone: tone||undefined,
+    },
+    wardrobe: {
+      wearing: clean(mask)||undefined,
+      accessories: accAll.length ? accAll.join("; ") : undefined,
+      hands: "both hands empty and relaxed at sides",
+    },
+    layout: {
+      hero_portrait: "left panel (largest, ~1/3 of the sheet): a single front-facing head-and-shoulders close-up \u2014 detailed face, hair, and upper wardrobe/collar",
+      turnaround: {
+        position: "right two-thirds of the sheet: three full-body poses in evenly divided vertical panels, left to right",
+        poses: [
+          "front view \u2014 full body, facing forward, arms at sides",
+          "three-quarter front view \u2014 full body, turned ~30\u201345\u00b0 to one side",
+          "back view \u2014 full body, facing away"
+        ]
+      }
+    },
+    continuity: {
+      identity_rule: "the SAME identical face, build and identity in every view",
+      anatomy: "true-to-design anatomy and proportions \u2014 never humanize a non-human design",
+    },
+    render: { ...charRenderBlock(c), aspect: "16:9" },
+    style_name: ((c.renderStyleKey==="surprise" && c.surpriseRender && c.surpriseRender.label) ? c.surpriseRender.label : undefined),
+  };
+  return "Render this character concept-art sheet EXACTLY as specified by this JSON spec (continuity fields are binding):\n"+JSON.stringify(spec, null, 1);
 }
 window.buildCharRefPrompt = buildCharRefPrompt;
 
@@ -100,13 +300,25 @@ function buildRefFromPhotoPrompt(c, project){
   if(tone) s += tone+" tone. ";
   s += "Character is "+v.height+" tall ("+v.scaleClass+"). ";
   s += "RENDER STYLE: "+style.replace(/\.$/,"")+". ";
-  s += "10-panel 5\u00d72 grid. Top row: full-body front (0\u00b0), 3/4 front (45\u00b0), profile (90\u00b0), 3/4 back (135\u00b0), back (180\u00b0). ";
-  s += "Bottom row: close-up headshots \u2014 neutral front, neutral profile, joy, anger, grief. ";
-  s += "Solid light grey background, height-measurement bar on the left, soft even studio lighting, ";
-  s += "the SAME identical face across every panel, sharp focus. --ar 16:9";
+  s += "LAYOUT: character concept art sheet \u2014 LEFT panel (largest, ~1/3): a single front-facing head-and-shoulders close-up (detailed face, hair, upper wardrobe/collar); ";
+  s += "RIGHT two-thirds: three full-body poses in evenly divided vertical panels, left to right \u2014 front view (facing forward, arms at sides), three-quarter front view (turned ~30\u201345\u00b0), back view (facing away); ";
+  s += "both hands empty and relaxed at sides, seamless neutral studio sweep background, no text, no labels, no annotations, ";
+  s += "soft studio lighting, the SAME identical face in every view, sharp focus.";
   return s;
 }
 window.buildRefFromPhotoPrompt = buildRefFromPhotoPrompt;
+
+/* Detect resolution tier + aspect from an uploaded image's real pixels — for sheets
+   the user generated OUTSIDE the app (e.g. GPT Image 2 in ChatGPT) and imported, so
+   we know neither up front. Quality (low/med/high) is a generation-time encoder
+   setting and CANNOT be recovered from a finished image, so it's left unknown. */
+function nbResLabel(w,h){ const lng=Math.max(w||0,h||0); if(!lng) return "—";
+  const tier = lng<=1280 ? "1K" : (lng<=2600 ? "2K" : "4K"); return tier+" · "+w+"×"+h; }
+function nbAspectLabel(w,h){ if(!w||!h) return "—"; const r=w/h;
+  const known=[["21:9",21/9],["16:9",16/9],["3:2",3/2],["4:3",4/3],["1:1",1],["4:5",4/5],["3:4",3/4],["2:3",2/3],["9:16",9/16]];
+  let best=known[0],bd=1e9; for(const k of known){ const d=Math.abs(k[1]-r); if(d<bd){ bd=d; best=k; } }
+  if(bd/best[1] < 0.06) return best[0];
+  const g=(a,b)=>b?g(b,a%b):a; const d=g(w,h)||1; return (w/d)+":"+(h/d); }
 
 /* ============================================================
    useImageGen — shared Nano Banana generation engine for any
@@ -234,7 +446,7 @@ function useImageGen(opts){
     if(isEditMode){ refImage = genUrl; mode = "edit"; }
     else if(useSimple){ mode = "simple"; }
     else if(slotHasRef && typeof nbGetSlotImage==="function"){ refImage = nbGetSlotImage(slotId); mode = "photo"; }
-    else if(opts.referenceFallback){ const b = opts.referenceFallback(gopts); if(b){ refImage = b; mode = "base"; } }
+    else if(opts.referenceFallback){ const b = await opts.referenceFallback(gopts); if(b){ refImage = b; mode = "base"; } }
     else if(cameoUrl){ refImage = cameoUrl; mode = "cameo"; }
 
     /* prompt: edit | simplified fallback | from-photo/cameo | from-base | master */
@@ -373,6 +585,38 @@ function useImageGen(opts){
     }
     setGenUrl(""); setGenErr(""); setGenTier("local"); setGenMeta(null);
   };
+  /* Import a FINISHED sheet the user generated outside the app (full resolution, no
+     downscale — unlike the reference-photo slot) and commit it AS this entity's sheet,
+     so it gets every normal affordance (zoom, ⋯ menu, clear, used as a reference
+     downstream). Resolution + aspect are detected from the pixels; quality is unknown. */
+  const importSheet = async (file)=>{
+    if(gening || !file) return;
+    if(!/^image\/(png|jpeg|jpg|webp|avif)$/i.test(file.type||"")){ setGenErr("Choose a PNG, JPEG, WebP or AVIF image."); return; }
+    setGenErr(""); setGening(true);
+    try{
+      const dataUrl = await new Promise((res,rej)=>{ const fr=new FileReader();
+        fr.onload=()=>res(fr.result); fr.onerror=()=>rej(new Error("Couldn't read that file.")); fr.readAsDataURL(file); });
+      const dims = await new Promise((res)=>{ const im=new Image();
+        im.onload=()=>res({ w:im.naturalWidth, h:im.naturalHeight }); im.onerror=()=>res(null); im.src=dataUrl; });
+      const now = new Date();
+      const meta = {
+        modelLabel:"Uploaded", modelId:"uploaded", uploaded:true, mode:"upload",
+        aspect: dims ? nbAspectLabel(dims.w,dims.h) : "—",
+        size:   dims ? nbResLabel(dims.w,dims.h)   : "—",
+        pixelW: dims&&dims.w, pixelH: dims&&dims.h,
+        date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
+        time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
+        iso: now.toISOString(), version: 1,
+      };
+      const assetKind = (typeof slotAssetKind==="function") ? slotAssetKind(slotId) : "character";
+      const saveResult = await nbCommit(id, dataUrl, meta, [], assetKind);
+      const url = (saveResult && saveResult.url) || dataUrl;
+      setGenUrl(url); setGenTier((saveResult && saveResult.tier) || "local"); setGenMeta(meta);
+      setSlotHasRef(false);
+      try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, url } })); }catch(e){}
+    }catch(e){ setGenErr((e && e.message) || "Couldn't import the image."); }
+    setGening(false);
+  };
   /* how many variant sub-sheets a Clear would also remove (for the confirm message) */
   const relatedClearCount = (typeof opts.relatedClearIds==="function")
     ? (()=>{ try{ return (opts.relatedClearIds()||[]).length; }catch(e){ return 0; } })() : 0;
@@ -397,7 +641,7 @@ function useImageGen(opts){
   };
 
   return { genUrl, genMeta, genTier, gening, genErr, retrying, slotHasRef,
-    editMode, setEditMode, editText, setEditText, generate, clearGen, relatedClearCount, loadDetails, revertTo, revertPrevious, deleteVersion, layers, allModels };
+    editMode, setEditMode, editText, setEditText, generate, clearGen, importSheet, relatedClearCount, loadDetails, revertTo, revertPrevious, deleteVersion, layers, allModels };
 }
 window.useImageGen = useImageGen;
 
@@ -578,7 +822,7 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
     React.createElement("div",{className:"dt-flab"},label),
     React.createElement("div",{className:"dt-fval"},val)) : null;
 
-  return React.createElement("div",{className:"lb-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
+  return React.createElement("div",{className:"lb-overlay dt-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
     React.createElement("div",{className:"dt-panel"},
       React.createElement("div",{className:"dt-head"},
         React.createElement("div",null,
@@ -680,10 +924,13 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
    Generate button, error recovery, and the metadata caption. Driven by useImageGen. */
 function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate, extraMeta, menuExtra }){
   const { genUrl, genMeta, genTier, gening, genErr, retrying, slotHasRef,
-    editMode, setEditMode, editText, setEditText, generate, clearGen, relatedClearCount, revertPrevious, layers, allModels } = gen;
+    editMode, setEditMode, editText, setEditText, generate, clearGen, importSheet, relatedClearCount, revertPrevious, layers, allModels } = gen;
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const menuRef = React.useRef(null);
+  const uploadRef = React.useRef(null);
+  const pickUpload = ()=>{ if(uploadRef.current) uploadRef.current.click(); };
+  const onUploadPicked = (e)=>{ const f=e.target.files&&e.target.files[0]; if(f&&importSheet) importSheet(f); e.target.value=""; };
   const [pendingGenerate, setPendingGenerate] = React.useState(false);
   const sawDraftingRef = React.useRef(false);
   noun = noun || "sheet";
@@ -723,7 +970,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
             shape:"rounded",radius:"10",placeholder:slotPlaceholder||"Drop reference art"}),
           slotHasRef && React.createElement("div",{className:"sheet-ref-pill"},
             React.createElement(Icon.bolt,{s:10,sw:2}),"Reference art active \u00b7 guides generation")),
-    (genUrl || onDelete) && React.createElement("div",{className:"sheet-gen-tools"},
+    (genUrl || onDelete || importSheet) && React.createElement("div",{className:"sheet-gen-tools"},
       React.createElement("div",{className:"sheet-tools-menu",ref:menuRef},
         React.createElement("button",{className:"sheet-gen-tool",onClick:()=>setMenuOpen(m=>!m),title:"Options"},
           React.createElement(Icon.moreV,{s:14})),
@@ -738,6 +985,11 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
           genUrl && React.createElement("button",{className:"sheet-tools-item",disabled:gening,
             onClick:()=>{ generate(); setMenuOpen(false); }},
             React.createElement(Icon.sparkles,{s:13}),"Regenerate"),
+          // import a finished sheet generated outside the app (e.g. GPT Image 2 in ChatGPT)
+          importSheet && React.createElement("button",{className:"sheet-tools-item",disabled:gening,
+            title:"Import a finished image you generated elsewhere, at full resolution — it becomes this "+noun,
+            onClick:()=>{ setMenuOpen(false); pickUpload(); }},
+            React.createElement(Icon.image,{s:13}), genUrl?"Replace with upload":"Upload a sheet"),
           // caller-specific menu items (e.g. Shots: "Generate fresh sample")
           ...(menuExtra||[]).filter(Boolean).map((m,i)=>
             React.createElement("button",{key:"mx"+i,className:"sheet-tools-item",disabled:gening||m.disabled,title:m.title,
@@ -791,6 +1043,12 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
             genUrl ? ("Regenerate "+noun) :
             (slotHasRef ? "Generate from photo" :
             (!drafted ? "Draft & Generate" : ("Generate "+noun))))),
+    // import a finished, full-res sheet generated outside the app (GPT Image 2, etc.)
+    React.createElement("input",{ref:uploadRef,type:"file",accept:"image/png,image/jpeg,image/webp,image/avif",
+      style:{display:"none"},onChange:onUploadPicked}),
+    !genUrl && importSheet && React.createElement("button",{className:"sheet-upload-btn",onClick:pickUpload,disabled:gening,
+      title:"Generated this elsewhere (e.g. GPT Image 2 in ChatGPT)? Upload it at full resolution — it becomes this "+noun+", with zoom, the … menu and clear, just like a generated one."},
+      React.createElement(Icon.image,{s:12}),"Upload a finished "+noun),
     specBlocked && React.createElement("div",{className:"sheet-gen-gate"},
       React.createElement(Icon.alert,{s:12}),
       React.createElement("span",null,(specGate&&specGate.hint)||"Draft the design spec first — it's what the plate is built from.")),
@@ -967,11 +1225,11 @@ function tidyTruncated(s){
   return m ? m[0].trim() : s;
 }
 
-function SheetField({ label, value, placeholder, multiline, list, onCommit, onItemRemoved, ownerName }){
+function SheetField({ label, value, placeholder, multiline, list, onCommit, onItemRemoved, onItemRenamed, ownerName }){
   return React.createElement("div",{className:"sheet-field"},
     React.createElement("div",{className:"obj-lab"},label),
     list
-      ? React.createElement(EditableItemList,{value,placeholder,onCommit,onItemRemoved,ownerName})
+      ? React.createElement(EditableItemList,{value,placeholder,onCommit,onItemRemoved,onItemRenamed,ownerName})
       : React.createElement(EditText,{value,placeholder,multiline,onCommit}));
 }
 
@@ -992,22 +1250,54 @@ function CardFold({ label, count, defaultOpen, children }){
     open && React.createElement("div",{className:"sheet-fold-body"},children));
 }
 
+/* RecentlyDeleted — the per-tab restore bin. Lists soft-deleted characters / props /
+   locations (each kept with its scenes, full spec and generated sheet) with Restore and
+   Delete-forever. Collapsed by default; renders nothing when the bin is empty. Shared by
+   all three Art Room tabs via window.RecentlyDeleted. */
+function RecentlyDeleted({ items, kind, onRestore, onPurge }){
+  const [open, setOpen] = React.useState(false);
+  if(!items || !items.length) return null;
+  const noun = kind==="character" ? "character" : kind==="location" ? "location" : "prop";
+  const rel = (iso)=>{ if(!iso) return ""; const ms=Date.now()-new Date(iso).getTime();
+    const m=Math.round(ms/60000); if(m<1) return "just now"; if(m<60) return m+"m ago";
+    const h=Math.round(m/60); if(h<24) return h+"h ago"; return Math.round(h/24)+"d ago"; };
+  return React.createElement("div",{className:"recently-deleted"+(open?" open":"")},
+    React.createElement("button",{className:"rd-head",onClick:()=>setOpen(o=>!o)},
+      React.createElement(Icon.trash,{s:12}),
+      React.createElement("span",null,"Recently deleted"),
+      React.createElement("span",{className:"rd-count"}, items.length),
+      React.createElement("span",{className:"rd-chev"}, React.createElement(open?Icon.chevD:Icon.chevR,{s:12}))),
+    open && React.createElement("div",{className:"rd-list"},
+      items.map(it=>React.createElement("div",{key:it.id,className:"rd-row"},
+        React.createElement("span",{className:"rd-name",title:it.name||it.title||""}, it.name||it.title||("Untitled "+noun)),
+        it._deletedAt && React.createElement("span",{className:"rd-when"}, rel(it._deletedAt)),
+        React.createElement("button",{className:"rd-restore",onClick:()=>onRestore&&onRestore(it.id),
+          title:"Restore this "+noun+" with its scenes & spec"},
+          React.createElement(Icon.undo,{s:12}),"Restore"),
+        React.createElement("button",{className:"rd-purge",title:"Delete forever",
+          onClick:async ()=>{ const ok=await window.appConfirm({ title:"Delete “"+(it.name||it.title||"this "+noun)+"” forever?",
+            body:"This permanently removes it and its reference sheet from the project. This can't be undone.",
+            confirmLabel:"Delete forever", danger:true });
+            if(ok && onPurge) onPurge(it.id); }},
+          React.createElement(Icon.x,{s:12}))))));
+}
+window.RecentlyDeleted = RecentlyDeleted;
+
 /* StateRow — one appearance state (continuity variant) as its own v2+ sheet, generated
    as an identity-locked edit of the base character sheet so the variant is provably the
    same character. Falls back to a text spec when no base image exists yet. */
-function StateRow({ c, st, index, project, scenes, baseGenUrl, onView, onChange, onDelete }){
+function StateRow({ c, st, index, project, scenes, props, baseGenUrl, onView, onChange, onDelete }){
   const vtag = "v"+(index+2);
   const stateId = c.id+":"+st.id;
-  const baseFinal = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project) : buildCharRefPrompt(c, project);
+  const baseFinal = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project, props) : buildCharRefPrompt(c, project, props);
   const changeText = ()=> (st.change||"").replace(/\.$/,"").trim();
 
   const buildFromBase = ()=>
     "Edit this character design sheet for "+(c.name||"the character")+". "
     +"Apply this appearance change: "+(changeText()||"(no specific change given)")+". "
-    +"Keep the EXACT same face, hair colour and style, skin tone, body proportions and identity across all 10 panels \u2014 "
+    +"Keep the EXACT same face, hair colour and style, skin tone, body proportions and identity in every view \u2014 "
     +"only the described change should differ from the reference. "
-    +"Maintain the same 5\u00d72 grid layout (full-body views on top row, close-up headshots on bottom row), "
-    +"the same render style and framing. Do not re-imagine the character.";
+    +"Maintain the reference sheet's EXISTING layout, panel arrangement, render style and framing. Do not re-imagine the character.";
   const buildFinal = ()=> baseFinal + " APPEARANCE STATE \u2014 "+(st.label||"variant")+": "
     + (changeText()||"") + ". Render the character in THIS changed state consistently across every panel.";
   const buildSimple = ()=> ((typeof buildSimpleCharPrompt==="function") ? buildSimpleCharPrompt(c) : "Character reference")
@@ -1024,7 +1314,7 @@ function StateRow({ c, st, index, project, scenes, baseGenUrl, onView, onChange,
     buildEdit: (instr)=>
       "Edit this character design sheet for "+(c.name||"the character")+" ("+(st.label||"variant")+" state). "
       +"Apply ONLY this change: "+instr+". Preserve the same face, identity and the "+(st.label||"variant")
-      +" appearance otherwise, across all 10 panels. Keep the 5\u00d72 grid layout. Do not re-imagine the character.",
+      +" appearance otherwise, in every view. Keep the sheet's existing layout. Do not re-imagine the character.",
   });
   const viewEntity = { ...c, name: c.name+" \u2014 "+(st.label||"variant") };
 
@@ -1051,9 +1341,19 @@ function StateRow({ c, st, index, project, scenes, baseGenUrl, onView, onChange,
         scenes.map(s=>React.createElement("option",{key:s.id,value:s.id},"Sc "+s.no+" \u00b7 "+s.title)))));
 }
 
-function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting, onView, onSuggestStates, suggestingStates, onRemoveOwnedItem, batchActiveId, onBatchDone, onDelete }){
+function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, onDraft, drafting, onView, onSuggestStates, suggestingStates, onRemoveOwnedItem, onRenameOwnedItem, batchActiveId, onBatchDone, onDelete }){
   const drivenScenes = scenes.filter(s=>s.driver===c.id);
   const driven = drivenScenes.length;
+  // ALL scenes this character appears in (drives OR is named in the script/summary), not
+  // just the ones they drive — driven scenes are marked so both reads at a glance.
+  const drivenIds = new Set(drivenScenes.map(s=>s.id));
+  const appearsScenes = React.useMemo(()=>{
+    const ids = (typeof scenesWhereCharacterAppears==="function")
+      ? scenesWhereCharacterAppears(c.id, c.name, scenes, drafts)
+      : drivenScenes.map(s=>s.id);
+    const set = new Set(ids);
+    return (scenes||[]).filter(s=>set.has(s.id)).sort((a,b)=>(a.no||0)-(b.no||0));
+  },[c.id, c.name, scenes, drafts]);
   // role packs FUNCTION · ARCHETYPE — IDENTITY in one string; show & edit each
   // part as its own labelled line, re-composed back into c.role on every edit.
   const roleParts = parseRole(c.role);
@@ -1063,8 +1363,8 @@ function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting
   const [roleOpen, setRoleOpen] = React.useState(false);   // collapsed by default to keep the card compact
   const roleSummary = composeRole({ ...roleParts, identity: capFirst(roleParts.identity) }) || "Role";
   const v = charVisualDefaults(c);
-  const promptText = buildCharRefPrompt(c, project);
-  const finalPrompt = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project) : promptText;
+  const promptText = buildCharRefPrompt(c, project, props);
+  const finalPrompt = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project, props) : promptText;
   const drafted = charVisualsDrafted(c);
   const initials = c.name.split(" ").map(w=>w[0]).slice(0,2).join("");
   const palette = (c.palette && c.palette.length) ? c.palette : v.palette;
@@ -1181,6 +1481,27 @@ function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting
   /* cameo (locked likeness) — Increment A */
   const [cameoOpen, setCameoOpen] = React.useState(false);
   const [cameoMeta, setCameoMeta] = React.useState(()=> (typeof nbCameoMeta==="function") ? nbCameoMeta(c.id) : null);
+  /* voice (locked timbre) — lives on the card now, parallel to Cameo */
+  const [voiceOpen, setVoiceOpen] = React.useState(false);
+  const voiceLocked = !!(c.voiceLock && c.voiceLock.voiceId);
+  // render-style picker: which visual language the sheet is drawn in (per character). For
+  // "surprise" we invent a bespoke style from the bible (once) and cache it on the card.
+  const [styling, setStyling] = React.useState(false);
+  const pickRenderStyle = async (key)=>{
+    if(key!=="surprise"){ onUpdate(c.id, { renderStyleKey:key }); return; }
+    onUpdate(c.id, { renderStyleKey:"surprise" });
+    if(c.surpriseRender && c.surpriseRender.render) return;   // already invented — keep it
+    if(typeof aiSurpriseRenderStyle!=="function" || !(typeof aiAvailable==="function" && aiAvailable())) return;
+    setStyling(true);
+    try{ const r = await aiSurpriseRenderStyle(c, project); if(r) onUpdate(c.id, { surpriseRender:r }); }
+    catch(e){} finally{ setStyling(false); }
+  };
+  const reSurprise = async ()=>{
+    if(typeof aiSurpriseRenderStyle!=="function" || styling) return;
+    setStyling(true);
+    try{ const r = await aiSurpriseRenderStyle(c, project); if(r) onUpdate(c.id, { surpriseRender:r }); }
+    catch(e){} finally{ setStyling(false); }
+  };
   const refreshCameo = ()=>{ if(typeof nbCameoMeta==="function") setCameoMeta(nbCameoMeta(c.id)); };
   const removeCameo = async ()=>{
     const ok = await window.appConfirm({
@@ -1247,8 +1568,8 @@ function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting
       "Edit this character design sheet for "+(c.name||"the character")+". "
       +"Apply ONLY this change: "+instr+". "
       +"Preserve everything else without alteration \u2014 the exact same face, hair colour and style, "
-      +"skin tone, body proportions, and physical identity across all 10 panels. "
-      +"Keep the same 5\u00d72 grid layout: full-body views on top row, close-up headshots on bottom row. "
+      +"skin tone, body proportions, and physical identity in every view. "
+      +"Keep the sheet's existing layout and panel arrangement. "
       +"Do not replace or re-imagine the character.",
   });
 
@@ -1278,12 +1599,16 @@ function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting
         "Generating prop sheet "+(prepProps.done+1)+"/"+prepProps.total+"\u2026 "+(prepProps.name||"")),
       React.createElement("div",{className:"sheet-head"},
         React.createElement("div",{className:"sheet-head-top"},
-          React.createElement("div",{className:"sheet-name"},c.name),
+          React.createElement("div",{className:"sheet-name",title:c.name||""},c.name),
           React.createElement("div",{className:"sheet-head-acts"},
             React.createElement("button",{className:"char-cameo-btn"+(cameoMeta?" on":""),disabled:drafting,
               onClick:()=>setCameoOpen(true),
               title:cameoMeta?"Likeness locked \u2014 recapture or manage cameo":"Cast a real face \u2014 lock this character's likeness"},
               React.createElement(Icon.userScan,{s:12}), cameoMeta?"Cameo":"Cast"),
+            React.createElement("button",{className:"char-voice-btn"+(voiceLocked?" on":""),
+              onClick:()=>setVoiceOpen(true),
+              title:voiceLocked?("Voice locked: "+((c.voiceLock&&c.voiceLock.voiceName)||"voice")+" \u2014 test or relock"):"Cast a voice \u2014 lock how this character sounds"},
+              React.createElement(Icon.mic,{s:12}), "Voice"),
             React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(c)},
               React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft details"))),
         React.createElement("div",{className:"sheet-role-block"+(roleOpen?" open":"")},
@@ -1312,19 +1637,34 @@ function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting
             React.createElement("div",{className:"sheet-role-desc"},
               React.createElement(EditText,{value:capFirst(roleParts.identity),multiline:true,
                 placeholder:"Who they are \u2014 e.g. A Somali-British trauma nurse\u2026",onCommit:val=>setRolePart({identity:val})}))),
-          React.createElement("div",{className:"sheet-scenes"},
-            React.createElement("span",{className:"sheet-scenes-lab"},"Scenes"),
-            drivenScenes.length
-              ? drivenScenes.map(s=>React.createElement("span",{key:s.id,className:"sheet-scene-chip",
-                  title:s.title||("Scene "+s.no)},String(s.no).padStart(2,"0")))
-              : React.createElement("span",{className:"sheet-scenes-none"},"none yet"))))),
+          // PRONOUNS \u2014 canonical, fed into the scene drafter so the script never drifts
+          // from the sheet's gender. Defaults to the value inferred from the bible; editable.
+          React.createElement("div",{className:"role-line"},
+            React.createElement("span",{className:"role-lab"},"Pronouns"),
+            React.createElement("select",{className:"char-pronoun-sel",
+              value:(c.pronouns||(typeof window.charPronouns==="function"?window.charPronouns(c):"they/them")),
+              onChange:e=>onUpdate(c.id,{pronouns:e.target.value})},
+              ["he/him","she/her","they/them"].map(p=>React.createElement("option",{key:p,value:p},p)))))),
+        // ALWAYS-VISIBLE scenes row (outside the collapsible role details)
+        React.createElement("div",{className:"sheet-scenes"},
+          React.createElement("span",{className:"sheet-scenes-lab",title:"Every scene this character appears in (drives or is named in). Filled chips = scenes they DRIVE."},"Appears in"),
+          appearsScenes.length
+            ? appearsScenes.map(s=>React.createElement("span",{key:s.id,
+                className:"sheet-scene-chip"+(drivenIds.has(s.id)?" driven":""),
+                title:(s.title||("Scene "+s.no))+(drivenIds.has(s.id)?" · drives this scene":" · appears")},
+                String(s.no).padStart(2,"0")))
+            : React.createElement("span",{className:"sheet-scenes-none"},"none yet"))),
 
       cameoMeta && React.createElement("div",{className:"sheet-cameo-status"},
         React.createElement(Icon.userScan,{s:13}),
         React.createElement("span",{className:"scs-t"},"Likeness locked"),
         React.createElement("span",{className:"scs-meta"},
           ((cameoMeta.angleCount||1)+" angle"+((cameoMeta.angleCount||1)!==1?"s":""))+" \u00b7 "
-          +(cameoMeta.sync?"Synced":"On this device")+" \u00b7 "+(cameoMeta.date||"")),
+          +(cameoMeta.sync?"Synced":"On this device")+" \u00b7 regenerate to apply it to the sheet"),
+        // locking stores the face-lock; it does NOT overwrite the sheet \u2014 this regenerates
+        // the sheet WITH the locked face so the design matches the real person.
+        React.createElement("button",{className:"scs-act",disabled:gen.gening,onClick:()=>gen.generate(),
+          title:"Regenerate the design sheet locked to this face"}, gen.gening?"Applying\u2026":"Apply to sheet"),
         React.createElement("button",{className:"scs-act",onClick:()=>setCameoOpen(true)},"Recapture"),
         React.createElement("button",{className:"scs-act danger",onClick:removeCameo},"Remove")),
 
@@ -1333,18 +1673,51 @@ function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting
         React.createElement("span",null,"Visuals not drafted yet \u2014 click ",
           React.createElement("b",null,"Draft details")," to fill the physical identity.")),
 
+      // render-style picker — the visual language the sheet is drawn in (always visible)
+      React.createElement("div",{className:"char-style-row"},
+        React.createElement("span",{className:"char-style-lab"},React.createElement(Icon.sparkles,{s:12}),"Render style"),
+        React.createElement("select",{className:"prop-select char-style-select",value:c.renderStyleKey||"photoreal",
+          disabled:styling,onChange:e=>pickRenderStyle(e.target.value)},
+          (window.CHAR_RENDER_STYLE_OPTIONS||[]).map(o=>React.createElement("option",{key:o.key,value:o.key},o.label))),
+        styling && React.createElement("span",{className:"char-style-busy"},React.createElement("span",{className:"ns-spin"}),"Inventing…"),
+        (!styling && c.renderStyleKey==="surprise" && c.surpriseRender && c.surpriseRender.label) &&
+          React.createElement("span",{className:"char-style-name",title:"Re-roll a new surprise style",onClick:reSurprise},
+            c.surpriseRender.label," ↻")),
+
       React.createElement(CardFold,{label:"Identity",defaultOpen:false},
-        React.createElement(SheetField,{label:"Body \u2014 fixed physical tokens",value:vfield(c,"coreBody","look"),multiline:true,
-          placeholder:"Apparent age, ethnicity, skin tone & condition, eye colour, hair, face shape, body type, defining features\u2026",onCommit:val=>onUpdate(c.id,{coreBody:val})}),
+        // physical identity as a clean LABELLED LIST (each field editable), instead of one
+        // run-on paragraph. Edits update the structured `physique` (the source the prompt
+        // reads) AND recompose `coreBody` so downstream/legacy readers stay in sync.
+        (()=>{
+          const F = c.physique || {};
+          const KEYS=["age","ethnicity","skin","eyes","hair","face","build"];
+          const hasPhys = KEYS.some(k=>String(F[k]||"").trim());
+          const recompose=(nf)=>{ const t=[nf.age&&("Apparent age: "+nf.age),nf.ethnicity&&("Ethnicity: "+nf.ethnicity),
+            nf.skin&&("Skin tone: "+nf.skin),nf.eyes&&("Eye colour: "+nf.eyes),nf.hair&&("Hair: "+nf.hair),
+            nf.face&&("Face shape: "+nf.face),nf.build&&("Body type: "+nf.build)].filter(Boolean).join(". "); return t?(t+"."):""; };
+          const setPhys=(k,val)=>{ const nf={...F,[k]:val}; onUpdate(c.id,{physique:nf, coreBody:recompose(nf)}); };
+          // long descriptive fields render as auto-growing textareas (ml=true) so the
+          // full sentence is always visible; short tokens stay single-line.
+          const Row=(lab,val,onC,ml)=> React.createElement("div",{className:"phys-row",key:lab},
+            React.createElement("span",{className:"phys-lab"},lab),
+            React.createElement(EditText,{value:val||"",placeholder:"\u2014",multiline:!!ml,onCommit:onC}));
+          if(!hasPhys) return React.createElement(SheetField,{label:"Body \u2014 fixed physical tokens",value:vfield(c,"coreBody","look"),multiline:true,
+            placeholder:"Apparent age, ethnicity, skin tone & condition, eye colour, hair, face shape, body type, defining features\u2026",onCommit:val=>onUpdate(c.id,{coreBody:val})});
+          return React.createElement("div",{className:"char-phys"},
+            Row("Apparent age",F.age,v2=>setPhys("age",v2),true),
+            Row("Ethnicity",F.ethnicity,v2=>setPhys("ethnicity",v2),true),
+            Row("Height",c.height||v.height,v2=>onUpdate(c.id,{height:v2})),
+            Row("Build",F.build,v2=>setPhys("build",v2),true),
+            Row("Hair",F.hair,v2=>setPhys("hair",v2),true),
+            Row("Eyes",F.eyes,v2=>setPhys("eyes",v2),true),
+            Row("Skin",F.skin,v2=>setPhys("skin",v2),true),
+            Row("Facial features",F.face,v2=>setPhys("face",v2),true),
+            Row("Scale",c.scaleClass||v.scaleClass,v2=>onUpdate(c.id,{scaleClass:v2})));
+        })(),
         c.bodyRationale && React.createElement("div",{className:"sheet-rationale"},
           React.createElement(Icon.sparkles,{s:11}),"Why this look: "+tidyTruncated(c.bodyRationale)),
         React.createElement(SheetField,{label:"Texture \u2014 skin & material detail",value:c.materialTexture,multiline:true,
-          placeholder:"Pore texture, subsurface scattering, blemishes, lighting\u2026",onCommit:val=>onUpdate(c.id,{materialTexture:val})}),
-        React.createElement("div",{className:"sheet-2col"},
-          React.createElement(SheetField,{label:"Scale",value:c.scaleClass||v.scaleClass,
-            onCommit:val=>onUpdate(c.id,{scaleClass:val})}),
-          React.createElement(SheetField,{label:"Height",value:c.height||v.height,
-            onCommit:val=>onUpdate(c.id,{height:val})}))),
+          placeholder:"Pore texture, subsurface scattering, blemishes, lighting\u2026",onCommit:val=>onUpdate(c.id,{materialTexture:val})})),
 
       React.createElement(CardFold,{label:"Wardrobe",defaultOpen:false},
         React.createElement(SheetField,{label:"Public \u2014 the mask",value:vfield(c,"wardrobeMask","wardrobe"),multiline:true,
@@ -1359,9 +1732,11 @@ function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting
         React.createElement("div",{className:"sheet-2col"},
           React.createElement(SheetField,{label:"Accessories \u2014 worn",value:c.accessories,list:true,ownerName:c.name,
             onItemRemoved: onRemoveOwnedItem ? (txt=>onRemoveOwnedItem(c.id,txt)) : null,
+            onItemRenamed: onRenameOwnedItem ? ((oldTxt,newTxt)=>onRenameOwnedItem(c.id,oldTxt,newTxt)) : null,
             placeholder:"Fixed worn items \u2014 watch, glasses, jewellery\u2026",onCommit:val=>onUpdate(c.id,{accessories:val})}),
           React.createElement(SheetField,{label:"Props \u2014 carried",value:c.props,list:true,ownerName:c.name,
             onItemRemoved: onRemoveOwnedItem ? (txt=>onRemoveOwnedItem(c.id,txt)) : null,
+            onItemRenamed: onRenameOwnedItem ? ((oldTxt,newTxt)=>onRenameOwnedItem(c.id,oldTxt,newTxt)) : null,
             placeholder:"Recurring objects \u2014 phone, weapon, talisman\u2026",onCommit:val=>onUpdate(c.id,{props:val})})),
         linkedRows.length>0 && React.createElement("div",{className:"linked-props"},
           React.createElement("div",{className:"linked-props-head"},
@@ -1422,7 +1797,7 @@ function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting
               React.createElement("div",{className:"state-row state-base"},
                 React.createElement("span",{className:"state-vtag base"},"v1"),
                 React.createElement("span",{className:"state-base-lab"},"Base look \u2014 the canonical sheet above")),
-              states.map((st,i)=>React.createElement(StateRow,{key:st.id,c,st,index:i,project,scenes,
+              states.map((st,i)=>React.createElement(StateRow,{key:st.id,c,st,index:i,project,scenes,props,
                 baseGenUrl:gen.genUrl,onView,
                 onChange:(patch)=>updateState(st.id,patch),onDelete:()=>deleteState(st.id)})))
           : React.createElement("div",{className:"state-empty"},
@@ -1444,7 +1819,9 @@ function CharacterSheet({ c, project, scenes, props, onUpdate, onDraft, drafting
 
       cameoOpen && React.createElement(CameoModal,{ character:c,
         onClose:()=>setCameoOpen(false),
-        onSaved:()=>{ refreshCameo(); } })));
+        onSaved:()=>{ refreshCameo(); } }),
+      voiceOpen && window.VoiceModal && React.createElement(window.VoiceModal,{ character:c, project, speaks,
+        onUpdate, onClose:()=>setVoiceOpen(false) })));
 }
 
 function NbKeyBar(){
@@ -1682,13 +2059,43 @@ function ImageLightbox({ url, character, onClose }){
               :React.createElement(React.Fragment,null,React.createElement(Icon.download,{s:14}),"Download "+res)))));
 }
 
-function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, onUpdate, onDraft, onDraftAll, draftingId, draftingAll, draftingIds, onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAdd, onDelete, onCast, lookbookStale, onApplyLookbook }){
+function CharacterSheets({ project, characters, scenes, props, drafts, shots, beatsMap, onUpdate, onDraft, onDraftAll, draftingId, draftingAll, draftingIds, onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onAdd, onDelete, onCast, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
   const [view, setView] = React.useState(null);   // {url, character}
+  // which characters actually speak (have dialogue) — used to flag the per-card Voice control
+  const speakingSet = React.useMemo(()=> (typeof speakingCharIds==="function") ? speakingCharIds(characters, scenes, shots) : new Set(), [characters, scenes, shots]);
   const [mgrOpen, setMgrOpen] = React.useState(false);
   const [sceneFilter, setSceneFilter] = React.useState("");   // "" = all scenes
+  const [query, setQuery] = React.useState("");               // free-text name search
+  // film-wide render style: apply one visual language to the WHOLE cast at once. Shows the
+  // shared key, or blank ("Mixed") when characters differ. "surprise" invents a bespoke
+  // style per character (each unique), so it confirms the per-character AI cost first.
+  const [allStyling, setAllStyling] = React.useState(null);   // null | {i,total}
+  const cast = characters || [];
+  const allStyleKey = (cast.length && cast.every(c=>(c.renderStyleKey||"photoreal")===(cast[0].renderStyleKey||"photoreal")))
+    ? (cast[0].renderStyleKey||"photoreal") : "";
+  const applyStyleAll = async (key)=>{
+    if(!key || allStyling) return;
+    cast.forEach(c=> onUpdate(c.id, { renderStyleKey:key }));
+    if(key!=="surprise") return;
+    if(!(typeof aiSurpriseRenderStyle==="function" && typeof aiAvailable==="function" && aiAvailable())) return;
+    const need = cast.filter(c=>!(c.surpriseRender && c.surpriseRender.render));
+    if(!need.length) return;
+    let ok = true;
+    if(typeof window.appConfirm==="function") ok = await window.appConfirm({
+      title:"Invent a surprise style for "+need.length+" character"+(need.length!==1?"s":"")+"?",
+      body:"Each character gets its OWN bespoke fused style invented from its bible — that's "+need.length+" AI call"+(need.length!==1?"s":"")+".",
+      confirmLabel:"Invent styles" });
+    if(!ok) return;
+    setAllStyling({ i:0, total:need.length });
+    for(let i=0;i<need.length;i++){ setAllStyling({ i:i+1, total:need.length });
+      try{ const r = await aiSurpriseRenderStyle(need[i], project); if(r) onUpdate(need[i].id, { surpriseRender:r }); }catch(e){} }
+    setAllStyling(null);
+  };
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
   const list = characters || [];
+  const q = query.trim().toLowerCase();
+  const matchesQuery = (c)=> (typeof searchWordMatch==="function") ? searchWordMatch((c.name||"")+" "+(c.role||""), q) : (!q || (c.name||"").toLowerCase().indexOf(q)>=0);
   const sceneList = (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
   // which characters appear in each scene — DERIVED (characters have no `scenes` field):
   // the scene's driver + everyone in its shots' subjects + the beats' reactor (by name).
@@ -1707,7 +2114,7 @@ function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, 
     return m;
   }, [scenes, shots, beatsMap, list]);
   const inScene = (c, sid)=> !!(charsInSceneMap[sid] && charsInSceneMap[sid].has(c.id));
-  const shown = sceneFilter ? list.filter(c=>inScene(c, sceneFilter)) : list;
+  const shown = (sceneFilter ? list.filter(c=>inScene(c, sceneFilter)) : list).filter(matchesQuery);
   // 9-up pagination; suspended while a batch runs so the queue can reach every card
   const charPager = usePager(shown.length, !!batchActiveId);
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s?s.no:sid; };
@@ -1774,6 +2181,15 @@ function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, 
               text:((typeof roomCopy==="function" && roomCopy(project,"characters").tip) ||
                 "A canonical visual reference for every character \u2014 the consistency anchor you feed into each shot so they look identical in every frame. 'Design the cast' runs the Casting Director agent: on its own it drafts each character's look, finds their appearance changes (wounds, dirt, costume shifts), then generates the master sheet (pulling in their prop sheets + any cameo) and every appearance-state variant. 'Draft all' + 'Generate all characters' stay as the manual paths.")}))),
         React.createElement("div",{className:"art-intro-actions"},
+          characters.length>0 && React.createElement("label",{className:"char-style-all",
+            title:"Apply one render style to the whole cast at once. Each character can still be overridden on its own card."},
+            React.createElement("span",{className:"char-style-all-lab"},
+              allStyling ? ("Inventing… "+allStyling.i+"/"+allStyling.total) : "Style · all cast"),
+            React.createElement("select",{className:"char-style-select",value:allStyleKey,
+              disabled:!!allStyling,onChange:e=>applyStyleAll(e.target.value)},
+              allStyleKey==="" && React.createElement("option",{value:""},"Mixed — per character"),
+              (window.CHAR_RENDER_STYLE_OPTIONS||[]).map(o=>
+                React.createElement("option",{key:o.key,value:o.key}, o.label)))),
           cameoCount>0 && React.createElement("button",{className:"art-cameo-mgr",onClick:()=>setMgrOpen(true),
             title:"Review & manage locked likenesses"},
             React.createElement(Icon.userScan,{s:14}),"Cameos \u00b7 "+cameoCount),
@@ -1788,26 +2204,181 @@ function CharacterSheets({ project, characters, scenes, props, shots, beatsMap, 
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the reference sheet for every drafted character \u2014 you choose whether to redo ones that already have a sheet"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all characters")))),
-    sceneList.length>0 && list.length>0 && React.createElement("div",{className:"prop-scenebar"},
-      React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Focus a scene"),
-      React.createElement("select",{className:"prop-select prop-scenebar-select",value:sceneFilter,onChange:e=>setSceneFilter(e.target.value)},
-        React.createElement("option",{value:""},"All scenes — show every character"),
-        sceneList.map(s=>{ const n=(charsInSceneMap[s.id]?charsInSceneMap[s.id].size:0);
-          return React.createElement("option",{key:s.id,value:s.id},
-            "Scene "+String(s.no).padStart(2,"0")+" · "+(s.title||"")+"  ("+n+" character"+(n!==1?"s":"")+")"); })),
-      sceneFilter && React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId,onClick:startSceneBatch,
-        title:"Generate the reference sheets for the characters in this scene — you choose whether to redo ones that already have a sheet"},
-        React.createElement(Icon.sparkles,{s:14}),
-        batchActiveId?"Generating…":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")))),
-    window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,label:"these characters",dept:"characters"}),
+    list.length>0 && React.createElement("div",{className:"prop-toolbar"},
+      React.createElement("div",{className:"prop-searchbar"},
+        React.createElement(Icon.search,{s:14}),
+        React.createElement("input",{className:"prop-search-input",type:"text",value:query,
+          placeholder:"Search characters by name or role…",
+          onChange:e=>setQuery(e.target.value), onKeyDown:e=>{ if(e.key==="Escape") setQuery(""); }}),
+        q && React.createElement("span",{className:"prop-search-count"}, shown.length+" of "+list.length),
+        q && React.createElement("button",{className:"prop-search-clear",title:"Clear search",onClick:()=>setQuery("")},React.createElement(Icon.x,{s:13}))),
+      sceneList.length>0 && React.createElement("div",{className:"prop-scenebar"},
+        React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Focus a scene"),
+        React.createElement("select",{className:"prop-select prop-scenebar-select",value:sceneFilter,onChange:e=>setSceneFilter(e.target.value)},
+          React.createElement("option",{value:""},"All scenes — show every character"),
+          sceneList.map(s=>{ const n=(charsInSceneMap[s.id]?charsInSceneMap[s.id].size:0);
+            return React.createElement("option",{key:s.id,value:s.id},
+              "Scene "+String(s.no).padStart(2,"0")+" · "+(s.title||"")+"  ("+n+" character"+(n!==1?"s":"")+")"); })),
+        sceneFilter && React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId,onClick:startSceneBatch,
+          title:"Generate the reference sheets for the characters in this scene — you choose whether to redo ones that already have a sheet"},
+          React.createElement(Icon.sparkles,{s:14}),
+          batchActiveId?"Generating…":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0"))))),
+    window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,onDraftOnly:onApplyLookbookDraftOnly,label:"these characters",dept:"characters"}),
     BatchBar && React.createElement(BatchBar,{batch,noun:"character"}),
     React.createElement("div",{className:"sheet-grid"},
-      charPager.slice(shown).map(c=>React.createElement(CharacterSheet,{key:c.id,c,project,scenes,props,onUpdate,onDraft,
+      charPager.slice(shown).map(c=>React.createElement(CharacterSheet,{key:c.id,c,project,scenes,props,drafts,speaks:speakingSet.has(c.id),onUpdate,onDraft,
         drafting:draftingId===c.id||(draftingIds||[]).indexOf(c.id)>=0,onView:(url,ch)=>setView({url,character:ch}),
         batchActiveId,onBatchDone:batch.advance,onDelete:onDelete,
-        onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem}))),
-    React.createElement(PagerBar,{pager:charPager,noun:"character"}));
+        onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem,onRenameOwnedItem}))),
+    React.createElement(PagerBar,{pager:charPager,noun:"character"}),
+    window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{items:trashItems,kind:"character",onRestore,onPurge}));
 }
+
+/* ---- pre-production readiness — ONE shared status model, used by the overview
+   strip (#1) and the Coordinator's cost preview (#2). Counts what's GENERATED
+   (nbGetImage, warmed by the Art Room's prefetch) against what the pipeline covers.
+   Style is a per-scene GRADE assignment, not an image, so it carries noGen. ---- */
+function preProdStatus({ project, characters, props, locations, shots, scenes }){
+  const img = (id)=> (typeof nbGetImage==="function") ? !!nbGetImage(id) : false;
+  const C=characters||[], P=props||[], L=locations||[], S=shots||[], SC=scenes||[];
+  const graded = (typeof scenePreset==="function") ? SC.filter(s=>scenePreset(project, s.id)).length : 0;
+  const boarded = SC.filter(s=> img("sbsheet-sbpage-"+s.id+"-2x2-0") || img("sbsheet-sbpage-"+s.id+"-0")).length;
+  // Voices: locked among SPEAKING characters (a lock, not an image, so noGen).
+  const speaking = (typeof speakingCharIds==="function") ? speakingCharIds(C, SC, S) : new Set();
+  const speakers = C.filter(c=>speaking.has(c.id));
+  const voiced = speakers.filter(c=>c.voiceLock && c.voiceLock.voiceId).length;
+  return [
+    { id:"characters", label:"Cast",        unit:"sheet", done:C.filter(c=>img(c.id)).length, total:C.length },
+    { id:"props",      label:"Props",       unit:"sheet", done:P.filter(p=>img(p.id)).length, total:P.length },
+    { id:"voices",     label:"Voices",      unit:"voice", noGen:true, done:voiced, total:speakers.length, navTo:"characters" },
+    { id:"locations",  label:"Locations",   unit:"plate", done:L.filter(l=>img(l.id)).length, total:L.length },
+    { id:"stylebible", label:"Style",       unit:"grade", noGen:true, done:graded, total:SC.length },
+    { id:"shots",      label:"Shots",       unit:"frame", done:S.filter(s=>img(s.id)).length, total:S.length },
+    { id:"storyboard", label:"Storyboards", unit:"sheet", done:boarded, total:SC.length },
+  ];
+}
+window.preProdStatus = preProdStatus;
+
+/* ---- shared SCENE PAGER — one scene at a time with ← / → (and arrow keys),
+   used by the Stage, Shots and Storyboards instead of one long scroll. ---- */
+function useScenePager(total){
+  const [idx, setIdx] = React.useState(0);
+  React.useEffect(()=>{ setIdx(i=> Math.min(i, Math.max(0, total-1))); },[total]);
+  React.useEffect(()=>{
+    const onKey=(e)=>{ const t=e.target; if(t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName||"")) return;
+      if(e.key==="ArrowLeft") setIdx(i=>Math.max(0,i-1));
+      else if(e.key==="ArrowRight") setIdx(i=>Math.min(Math.max(0,total-1),i+1)); };
+    window.addEventListener("keydown",onKey); return ()=>window.removeEventListener("keydown",onKey);
+  },[total]);
+  return [ Math.min(idx, Math.max(0,total-1)), setIdx ];
+}
+window.useScenePager = useScenePager;
+function ScenePager({ idx, total, title, sub, onPrev, onNext, scenes, onJump }){
+  const [open, setOpen] = React.useState(false);
+  const canJump = !!(onJump && scenes && scenes.length>1);
+  React.useEffect(()=>{ if(!open) return;
+    const close=(e)=>{ if(!e.target.closest || !e.target.closest(".scene-pager-mid")) setOpen(false); };
+    document.addEventListener("mousedown", close); return ()=>document.removeEventListener("mousedown", close); },[open]);
+  return React.createElement("div",{className:"scene-pager"},
+    React.createElement("button",{className:"scene-pager-arrow",onClick:onPrev,disabled:idx<=0,
+      title:"Previous scene (←)","aria-label":"Previous scene"}, React.createElement(Icon.chevL,{s:18})),
+    React.createElement("div",{className:"scene-pager-mid"+(canJump?" jump":""),
+        onClick: canJump?()=>setOpen(o=>!o):undefined, title: canJump?"Jump to a scene":undefined,
+        role: canJump?"button":undefined, tabIndex: canJump?0:undefined},
+      React.createElement("span",{className:"scene-pager-no"},
+        "Scene "+(idx+1)+" of "+total,
+        canJump ? React.createElement(Icon.chevD,{s:10}) : null),
+      React.createElement("span",{className:"scene-pager-title"}, title||"Untitled scene"),
+      sub ? React.createElement("span",{className:"scene-pager-sub"}, sub) : null,
+      (canJump && open) && React.createElement("div",{className:"scene-pager-menu",onClick:(e)=>e.stopPropagation()},
+        scenes.map((s,i)=>React.createElement("button",{key:s.id||i,className:"scene-pager-menu-item"+(i===idx?" on":""),
+          onClick:()=>{ onJump(i); setOpen(false); }},
+          React.createElement("span",{className:"scene-pager-menu-no"}, String(s.no||(i+1)).padStart(2,"0")),
+          React.createElement("span",{className:"scene-pager-menu-t"}, s.title||"Untitled scene"),
+          i===idx && React.createElement(Icon.check,{s:13}))))),
+    React.createElement("button",{className:"scene-pager-arrow",onClick:onNext,disabled:idx>=total-1,
+      title:"Next scene (→)","aria-label":"Next scene"}, React.createElement(Icon.chevR,{s:18})));
+}
+window.ScenePager = ScenePager;
+
+/* #1 — a compact, always-visible readiness strip across the top of the Art Room.
+   Each stage shows generated/total and jumps to its tab. Refreshes as assets load
+   (nb-prefetched) and as new ones generate (nb-gen-done). */
+function PreProductionStatus({ project, characters, props, locations, shots, scenes, setArtView }){
+  const [, force] = React.useReducer(x=>x+1, 0);
+  React.useEffect(()=>{
+    const bump=()=>force();
+    window.addEventListener("nb-prefetched", bump);
+    window.addEventListener("nb-gen-done", bump);
+    return ()=>{ window.removeEventListener("nb-prefetched", bump); window.removeEventListener("nb-gen-done", bump); };
+  },[]);
+  // show/hide — COLLAPSED BY DEFAULT; only expanded if the user has explicitly opened it
+  // before (their choice persists across sessions, device-local: "0" = shown, "1"/unset = hidden)
+  const [open, setOpen] = React.useState(()=>{ try{ return localStorage.getItem("turn-pp-hidden")==="0"; }catch(e){ return false; } });
+  const toggle = ()=> setOpen(o=>{ const n=!o; try{ localStorage.setItem("turn-pp-hidden", n?"0":"1"); }catch(e){} return n; });
+  const stages = preProdStatus({project,characters,props,locations,shots,scenes}).filter(s=>s.total>0);
+  if(!stages.length) return null;   // nothing to build yet — stay out of the way
+  const done = stages.reduce((a,s)=>a+s.done,0), total = stages.reduce((a,s)=>a+s.total,0);
+  const pct = total ? Math.round(100*done/total) : 0;
+  return React.createElement("div",{className:"pp-status"+(open?"":" collapsed")},
+    React.createElement("button",{className:"pp-status-lead",onClick:toggle,title:open?"Hide readiness":"Show readiness"},
+      React.createElement("span",{className:"pp-status-eyebrow"},"Pre-production"),
+      React.createElement("span",{className:"pp-status-pct"+(pct===100?" done":"")}, pct+"%"),
+      React.createElement((open?Icon.chevD:Icon.chevR)||Icon.chevD,{s:12})),
+    open && React.createElement("div",{className:"pp-chips"},
+      stages.map(s=>{
+        const state = s.done>=s.total ? "pp-complete" : s.done>0 ? "pp-partial" : "pp-empty";
+        return React.createElement("button",{key:s.id,className:"pp-chip "+state,
+          onClick:()=>setArtView&&setArtView(s.navTo||s.id),
+          title:s.label+" — "+s.done+" of "+s.total+(s.noGen?" graded":" generated")+". Click to open."},
+          React.createElement("span",{className:"pp-chip-dot"}),
+          React.createElement("span",{className:"pp-chip-lab"}, s.label),
+          React.createElement("span",{className:"pp-chip-ct"}, s.done+"/"+s.total));
+      })));
+}
+window.PreProductionStatus = PreProductionStatus;
+
+/* #2 — cost/scope preview before the Coordinator runs the whole pipeline (it
+   generates a lot, end to end, with no per-step gate). Shows roughly how many
+   images it will produce so a paid user isn't surprised. */
+function CoordConfirm({ project, characters, props, locations, shots, scenes, onCancel, onConfirm }){
+  const stages = preProdStatus({project,characters,props,locations,shots,scenes})
+    .filter(s=>!s.noGen)                                   // Style grading isn't an image generation
+    .map(s=>({ ...s, pending:Math.max(0, s.total - s.done) }));
+  const pending = stages.filter(s=>s.pending>0);
+  const totalGen = pending.reduce((a,s)=>a+s.pending,0);
+  const freshShots = (shots||[]).length===0 && (scenes||[]).length>0;   // it will design shots first, then frame them
+  const hasWork = totalGen>0 || freshShots;
+  return React.createElement("div",{className:"ns-overlay",onMouseDown:e=>{ if(e.target===e.currentTarget) onCancel(); }},
+    React.createElement("div",{className:"cc-modal"},
+      React.createElement("div",{className:"cc-head"},
+        React.createElement("span",{className:"cc-orb"}, React.createElement(Icon.robot,{s:17})),
+        React.createElement("div",null,
+          React.createElement("div",{className:"cc-title"},"Run pre-production"),
+          React.createElement("div",{className:"cc-sub"},"The Coordinator builds the whole visual package in one pass — Lookbook → Cast → Props → Locations → Style → Shots → Storyboards."))),
+      hasWork
+        ? React.createElement(React.Fragment,null,
+            React.createElement("div",{className:"cc-est"},
+              React.createElement("span",{className:"cc-est-n"}, "≈ "+totalGen+(freshShots?"+":"")),
+              React.createElement("span",{className:"cc-est-l"}, "image"+(totalGen===1?"":"s")+" to generate")),
+            pending.length>0 && React.createElement("ul",{className:"cc-list"},
+              pending.map(s=>React.createElement("li",{key:s.id},
+                React.createElement("span",{className:"cc-list-lab"}, s.label),
+                React.createElement("span",{className:"cc-list-n"}, s.pending+" "+s.unit+(s.pending===1?"":"s"))))),
+            React.createElement("div",{className:"cc-note"},
+              React.createElement(Icon.alert,{s:12}),
+              React.createElement("span",null, freshShots
+                ? "Plus the shots designed from your scenes and their frames. Each generation uses credits."
+                : "Each generation uses credits. It also drafts the Lookbook, colour grade and any missing shot coverage as needed.")))
+        : React.createElement("div",{className:"cc-note ok"},
+            React.createElement(Icon.check,{s:12}),
+            React.createElement("span",null,"Everything already has art — running again refines the pipeline and fills any gaps.")),
+      React.createElement("div",{className:"cc-foot"},
+        React.createElement("button",{className:"ns-btn ghost",onClick:onCancel},"Cancel"),
+        React.createElement("button",{className:"ns-btn primary",onClick:onConfirm},
+          React.createElement(Icon.robot,{s:15}), hasWork?"Generate everything":"Run anyway"))));
+}
+window.CoordConfirm = CoordConfirm;
 
 function ArtComingSoon({ tab }){
   const map = {
@@ -1823,8 +2394,8 @@ function ArtComingSoon({ tab }){
     React.createElement("div",{className:"art-soon-tag"},"Next increment"));
 }
 
-function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds,
-  onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onAddCharacter, onDeleteCharacter,
+function ArtRoom({ artView, setArtView, project, characters, scenes, props, drafts, trash, onRestoreChar, onPurgeChar, onRestoreProp, onPurgeProp, onRestoreLoc, onPurgeLoc, onEnsureOwner, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds,
+  onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
   locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocId, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId,
   shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard, onDirectScene, onColorist, onShoot, onCast, onPropsMaster,
@@ -1860,24 +2431,32 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, onUp
     // fixed engine dock — Model / Aspect / Resolution, always reachable while
     // scrolling (desktop only; below 1100px the in-flow controls remain)
     React.createElement(NbDock,null),
+    // #1 — pre-production readiness strip, visible across every tab
+    React.createElement(PreProductionStatus,{project,characters,props,locations,shots,scenes,setArtView}),
     artView==="lookbook" && LookbookView
       ? React.createElement(LookbookView,{project,lookbook,note:lookbookNote,
           onUpdate:onUpdateLookbook,onAdd:onAddLookbook,onDelete:onDeleteLookbook,onSetNote:onSetLookbookNote,onResearch,onClear:onClearLookbook})
     : artView==="characters"
-      ? React.createElement(CharacterSheets,{project,characters,scenes,props,shots,beatsMap,onUpdate:onUpdateChar,
+      ? React.createElement(CharacterSheets,{project,characters,scenes,props,drafts,shots,beatsMap,onUpdate:onUpdateChar,
           onDraft:onDraftVisuals,onDraftAll:onDraftAllVisuals,draftingId:draftingVisualId,draftingAll:draftingAllVisuals,draftingIds:draftingVisualIds,
-          onSuggestStates,suggestingStatesId,onRemoveOwnedItem,onAdd:onAddCharacter,onDelete:onDeleteCharacter,onCast,
-          lookbookStale:!!_stale.characters,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("characters")})
+          trashItems:(trash&&trash.characters)||[],onRestore:onRestoreChar,onPurge:onPurgeChar,
+          onSuggestStates,suggestingStatesId,onRemoveOwnedItem,onRenameOwnedItem,onAdd:onAddCharacter,onDelete:onDeleteCharacter,onCast,
+          lookbookStale:!!_stale.characters,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("characters"),
+          onApplyLookbookDraftOnly:()=>onApplyLookbook&&onApplyLookbook("characters","draft")})
     : artView==="props" && PropSheets
-      ? React.createElement(PropSheets,{project,props,characters,scenes,onUpdate:onUpdateProp,onDraft:onDraftProp,
+      ? React.createElement(PropSheets,{project,props,characters,scenes,drafts,onUpdate:onUpdateProp,onDraft:onDraftProp,
           onDraftAll:onDraftAllProps,onAdd:onAddProp,onDelete:onDeleteProp,draftingId:draftingPropId,draftingAll:draftingAllProps,
+          trashItems:(trash&&trash.props)||[],onRestore:onRestoreProp,onPurge:onPurgeProp,onEnsureOwner,
           onSeedFromCast,castHasProps,onTagScenes,taggingScenes,onTagOne,taggingSceneId,onMergeProps,onPropsMaster,
-          lookbookStale:!!_stale.props,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("props")})
-      : artView==="locations" && LocationSheets
+          lookbookStale:!!_stale.props,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("props"),
+          onApplyLookbookDraftOnly:()=>onApplyLookbook&&onApplyLookbook("props","draft")})
+    : artView==="locations" && LocationSheets
       ? React.createElement(LocationSheets,{project,locations,scenes,onUpdate:onUpdateLocation,onDraft:onDraftLocation,
           onDraftAll:onDraftAllLocs,onAdd:onAddLocation,onDelete:onDeleteLocation,draftingId:draftingLocId,draftingAll:draftingAllLocs,
+          trashItems:(trash&&trash.locations)||[],onRestore:onRestoreLoc,onPurge:onPurgeLoc,
           onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId,onScout,
-          lookbookStale:!!_stale.locations,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("locations")})
+          lookbookStale:!!_stale.locations,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("locations"),
+          onApplyLookbookDraftOnly:()=>onApplyLookbook&&onApplyLookbook("locations","draft")})
       : artView==="stylebible" && window.StyleBibleView
       ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage,onColorist,
           lookbookStale:!!_stale.stylebible,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("colorist")})

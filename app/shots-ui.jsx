@@ -69,7 +69,13 @@ function ClipBar({ shots, onUpdate, clipMax }){
 
 function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnchor, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, clipNo }){
   const loc = ctx.location;
-  const subjects = (sh.subjects||[]).map(id=>ctx.charById[id]).filter(Boolean);
+  // who/what is in frame is DERIVED from the action text (single source of truth) — the
+  // old manual tags are gone; this is what the prompt + references actually use.
+  const _allChars = Object.values(ctx.charById||{});
+  const inCastIds = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, _allChars) : (sh.subjects||[]);
+  const subjects = inCastIds.map(id=>ctx.charById[id]).filter(Boolean);
+  const inPropIds = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, ctx.charById, ctx.propById) : (sh.props||[]);
+  const inProps = inPropIds.map(id=>ctx.propById[id]).filter(Boolean);
   const finalPrompt = combinedShotPrompt(sh, ctx);
   const isAnchor = !!(anchorShot && anchorShot.id===sh.id);
 
@@ -78,9 +84,14 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
   // text-to-image sample — single-sample physics, so the set/light/identity can't
   // re-roll per shot. {fresh:true} (the card menu's "Generate fresh sample")
   // bypasses it for the rare reframe an edit can't reach.
-  const deriveBase = (gopts)=>{
+  // ASYNC on purpose: in cloud mode the anchor frame often isn't in the sync memory
+  // cache (e.g. right after a reload) — falling back to nbLoadImage keeps the derive
+  // chain intact instead of silently degrading to a fresh sample that drifts.
+  const deriveBase = async (gopts)=>{
     if(isAnchor || !anchorShot || (gopts && (gopts.fresh || gopts.editInstruction))) return null;
-    return (typeof nbGetImage==="function") ? (nbGetImage(anchorShot.id) || null) : null;
+    let u = (typeof nbGetImage==="function") ? nbGetImage(anchorShot.id) : "";
+    if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(anchorShot.id); }catch(e){} }
+    return u || null;
   };
 
   // reference images. Deriving: the anchor IS the base image, so attachments slim to
@@ -90,11 +101,17 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
     const grab = async (id)=>{ let u = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
       if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(id); }catch(e){} } return u; };
     const out = [];
-    const deriving = !!deriveBase(gopts);
+    const deriving = !!(await deriveBase(gopts));
     if(!deriving && anchorShot && anchorShot.id!==sh.id){ const u = await grab(anchorShot.id); if(u) out.push({ url:u, note:"scene key frame", anchor:true }); }
-    if(loc){ const u = await grab(loc.id); if(u) out.push({ url:u, note:(loc.name||"location")+" location coverage sheet (six views of ONE set)" }); }
-    for(const c of subjects){ const u = await grab(c.id); if(u) out.push({ url:u, note:c.name+" character sheet" }); }
-    for(const id of (sh.props||[])){ const p = ctx.propById[id]; if(!p) continue; const u = await grab(id); if(u) out.push({ url:u, note:p.name+" prop sheet" }); }
+    if(loc){ const u = await grab(loc.id); if(u) out.push({ url:u, note:(loc.name||"location")+" location coverage sheet (multiple views of ONE set)" }); }
+    // identity anchors for the cast & props actually in THIS frame — derived from the
+    // action text (inFrameCast/inFrameProps), never the fragile manual tags, so an
+    // under-tagged shot can't drop an anchor and an off-frame character isn't forced in.
+    const _chars = Object.values(ctx.charById||{});
+    const inCast = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, _chars) : (sh.subjects||[]);
+    for(const id of inCast){ const c = ctx.charById[id]; if(!c) continue; const u = await grab(id); if(u) out.push({ url:u, note:c.name+" character sheet" }); }
+    const inPr = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, ctx.charById, ctx.propById) : (sh.props||[]);
+    for(const id of inPr){ const p = ctx.propById[id]; if(!p) continue; const u = await grab(id); if(u) out.push({ url:u, note:p.name+" prop sheet" }); }
     return out;
   };
 
@@ -112,7 +129,7 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
       s += "Match the corresponding character(s), location and prop(s) to these reference designs EXACTLY "
         +"(faces, wardrobe, geometry, materials) for cross-shot continuity; compose them into this one frame.";
       if(isAnchor) s += " THIS FRAME IS THE SCENE'S KEY FRAME — every other shot in the scene will be derived from it. "
-        +"Lock it to the location coverage sheet exactly (ONE real set, six views): its architecture, surfaces, "
+        +"Lock it to the location coverage sheet exactly (ONE real set, multiple views): its architecture, surfaces, "
         +"signage and light define the scene's look from here on.";
       return s;
     },
@@ -159,6 +176,28 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
   const toggleIn = (key, id)=>{ const cur = sh[key]||[]; const next = cur.indexOf(id)>=0 ? cur.filter(x=>x!==id) : [...cur, id];
     const patch = { [key]: next }; if(key==="subjects") patch.subjectsSet = true; onUpdate(sh.id, patch); };
 
+  // REFERENCE IMAGES that influence this shot's frame — the scene KEY FRAME it derives
+  // from, the LOCATION coverage plate, and the in-frame CHARACTER & PROP sheets. Shown as
+  // small thumbnails (click to enlarge) so it's clear what canon art the generation locks
+  // to. Recomputed from the live entity sheets (always displayable), keyed off the ids.
+  const [refImgs, setRefImgs] = React.useState([]);    // auto influences, DERIVED from Characters/Props/Locations
+  const _refKey = [sh.id, anchorShot&&anchorShot.id, loc&&loc.id,
+    subjects.map(c=>c.id).join(","), inProps.map(p=>p.id).join(","), gen.genUrl||""].join("|");
+  React.useEffect(()=>{
+    let alive = true;
+    (async ()=>{
+      const grab = async (id)=>{ let u = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
+        if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(id); }catch(e){} } return u||""; };
+      const out = [];
+      if(anchorShot && anchorShot.id!==sh.id){ const u=await grab(anchorShot.id); if(u) out.push({ url:u, label:"Scene key frame", kind:"anchor" }); }
+      if(loc){ const u=await grab(loc.id); if(u) out.push({ url:u, label:(loc.name||"Location")+" plate", kind:"location" }); }
+      for(const c of subjects){ const u=await grab(c.id); if(u) out.push({ url:u, label:c.name, kind:"character" }); }
+      for(const p of inProps){ const u=await grab(p.id); if(u) out.push({ url:u, label:p.name, kind:"prop" }); }
+      if(alive) setRefImgs(out);
+    })();
+    return ()=>{ alive=false; };
+  },[_refKey]);
+
   const beatLabel = "Beat "+(sh.beatN||"\u2014");
   const initials = (sizeOf(sh.size).label||"SH");
 
@@ -181,6 +220,17 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
       ],
       onDelete:()=>onDelete(sh.id), deleteLabel:"Delete shot" }),
     _el("div",{className:"sheet-body"},
+      // reference images this frame is DERIVED from — the in-frame Characters, Props &
+      // Location sheets (+ the scene key frame). Click a thumb to enlarge. Read-only: who/
+      // what is in frame is auto-read from the Action line, not added by hand.
+      refImgs.length>0 && _el("div",{className:"shot-refs"},
+        _el("div",{className:"shot-refs-lab"},
+          _el(Icon.layers,{s:11}),"Built from — derived from Characters, Props & Locations"),
+        _el("div",{className:"shot-refs-row"},
+          refImgs.map((r,i)=>_el("button",{key:"a"+i,className:"shot-ref-thumb "+r.kind,
+            title:r.label+" — click to enlarge",
+            onClick:()=>onView&&onView(r.url,{name:r.label})},
+            _el("img",{src:r.url,alt:r.label,loading:"lazy"}))))),
       _el("div",{className:"shot-head"},
         _el("div",{className:"shot-grammar-line"},shotGrammarLabel(sh)),
         _el("div",{className:"shot-head-right"},
@@ -211,10 +261,21 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
         placeholder:"A short line spoken in this beat\u2026",onCommit:v=>onUpdate(sh.id,{dialogue:v})}),
 
       _el(CardFold,{label:"In frame",defaultOpen:false},
-        _el(FrameToggles,{label:"Characters",items:characters,selected:sh.subjects||[],
-          onToggle:(id)=>toggleIn("subjects",id),emptyHint:"No cast in this story."}),
-        _el(FrameToggles,{label:"Props",items:propsAvail,selected:sh.props||[],
-          onToggle:(id)=>toggleIn("props",id),emptyHint:"No props mapped to this scene."}),
+        // read-only: derived from the action text, the single source the prompt uses —
+        // no manual toggles to drift out of sync. Edit the ACTION to change who's in frame.
+        _el("div",{className:"shot-inframe-auto"},
+          _el("div",{className:"shot-inframe-row"},
+            _el("span",{className:"shot-frame-lab"},"Characters"),
+            subjects.length
+              ? subjects.map(c=>_el("span",{key:c.id,className:"shot-inframe-chip"},c.name))
+              : _el("span",{className:"shot-inframe-none"},"none named in the action")),
+          _el("div",{className:"shot-inframe-row"},
+            _el("span",{className:"shot-frame-lab"},"Props"),
+            inProps.length
+              ? inProps.map(p=>_el("span",{key:p.id,className:"shot-inframe-chip prop"},p.name))
+              : _el("span",{className:"shot-inframe-none"},"none named in the action")),
+          _el("div",{className:"shot-inframe-hint"},
+            _el(Icon.sparkles,{s:11}),"Auto-read from the action — edit the Action line to change who/what is in frame.")),
         _el("div",{className:"shot-loc-note"},
           _el(Icon.globe,{s:12}),
           loc ? _el("span",null,"Location: ",_el("b",null,loc.name),(typeof stagingHasContent==="function"&&stagingHasContent(loc))?" \u00b7 depth grid inherited":" \u00b7 no depth grid staged")
@@ -340,7 +401,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     });
   },[(shots||[]).length]);
   const ctxFor = (scene)=>({ scene, location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null,
-    charById, propById, project });
+    charById, propById, project, locations:locations||[] });
 
   const ordered = React.useMemo(()=> (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0)),[scenes]);
   const shotsByScene = React.useMemo(()=>{ const m={}; (shots||[]).forEach(s=>{ (m[s.sceneId]=m[s.sceneId]||[]).push(s); });
@@ -350,8 +411,25 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   // scene FOCUS (same pattern as Props / Characters / Locations): pick one scene
   // from the dropdown to see only its shots and batch-generate the whole scene.
   // A focused scene is always rendered OPEN — the batch queue needs its cards mounted.
-  const [sceneFilter, setSceneFilter] = React.useState("");
-  const visibleScenes = sceneFilter ? scenesWithShots.filter(s=>s.id===sceneFilter) : scenesWithShots;
+  // one scene at a time — the ← / → pager (with a jump menu) IS the scene focus;
+  // a search or an active batch shows the full set so every needed card stays mounted
+  const [pIdx, setPIdx] = useScenePager(scenesWithShots.length);
+  // free-text search across each shot's ACTION, composition, dialogue, who's in frame, and
+  // its camera grammar (size/angle/move/lens) — word-boundary match, like the other tabs.
+  const [query, setQuery] = React.useState("");
+  const q = query.trim().toLowerCase();
+  const shotHay = (sh)=>{ const subs=(sh.subjects||[]).map(id=>(charById[id]||{}).name||"").join(" ");
+    return [sh.action, sh.composition, sh.dialogue, subs, (typeof shotGrammarLabel==="function"?shotGrammarLabel(sh):"")].filter(Boolean).join("  "); };
+  const matchShot = (sh)=> (typeof searchWordMatch==="function") ? searchWordMatch(shotHay(sh), q) : (!q || shotHay(sh).toLowerCase().indexOf(q)>=0);
+  const shotsForGroup = (sid)=> q ? (shotsByScene[sid]||[]).filter(matchShot) : (shotsByScene[sid]||[]);
+  // the pager IS the scene focus: browse pages ONE scene at a time; a search or a
+  // running batch shows the full set (so every needed card stays mounted)
+  const pagerMode = !q && !batchActiveId;
+  const pIdxC = Math.min(pIdx, Math.max(0, scenesWithShots.length-1));
+  const curScene = scenesWithShots[pIdxC];
+  const baseScenes = pagerMode ? [curScene].filter(Boolean) : scenesWithShots;
+  const visibleScenes = q ? scenesWithShots.filter(s=>shotsForGroup(s.id).length) : baseScenes;
+  const shownCount = q ? scenesWithShots.reduce((n,s)=>n+shotsForGroup(s.id).length,0) : (shots||[]).length;
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s ? s.no : sid; };
 
   // order a scene's shots with its anchor FIRST, so the anchor frame exists before the
@@ -360,7 +438,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     if(i>0){ const [a]=arr.splice(i,1); arr.unshift(a); } return arr.map(s=>s.id); };
   const startAll = ()=>{ if(batchActiveId) return; const ids=scenesWithShots.flatMap(s=>anchorFirstIds(shotsByScene[s.id]));
     if(!ids.length){ batch.setMsg("Draft the shots first \u2014 nothing to generate yet."); return; }
-    setSceneFilter(""); setCollapsed({});   // mount every card so the queue can reach each one
+    setCollapsed({});   // batch shows the full set (pagerMode is off while batchActiveId), cards mounted
     batch.begin(ids, 0); };
   const startScene = (scene)=>{ if(batchActiveId) return; const ids=anchorFirstIds(shotsByScene[scene.id]);
     if(!ids.length) return; batch.begin(ids, 0); };
@@ -397,7 +475,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
         _el("div",{style:{flex:1}},
           _el("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Cinematographer (Shot Designer)",
             _el(window.InfoTip,{label:"About the Shot List",
-              text:"One shot per beat, grouped by scene. Each frame composes the scene's Style Bible grade, the location plate and the character & prop sheets into a single image \u2014 so every shot stays on-model and on-palette. Each scene's CLIPS strip groups its shots into clip sequences \u2014 one generated video clip each (\u226415s, the Stage's render unit): it auto-packs by estimated duration (dialogue shots from their line's length, else \u22485s); click a joint to split or merge by hand. The Storyboards tab can board these same clips. Focus a scene from the dropdown to see only its shots and generate the whole scene at once. 'Design all shots' breaks any scene that has none into coverage; 'Generate all shots' renders every frame, anchor first."}))),
+              text:"One shot per beat, grouped by scene. Each frame composes the scene's Style Bible grade, the location plate and the character & prop sheets into a single image \u2014 so every shot stays on-model and on-palette. Each scene's CLIPS strip groups its shots into clip sequences \u2014 one generated video clip each (\u226415s, the Stage's render unit): it auto-packs by estimated duration (dialogue shots from their line's length, else \u22485s); click a joint to split or merge by hand. The Storyboards tab can board these same clips. Move between scenes with the ← / → pager (or its jump menu) — one scene at a time — and generate the whole scene at once. 'Design all shots' breaks any scene that has none into coverage; 'Generate all shots' renders every frame, anchor first."}))),
         _el("div",{className:"art-intro-actions"},
           _el("button",{className:"art-draftall ghost",onClick:()=>exportShotList(scenesWithShots, shotsByScene, ctxFor, project),
             title:"Preview the shot list as a printable table, then print / save as PDF or download the HTML"},
@@ -412,32 +490,34 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
             title:"Generate (or regenerate) the frame for every shot \u2014 you choose whether to redo ones that already have a frame"},
             _el(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all shots")))),
     BatchBar && _el(BatchBar,{batch,noun:"shot"}),
-    // scene focus + per-scene batch generate (the same bar Props / Locations use)
-    _el("div",{className:"prop-scenebar"},
-      _el("span",{className:"prop-scenebar-lab"},_el(Icon.layers,{s:13}),"Focus a scene"),
-      _el("select",{className:"prop-select prop-scenebar-select",value:sceneFilter,
-        onChange:e=>setSceneFilter(e.target.value)},
-        _el("option",{value:""},"All scenes — show every scene's shots"),
-        scenesWithShots.map(s=>{
-          const n = (shotsByScene[s.id]||[]).length;
-          return _el("option",{key:s.id,value:s.id},
-            "Scene "+String(s.no).padStart(2,"0")+" · "+(s.title||"")+"  ("+n+" shot"+(n!==1?"s":"")+")");
-        })),
-      sceneFilter && _el("button",{className:"art-draftall",disabled:!!batchActiveId,
-        onClick:()=>{ const sc=scenesWithShots.find(x=>x.id===sceneFilter); if(sc) startScene(sc); },
+    // search + scene focus (the same toolbar Props / Characters / Locations use)
+    _el("div",{className:"prop-toolbar"},
+     _el("div",{className:"prop-searchbar"},
+       _el(Icon.search,{s:14}),
+       _el("input",{className:"prop-search-input",type:"text",value:query,
+         placeholder:"Search shots — action, who's in frame, size…",
+         onChange:e=>setQuery(e.target.value), onKeyDown:e=>{ if(e.key==="Escape") setQuery(""); }}),
+       q && _el("span",{className:"prop-search-count"}, shownCount+" of "+(shots||[]).length),
+       q && _el("button",{className:"prop-search-clear",title:"Clear search",onClick:()=>setQuery("")},_el(Icon.x,{s:13}))),
+     pagerMode && curScene && _el("div",{className:"prop-scenebar"},
+      _el("button",{className:"art-draftall",disabled:!!batchActiveId,
+        onClick:()=>startScene(curScene),
         title:"Generate (or regenerate) the frame for every shot in this scene — the anchor renders first; you choose whether to redo frames that already exist"},
         _el(Icon.sparkles,{s:14}),
-        batchActiveId?"Generating…":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0"))),
-      sceneFilter && onDirectScene && _el("button",{className:"art-draftall ghost",disabled:!!batchActiveId,
-        onClick:()=>onDirectScene(sceneFilter),
+        batchActiveId?"Generating…":("Generate all in Scene "+String(curScene.no).padStart(2,"0"))),
+      onDirectScene && _el("button",{className:"art-draftall ghost",disabled:!!batchActiveId,
+        onClick:()=>onDirectScene(curScene.id),
         title:"Scene Director — locks this scene's key frame, derives every other shot from it, visually inspects each result against the anchor and repairs drift. Asks before it spends."},
-        _el(Icon.clapper,{s:14}),"Direct scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0"))),
-    visibleScenes.map(scene=>_el(SceneShotGroup,{key:scene.id,scene,shots:shotsByScene[scene.id]||[],
+        _el(Icon.clapper,{s:14}),"Direct scene "+String(curScene.no).padStart(2,"0")))),
+    (pagerMode && (typeof ScenePager!=="undefined") && scenesWithShots.length>0) && (()=>{ const cs=scenesWithShots[pIdxC]; const cl=cs&&ctxFor(cs).location;
+      return _el(ScenePager,{ idx:pIdxC, total:scenesWithShots.length, title:cs&&cs.title, sub:cl&&cl.name, scenes:scenesWithShots, onJump:setPIdx,
+        onPrev:()=>setPIdx(i=>Math.max(0,i-1)), onNext:()=>setPIdx(i=>Math.min(scenesWithShots.length-1,i+1)) }); })(),
+    visibleScenes.map(scene=>_el(SceneShotGroup,{key:scene.id,scene,shots:shotsForGroup(scene.id),
       ctx:ctxFor(scene),characters:characters||[],beatsMap,propsAvail:(typeof propsForScene==="function")?propsForScene(props,scene.id):[],
       onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
       onAddShot,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===scene.id,
       batchActiveId,onBatchDone:batch.advance,onGenerateShot:startShot,
-      open:sceneFilter ? true : !collapsed[scene.id],onToggle:()=>toggleScene(scene.id)})));
+      open:(q || pagerMode) ? true : !collapsed[scene.id],onToggle:()=>toggleScene(scene.id)})));
 }
 window.ShotList = ShotList;
 

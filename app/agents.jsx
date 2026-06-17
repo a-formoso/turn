@@ -531,12 +531,22 @@ async function agentAdaptation(ctx){
     let scn = s, beats = ctx.model.beats[s.id];
     try{
       if(!beats && typeof author==="function"){
-        const authored = await author(s, prev, ctx.model.characters);
-        if(authored){ scn = {...s, ...authored.patch}; beats = authored.beats;
-          ctx.model.scenes[i] = scn; ctx.model.beats[s.id] = authored.beats; }
+        // author the beat map; retry ONCE if the model hiccups — a scene must never end
+        // up with a screenplay but no beat map (the cause of "No beat map yet" on a written
+        // scene). Both tries can fail only on a hard model error.
+        for(let attempt=0; attempt<2 && !beats; attempt++){
+          const authored = await author(s, prev, ctx.model.characters);
+          if(authored && authored.beats && (authored.beats.rows||[]).length){
+            scn = {...s, ...authored.patch}; beats = authored.beats;
+            ctx.model.scenes[i] = scn; ctx.model.beats[s.id] = authored.beats;
+          }
+        }
       }
       const res = (typeof draft==="function") ? await draft(scn, beats, prev) : null;
       if(res){ ctx.model.drafts[s.id] = res; written++; }
+      // never leave a written scene beat-less and silent — flag it so the user can fix it.
+      if(res && !(beats && (beats.rows||[]).length))
+        ctx.emit({k:"flag", t:"Sc "+s.no+" “"+s.title+"” was written, but its beat map didn't generate — open it and 'Create beat map', or re-run."});
       ctx.sync();
     }catch(e){ /* keep going — one bad scene shouldn't stop the film */ }
   }
@@ -593,6 +603,81 @@ async function agentTableRead(ctx){
     ctx.emit({k:"flag", t:"Voice check skipped — it needs at least two characters with spoken lines."});
     ctx.emit({k:"done", t:rep.notes.length+" specific notes flagged. Click a note to jump to that scene."});
   }
+}
+
+/* =========================================================
+   SCRIPT BREAKDOWN  (Writers' Room — the 1st-AD pass, runs on Claude)
+   Reads every WRITTEN scene's beats + screenplay, tags each beat's characters (anatomy /
+   features / appearance states + the pronoun the script uses), props handled, and set
+   dressing. Two jobs: (1) ENRICH the cast sheets with script-only details; (2) the
+   bible↔script DRIFT CHECK — flag where the script's pronouns contradict a character's
+   canonical pronouns, with a reconcile proposal (catches the Lumi gender case). Props are
+   tagged + listed for the Props Master to generate (this Writers' ctx can't write props).
+   ========================================================= */
+async function agentScriptBreakdown(ctx){
+  if(!ctx.ai || !ctx.ai.available){ ctx.emit({k:"flag", t:"The model isn't available — the breakdown needs it."}); ctx.emit({k:"done",t:"Aborted."}); return; }
+  const scenes = (ctx.model.scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const written = scenes.filter(s=> ctx.model.drafts[s.id]);
+  if(!written.length){ ctx.emit({k:"flag", t:"No scenes are written yet — build the script first (New Story / Adaptation), then run the breakdown."}); ctx.emit({k:"done",t:"Nothing to break down."}); return; }
+  ctx.emit({k:"plan", t:"Breaking down "+written.length+" written scene"+(written.length>1?"s":"")+" — tagging each beat's characters, features, props and set dressing, and checking the script against the cast sheets."});
+  const pronOf = (g)=> g==="he"?"he/him":g==="she"?"she/her":g==="they"?"they/them":"";
+  const charByName = {}; (ctx.model.characters||[]).forEach(c=>{ if(c.name) charByName[c.name.toLowerCase()]=c; });
+  const findChar = (nm)=>{ const low=(nm||"").toLowerCase();
+    return charByName[low] || (ctx.model.characters||[]).find(x=>{ const xn=(x.name||"").toLowerCase(); return xn && (xn.includes(low)||low.includes(xn)); }); };
+  let drift=0, reconciled=0, enriched=0, propsFound=0, dressFound=0, lintCount=0;
+  for(const s of written){
+    if(ctx.cancelled()) return;
+    ctx.emit({k:"act", t:"Reading Sc "+s.no+" “"+s.title+"”…"});
+    let bd=null; try{ bd = await window.aiScriptBreakdown(s, ctx.model.beats[s.id], ctx.model.drafts[s.id], ctx.model.characters); }catch(e){}
+    if(!bd){ ctx.emit({k:"flag", t:"Sc "+s.no+": couldn't read a breakdown — skipping."}); continue; }
+    // (4) REFERENTIAL-COMPLETENESS LINT — flag beats whose text isn't self-contained
+    // (ambiguous pronoun, or a prop established earlier that this beat drops) before any
+    // frame is generated. Deterministic, reads the beat map + the breakdown's prop list.
+    if(typeof window.beatContinuityLint==="function"){
+      const lf = window.beatContinuityLint(s, ctx.model.beats[s.id], bd.props, ctx.model.characters);
+      lf.forEach(f=> ctx.emit({k:"flag", t:"Sc "+s.no+" · "+f.msg}));
+      lintCount += lf.length;
+    }
+    bd.characters.forEach(c=>{ const bits=[]; if(c.features.length) bits.push(c.features.length+" feature"+(c.features.length>1?"s":"")); if(c.states.length) bits.push(c.states.length+" state"+(c.states.length>1?"s":""));
+      ctx.emit({k:"observe", t:"Sc "+s.no+" · "+c.name+(bits.length?(" — "+bits.join(", ")):"")+(c.gender_used!=="unclear"?(" · script says “"+c.gender_used+"”"):"")}); });
+    if(bd.props.length){ propsFound+=bd.props.length; ctx.emit({k:"observe", t:"Sc "+s.no+" props: "+bd.props.map(p=>p.name+(p.owner?(" ("+p.owner+")"):"")).join(", ")}); }
+    if(bd.set_dressing.length){ dressFound+=bd.set_dressing.length; ctx.emit({k:"observe", t:"Sc "+s.no+" set dressing: "+bd.set_dressing.join(", ")}); }
+    for(const c of bd.characters){
+      if(ctx.cancelled()) return;
+      const ch = findChar(c.name); if(!ch) continue;
+      // (1) DRIFT CHECK — script pronoun vs canonical pronoun
+      const scriptPron = pronOf(c.gender_used);
+      const canonPron = (typeof window.charPronouns==="function") ? window.charPronouns(ch) : "";
+      if(scriptPron && canonPron && scriptPron!==canonPron){
+        drift++;
+        const ok = await ctx.propose({
+          title:"Gender drift — "+ch.name,
+          reason:"Sc "+s.no+" refers to "+ch.name+" as “"+c.gender_used+"”, but the cast sheet's pronouns are "+canonPron+".",
+          rationale:"Approve to set "+ch.name+"'s canonical pronouns to "+scriptPron+" (match the script). Reject to keep "+canonPron+" — then fix the script's pronouns.",
+          before:"Sheet: "+canonPron, after:"Sheet: "+scriptPron });
+        if(ctx.cancelled()) return;
+        if(ok){ const i=ctx.model.characters.findIndex(x=>x.id===ch.id);
+          if(i>=0){ ctx.model.characters[i]={...ctx.model.characters[i], pronouns:scriptPron}; charByName[(ch.name||"").toLowerCase()]=ctx.model.characters[i]; ctx.sync(); reconciled++; ctx.emit({k:"ok", t:ch.name+" → "+scriptPron}); } }
+      }
+      // (2) ENRICH — features the scene reveals that aren't on the sheet yet
+      const existing = ((ch.coreBody||"")+" "+(ch.physique?Object.values(ch.physique).join(" "):"")).toLowerCase();
+      const newFeats = c.features.filter(f=> f && !existing.includes(f.toLowerCase().slice(0,16)));
+      for(const f of newFeats){
+        if(ctx.cancelled()) return;
+        const ok = await ctx.propose({
+          title:"Add to "+ch.name+"'s sheet",
+          reason:"Sc "+s.no+" reveals a detail not on "+ch.name+"'s sheet: “"+f+"”.",
+          rationale:"Approve to append it to the character's physical description so every sheet and shot includes it.",
+          before:(ch.coreBody||"(no body description)").slice(0,90), after:f });
+        if(ctx.cancelled()) return;
+        if(ok){ const i=ctx.model.characters.findIndex(x=>x.id===ch.id);
+          if(i>=0){ const cur=ctx.model.characters[i]; const cb=(cur.coreBody||"").trim();
+            ctx.model.characters[i]={...cur, coreBody:(cb+(cb?" ":"")+f.replace(/\.$/,"")+".").trim()};
+            charByName[(ch.name||"").toLowerCase()]=ctx.model.characters[i]; ctx.sync(); enriched++; ctx.emit({k:"ok", t:"Added “"+f+"” to "+ch.name}); } }
+      }
+    }
+  }
+  ctx.emit({k:"done", t:"Breakdown complete — "+drift+" drift flag"+(drift!==1?"s":"")+" ("+reconciled+" reconciled), "+enriched+" feature"+(enriched!==1?"s":"")+" added to the cast, "+propsFound+" prop"+(propsFound!==1?"s":"")+" + "+dressFound+" set-dressing item"+(dressFound!==1?"s":"")+" tagged, "+lintCount+" continuity warning"+(lintCount!==1?"s":"")+" flagged. Generate the tagged props in the Art Room → Props (Props Master)."});
 }
 
 /* =========================================================
@@ -807,7 +892,9 @@ async function agentCastingDirector(ctx){
     ctx.emit({k:"done", t:"Nothing to cast."}); return;
   }
   const N = cast.list.length;
-  ctx.emit({k:"plan", t:"Designing the cast — for each of the "+N+" character"+(N!==1?"s":"")+": draft the look, find their appearance changes, generate the master sheet (with prop + cameo references), then each state variant."});
+  ctx.emit({k:"plan", t: ctx.draftOnly
+    ? "Re-drafting the cast from the updated Lookbook — for each of the "+N+" character"+(N!==1?"s":"")+": re-draft the look and appearance states. Specs only — every master sheet and variant stays untouched."
+    : "Designing the cast — for each of the "+N+" character"+(N!==1?"s":"")+": draft the look, find their appearance changes, generate the master sheet (with prop + cameo references), then each state variant."});
   let specs=0, sheets=0, variants=0;
   for(const ch of cast.list){
     if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+sheets+" sheet"+(sheets!==1?"s":"")+" generated."}); return; }
@@ -828,6 +915,10 @@ async function agentCastingDirector(ctx){
       try{ const sts = await cast.suggestStates(c); if(sts && sts.length){ c = {...c, states:sts}; } }catch(e){}
     }
     if(ctx.cancelled()) return;
+
+    // draft-only ("Re-draft only" on the Lookbook-stale banner): spec updated — leave this
+    // character's master sheet and variants untouched.
+    if(ctx.draftOnly) continue;
 
     // 3) generate the master sheet (force = regenerate even if one exists)
     let baseUrl = ctx.force ? "" : await cast.imageOf(c.id);
@@ -852,8 +943,51 @@ async function agentCastingDirector(ctx){
     }
   }
   if(ctx.art.markApplied && (ctx.force||specs||sheets||variants)) ctx.art.markApplied("characters");
-  ctx.emit({k:"done", t:"Cast designed — "+specs+" spec"+(specs!==1?"s":"")+" drafted, "+sheets+" master sheet"+(sheets!==1?"s":"")+", "+variants+" appearance variant"+(variants!==1?"s":"")+". Review and tweak any in the Characters tab."});
+  ctx.emit({k:"done", t: ctx.draftOnly
+    ? "Cast re-drafted — "+specs+" spec"+(specs!==1?"s":"")+" updated from the Lookbook. Sheets left untouched — regenerate them from the Characters tab when ready."
+    : "Cast designed — "+specs+" spec"+(specs!==1?"s":"")+" drafted, "+sheets+" master sheet"+(sheets!==1?"s":"")+", "+variants+" appearance variant"+(variants!==1?"s":"")+". Review and tweak any in the Characters tab."});
 }
+
+/* =========================================================
+   WEAR PROPS (the Coordinator's "step 3", Art Room) — after the cast is generated and
+   the props (which reference the cast) are made, RE-GENERATE each character's master so
+   it wears its exact finalized worn-prop sheets (generateMaster already attaches them).
+   Only touches characters that (a) already have a master and (b) have ≥1 worn prop WITH a
+   sheet; any already-generated appearance-state variant is refreshed off the new master so
+   they don't drift. Closes the loop: character → prop (refs character) → character wears prop.
+   ========================================================= */
+async function agentWearProps(ctx){
+  const cast = ctx.art && ctx.art.cast;
+  if(!cast || !cast.list || !cast.list.length){ ctx.emit({k:"done", t:"No cast to dress."}); return; }
+  const targets = [];
+  for(const c of cast.list){
+    if(ctx.cancelled()) return;
+    const hasMaster = cast.imageOf ? await cast.imageOf(c.id) : null;
+    if(!hasMaster) continue;   // never generated — leave it for the Casting Director
+    const worn = cast.wornPropsWithSheets ? await cast.wornPropsWithSheets(c) : [];
+    if(worn.length) targets.push({ c, worn });
+  }
+  if(!targets.length){ ctx.emit({k:"ok", t:"No characters have newly-generated worn props to wear."}); ctx.emit({k:"done", t:"Cast already wears its props."}); return; }
+  ctx.emit({k:"plan", t:"Dressing "+targets.length+" character"+(targets.length!==1?"s":"")+" in their finalized worn props — re-generating each master so it wears the exact prop sheet"+(targets.length!==1?"s":"")+", then refreshing any appearance variant off the new master."});
+  let done=0;
+  for(const { c, worn } of targets){
+    if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+done+" dressed."}); return; }
+    ctx.emit({k:"act", t:"Dressing "+(c.name||"a character")+" in "+worn.length+" worn prop"+(worn.length!==1?"s":"")+" ("+worn.map(p=>p.name).join(", ").slice(0,80)+")…"});
+    try{
+      const masterUrl = await cast.generateMaster(c);
+      // refresh ONLY appearance states that already exist, off the new master
+      for(const st of (c.states||[])){
+        if(ctx.cancelled()) return;
+        const existing = cast.imageOf ? await cast.imageOf(c.id+":"+st.id) : null;
+        if(existing){ try{ await cast.generateState(c, st, masterUrl); }catch(e){} }
+      }
+      done++;
+      ctx.emit({k:"ok", t:(c.name||"Character")+" now wears its exact prop"+(worn.length!==1?"s":"")+"."});
+    }catch(e){ ctx.emit({k:"flag", t:"Couldn't dress "+(c.name||"the character")+": "+((e&&e.message)||e)+". Moving on."}); }
+  }
+  ctx.emit({k:"done", t:"Dressed "+done+" character"+(done!==1?"s":"")+" in their finalized worn props."});
+}
+window.agentWearProps = agentWearProps;
 
 async function agentPropsMaster(ctx){
   const pm = ctx.art && ctx.art.propmaster;
@@ -861,7 +995,9 @@ async function agentPropsMaster(ctx){
     ctx.emit({k:"flag", t:"Props workspace unavailable."});
     ctx.emit({k:"done", t:"Nothing to do."}); return;
   }
-  ctx.emit({k:"plan", t:"Mastering the props — derive every prop the script names (worn/carried by the cast + the set dressing in the action), draft each spec, dedup near-duplicates, then generate a reference sheet for each so the cast can reference them."});
+  ctx.emit({k:"plan", t: ctx.draftOnly
+    ? "Re-drafting the props from the updated Lookbook — derive any new props, re-draft each spec, dedup near-duplicates. Specs only — every generated sheet stays untouched."
+    : "Mastering the props — derive every prop the script names (worn/carried by the cast + the set dressing in the action), draft each spec, dedup near-duplicates, then generate a reference sheet for each so the cast can reference them."});
 
   // 1) derive props from the script: cast-owned + set dressing
   ctx.emit({k:"act", t:"Reading the script for props…"});
@@ -886,6 +1022,14 @@ async function agentPropsMaster(ctx){
   try{ merged = pm.dedup(); }catch(e){}
   if(merged) ctx.emit({k:"ok", t:"Merged "+merged+" near-duplicate"+(merged!==1?"s":"")+" into one card each."});
   if(ctx.cancelled()) return;
+
+  // draft-only ("Re-draft only" on the Lookbook-stale banner): the specs now carry the
+  // updated Lookbook — stop before generation so every existing sheet stays untouched.
+  if(ctx.draftOnly){
+    if(ctx.art.markApplied) ctx.art.markApplied("props");
+    ctx.emit({k:"done", t:"Props re-drafted — "+(castN+setN)+" derived, "+drafted+" spec"+(drafted!==1?"s":"")+" updated from the Lookbook. Sheets left untouched — regenerate them from the Props tab when ready."});
+    return;
+  }
 
   // 4) generate sheets (force = regenerate ALL drafted props)
   let todo=[];
@@ -913,7 +1057,9 @@ async function agentLocationScout(ctx){
     ctx.emit({k:"flag", t:"Locations workspace unavailable."});
     ctx.emit({k:"done", t:"Nothing to do."}); return;
   }
-  ctx.emit({k:"plan", t:"Scouting the film's locations — pull every place from the sluglines, draft each one's staging + depth-grid spec, generate the plate, and add the time-of-day variants the script needs. Plus a coverage check: any scene whose slugline location has no card yet."});
+  ctx.emit({k:"plan", t: ctx.draftOnly
+    ? "Re-drafting the locations from the updated Lookbook — pull any new places, re-draft each spec + depth-grid staging. Specs only — every generated plate stays untouched."
+    : "Scouting the film's locations — pull every place from the sluglines, draft each one's staging + depth-grid spec, generate the plate, and add the time-of-day variants the script needs. Plus a coverage check: any scene whose slugline location has no card yet."});
 
   // 1) pull locations from the sluglines (and refresh existing scene lists / times)
   ctx.emit({k:"act", t:"Reading the sluglines for locations…"});
@@ -955,6 +1101,14 @@ async function agentLocationScout(ctx){
   if(vars) ctx.emit({k:"ok", t:"Added "+vars+" time-of-day variant"+(vars!==1?"s":"")+" for places the script shows at more than one time."});
   if(ctx.cancelled()) return;
 
+  // draft-only ("Re-draft only" on the Lookbook-stale banner): the specs + staging now
+  // carry the updated Lookbook — stop before generation so every plate stays untouched.
+  if(ctx.draftOnly){
+    if(ctx.art.markApplied) ctx.art.markApplied("locations");
+    ctx.emit({k:"done", t:"Locations re-drafted — "+specs+" spec"+(specs!==1?"s":"")+" updated from the Lookbook"+(staged?(", "+staged+" staged"):"")+". Plates left untouched — regenerate them from the Locations tab when ready."});
+    return;
+  }
+
   // 6) generate plates, then variants (force = regenerate ALL)
   let plates=[], variants=[];
   try{ plates = await ls.toGeneratePlates(ctx.force); }catch(e){}
@@ -992,7 +1146,7 @@ async function agentVisualResearcher(ctx){
     ctx.emit({k:"flag", t:"The writing model isn't available — the Visual Researcher needs it to research the look."});
     ctx.emit({k:"done", t:"Aborted."}); return;
   }
-  ctx.emit({k:"plan", t:"Researching the film's visual language — writing the look statement, gathering reference touchstones across every department (palette, lighting, lens, texture, plus wardrobe for the cast and production design for props & sets), then rendering a mood frame for each. The colour system (Presets) reads these references when it designs the palette downstream; wardrobe and production design route to Characters, Props and Locations."});
+  ctx.emit({k:"plan", t:"Researching the film's visual language — writing the look statement, gathering reference touchstones across every department (palette, lighting, lens, texture, plus wardrobe for the cast and production design for props & sets), then rendering a mood frame for each. The colour system (the Styles tab) reads these references when it designs the palette downstream; wardrobe and production design route to Characters, Props and Locations."});
 
   // 1) research: statement + reference entries, written through to the Colorist
   ctx.emit({k:"act", t:"Reading the story, writing the look statement, gathering references…"});
@@ -1000,7 +1154,7 @@ async function agentVisualResearcher(ctx){
   try{ res = await lb.research(); }
   catch(e){ ctx.emit({k:"flag", t:"Research hit an error: "+((e&&e.message)||e)}); }
   if(res && res.statement) ctx.emit({k:"observe", t:"Look statement — "+res.statement.slice(0,150)});
-  ctx.emit({k:"observe", t:(res&&res.added ? ("Gathered "+res.added+" reference"+(res.added!==1?"s":"")) : "References already gathered")+" — the colour system (Presets) reads these directly when it designs the palette."});
+  ctx.emit({k:"observe", t:(res&&res.added ? ("Gathered "+res.added+" reference"+(res.added!==1?"s":"")) : "References already gathered")+" — the colour system (the Styles tab) reads these directly when it designs the palette."});
   if(ctx.cancelled()) return;
 
   // 2) render a mood frame for each drafted reference without one
@@ -1026,14 +1180,15 @@ async function agentDepartmentCoordinator(ctx){
   // approval-gated ones (Colour, Shots) pause at their proposal cards and resume on your yes.
   const steps = [
     ["Lookbook",   agentVisualResearcher],
-    ["Props",      agentPropsMaster],
     ["Characters", agentCastingDirector],
+    ["Props",      agentPropsMaster],
+    ["Wear props", agentWearProps],
     ["Locations",  agentLocationScout],
     ["Colour",     agentColorist],
     ["Shots",      agentShotDesigner],
     ["Storyboard", agentStoryboardDirector],
   ];
-  ctx.emit({k:"plan", t:"Running the whole pre-production pipeline in dependency order — the lookbook first (it steers the look), then props, then the cast that references them, then locations, then the colour system, then shot coverage, then the storyboard. It runs end to end WITHOUT stopping — the colour and shot-coverage steps are applied automatically, no approval needed. Press Stop anytime."});
+  ctx.emit({k:"plan", t:"Running the whole pre-production pipeline in dependency order — the lookbook first (it steers the look), then the CAST, then the PROPS (each worn/owned prop references its owner's sheet so it matches that character), then DRESSING the cast in their finalized worn props, then locations, then the colour system, then shot coverage, then the storyboard. It runs end to end WITHOUT stopping — the colour and shot-coverage steps are applied automatically, no approval needed. Press Stop anytime."});
   // each sub-agent emits its own k:"done" when its stage finishes — relabel those to k:"ok"
   // so each stage reads as one completed step and only THIS coordinator emits the final done.
   // propose() is auto-approved so the two gated steps (Colour, Shots) apply without pausing.
@@ -1166,6 +1321,9 @@ const AGENTS = [
   { id:"tableread", name:"Table-Read", icon:"film", kind:"report",
     blurb:"Reads every drafted scene end-to-end and reports pacing, tone, and voice issues across the whole script \u2014 not scene by scene.",
     run:agentTableRead },
+  { id:"breakdown", name:"Script Breakdown", icon:"clipboard", kind:"fix",
+    blurb:"The 1st-AD pass: reads every written scene beat by beat and tags each character's physical details, appearance changes, props and set dressing \u2014 then enriches the cast sheets with script-only details, flags where the script's pronouns contradict a character's sheet (one-click reconcile), and warns about beats whose text isn't self-contained (an ambiguous pronoun, or a prop that drops out) before you generate. Tagged props are listed for the Props Master.",
+    run:agentScriptBreakdown },
   { id:"director", name:"Storyboard Director", icon:"board", kind:"build", room:"art", autonomous:true,
     blurb:"Boards your film scene by scene \u2014 it thinks through each sheet's panels with the writing model, then renders the whole storyboard sheet with GPT Image 2. Runs on its own; press Stop anytime.",
     run:agentStoryboardDirector },
@@ -1179,10 +1337,10 @@ const AGENTS = [
     blurb:"Designs your whole cast on its own \u2014 drafts each character's look, finds their appearance changes, then generates the master sheet (with prop + cameo references) and every state variant. Runs autonomously; press Stop anytime.",
     run:agentCastingDirector },
   { id:"propsmaster", name:"Props Master", icon:"box", kind:"build", room:"art", autonomous:true,
-    blurb:"Derives every prop the script names \u2014 worn/carried by the cast plus the set dressing in the action \u2014 drafts each spec, dedups near-duplicates, and generates the reference sheets, so they're ready before the cast. Runs autonomously; press Stop anytime.",
+    blurb:"Derives every prop the script names \u2014 worn/carried by the cast plus the set dressing in the action \u2014 drafts each spec, dedups near-duplicates, and generates the reference sheets, each owned prop referencing its owner's character sheet so it matches that character's look (runs after the cast). Runs autonomously; press Stop anytime.",
     run:agentPropsMaster },
   { id:"researcher", name:"Visual Researcher", icon:"image", kind:"build", room:"art", autonomous:true,
-    blurb:"Builds the film's lookbook on its own — writes the visual statement, gathers reference touchstones (palette, lighting, lens, texture), and renders a mood frame for each. The colour system (Presets) reads these references when it designs the palette, so the whole look is built from one brief. Runs autonomously; press Stop anytime.",
+    blurb:"Builds the film's lookbook on its own — writes the visual statement, gathers reference touchstones (palette, lighting, lens, texture), and renders a mood frame for each. The colour system (the Styles tab) reads these references when it designs the palette, so the whole look is built from one brief. Runs autonomously; press Stop anytime.",
     run:agentVisualResearcher },
   { id:"locscout", name:"Location Scout", icon:"globe", kind:"build", room:"art", autonomous:true,
     blurb:"Scouts your film's locations on its own \u2014 pulls every place from the sluglines, drafts each one's staging + depth-grid spec, generates the plate, and adds the time-of-day variants the script calls for. Also flags any scene whose slugline location has no card yet. Runs autonomously; press Stop anytime.",

@@ -5,27 +5,41 @@
    Generate (Nano Banana → a multi-view product sheet). Reuses the shared
    useImageGen hook + SheetFrame so the generation machinery stays in one place. */
 
-/* deterministic prop reference prompt — a 6-panel product turnaround */
+/* PROSE prop prompt (2026-06-15, reverted from JSON at the user's request): a single
+   descriptive line \u2014 "Prop concept art sheet, <name + description>, full 360-degree
+   turnaround (front center / side middle / back right), <off-white background + soft
+   contact shadow>, made of <material>, ~<scale>, right side: 3 detail shots, <render
+   style>, \u2026". The render style comes from the card's dropdown (photoreal default). Owner
+   matching is no longer carried in the prompt text \u2014 a worn/owned prop's OWNER character
+   sheet rides in as a REFERENCE IMAGE (see generatePropSheet / the card's attachments)
+   plus propOwnerNote, which matches the prop to the character far better than a text tag. */
 function buildPropRefPrompt(p, project){
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
-  const form = (p.form||"").replace(/\.$/,"").trim();
-  const material = (p.material||"").replace(/\.$/,"").trim();
-  const detail = (p.detail||"").replace(/\.$/,"").trim();
-  const style = p.renderStyle || "photoreal product reference, 85mm, soft even studio lighting, sharp focus";
-  const period = P.setting && P.setting.period ? P.setting.period.split(/[\u2014,]/)[0].trim() : "";
-  const tone = [P.genre, period].filter(Boolean).join(", ");
-  const owner = p.ownerName ? ("Belongs to "+p.ownerName+(p.kind?(" \u2014 "+p.kind):"")+". ") : "";
-  let s = "Master prop / object design reference sheet \u2014 "+(p.name||"Object")+". ";
-  s += form ? ("OBJECT: "+form+". ") : "";
-  s += material ? ("Material & finish: "+material+". ") : "";
-  s += detail ? ("Significance: "+detail+". ") : "";
-  s += owner;
-  if(tone) s += tone+" tone. ";
-  s += "RENDER STYLE: "+style.replace(/\.$/,"")+". ";
-  s += "6-panel 3\u00d72 grid on a solid neutral light-grey background: front view, 3/4 view, side profile, "
-     + "back view, top-down view, and one extreme close-up detail shot. ";
-  s += "Consistent scale across panels, soft even studio product lighting, no people, no hands, "
-     + "the SAME identical object in every panel, crisp edge detail, sharp focus. --ar 16:9";
+  const clean = (x)=>String(x||"").replace(/\.$/,"").trim();
+  const name = p.name || "Object";
+  const form = clean(p.form);
+  const material = clean(p.material);
+  const detail = clean(p.detail);
+  const scale = p.kind==="worn" ? "wearable, true-to-body scale"
+              : p.kind==="carried" ? "handheld scale"
+              : "true real-world scale as described";
+  // render style from the card dropdown / Surprise me (photoreal default, or anime/3d/flat)
+  const styleText = (p.renderStyleKey==="surprise" && p.surpriseRender && p.surpriseRender.style)
+    ? p.surpriseRender.style
+    : (clean(p.renderStyle) || (window.PROP_RENDER_TEXT||{})[p.renderStyleKey||"photoreal"] || (window.PROP_RENDER_TEXT||{}).photoreal
+       || "hyper realistic photography, photorealistic 8k");
+  // off-white / light-neutral background with a soft contact shadow (matches the cast sheets)
+  const bg = "flat off-white / very light neutral panel background, even and clean, with a simple soft contact shadow beneath the object";
+  const d1 = detail   ? ("its signature feature \u2014 "+detail.slice(0,90))   : "its most story-relevant feature";
+  const d2 = material ? ("the material & finish in macro \u2014 "+material.slice(0,90)) : "the material & finish in macro";
+  const d3 = "its construction \u2014 fastenings, joins, edges and wear marks";
+  let s = "Prop concept art sheet, "+name+(form?(", "+form):"")
+    +", full 360-degree turnaround, front view center, side view middle, back view right, "+bg
+    +", no text, no labels, no watermarks, no annotations";
+  if(material) s += ", made of "+material;
+  s += ", approximately "+scale;
+  s += ", right side: 3 close-up detail shots in a vertical grid showing "+d1+", "+d2+", "+d3;
+  s += ", no text, no labels, "+styleText+", accurate material rendering, natural surface textures, soft studio lighting, "
+    + bg + ", ultra detailed, clean layout, no typography, no captions";
   return s;
 }
 window.buildPropRefPrompt = buildPropRefPrompt;
@@ -71,6 +85,17 @@ window._mergeDanglingFragment = _mergeDanglingFragment;
    sanity check propsFromCast lacked. Returns "carried" | "worn" | "" (unsure → keep
    the source field's kind). Only fires on UNAMBIGUOUS nouns so a deliberate choice is
    never second-guessed. */
+/* word-boundary search match — the query must begin a WORD in the text (case-insensitive),
+   so single letters / mid-word fragments don't match noise (e.g. "h" ≠ "throat"). Shared by
+   the Props / Characters / Locations search boxes. */
+function searchWordMatch(text, q){
+  q = String(q||"").trim().toLowerCase(); if(!q) return true;
+  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  try{ return new RegExp("\\b"+esc, "i").test(String(text||"")); }
+  catch(e){ return String(text||"").toLowerCase().indexOf(q)>=0; }
+}
+window.searchWordMatch = searchWordMatch;
+
 const PROP_CARRIED_WORDS = ["phone","mobile","cellphone","cell phone","smartphone","iphone","handset","gun","pistol",
   "revolver","rifle","shotgun","firearm","weapon","knife","blade","dagger","sword","machete","axe","bottle","flask",
   "canteen","cup","mug","glass","tumbler","bag","handbag","briefcase","suitcase","backpack","rucksack","satchel",
@@ -120,20 +145,50 @@ window.propHeadNoun = propHeadNoun;
    name when the object is unknown). Returns a map: signature -> array of prop ids
    (only signatures with 2+ props, i.e. actual duplicates). */
 function findDuplicateProps(props){
-  const groups = {};
-  (props||[]).forEach(p=>{
-    const head = propHeadNoun(p.name) || ("name:"+propSlug(p.name));
-    const key = (p.ownerId||"")+"##"+head;
-    (groups[key] = groups[key] || []).push(p.id);
-  });
+  const list = props || [];
+  const head0 = (n)=> propHeadNoun(n) || ("name:"+propSlug(n));
   const dups = {};
-  Object.keys(groups).forEach(k=>{ if(groups[k].length>1) dups[k] = groups[k]; });
+  // OWNED props: same owner + same object noun is the same prop (reliable).
+  const groups = {};
+  list.forEach(p=>{ if(!p.ownerId) return; const key = p.ownerId+"##"+head0(p.name);
+    (groups[key]=groups[key]||[]).push(p.id); });
+  Object.keys(groups).forEach(k=>{ if(groups[k].length>1) dups[k]=groups[k]; });
+  // OWNERLESS set dressing: the same head noun is NOT enough — "Forearm maintenance latch"
+  // and "Seized door latch" are different objects that share "latch". Cluster only names
+  // that ALSO share a significant modifier word, or where one name's words are a subset of
+  // the other (so the two dolls merge, the three latches don't).
+  const sigWords = (name)=> new Set(String(name||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ")
+    .split(/\s+/).filter(w=>w.length>=4 && !/^[0-9]+$/.test(w)));
+  // a head noun even for objects outside propHeadNoun's vocabulary (doll, latch, box…):
+  // the recognised noun, else the LAST significant word of the name.
+  const headNoun = (name)=>{ const h=propHeadNoun(name); if(h) return h;
+    const w=String(name||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/).filter(x=>x.length>=3 && !/^[0-9]+$/.test(x));
+    return w.length ? w[w.length-1] : ("name:"+propSlug(name)); };
+  const ownerless = list.filter(p=>!p.ownerId);
+  const used = new Set();
+  ownerless.forEach((p,i)=>{
+    if(used.has(p.id)) return;
+    const head = headNoun(p.name); const pw = sigWords(p.name); const cluster=[p.id];
+    ownerless.slice(i+1).forEach(q=>{
+      if(used.has(q.id) || headNoun(q.name)!==head) return;
+      const qw = sigWords(q.name);
+      const shareMod = [...pw].some(w=> w!==head && qw.has(w));
+      const subset = ([...pw].length && [...pw].every(w=>qw.has(w))) || ([...qw].length && [...qw].every(w=>pw.has(w)));
+      if(shareMod || subset){ cluster.push(q.id); used.add(q.id); }
+    });
+    if(cluster.length>1){ used.add(p.id); dups["set##"+head+"##"+i] = cluster; }
+  });
   return dups;
 }
 window.findDuplicateProps = findDuplicateProps;
 
-function propsFromCast(characters, existing){
+function propsFromCast(characters, existing, scenes, drafts){
   const have = existing || [];
+  // WORN items belong to their owner, so they're present wherever the owner is — map them
+  // to owner-presence at seed time (carried items stay unmapped; the AI pins those exactly
+  // later). Without this the bible showed worn props with an empty scene list.
+  const wornScenes = (ownerId, name)=> (scenes && scenes.length && typeof scenesWhereCharacterAppears==="function")
+    ? scenesWhereCharacterAppears(ownerId, name, scenes, drafts) : null;
   // signature = ownerId + normalised name, so a prop already on the tab isn't re-added
   const sig = (ownerId,name)=> (ownerId||"")+"::"+propSlug(name);
   const seen = new Set(have.map(p=> sig(p.ownerId, p.name)));
@@ -150,13 +205,15 @@ function propsFromCast(characters, existing){
       if(os && seenObj.has(os)) return;   // same owner already has this object
       seen.add(s); if(os) seenObj.add(os);
       const kind = classifyPropKind(item) || sourceKind;   // name-based truth wins over the source field
-      out.push({
+      const card = {
         id: "prop-"+(c.id||"x")+"-"+kind+"-"+propSlug(item)+"-"+(out.length),
         name: item.replace(/^\w/, m=>m.toUpperCase()),
         kind, ownerId: c.id||"", ownerName: c.name||"",
         form:"", material:"", detail:"", renderStyle:"", negativePrompt:"",
         fromCast:true,
-      });
+      };
+      if(kind==="worn"){ const sc = wornScenes(c.id, c.name); if(sc) card.scenes = sc; }
+      out.push(card);
     });
     add(c.accessories, "worn");
     add(c.props, "carried");
@@ -177,6 +234,26 @@ function propDefaults(p){
     renderStyle: p.renderStyle || "photoreal product reference, 85mm, soft even studio lighting, sharp focus",
   };
 }
+
+/* Render-style text per key — the prop card uses the SAME dropdown options as the cast
+   (window.CHAR_RENDER_STYLE_OPTIONS, incl. "Surprise me ✨"); picking a concrete key
+   writes this prop-tuned recipe into p.renderStyle, which buildPropRefPrompt feeds into
+   the sheet's render.style. "surprise" is AI-invented per prop (aiSurpriseStyleText). */
+const PROP_RENDER_TEXT = {
+  photoreal: "photoreal product reference, 85mm macro, soft even studio lighting, sharp focus, true-to-life materials",
+  render3d:  "stylized 3D product render, clean studio HDRI lighting, physically-based materials, soft ambient occlusion, subtle bevels",
+  anime:     "anime cel-shaded product illustration, clean confident linework, flat shading with soft gradients, no photoreal texture",
+  flat:      "flat vector graphic, bold clean shapes, minimal flat shading, limited palette, no gradients, no photoreal texture",
+  horror:    "low-key cinematic horror photography of the object, hard cold side light, deep crushed shadows, desaturated cold green-teal grade, damp grimy detail",
+  ghibli:    "soft hand-painted Studio Ghibli-style 2D object, fine warm hand-drawn linework, gentle painterly cel shading, warm earthy naturalistic palette",
+  animated3d:"polished animated-feature 3D product render, soft warm flattering light, appealing clean PBR materials, idealized finish, no noise",
+  stopmotion:"photograph of a real handmade stop-motion prop, sculpted silicone/felt/wood at miniature scale, soft practical macro light, shallow depth of field",
+  claymation:"photograph of a real plasticine claymation prop, rounded clay forms with thumbprints and tool marks, soft practical macro light, shallow depth of field",
+  adv1960s:  "1960s painted commercial illustration of the object, smooth airbrushed gouache, vintage halftone print texture, mid-century mustard/avocado/teal palette",
+  gaganime:  "1990s gag-anime 2D cel cartoon object, thick bold black outlines, flat high-saturation colors, simple graphic shadows, sticker-poster finish",
+  pixelart:  "retro 16/32-bit pixel-art object, hard square pixels, no anti-aliasing, limited indexed palette, dithered shading, crisp pixel outlines",
+};
+window.PROP_RENDER_TEXT = PROP_RENDER_TEXT;
 
 function combinedPropPrompt(p, project){
   const master = buildPropRefPrompt(p, project);
@@ -206,9 +283,32 @@ window.buildSimplePropPrompt = buildSimplePropPrompt;
    an empty result). Used by the character card's "generate props first" flow so the
    user can fill missing prop references without switching tabs. Resolves true on
    success, throws on a hard failure. */
+/* the owner's generated character sheet — a worn/owned prop references it so the prop
+   matches that character's style, materials, palette and wear (they belong to the same
+   world / the same body). Returns "" if the owner has no generated sheet yet. */
+async function propOwnerSheetUrl(p){
+  if(!p || !p.ownerId) return "";
+  let u = (typeof nbGetImage==="function") ? nbGetImage(p.ownerId) : "";
+  if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(p.ownerId); }catch(e){} }
+  return u || "";
+}
+window.propOwnerSheetUrl = propOwnerSheetUrl;
+/* the instruction that tells the model to match the referenced character sheet. */
+function propOwnerNote(p){
+  const who = (p && p.ownerName) || "the owner";
+  return (p && p.kind==="worn")
+    ? "Reference image: "+who+"'s character sheet. This prop is WORN by "+who+" — render it in the SAME visual style, materials, colour palette, surface wear and finish as that character, so it looks like it belongs on their body."
+    : "Reference image: "+who+"'s character sheet. Render this prop in the SAME visual style, palette and world as that character so it reads as theirs.";
+}
+window.propOwnerNote = propOwnerNote;
+
 async function generatePropSheet(p, project){
   if(typeof nbGenerate!=="function" || typeof nbCommit!=="function") return false;
-  const prompt = (typeof combinedPropPrompt==="function") ? combinedPropPrompt(p, project) : (p.name||"prop reference");
+  const basePrompt = (typeof combinedPropPrompt==="function") ? combinedPropPrompt(p, project) : (p.name||"prop reference");
+  // reference the OWNER's character sheet (if generated) so the prop matches their look
+  const ownerUrl = await propOwnerSheetUrl(p);
+  const prompt = basePrompt + (ownerUrl ? (" "+propOwnerNote(p)) : "");
+  const refOpts = ownerUrl ? { extraImages:[ownerUrl] } : {};
   const model  = (typeof nbGetModel==="function")  ? nbGetModel()  : "";
   const aspect = (typeof nbGetAspect==="function") ? nbGetAspect() : "16:9";
   const size   = (typeof nbGetRes==="function")    ? nbGetRes()    : "2K";
@@ -218,11 +318,11 @@ async function generatePropSheet(p, project){
   window.__nbGenInflight[p.id] = true;
   try{
     let url;
-    try{ url = await nbGenerate(prompt, {}); }
+    try{ url = await nbGenerate(prompt, refOpts); }
     catch(e){
       // same fallback the card uses: an empty/"no image" result retries simplified
       if(/no image/i.test((e&&e.message)||"") && typeof buildSimplePropPrompt==="function"){
-        url = await nbGenerate(buildSimplePropPrompt(p), {});
+        url = await nbGenerate(buildSimplePropPrompt(p) + (ownerUrl?(" "+propOwnerNote(p)):""), refOpts);
       } else { throw e; }
     }
     const now = new Date();
@@ -249,9 +349,10 @@ function buildPropFromPhotoPrompt(p, project){
   s += "proportions, colour, material and finish. Do not redesign or stylise it. ";
   s += (p.detail ? ("Significance: "+p.detail.replace(/\.$/,"")+". ") : "");
   s += "RENDER STYLE: "+style.replace(/\.$/,"")+". ";
-  s += "6-panel 3\u00d72 grid on a solid neutral light-grey background: front, 3/4, side, back, top-down, "
-     + "and an extreme close-up detail. Consistent scale, soft even studio product lighting, no people, "
-     + "the SAME identical object in every panel, sharp focus. --ar 16:9";
+  s += "LAYOUT: prop concept art sheet \u2014 full 360-degree turnaround, front view center, side view middle, back view right; ";
+  s += "right side: 3 close-up detail shots in a vertical grid (signature feature, material & finish in macro, construction & wear). ";
+  s += "Flat off-white / very light neutral panel background, even and clean, with a simple soft contact shadow beneath the object, no text, no labels, no annotations, soft studio lighting, no people, no hands, ";
+  s += "the SAME identical object in every view, sharp focus.";
   return s;
 }
 window.buildPropFromPhotoPrompt = buildPropFromPhotoPrompt;
@@ -267,10 +368,29 @@ function propSwatch(kind){
     : "linear-gradient(135deg,#b8412e,#5a2018)";
 }
 
-function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onTagOne, taggingScene, dupIds, onMerge }){
+function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft, onEnsureOwner, drafting, onView, batchActiveId, onBatchDone, onChipClick, onTagOne, taggingScene, dupIds, dupProps, onMerge, derivedScenes }){
   const d = propDefaults(p);
   const finalPrompt = combinedPropPrompt(p, project);
   const drafted = propVisualsDrafted(p);
+
+  // render style — same dropdown + "Surprise me" behaviour as the character cards
+  const [styling, setStyling] = React.useState(false);
+  const propBible = ()=> [p.name&&("Name: "+p.name), p.ownerName&&("Owner: "+p.ownerName),
+    p.form&&("Form: "+p.form), p.material&&("Material: "+p.material), p.detail&&("Significance: "+p.detail),
+    (project&&project.genre)&&("Genre: "+project.genre)].filter(Boolean).join("\n");
+  const rollSurprise = async ()=>{
+    if(!(typeof aiSurpriseStyleText==="function" && typeof aiAvailable==="function" && aiAvailable())) return;
+    setStyling(true);
+    try{ const r = await aiSurpriseStyleText({ name:p.name, kind:"prop", bible:propBible() }, project);
+      if(r) onUpdate(p.id, { surpriseRender:r, renderStyle:r.style }); }catch(e){}
+    setStyling(false);
+  };
+  const pickPropStyle = async (key)=>{
+    if(key!=="surprise"){ onUpdate(p.id, { renderStyleKey:key, renderStyle:(PROP_RENDER_TEXT[key]||PROP_RENDER_TEXT.photoreal) }); return; }
+    onUpdate(p.id, { renderStyleKey:"surprise" });
+    if(p.surpriseRender && p.surpriseRender.style){ onUpdate(p.id, { renderStyle:p.surpriseRender.style }); return; }
+    await rollSurprise();
+  };
   const initials = (p.name||"?").replace(/^the\s+/i,"").split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
 
   const gen = useImageGen({
@@ -278,6 +398,11 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
     buildFinal: ()=> finalPrompt,
     buildFromPhoto: ()=> buildPropFromPhotoPrompt(p, project),
     buildSimple: ()=> buildSimplePropPrompt(p),
+    // reference the OWNER's character sheet so the prop matches their look (worn props
+    // especially must read as part of THAT body, not a generic grey object).
+    attachments: async ()=>{ const u = (typeof propOwnerSheetUrl==="function") ? await propOwnerSheetUrl(p) : "";
+      return u ? [{ url:u, note:(p.ownerName||"owner")+" character sheet" }] : []; },
+    attachmentsText: ()=> (typeof propOwnerNote==="function") ? propOwnerNote(p) : "",
     buildEdit: (instr)=>
       "Edit this prop reference sheet for "+(p.name||"the object")+". "
       +"Apply ONLY this change: "+instr+". "
@@ -285,6 +410,15 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
       +"across all panels. Keep the same 3\u00d72 grid of views on a neutral grey background. "
       +"Do not replace or re-imagine the object.",
   });
+
+  // Guarantee the prop is generated WITH its owner's character sheet: if the owner has no
+  // sheet yet, generate it first (drafting the owner's spec if needed), THEN the prop —
+  // so the owner sheet is present as a reference. No-op for ownerless / already-sheeted.
+  const genWithOwner = React.useCallback(async (...a)=>{
+    if(onEnsureOwner){ try{ await onEnsureOwner(p); }catch(e){} }
+    return gen.generate(...a);
+  },[gen, onEnsureOwner, p]);
+  const genForFrame = onEnsureOwner ? { ...gen, generate: genWithOwner } : gen;
 
   /* ---- batch generation: when the parent activates this card (its id == the
      batch's current id), kick off a generation and report completion so the
@@ -296,7 +430,7 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
     if(!mine){ batchStarted.current=false; wasGening.current=gen.gening; return; }
     if(!batchStarted.current && !gen.gening){
       batchStarted.current = true; wasGening.current = false;
-      gen.generate();                       // master prompt; works drafted or not
+      genWithOwner();                       // owner sheet first, then this prop's master
       return;
     }
     if(batchStarted.current && wasGening.current && !gen.gening){
@@ -306,12 +440,16 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
     wasGening.current = gen.gening;
   },[batchActiveId, gen.gening, p.id]);
 
-  // scenes this prop appears in, as {no,id} sorted by story order
+  // scenes this prop appears in, as {no,id} sorted by story order. A stored map wins;
+  // an OWNED but never-mapped prop shows its derived owner-presence scenes instead
+  // (passed in as derivedScenes), flagged "auto" — Re-map scenes pins the exact list.
   const sceneById = React.useMemo(()=>{ const m={}; (scenes||[]).forEach(s=>{ m[s.id]=s; }); return m; },[scenes]);
-  const propScenes = (p.scenes||[]).map(id=>sceneById[id]).filter(Boolean);
+  const sceneIds = Array.isArray(p.scenes) ? p.scenes : (Array.isArray(derivedScenes) ? derivedScenes : undefined);
+  const scenesDerived = !Array.isArray(p.scenes) && Array.isArray(derivedScenes);
+  const propScenes = (sceneIds||[]).map(id=>sceneById[id]).filter(Boolean);
 
   return React.createElement("div",{className:"sheet-card"+(batchActiveId===p.id?" batch-on":""),"data-prop-card":p.id},
-    React.createElement(SheetFrame,{ gen, slotId:"propref-"+p.id, name:p.name, avatarColor:propSwatch(p.kind),
+    React.createElement(SheetFrame,{ gen:genForFrame, slotId:"propref-"+p.id, name:p.name, avatarColor:propSwatch(p.kind),
       initials, drafted, drafting, onDraft:()=>onDraft(p), entity:p, onView,
       slotPlaceholder:"Drop a photo of the object", noun:"prop sheet",
       specGate:{ ready:(drafted || !p.manual), hint:"Draft the design spec first \u2014 form & material are what the sheet is built from." },
@@ -319,14 +457,20 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
     React.createElement("div",{className:"sheet-body"},
       React.createElement("div",{className:"sheet-head"},
         React.createElement("div",{style:{flex:1,minWidth:0}},
-          React.createElement("div",{className:"sheet-name"},
+          React.createElement("div",{className:"sheet-name",title:p.name||""},
             React.createElement(EditText,{value:p.name,placeholder:"Prop name\u2026",onCommit:val=>onUpdate(p.id,{name:val})})),
           React.createElement("div",{className:"sheet-role"},
             React.createElement("span",{className:"prop-kind-badge "+(p.kind==="worn"?"worn":"carried")},p.kind||"carried"),
             p.ownerName ? (" \u00b7 "+p.ownerName) : " \u00b7 unassigned"),
-          (p.scenes!==undefined) && React.createElement("div",{className:"prop-scenes"},
+          p.kind==="worn" && React.createElement("div",{className:"prop-worn-note",
+            title:"Worn items are baked into "+(p.ownerName||"the owner")+"'s character-sheet prompt (with this card's form & material) and rendered there \u2014 they don't need a separate sheet. Only carried props get their own. Keep this spec accurate; it feeds the character prompt."},
+            React.createElement(Icon.sparkles,{s:11}),
+            React.createElement("span",null,"Rendered on ",React.createElement("b",null,p.ownerName||"the character"),"'s sheet \u2014 no separate sheet needed")),
+          (sceneIds!==undefined) && React.createElement("div",{className:"prop-scenes"},
             propScenes.length
-              ? [ React.createElement("span",{key:"lab",className:"prop-scenes-lab"},"Scenes"),
+              ? [ React.createElement("span",{key:"lab",className:"prop-scenes-lab",
+                    title: scenesDerived ? "Auto-derived from "+(p.ownerName||"the owner")+"'s scene presence — click “Re-map scenes” to pin the exact appearances" : undefined},
+                    "Scenes"+(scenesDerived?" (auto)":"")),
                   ...propScenes.map(s=>React.createElement("button",{key:s.id,className:"prop-scene-chip",
                     title:s.title||("Scene "+s.no),onClick:()=>onChipClick&&onChipClick(s.id)},
                     String(s.no).padStart(2,"0"))) ]
@@ -338,18 +482,40 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
             title:"Re-map which scenes this prop appears in \u2014 without re-drafting its spec. Use after the script changes."},
             React.createElement(Icon.layers,{s:12}), taggingScene?"Mapping\u2026":"Re-map scenes"))),
 
+      React.createElement("div",{className:"char-style-row"},
+        React.createElement("span",{className:"char-style-lab"},"Render style"),
+        React.createElement("select",{className:"char-style-select",value:p.renderStyleKey||"photoreal",
+          disabled:styling,onChange:e=>pickPropStyle(e.target.value)},
+          (window.CHAR_RENDER_STYLE_OPTIONS||[]).map(o=>React.createElement("option",{key:o.key,value:o.key},o.label))),
+        styling && React.createElement("span",{className:"char-style-busy"},React.createElement("span",{className:"ns-spin"}),"Inventing\u2026"),
+        (!styling && p.renderStyleKey==="surprise" && p.surpriseRender && p.surpriseRender.label) &&
+          React.createElement("span",{className:"char-style-name",title:"Re-roll a new surprise style",onClick:rollSurprise},
+            p.surpriseRender.label," \u21bb")),
+
       !drafted && !gen.genUrl && React.createElement("div",{className:"sheet-undrafted"},
         React.createElement(Icon.alert,{s:13}),
         React.createElement("span",null,"Details not drafted yet \u2014 click ",
           React.createElement("b",null,"Draft details")," to fill the object's form & material.")),
 
       (dupIds && dupIds.length>1) && React.createElement("div",{className:"prop-dup-warn"},
-        React.createElement(Icon.alert,{s:13}),
-        React.createElement("span",null,"Looks like the same object as ",
-          React.createElement("b",null,(dupIds.length-1)+" other "+(dupIds.length>2?"cards":"card")),
-          (p.ownerName?(" for "+p.ownerName):"")," \u2014 merge into one to combine their scenes."),
-        React.createElement("button",{className:"prop-dup-merge",onClick:()=>onMerge&&onMerge(dupIds)},
-          React.createElement(Icon.layers,{s:12}),"Merge "+dupIds.length)),
+        React.createElement("div",{className:"prop-dup-head"},
+          React.createElement(Icon.alert,{s:13}),
+          React.createElement("span",null,"This looks like the same object as ",
+            React.createElement("b",null,(dupProps||[]).map(d=>d.name).join(", ")||((dupIds.length-1)+" other")),
+            ". Merging combines their scenes \u2014 keep the card whose art & spec you prefer.")),
+        // show the OTHER duplicate(s) so you can see what you're merging, each with its thumbnail
+        React.createElement("div",{className:"prop-dup-cards"},
+          (dupProps||[]).map(d=>{
+            const u = (typeof nbGetImage==="function") ? nbGetImage(d.id) : "";
+            return React.createElement("div",{key:d.id,className:"prop-dup-card"},
+              u ? React.createElement("img",{src:u,alt:d.name,onClick:()=>onView&&onView(u,d)})
+                : React.createElement("div",{className:"prop-dup-noimg"},React.createElement(Icon.image,{s:14})),
+              React.createElement("span",{className:"prop-dup-name",title:d.name},d.name));
+          })),
+        React.createElement("div",{className:"prop-dup-acts"},
+          React.createElement("button",{className:"prop-dup-merge",onClick:()=>onMerge&&onMerge(dupIds, p.id),
+            title:"Merge all of these into THIS card \u2014 this card's art & spec are kept, their scenes are combined"},
+            React.createElement(Icon.layers,{s:12}),"Merge \u2014 keep this card"))),
 
       React.createElement(CardFold,{label:"Object",defaultOpen:(!drafted && !!p.manual)},
         React.createElement("div",{className:"sheet-2col"},
@@ -376,38 +542,85 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
           placeholder:"Why this object matters \u2014 what it represents, how it's used\u2026",onCommit:val=>onUpdate(p.id,{detail:val})})),
 
       React.createElement(CardFold,{label:"Look dev",defaultOpen:false},
-        React.createElement(SheetField,{label:"Render style",value:p.renderStyle||d.renderStyle,multiline:true,
+        React.createElement(SheetField,{label:"Render style \u2014 edit freely",value:p.renderStyle||d.renderStyle,multiline:true,
           placeholder:"photoreal product reference, 85mm, soft studio lighting\u2026",onCommit:val=>onUpdate(p.id,{renderStyle:val})})),
 
       React.createElement(CardFold,{label:"Master reference prompt",defaultOpen:false},
-        React.createElement(CopyBox,{label:"6-panel turnaround \u2014 feed to your image tool",text:buildPropRefPrompt(p,project)}),
+        React.createElement(CopyBox,{label:"Turnaround sheet (front/side/back + detail column) \u2014 feed to your image tool",text:buildPropRefPrompt(p,project)}),
         React.createElement(SheetField,{label:"Negative prompt \u2014 exclude",value:p.negativePrompt||d.negativePrompt,multiline:true,
           onCommit:val=>onUpdate(p.id,{negativePrompt:val})}),
         React.createElement(CopyBox,{label:"Final prompt \u2014 master + negative (sent to Nano Banana)",text:finalPrompt}))));
 }
 
-function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId, onMergeProps, onPropsMaster, lookbookStale, onApplyLookbook }){
+function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId, onMergeProps, onPropsMaster, trashItems, onRestore, onPurge, onEnsureOwner, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
   const [view, setView] = React.useState(null);   // {url, character/prop}
   const [sceneFilter, setSceneFilter] = React.useState("");   // "" = all
   const [query, setQuery] = React.useState("");               // free-text name/owner search
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
   const list = props || [];
+  // STYLE · ALL PROPS — apply one render style to every prop at once (mirrors the cast's
+  // 'Style · all cast'); each prop can still be overridden on its own card.
+  const [allStyling, setAllStyling] = React.useState(null);   // null | {i,total} (surprise progress)
+  const PROP_TEXT = window.PROP_RENDER_TEXT || {};
+  const allStyleKey = (list.length && list.every(p=>(p.renderStyleKey||"photoreal")===(list[0].renderStyleKey||"photoreal")))
+    ? (list[0].renderStyleKey||"photoreal") : "";
+  const propBibleOf = (p)=> [p.name&&("Name: "+p.name), p.ownerName&&("Owner: "+p.ownerName),
+    p.form&&("Form: "+p.form), p.material&&("Material: "+p.material), p.detail&&("Significance: "+p.detail),
+    (project&&project.genre)&&("Genre: "+project.genre)].filter(Boolean).join("\n");
+  const applyStyleAll = async (key)=>{
+    if(!key || allStyling) return;
+    if(key!=="surprise"){ list.forEach(p=> onUpdate(p.id, { renderStyleKey:key, renderStyle:(PROP_TEXT[key]||PROP_TEXT.photoreal) })); return; }
+    list.forEach(p=> onUpdate(p.id, { renderStyleKey:"surprise" }));
+    if(!(typeof aiSurpriseStyleText==="function" && typeof aiAvailable==="function" && aiAvailable())) return;
+    const need = list.filter(p=>!(p.surpriseRender && p.surpriseRender.style));
+    if(!need.length) return;
+    let ok = true;
+    if(typeof window.appConfirm==="function") ok = await window.appConfirm({
+      title:"Invent a surprise style for "+need.length+" prop"+(need.length!==1?"s":"")+"?",
+      body:"Each prop gets its OWN bespoke fused style invented from its bible — that's "+need.length+" AI call"+(need.length!==1?"s":"")+".",
+      confirmLabel:"Invent styles" });
+    if(!ok) return;
+    setAllStyling({ i:0, total:need.length });
+    for(let i=0;i<need.length;i++){ setAllStyling({ i:i+1, total:need.length });
+      try{ const r = await aiSurpriseStyleText({ name:need[i].name, kind:"prop", bible:propBibleOf(need[i]) }, project);
+        if(r) onUpdate(need[i].id, { surpriseRender:r, renderStyle:r.style }); }catch(e){} }
+    setAllStyling(null);
+  };
   const sceneList = (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
-  const tagged = list.some(p=>p.scenes!==undefined);
-  const inScene = (p, sid)=> Array.isArray(p.scenes) && p.scenes.indexOf(sid)>=0;
-  // free-text search matches a prop's name or its owner's name (whitespace-trimmed,
-  // case-insensitive). Stacks on top of the scene filter so the two narrow together.
+  // EFFECTIVE scene map. A prop seeded from the cast may never have been scene-mapped
+  // (p.scenes === undefined) — those used to silently vanish from every scene focus
+  // and from the dropdown counts, while still showing under "All scenes" (the
+  // filter-vs-character-sheet mismatch). Fallback: an OWNED, unmapped prop derives
+  // its scenes from its owner's presence — the same deterministic rule the mapper
+  // itself uses for worn items. "Re-map scenes" / "Design all props" replaces the
+  // fallback with a stored (AI-narrowed) map; unowned + unmapped props stay out.
+  const effMap = React.useMemo(()=>{
+    const m = {};
+    if(typeof scenesWhereCharacterAppears!=="function") return m;
+    list.forEach(p=>{
+      if(Array.isArray(p.scenes)) return;
+      if(!(p.ownerId || p.ownerName)) return;
+      const ids = scenesWhereCharacterAppears(p.ownerId, p.ownerName, scenes, drafts) || [];
+      if(ids.length) m[p.id] = ids;
+    });
+    return m;
+  },[list, scenes, drafts]);
+  const effScenes = (p)=> Array.isArray(p.scenes) ? p.scenes : effMap[p.id];
+  const tagged = list.some(p=>p.scenes!==undefined) || Object.keys(effMap).length>0;
+  const inScene = (p, sid)=>{ const sc = effScenes(p); return Array.isArray(sc) && sc.indexOf(sid)>=0; };
+  // free-text search matches a prop's name or owner — at a WORD BOUNDARY, not anywhere,
+  // so typing "h" surfaces words that START with h (Heavy, Handmade…) instead of matching
+  // the "h" buried in "throat". Stacks on top of the scene filter.
   const q = query.trim().toLowerCase();
-  const matchesQuery = (p)=> !q
-    || (p.name||"").toLowerCase().indexOf(q)>=0
-    || (p.ownerName||"").toLowerCase().indexOf(q)>=0;
+  const matchesQuery = (p)=> searchWordMatch((p.name||"")+" "+(p.ownerName||""), q);
   const shown = (sceneFilter ? list.filter(p=>inScene(p, sceneFilter)) : list).filter(matchesQuery);
   // 9-up pagination; suspended while a batch runs so the queue can reach every card
   const pager = usePager(shown.length, !!batchActiveId);
   // duplicate detection: map each prop id -> the set of ids it duplicates (same owner + object)
   const dupSets = (typeof findDuplicateProps==="function") ? findDuplicateProps(list) : {};
   const dupForId = {}; Object.values(dupSets).forEach(ids=> ids.forEach(id=>{ dupForId[id]=ids; }));
+  const byId = {}; list.forEach(p=>{ byId[p.id]=p; });
 
   // one-time sanity pass: correct props whose NAME unambiguously contradicts their
   // worn/carried kind (e.g. a phone mis-filed as "worn"). Skips any the user has
@@ -461,7 +674,10 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
   // ---- batch generation ----
   // eligible = drafted props (so a hand-added, undrafted/gated card never makes a
   // generic image). Cards that already have a sheet are caught by the begin() partition.
-  const draftedIds = (subset)=> subset.filter(p=>propVisualsDrafted(p)).map(p=>p.id);
+  // WORN props are rendered ON their owner's character sheet (their spec is baked into the
+  // character prompt), so ONLY CARRIED props are generated as separate sheets. The batch
+  // skips worn items; their cards stay for spec editing (which feeds the character prompt).
+  const draftedIds = (subset)=> subset.filter(p=>propVisualsDrafted(p) && p.kind!=="worn").map(p=>p.id);
   const startSceneBatch = ()=>{
     if(!sceneFilter || batchActiveId) return;
     const eligible = draftedIds(shown);
@@ -475,7 +691,7 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
     if(sceneFilter) setSceneFilter("");            // mount every card so the queue can reach each one
     batch.begin(eligible, list.length - eligible.length);
   };
-  const eligibleAll = list.filter(p=>propVisualsDrafted(p)).length;
+  const eligibleAll = list.filter(p=>propVisualsDrafted(p) && p.kind!=="worn").length;
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s?s.no:sid; };
 
   return React.createElement("div",{className:"art-scroll"},
@@ -491,6 +707,14 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
               text:((typeof roomCopy==="function" && roomCopy(project,"props").tip) ||
                 "Continuity objects \u2014 the things characters wear and carry, plus the set dressing the camera sees. Each gets its own multi-view reference sheet so the object stays identical in every shot. 'Design all props' builds every prop from the story in one pass \u2014 pulls missing items from the cast, drafts each spec, and maps every prop to its scenes; 'Generate all props' then renders the sheets.")}))),
         React.createElement("div",{className:"art-intro-actions"},
+          list.length>0 && React.createElement("label",{className:"char-style-all",
+            title:"Apply one render style to ALL props at once. Each prop can still be overridden on its own card."},
+            React.createElement("span",{className:"char-style-all-lab"},
+              allStyling ? ("Inventing… "+allStyling.i+"/"+allStyling.total) : "Style · all props"),
+            React.createElement("select",{className:"char-style-select",value:allStyleKey,disabled:!!allStyling,
+              onChange:e=>applyStyleAll(e.target.value)},
+              allStyleKey==="" && React.createElement("option",{value:""},"Mixed — per prop"),
+              (window.CHAR_RENDER_STYLE_OPTIONS||[]).map(o=>React.createElement("option",{key:o.key,value:o.key},o.label)))),
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add prop"),
           React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!castHasProps),onClick:onDraftAll,
@@ -499,8 +723,9 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the reference sheet for every drafted prop \u2014 you choose whether to redo ones that already have a sheet"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all props")))),
-    window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,label:"these props",dept:"props"}),
+    window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,onDraftOnly:onApplyLookbookDraftOnly,label:"these props",dept:"props"}),
     BatchBar && React.createElement(BatchBar,{batch,noun:"prop"}),
+    window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{items:trashItems,kind:"prop",onRestore,onPurge}),
     // free-text search — filter prop cards by name or owner as you type
     (list.length>0 || (tagged && sceneList.length>0)) && React.createElement("div",{className:"prop-toolbar"},
       list.length>0 && React.createElement("div",{className:"prop-searchbar"},
@@ -532,11 +757,11 @@ function PropSheets({ project, props, characters, scenes, onUpdate, onDraft, onD
       ? (shown.length
           ? React.createElement(React.Fragment,null,
               React.createElement("div",{className:"sheet-grid"},
-                pager.slice(shown).map(p=>React.createElement(PropSheet,{key:p.id,p,project,characters,scenes,onUpdate,onDelete,onDraft,
+                pager.slice(shown).map(p=>React.createElement(PropSheet,{key:p.id,p,project,characters,scenes,onUpdate,onDelete,onDraft,onEnsureOwner,
                   drafting:draftingId===p.id||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
                   batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
-                  onTagOne,taggingScene:taggingSceneId===p.id,
-                  dupIds:dupForId[p.id],onMerge:onMergeProps}))),
+                  onTagOne,taggingScene:taggingSceneId===p.id,derivedScenes:effMap[p.id],
+                  dupIds:dupForId[p.id],dupProps:(dupForId[p.id]||[]).filter(id=>id!==p.id).map(id=>byId[id]).filter(Boolean),onMerge:onMergeProps}))),
               React.createElement(PagerBar,{pager,noun:"prop"}))
           : q
             ? React.createElement("div",{className:"prop-empty"},

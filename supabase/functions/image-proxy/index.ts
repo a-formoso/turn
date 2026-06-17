@@ -24,6 +24,8 @@
 //   2. Link your project:                          npx supabase link --project-ref vubenblfdzginlqiglzw
 //   3. Set the server secrets (your provider keys): npx supabase secrets set OPENAI_API_KEY=sk-...
 //                                                   npx supabase secrets set GOOGLE_API_KEY=...
+//                                                   npx supabase secrets set ELEVENLABS_API_KEY=...  (voice — the Stage)
+//                                                   npx supabase secrets set FAL_KEY=...             (video — Seedance via fal.ai)
 //   4. Deploy:                                      npx supabase functions deploy image-proxy --no-verify-jwt
 //   5. In app/supabase-config.js set  imageProxy: true
 //
@@ -186,6 +188,193 @@ Deno.serve(async (req) => {
       } catch (e) { return json({ error: "Proxy failed to reach Anthropic: " + (e?.message || e) }, 502); }
     }
     return json({ error: `Text provider "${provider}" is not configured on this proxy.` }, 400);
+  }
+
+  // ── task: VOICE (ElevenLabs) — powers the Voices tab + per-line audio (Stage) ──
+  // No `prompt`; branches on `op`. Key = the ELEVENLABS_API_KEY server secret.
+  //   "tts"        → render a line WITH per-character timing → audio + durationMs (the clock).
+  //   "design"     → Voice Design previews from a text descriptor (the "designed" origin).
+  //   "saveVoice"  → lock a chosen preview into a permanent voice_id.
+  //   "listVoices" → the account's voices (the "picked" origin).
+  //   "clone"      → instant clone from uploaded samples (consent-gated client-side).
+  // ElevenLabs field names/model ids move — confirm against current docs at deploy.
+  if (task === "voice") {
+    const elKey = Deno.env.get("ELEVENLABS_API_KEY");
+    if (!elKey) return json({ error: "Server is missing ELEVENLABS_API_KEY. Set it with: supabase secrets set ELEVENLABS_API_KEY=..." }, 500);
+    const EL = "https://api.elevenlabs.io/v1";
+    const op = (body.op || "tts").toString();
+    const elErr = async (r: Response) => {
+      let d = ""; try { const j = await r.json(); d = j?.detail?.message || (typeof j?.detail === "string" ? j.detail : "") || j?.message || ""; } catch (_e) { /* noop */ }
+      return d || `ElevenLabs error (${r.status}).`;
+    };
+    try {
+      // TTS WITH TIMESTAMPS — one call returns the audio AND per-character timing, so
+      // we get the line's duration (the cut clock) and split points for free.
+      if (op === "tts") {
+        const voiceId = (body.voiceId || "").toString();
+        const text = (body.text || "").toString();
+        if (!voiceId || !text) return json({ error: "Voice render needs voiceId and text." }, 400);
+        const s = body.settings || {};
+        const fmt = (body.outputFormat || "mp3_44100_128").toString();
+        const r = await fetch(`${EL}/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${encodeURIComponent(fmt)}`, {
+          method: "POST",
+          headers: { "xi-api-key": elKey, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text,
+            model_id: (body.modelId || "eleven_multilingual_v2").toString(),
+            voice_settings: {
+              stability: s.stability ?? 0.5,
+              similarity_boost: s.similarity ?? 0.75,
+              style: s.style ?? 0.0,
+              speed: s.speed ?? 1.0,
+              use_speaker_boost: s.speakerBoost ?? true,
+            },
+          }),
+        });
+        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
+        const data = await r.json();
+        const ends = (data.alignment && data.alignment.character_end_times_seconds) || [];
+        const durationMs = ends.length ? Math.round(Number(ends[ends.length - 1]) * 1000) : 0;
+        return json({ audioB64: data.audio_base64, mime: "audio/mpeg", durationMs, alignment: data.alignment || null });
+      }
+
+      // Voice Design — returns candidate previews (each with a generated_voice_id).
+      if (op === "design") {
+        const description = (body.description || "").toString();
+        if (!description) return json({ error: "Voice design needs a description." }, 400);
+        const r = await fetch(`${EL}/text-to-voice/design`, {
+          method: "POST",
+          headers: { "xi-api-key": elKey, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            voice_description: description,
+            ...(body.modelId ? { model_id: String(body.modelId) } : {}),
+            ...(body.text ? { text: String(body.text) } : { auto_generate_text: true }),
+          }),
+        });
+        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
+        const data = await r.json();
+        const previews = (data.previews || []).map((p: any) => ({
+          generatedVoiceId: p.generated_voice_id,
+          audioB64: p.audio_base_64 || p.audio_base64 || "",
+          mime: "audio/mpeg",
+        }));
+        return json({ previews, text: data.text || "" });
+      }
+
+      // Lock a chosen preview → a permanent voice_id (the identity lock).
+      if (op === "saveVoice") {
+        const generatedVoiceId = (body.generatedVoiceId || "").toString();
+        if (!generatedVoiceId) return json({ error: "Saving a voice needs a generatedVoiceId." }, 400);
+        const name = (body.name || "Voice").toString();
+        const r = await fetch(`${EL}/text-to-voice`, {
+          method: "POST",
+          headers: { "xi-api-key": elKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ voice_name: name, voice_description: (body.description || "").toString(), generated_voice_id: generatedVoiceId }),
+        });
+        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
+        const data = await r.json();
+        return json({ voiceId: data.voice_id || (data.voice && data.voice.voice_id) || "", name });
+      }
+
+      // The account's voices (for the "picked from library" origin).
+      if (op === "listVoices") {
+        const r = await fetch(`${EL}/voices`, { headers: { "xi-api-key": elKey } });
+        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
+        const data = await r.json();
+        const voices = (data.voices || []).map((v: any) => ({
+          voiceId: v.voice_id, name: v.name, category: v.category || "",
+          previewUrl: v.preview_url || "", labels: v.labels || {},
+        }));
+        return json({ voices });
+      }
+
+      // Instant clone from uploaded samples (consent gated on the client, like a cameo).
+      if (op === "clone") {
+        const samples: string[] = Array.isArray(body.samples) ? body.samples : [];
+        if (!samples.length) return json({ error: "Cloning needs at least one audio sample." }, 400);
+        const form = new FormData();
+        form.append("name", (body.name || "Cloned voice").toString());
+        if (body.description) form.append("description", String(body.description));
+        let i = 0;
+        for (const src of samples) {
+          const blob = dataUrlToBlob(src);
+          if (blob) form.append("files", blob, `sample${i++}.mp3`);
+        }
+        const r = await fetch(`${EL}/voices/add`, { method: "POST", headers: { "xi-api-key": elKey }, body: form });
+        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
+        const data = await r.json();
+        return json({ voiceId: data.voice_id || "", name: (body.name || "Cloned voice").toString() });
+      }
+
+      return json({ error: `Unknown voice op "${op}".` }, 400);
+    } catch (e) {
+      return json({ error: "Proxy failed to reach ElevenLabs: " + ((e as any)?.message || e) }, 502);
+    }
+  }
+
+  // ── task: VIDEO (Seedance 2.0 via fal.ai) — the Stage's lip-synced clip render ──
+  // Async (videos take minutes): the client SUBMITS, then POLLS until COMPLETED.
+  //   "submit" → { requestId, statusUrl, responseUrl, status }
+  //   "poll"   → { status } | { status:"COMPLETED", videoUrl, seed, contentType }
+  // Key = the FAL_KEY server secret. Model defaults to reference-to-video (frame +
+  // line audio → lip-synced clip). See docs/Voice & Lip-Sync (Seedance) Plan.md §6A.
+  if (task === "video") {
+    const falKey = Deno.env.get("FAL_KEY");
+    if (!falKey) return json({ error: "Server is missing FAL_KEY. Set it with: supabase secrets set FAL_KEY=..." }, 500);
+    const ALLOWED = new Set([
+      "bytedance/seedance-2.0/reference-to-video", "bytedance/seedance-2.0/fast/reference-to-video",
+      "bytedance/seedance-2.0/image-to-video",     "bytedance/seedance-2.0/fast/image-to-video",
+      "bytedance/seedance-2.0/text-to-video",      "bytedance/seedance-2.0/fast/text-to-video",
+    ]);
+    const model = (body.model || "bytedance/seedance-2.0/reference-to-video").toString();
+    if (!ALLOWED.has(model)) return json({ error: `Video model "${model}" isn't allowed on this proxy.` }, 400);
+    const op = (body.op || "submit").toString();
+    const falHead = { "Authorization": "Key " + falKey, "Content-Type": "application/json" };
+    const falErr = async (r: Response) => {
+      let d = ""; try { const j = await r.json(); d = (typeof j?.detail === "string" ? j.detail : Array.isArray(j?.detail) ? j.detail.map((x: any) => x.msg || x).join("; ") : "") || j?.error || ""; } catch (_e) { /* noop */ }
+      return d || `fal error (${r.status}).`;
+    };
+    try {
+      if (op === "submit") {
+        const input: any = {
+          prompt: (body.prompt || "").toString(),
+          resolution: (body.resolution || "720p").toString(),
+          duration: (body.duration != null ? String(body.duration) : "auto"),
+          aspect_ratio: (body.aspectRatio || "auto").toString(),
+          generate_audio: body.generateAudio !== false,
+        };
+        if (Array.isArray(body.image_urls) && body.image_urls.length) input.image_urls = body.image_urls;
+        if (Array.isArray(body.audio_urls) && body.audio_urls.length) input.audio_urls = body.audio_urls;
+        if (body.image_url) input.image_url = String(body.image_url);
+        if (body.end_image_url) input.end_image_url = String(body.end_image_url);
+        if (body.seed != null) input.seed = body.seed;
+        const r = await fetch("https://queue.fal.run/" + model, { method: "POST", headers: falHead, body: JSON.stringify(input) });
+        if (!r.ok) return json({ error: await falErr(r), status: r.status }, 200);
+        const data = await r.json();
+        return json({ requestId: data.request_id, statusUrl: data.status_url, responseUrl: data.response_url, status: data.status || "IN_QUEUE" });
+      }
+      if (op === "poll") {
+        // use the URLs fal handed back at submit (avoids the base-vs-subpath gotcha);
+        // only ever attach the key to a fal.run host
+        const statusUrl = (body.statusUrl || "").toString();
+        const responseUrl = (body.responseUrl || "").toString();
+        const okHost = (u: string) => { try { return new URL(u).host.endsWith("fal.run"); } catch (_e) { return false; } };
+        if (!okHost(statusUrl) || !okHost(responseUrl)) return json({ error: "Bad poll URLs." }, 400);
+        const sr = await fetch(statusUrl, { headers: { "Authorization": "Key " + falKey } });
+        if (!sr.ok) return json({ error: await falErr(sr), status: sr.status }, 200);
+        const sd = await sr.json();
+        if (sd.status !== "COMPLETED") return json({ status: sd.status || "IN_PROGRESS" });
+        const rr = await fetch(responseUrl, { headers: { "Authorization": "Key " + falKey } });
+        if (!rr.ok) return json({ error: await falErr(rr), status: rr.status }, 200);
+        const rd = await rr.json();
+        const vurl = rd?.video?.url || "";
+        if (!vurl) return json({ error: "fal returned no video." }, 200);
+        return json({ status: "COMPLETED", videoUrl: vurl, seed: rd.seed, contentType: (rd?.video?.content_type) || "video/mp4" });
+      }
+      return json({ error: `Unknown video op "${op}".` }, 400);
+    } catch (e) {
+      return json({ error: "Proxy failed to reach fal: " + ((e as any)?.message || e) }, 502);
+    }
   }
 
   if (!prompt) return json({ error: "No prompt supplied." }, 400);

@@ -72,6 +72,42 @@ Storyboard. Two proposed edits to `docs/Story Pipeline.md`:
 
 ---
 
+## 2A. The Stage UI — canonical layout *(approved 2026-06-15)*
+
+Step 10 is realised as a **two-pane workspace** — a render-control **dock** on the left, a clip
+**board** on the right — adapted from a standard AI-video tool, but with every input **fed by the
+pipeline** instead of hand-uploaded. The filmmaker never assembles a clip from scratch; they
+**approve and render** one the story already defined.
+
+**Top bar:** project title · a **Board ↔ Timeline** toggle · a media filter `frames | voice | clips`
+· batch + export actions.
+- **Board** = the generation / review grid (below).
+- **Timeline** = the existing audio-driven cut-rhythm assembly already in `app/stage.jsx` (the §0
+  clock made visible). One toggle keeps both surfaces.
+
+**Left — the Render dock** (reuses the Art Room engine-dock `NbDock` shell). For the selected shot:
+- **Model** — Seedance 2.0 (via the media-proxy).
+- **First frame** — auto-filled from the shot's rendered frame (Shot List). **End frame** —
+  auto-chained to the *next* shot's frame for continuity. *No manual upload.*
+- **Prompt** — auto-composed from the beat / shot, editable.
+- **Voice** — the character's **locked-voice line** shown as a waveform (not a toggle): the Phase-2
+  `lineAudio`.
+- **Duration** — **read-only, locked to the line's measured `durationMs`** ("3.2s · from voice").
+  This is §0 audio-as-clock surfaced in the UI — the user never picks a duration.
+- **Resolution** + **Generate** with a credit cost and a per-scene estimate ("≈ 6 clips · 90 cr"),
+  reusing the Coordinator cost-preview pattern (`CoordConfirm` / `preProdStatus`).
+
+**Right — the clip Board**, **grouped by scene in cut order** (not a freeform grid). Each clip card:
+keyframe thumbnail + play, **status chips** (`voice ✓ / video ✓ / pending`), duration, and a
+tie-back to its shot. Scene headers show progress ("Scene 04 · 3 / 6 clips"). Empty / blocked states
+read honestly ("frame ready", "needs voice", "rendering").
+
+**Build dependency:** the dock is the **Phase 3** surface; its Voice + Duration fields only light up
+once **Phase 1 (voices)** and **Phase 2 (line audio)** exist to feed them. Board/Timeline + the
+status board can ship on top of today's shell first; the render controls activate per phase.
+
+---
+
 ## 3. Data-model additions (additive, mirrors what exists)
 
 **Design rule — two layers.** *Tone is identity (frozen); pacing & emotion are performance (per line).*
@@ -194,7 +230,37 @@ path this plan assumes. Before building the hand-off, the chosen provider/endpoi
 7. **Determinism/seed:** can we pin a seed for reproducible retries?
 8. **Async contract:** submit→poll→signed-url, latency, and failure/refund behaviour (for the proxy).
 
-*User will supply the endpoint once the plan + feasibility are agreed.*
+### 6A. ANSWERED — provider chosen: fal.ai, `reference-to-video` *(2026-06-15)*
+
+Endpoint confirmed and feasibility checked against fal.ai's official ByteDance Seedance 2.0 API
+(also on Volcengine Ark / Replicate / PiAPI). **We use the `reference-to-video` variant — it's the exact
+frame + line-audio → lip-synced-clip shape this plan assumed.**
+
+- **Model id:** `bytedance/seedance-2.0/reference-to-video` (or `…/fast/reference-to-video`, 720p cap).
+- **Auth:** `FAL_KEY` (server secret, set via `supabase secrets set FAL_KEY=…` — never the browser).
+- **Inputs:** `image_urls` (≤9 — the **shot frame** goes here), `audio_urls` (≤3, **combined ≤15s** — the
+  **locked-voice line**), `video_urls` (≤3), `prompt` (refs assets as `@Image1` / `@Audio1`), `duration`
+  (`auto` or **4–15**s), `resolution` (480/720/**1080p**), `aspect_ratio` (incl. **9:16** for micro-drama),
+  `generate_audio` (bool), `seed`. Total ≤12 files.
+- **Output:** `{ video:{ url, content_type, file_name, file_size }, seed }` — a signed `fal.media` mp4 URL.
+- **Async:** submit → poll/`webhook`/`subscribe` → result. Good for the proxy.
+
+Checklist resolutions (1–8 above):
+1. ✅ one call takes (image + audio refs + prompt). 2. ⚠️ **duration is a PARAMETER** (auto | 4–15s), not
+auto-bound to audio length — so we **pass our measured `lineAudio.durationMs`** (clamped 4–15s) as `duration`;
+our §0 clock drives it. 3. ✅ **max 15s** (= our `clipMax`; long lines split at sentence/beat as planned).
+4. ⚠️ **no explicit per-face map** — multi-speaker binding is **prompt-driven** (`@Audio1 is spoken by the
+woman on the left`); this remains the top mis-binding risk → Phase-0 Lab Tests 2 & 4. 5. lip-sync is
+phoneme-level; style/motion transfer is separate (test which knob). 6. time-range is via prompt/camera
+directives (not a structured field) — validate in the Lab. 7. ✅ `seed`. 8. ✅ submit→poll→signed-url; confirm
+refund-on-failure behaviour at build time.
+
+- **Cost (flag):** priced **per second of output** (~$0.24–0.30/s fast/standard on fal; varies by
+  resolution/provider). A 15s clip ≈ $3.60–4.50; a ~50-clip micro-drama ≈ low hundreds → the Coordinator's
+  cost-preview gate (`CoordConfirm`/`preProdStatus`) must extend to the Stage video render before batching.
+
+> **Decided 2026-06-15:** Seedance 2.0 via **fal.ai `reference-to-video`** is the Phase-3 provider; `FAL_KEY`
+> is a server secret in the same proxy. §6 is no longer an open question — Phase 3 is unblocked.
 
 ---
 
@@ -249,6 +315,78 @@ that fight the audio ("he shouts" over a calm track) unless conflict-resolution 
 
 ---
 
+## 8A. Phase 1 → 2 — the audio slice (the first increment, detailed)
+
+This lands **before any video**. It needs **only ElevenLabs** (no Seedance), and is independently
+valuable: the Stage's *estimated* durations become **real measured ones**, and the cut can be
+**heard**. Build this slice first; Phase 0/3 (Seedance) proceed in parallel and converge later.
+
+### Shared infrastructure
+- **media-proxy** — extend the Supabase `image-proxy` Edge Function to accept `task:"voice"` (the §4/§9
+  decision; sibling functions are the fallback). The **ElevenLabs key is a server secret**; the browser
+  only ever calls the proxy. Sub-routes: `tts`, `voiceDesign`, `voiceLibrary`, `voiceClone`.
+- **Asset kind `"audio"`** — `turn_audios` cloud table + `turn-audio-{id}` IDB store, `.mp3` (per §3),
+  reusing the `cloud.jsx` signed-URL / RLS machinery.
+- **`app/voicegen.jsx`** — a structural twin of `imagegen.jsx`: `elGenerate / elDesignVoice /
+  elPickLibrary / elCloneVoice / elCommit / useVoiceGen` (§4), cached by
+  `hash(text + voiceId + resolvedSettings)` so unchanged lines never re-spend.
+
+### Phase 1 — Voices tab (Art Room)
+- **Tab order:** `Characters → Props → Voices → Locations → Style → Shots → Storyboard`.
+- **VoiceCard per speaking character** — reuses the `SheetFrame` shell with a **waveform + play head**
+  instead of an image. Three origins (§5):
+  - **Designed** — build a `voiceSpec` from the bible (age / identity / archetype / drive) → Voice
+    Design → audition 2-3 candidates → **lock** `voiceLock.voiceId`.
+  - **Library** — browse / pick a prebuilt voice, lock its id.
+  - **Cloned** — upload samples, **consent-gated + local-first exactly like Cameo** (reuse the cameo
+    consent UX) → instant clone → lock.
+- **Auto-draft** a candidate `voiceSpec` on first Art Room open (mirrors the silent cast auto-draft);
+  the user **auditions and locks — never silently committed.**
+- Writes `voiceLock { voiceId, voiceName, source, modelId, defaults, consent, sync, provenance }` (§3).
+- **Scope:** only characters who actually have `dialogue` need a voice — surface the count ("4 of 6
+  speak"). Add a **"Voices" stage to `preProdStatus`** (locked / speaking) so it shows in the
+  readiness strip and the Coordinator estimate.
+- **Acceptance:** every speaking character can be locked to a `voiceId`; re-open shows the lock;
+  cloned voices honour consent + local-first.
+
+### Phase 2 — line audio = the clock
+- **Render** each shot's `dialogue` through its `voiceLock` (resolved settings = `defaults` ⊕ the
+  line's `delivery`) → `lineAudio { audioUrl, durationMs, text, voiceId, delivery, hash }` (§3).
+- **Audio-as-clock swap:** replace the Stage's estimated `shotDur` with the **measured `durationMs`**
+  everywhere it drives `clipLenMs`, the cut-rhythm bar, the `sceneSequences` partition, and the
+  runtime summary. (`app/stage.jsx` uses estimates today — this is the one-line-of-truth swap.)
+- **Long-line split:** a line whose `durationMs` exceeds the clip max splits at a **sentence / beat
+  boundary** (the rule §0 promised) — each part its own `lineAudio` + sub-clip.
+- **Multi-speaker shots:** one `lineAudio` per speaker (sets up Phase 3's per-face binding).
+- **Batch:** "Voice all lines" renders every shot's dialogue, one at a time, progress + cancel,
+  **skipping unchanged** lines by hash, behind a **cost preview** (Coordinator pattern).
+- **Stage surfacing:** the render dock's **Voice** field shows the `lineAudio` waveform and
+  **Duration** shows the locked `durationMs`; un-voiced lines read "needs voice".
+- **Acceptance:** with voices locked, "Voice all lines" populates `lineAudio`; the Stage timeline
+  **re-times to measured durations**; re-runs skip unchanged lines; the Stage is fully usable (you can
+  hear the cut) **with zero Seedance dependency.**
+
+### Deferred by this slice
+Seedance video (Phase 3) and the player / export — gated on the §6 endpoint checklist and the Phase 0
+Lab. The render dock's frame/model/Generate controls stay inert until Phase 3. Phase 1→2 stands alone.
+
+### ElevenLabs API key — required scopes (restricted key, server-side only)
+The Phase 1→2 slice maps to exactly these ElevenLabs endpoint permissions — grant these, **No Access**
+to everything else (especially all *Administration* scopes):
+
+| ElevenLabs scope | Access | Why |
+|---|---|---|
+| **Text to Speech** | Access | per-line render + timestamps (Phase 2) |
+| **Voice Generation** | Access | Voice Design — the "designed" origin (Phase 1) |
+| **Voices** | **Write** | clone + create + list library (Phase 1) |
+| **Models** | Access | list / select the TTS model (optional) |
+| **Forced Alignment** | Access | precise word timing for cuts + captions (optional) |
+| *all others, incl. all Administration* | **No Access** | least privilege — an app key is not an admin key |
+
+The key is held **only** as the media-proxy server secret — never shipped to the browser.
+
+---
+
 ## 9. Risks & cross-cutting decisions
 
 - **Consent / licensing** for voice cloning — reuse the cameo consent gate; local-first, cloud opt-in.
@@ -263,6 +401,15 @@ that fight the audio ("he shouts" over a calm track) unless conflict-resolution 
 
 ## 10. Open questions for the user
 
-1. Seedance provider/route (so the proxy contract in §6 can be filled in).
-2. ElevenLabs account/key available for Phase 1 (Phase 0 can run upload-only without it).
-3. Approve the §2 pipeline wording (Voices tab + Step 10) — or amend it.
+1. Seedance provider/route (so the proxy contract in §6 can be filled in). **— RESOLVED:** fal.ai
+   `bytedance/seedance-2.0/reference-to-video`, `FAL_KEY` server secret. Full contract in §6A.
+2. ElevenLabs account/key for Phase 1. **— in progress:** a restricted, server-side key is being
+   created with the §8A scopes (Text to Speech + Voice Generation + Voices·Write; Models + Forced
+   Alignment optional). ⚠️ The account shows an **unpaid invoice** — voice generation will fail until
+   that's cleared, so settle it before relying on the key.
+3. Approve the §2 pipeline wording (Voices tab + Step 10) — or amend it. **— still open** (the
+   `Story Pipeline.md` edit waits on this).
+
+> **Decided 2026-06-15:** §2A Stage UI (dock + board, Board/Timeline toggle, pipeline-fed inputs,
+> locked duration) is the **canonical** Stage layout. §8A defines the **Phase 1→2 audio slice** as the
+> first build increment (ElevenLabs only, no Seedance).

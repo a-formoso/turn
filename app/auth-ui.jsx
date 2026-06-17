@@ -48,7 +48,7 @@ function AuthModal({ onClose, onAuthed, initialMode, plan, light }){
     }catch(ex){ setErr((ex && ex.message) || "Network error."); setBusy(false); }
   };
 
-  return React.createElement("div",{className:"lb-overlay"+(light?" auth-light":""),onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose && onClose(); }},
+  return React.createElement("div",{className:"auth-overlay"+(light?" auth-light":""),onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose && onClose(); }},
     React.createElement("div",{className:"auth-panel"+(light?" light":"")},
       React.createElement("div",{className:"auth-head"},
         React.createElement("div",{className:"auth-mark"},"TURN"),

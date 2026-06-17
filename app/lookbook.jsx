@@ -53,6 +53,28 @@ function composeLookbookRefs(statement, cards){
 }
 window.composeLookbookRefs = composeLookbookRefs;
 
+/* Write-through (legacy migration): the Lookbook's colorist brief now auto-fills the
+   Presets references field DIRECTLY (plain text, no markers — see the write-through effect
+   in app.jsx, ownership tracked via styleBible.lookbookSynced). An earlier version spliced
+   it into styleBible.refs inside this delimited block; docs saved then still carry it, so
+   mergeLookbookIntoRefs(refs, "") is kept as the strip the effect uses to lift the block
+   back out of the manual refs. */
+const LB_REFS_START = "[Lookbook references]";
+const LB_REFS_END   = "[/Lookbook references]";
+window.LB_REFS_START = LB_REFS_START;
+window.LB_REFS_END = LB_REFS_END;
+function mergeLookbookIntoRefs(existingRefs, lbText){
+  const esc = (s)=> s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const base = String(existingRefs||"")
+    .replace(new RegExp("\\n*"+esc(LB_REFS_START)+"[\\s\\S]*?"+esc(LB_REFS_END)+"\\n*", "g"), "\n")
+    .trim();
+  const lb = String(lbText||"").trim();
+  if(!lb) return base;                                  // lookbook empty → only the manual refs
+  const block = LB_REFS_START+"\n"+lb+"\n"+LB_REFS_END;
+  return base ? base+"\n\n"+block : block;
+}
+window.mergeLookbookIntoRefs = mergeLookbookIntoRefs;
+
 /* which reference categories feed which downstream department. A category may feed more than
    one. Each Art Room drafter pulls only its department's categories as a focused brief, so the
    one visual lookbook propagates to every department (not just colour). */
@@ -106,8 +128,11 @@ const LOOKBOOK_DEPT_AFFECT = {
 };
 window.LOOKBOOK_DEPT_AFFECT = LOOKBOOK_DEPT_AFFECT;
 
-/* the in-tab banner: "the Lookbook changed since this was drafted" + how it drives THIS tab + [Re-draft]. */
-function LookbookStaleNotice({ stale, onApply, label, dept }){
+/* the in-tab banner: "the Lookbook changed since this was drafted" + how it drives THIS tab
+   + [Re-draft only] [Re-draft & regenerate]. onDraftOnly (optional) re-drafts the specs from
+   the updated Lookbook but leaves the generated images alone — for when you want the words
+   updated now and the renders later. */
+function LookbookStaleNotice({ stale, onApply, onDraftOnly, label, dept }){
   if(!stale) return null;
   const affect = LOOKBOOK_DEPT_AFFECT[dept] || "";
   return React.createElement("div",{className:"lb-stale-notice"},
@@ -115,6 +140,9 @@ function LookbookStaleNotice({ stale, onApply, label, dept }){
     React.createElement("span",null,
       "The ",React.createElement("b",null,"Lookbook")," changed since "+(label||"this tab")+" "+((label&&/s$/.test(label))?"were":"was")+" last drafted — re-draft to apply it.",
       affect && React.createElement("span",{className:"lb-stale-affect"}, affect)),
+    onDraftOnly && React.createElement("button",{className:"lb-stale-btn ghost",onClick:onDraftOnly,
+      title:"Re-draft this tab's specs from the updated Lookbook — images stay as they are; regenerate them when you're ready"},
+      React.createElement(Icon.sparkles,{s:12}),"Re-draft only"),
     React.createElement("button",{className:"lb-stale-btn",onClick:onApply,title:"Re-draft this tab's specs from the updated Lookbook and regenerate its sheets"},
       React.createElement(Icon.sparkles,{s:12}),"Re-draft & regenerate"));
 }
@@ -225,7 +253,7 @@ function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSe
         React.createElement("div",{style:{flex:1}},
           React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Visual Researcher",
             React.createElement(window.InfoTip,{label:"About the Lookbook",
-              text:"The film's visual north star, built first so it can steer everything downstream. A short visual statement plus reference touchstones — palette, lighting, lens, texture — each with a mood frame in that visual language (original frames, never copies of the named films). 'Research the look' runs the Visual Researcher agent: it writes the statement, gathers the references, and renders a mood frame for each — then writes those references through to the Presets (Colorist), so the colour system is built from the same brief."}))),
+              text:"The film's visual north star, built first so it can steer everything downstream. A short visual statement plus reference touchstones — palette, lighting, lens, texture — each with a mood frame in that visual language (original frames, never copies of the named films). 'Research the look' runs the Visual Researcher agent: it writes the statement, gathers the references, and renders a mood frame for each — then writes those references through to the Styles tab (Colorist), so the colour system is built from the same brief."}))),
         React.createElement("div",{className:"art-intro-actions"},
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add reference"),

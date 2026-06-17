@@ -112,8 +112,21 @@ Infinite Studio method vocabulary (values, charges, beats, turns).
 
 ### 9. Pre-production — the Art Room (visual pipeline)
 Once the script exists, the **Art Room** turns it into a visual reference package (separate from the
-Writers' Room). Tabs, left-to-right: **Props → Characters → Locations → Style Bible → Shot List → Storyboard**.
+Writers' Room). Tabs, left-to-right: **Characters → Props → Voices → Locations → Style Bible → Shot List → Storyboard**.
 Each entity gets a canonical, reusable reference so every generated image stays consistent.
+
+> **Characters come before Props** *(2026-06-15)*: a worn/owned prop must look like it belongs to its
+> character, so the **character is generated first** and each prop is then generated **referencing its
+> owner's character sheet** (matching their style, materials, palette and wear). A prop generated in
+> isolation comes out generic — not part of that character's world. After the props exist, re-generating
+> a character makes its master ingest the finalized worn-prop sheets so it wears the exact prop.
+
+- **Voices** *(approved 2026-06-13; tab planned, not yet built — see Step 10)* — each speaking
+  character gets a **locked voice** the way Cameo locks a face. A voice is **designed from the
+  character's own bible** (age, identity, archetype, drive), **picked from a library**, or **cloned from
+  a real voice sample** (consent-gated, exactly like a cameo). Locking writes a canonical `voiceId` so
+  the same character sounds identical in every line. A candidate spec is auto-drafted on first Art Room
+  open (mirroring the silent cast auto-draft); the user auditions and locks — never silently committed.
 
 - **"Draft all" batch drafters are consistent across tabs.** Each tab's primary action fills every
   card's full written spec from the script in one pass — the same fields the per-card "Draft details"
@@ -130,8 +143,12 @@ Each entity gets a canonical, reusable reference so every generated image stays 
     undrafted card shows a quiet inline "Drafting from script…" status while it runs. The manual
     "Draft" button only appears when some character still lacks a spec (e.g. one added by hand, or if
     auto-draft didn't finish); once the whole cast is drafted it disappears. This makes the intended
-    order: **Props → Draft all → Generate all → Characters → Generate all** (characters last, because a
-    character sheet ingests its owned props' generated sheets as visual references).
+    order: **Characters → Generate all → Props → Draft all → Generate all → (re-generate Characters)** —
+    characters FIRST so each worn/owned prop can be generated referencing its owner's character sheet
+    (so it matches them); then, with the props made, re-generating a character makes its master wear the
+    exact finalized prop. The Coordinator's **Run pre-production** does this automatically: Lookbook →
+    Characters → Props → **Wear props** (re-generates each affected master and refreshes any existing
+    appearance variant off it) → Locations → Style Bible → Shot List → Storyboard.
   - **Draft all locations** → The space, Significance, Staging · Depth Grid, Look dev. (Locations also runs
     the full locations pipeline here: it first pulls any missing places in from the script's sluglines and
     refreshes existing scene chips, then drafts the specs, then stages each depth grid — so there's no
@@ -180,6 +197,16 @@ Each entity gets a canonical, reusable reference so every generated image stays 
   every frame (one at a time, skip/regenerate). **"Export shot list"** opens a printable AD-style table (Save as
   PDF). The Storyboard tab lays these frames out in sequence next.
 
+### 10. The Stage — performance & assembly  *(audio-first; approved 2026-06-13. Assembly shell built; voice + video render are the next phases)*
+Storyboard lays out the still frames in sequence; the **Stage** turns each into a moving shot.
+**Audio leads:** each shot's `dialogue` is rendered through the speaking character's **locked voice**;
+the line's **duration sets the clip length and the cut point**. The shot's **frame** (already produced
+in Shot List) plus the **line audio** are handed to the video model, which **lip-syncs the performance
+to the audio**. Multi-character shots attach **one reference audio per speaker**, bound to the right
+face. The sequence of line durations becomes the **edit timeline** — cuts fall on line boundaries;
+lines longer than one clip are split at a sentence/beat boundary. Built audio-first per
+`docs/Voice & Lip-Sync (Seedance) Plan.md`.
+
 ---
 
 ## Implementation status (keep this honest)
@@ -190,6 +217,10 @@ Each entity gets a canonical, reusable reference so every generated image stays 
   pillar draws on the model's own world knowledge (period, place, the protagonist's role through four lenses:
   what happens / how it feels / frustrating / lovely).
 - `APP_FEATURES` in `app/ai.jsx` has been updated so MUSE can describe the stage.
+- Step **10 (The Stage)**: the **audio-first assembly shell** is built (`app/stage.jsx`, room unlocked) —
+  it lays the clip partition + shot frames + dialogue on the cut timeline, timed by ESTIMATED line
+  durations. The **Voices** tab (Step 9) and the real voice/video render (ElevenLabs → Seedance) are the
+  next phases (keys/endpoint in hand).
 
 ---
 
@@ -197,6 +228,15 @@ Each entity gets a canonical, reusable reference so every generated image stays 
 - *(created)* — initial pipeline codified from the manager's 8-step spec + the Three Pillars of Research.
 - *(Step 2 shipped)* — Research → Synopsis built into the New Story flow: 3-pillar research + editable
   three-paragraph synopsis, reviewed before the spine builds, then threaded into spine/world/cast generation.
+- *(Step 10 added; Voices tab approved)* — The Stage (audio-first performance & assembly) and a
+  planned Voices tab in Step 9, per `Voice & Lip-Sync (Seedance) Plan.md`, with the user's explicit
+  approval of the §2 wording. The Stage assembly shell shipped (`app/stage.jsx`); voice/video phases next.
 - *(Step 9 added)* — Pre-production / Art Room documented, including per-location **Depth-Grid Staging**
   (3×3 + Floor + Scale Class + Camera, optional cells, AI "Draft staging", feeds the plate prompt). Added
   with the user's explicit permission; the grid lives on Locations now and Shots will inherit it later.
+- *(2026-06-15 — Characters before Props)* — Art Room reordered so **Characters precede Props** (tab
+  order + default tab + Coordinator). Each worn/owned prop is now generated **referencing its owner's
+  character sheet** so it matches that character (a prop made in isolation came out generic). The
+  Coordinator gained a **"Wear props"** pass after Props that re-generates each affected character's
+  master so it wears the finalized worn-prop sheets (refreshing any existing appearance variant).
+  Done with the user's explicit permission.

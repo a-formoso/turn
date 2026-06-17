@@ -96,6 +96,9 @@ window.OverflowMenu = OverflowMenu;
    size. Moved out of the top bar to free its space; the panel toggles ride along
    at the edges (Writers' Room only). Replaces the old mobile-only bottom bar. */
 function ViewNav({ room, view, setView, artView, setArtView, railOpen, inspOpen, onToggleRail, onToggleInsp, onCoordinate, onAgents, staleTabs, hiddenTabs }){
+  // The Stage is a single full-width assembly view — no sub-view tabs (don't fall through
+  // to the Writers' Room tabs); its own header carries the context.
+  if(room==="stage") return null;
   const writersNav = [["spine","Spine",Icon.graph],["beats","Audit",Icon.grid],["board","Board",Icon.board],["script","Script",Icon.script]];
   // a format may hide tabs entirely (registry `tabs` map — used sparingly)
   const artNav = (window.ART_TABS||[]).filter(t=>!(hiddenTabs&&hiddenTabs[t.id])).map(t=>[t.id,t.label,Icon[t.icon]||Icon.user]);
@@ -137,7 +140,7 @@ window.ViewNav = ViewNav;
 const ROOMS = [
   { id:"writers", label:"Writers\u2019 Room", phase:"Development", icon:"script", live:true },
   { id:"art", label:"The Art Room", phase:"Pre-production", icon:"palette", live:true },
-  { id:"stage", label:"The Stage", phase:"Production", icon:"clapper", live:false },
+  { id:"stage", label:"The Stage", phase:"Production", icon:"clapper", live:true },
   { id:"cutting", label:"The Cutting Room", phase:"Post", icon:"scissorsCut", live:false },
 ];
 window.ROOMS = ROOMS;
@@ -192,24 +195,89 @@ function ThemeToggle({ theme, onTheme }){
 }
 window.ThemeToggle = ThemeToggle;
 
-function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, theme, onTheme, authSlot, projectSlot }){
+/* ADMIN: the Film Bible viewer — the whole continuity JSON the studio reads from,
+   shown read-only with a Copy button. getBible() builds it fresh on open. */
+function FilmBibleModal({ getBible, onClose }){
+  const [copied, setCopied] = React.useState(false);
+  const json = React.useMemo(()=>{ try{ return JSON.stringify(getBible()||{}, null, 2); }catch(e){ return "// couldn't build the bible: "+(e&&e.message||e); } },[]);
+  const copy = ()=>{ try{ navigator.clipboard.writeText(json); setCopied(true); setTimeout(()=>setCopied(false), 1600); }catch(e){} };
+  React.useEffect(()=>{ const h=(e)=>{ if(e.key==="Escape") onClose(); }; document.addEventListener("keydown",h); return ()=>document.removeEventListener("keydown",h); },[]);
+  return React.createElement("div",{className:"bible-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
+    React.createElement("div",{className:"bible-modal"},
+      React.createElement("div",{className:"bible-head"},
+        React.createElement("div",{className:"bible-title"},
+          React.createElement(Icon.layers,{s:15}),"Film Bible — continuity JSON",
+          React.createElement("span",{className:"bible-sub"},"deterministic projection of the live story · admin only")),
+        React.createElement("div",{className:"bible-head-acts"},
+          React.createElement("button",{className:"bible-btn"+(copied?" on":""),onClick:copy},
+            React.createElement((Icon[copied?"check":"copy"]||Icon.check),{s:13}), copied?"Copied":"Copy JSON"),
+          React.createElement("button",{className:"bible-x",onClick:onClose,title:"Close"},React.createElement(Icon.x,{s:16})))),
+      React.createElement("pre",{className:"bible-pre"}, json)));
+}
+window.FilmBibleModal = FilmBibleModal;
+
+/* StoryBriefModal — shows the logline + synopsis (the composed brief) the story's spine,
+   beats and cast were built from, so the user can review exactly what was generated and
+   spot where anything deviated. Saved at build time on project.sourceBrief. */
+function StoryBriefModal({ project, onClose }){
+  const p = project || {};
+  const brief = (p.sourceBrief||"").trim();
+  const logline = (p.logline||p.premise||"").trim();
+  React.useEffect(()=>{ const h=(e)=>{ if(e.key==="Escape") onClose(); }; document.addEventListener("keydown",h); return ()=>document.removeEventListener("keydown",h); },[]);
+  const when = p.sourceBriefAt ? new Date(p.sourceBriefAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "";
+  return React.createElement("div",{className:"bible-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
+    React.createElement("div",{className:"bible-modal brief-modal"},
+      React.createElement("div",{className:"bible-head"},
+        React.createElement("div",{className:"bible-title"},
+          React.createElement((Icon.book||Icon.file||Icon.layers),{s:15}),"Story brief — what the spine was built from",
+          when && React.createElement("span",{className:"bible-sub"},"generated "+when)),
+        React.createElement("button",{className:"bible-x",onClick:onClose,title:"Close"},React.createElement(Icon.x,{s:16}))),
+      brief
+        ? React.createElement("pre",{className:"bible-pre brief-pre"}, brief)
+        : React.createElement("div",{className:"brief-empty"},
+            logline
+              ? React.createElement(React.Fragment,null,
+                  React.createElement("div",{className:"brief-empty-lab"},"Logline"),
+                  React.createElement("p",{className:"brief-empty-log"},logline),
+                  React.createElement("p",{className:"brief-empty-note"},"No saved synopsis — this story was built before briefs were saved. New stories save their full logline + synopsis here."))
+              : React.createElement("p",{className:"brief-empty-note"},"No saved brief yet. Start a story with New Story and its logline + synopsis are saved here for review."))));
+}
+window.StoryBriefModal = StoryBriefModal;
+
+function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, theme, onTheme, authSlot, projectSlot, onHome }){
+  const [bibleOpen, setBibleOpen] = React.useState(false);
+  const [briefOpen, setBriefOpen] = React.useState(false);
   return React.createElement("div",{className:"topbar"},
+    bibleOpen && onViewBible && React.createElement(FilmBibleModal,{ getBible:onViewBible, onClose:()=>setBibleOpen(false) }),
+    briefOpen && React.createElement(StoryBriefModal,{ project, onClose:()=>setBriefOpen(false) }),
     React.createElement("div",{className:"tb-left"},
-      React.createElement("div",{className:"brand"},
-        React.createElement(BrandMark,null),
-        React.createElement("span",{className:"brand-name"},"T",React.createElement("b",null,"U"),"RN")),
+      onHome
+        ? React.createElement("button",{className:"brand brand-btn",onClick:onHome,title:"Home — all your films"},
+            React.createElement(BrandMark,null),
+            React.createElement("span",{className:"brand-name"},"T",React.createElement("b",null,"U"),"RN"))
+        : React.createElement("div",{className:"brand"},
+            React.createElement(BrandMark,null),
+            React.createElement("span",{className:"brand-name"},"T",React.createElement("b",null,"U"),"RN")),
       React.createElement("div",{className:"topbar-divider"}),
-      // the department (room) switcher first, then the project title
+      // the project title first, then the department (room) switcher to its right
       React.createElement("div",{className:"context-group"},
-        React.createElement(RoomSwitcher,{room,setRoom,hasStory:(scenes||[]).length>0}),
-        projectSlot || null)),
+        projectSlot || null,
+        React.createElement(RoomSwitcher,{room,setRoom,hasStory:(scenes||[]).length>0}))),
 
     React.createElement("div",{className:"tb-right"},
       React.createElement(ThemeToggle,{theme,onTheme}),
+      // Writers' Room: review the logline + synopsis the story was built from
+      room==="writers" && project && (project.sourceBrief||project.logline||project.premise) && React.createElement("button",{className:"tb-btn",onClick:()=>setBriefOpen(true),
+        title:"Story brief — the logline & synopsis this story was built from"},
+        React.createElement((Icon.book||Icon.file||Icon.layers),{s:14}),"Brief"),
+      // ADMIN ONLY: the whole continuity JSON, one click
+      onViewBible && React.createElement("button",{className:"tb-btn",onClick:()=>setBibleOpen(true),
+        title:"Film Bible — view the whole continuity JSON the studio reads from"},
+        React.createElement(Icon.layers,{s:14}),"JSON"),
       React.createElement("button",{className:"tb-btn newstory",onClick:onNewStory,title:"Start a new story from an idea"},
         React.createElement(Icon.plus,{s:14}),"New Story"),
-      // Export is a Writers' Room action (screenplay / story formats) — hidden in the Art Room
-      room!=="art" && React.createElement(ExportMenu,{project,scenes,drafts,onReset}),
+      // Export is a Writers' Room action (screenplay / story formats) — only there (not Art / Stage)
+      room==="writers" && React.createElement(ExportMenu,{project,scenes,drafts,onReset}),
       React.createElement(OverflowMenu,{onNewStory,project,scenes,drafts,onReset,room}),
       // 'Agents' moved to the ViewNav's right zone (Writers' Room), mirroring the Art Room's
       // 'Run pre-production' — both sit to the right of their centered tab strip.
@@ -219,9 +287,13 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
 window.TopBar = TopBar;
 
 /* collapsed vertical strip — left or right */
-function CollapsedStrip({ side, label, icon:Ic, onExpand, flagCount }){
-  return React.createElement("div",{className:`strip ${side}`},
-    React.createElement("button",{className:"strip-btn",onClick:onExpand,title:`Expand ${label}`},
+function CollapsedStrip({ side, label, icon:Ic, onExpand, flagCount, buttonless }){
+  // buttonless (the inspector, right): drop the strip's own expand button — it would sit
+  // right under the top-bar's inspector toggle and read as a duplicate. The whole strip is
+  // clickable to reopen instead, and the top-bar toggle still works.
+  return React.createElement("div",{className:`strip ${side}${buttonless?" strip-clickable":""}`,
+      ...(buttonless ? { onClick:onExpand, title:`Expand ${label}`, role:"button", tabIndex:0 } : {})},
+    buttonless ? null : React.createElement("button",{className:"strip-btn",onClick:onExpand,title:`Expand ${label}`},
       React.createElement(Ic,{s:16})),
     React.createElement("div",{className:"strip-label"},label),
     flagCount ? React.createElement("div",{className:"strip-flag",title:`${flagCount} scenes don't turn`},

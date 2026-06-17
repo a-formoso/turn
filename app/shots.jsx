@@ -204,56 +204,87 @@ function buildShotPrompt(sh, ctx){
   const loc = ctx.location || null;
   const charById = ctx.charById || {};
   const propById = ctx.propById || {};
-  const subjects = (sh.subjects||[]).map(id=>charById[id]).filter(Boolean);
-  const props    = (sh.props||[]).map(id=>propById[id]).filter(Boolean);
+  // in-frame cast & props are DERIVED from the action text (inFrameCast/inFrameProps),
+  // not the stored tags — so they're always accurate to what the frame actually shows.
+  const _chars = Object.values(charById);
+  const subjects = ((typeof inFrameCast==="function") ? inFrameCast(sh, scene, _chars) : (sh.subjects||[])).map(id=>charById[id]).filter(Boolean);
+  const props    = ((typeof inFrameProps==="function") ? inFrameProps(sh, scene, charById, propById) : (sh.props||[])).map(id=>propById[id]).filter(Boolean);
   const size = sizeOf(sh.size), angle = angleOf(sh.angle), move = moveOf(sh.move), lens = lensOf(sh.lens);
 
-  let s = "A single cinematic film FRAME — one shot from a live-action feature. ";
-  // 1) shot grammar
-  s += "SHOT: "+size.name+" ("+size.desc+"), "+angle.label.toLowerCase()+" ("+angle.desc+"), "
-     + "on a "+lens.label+" lens ("+lens.desc+")";
-  if(sh.move && sh.move!=="static") s += ", camera "+move.label.toLowerCase()+" ("+move.desc+")";
-  s += ". ";
-  // 2) who + action
-  if(subjects.length){
-    s += "IN FRAME: "+subjects.map(c=>c.name).join(" and ")+". ";
-  }
-  if(sh.action) s += "ACTION: "+sh.action.replace(/\.$/,"")+". ";
-  if(sh.dialogue) s += "They are mid-line: \u201c"+sh.dialogue.replace(/^["\u201c]|["\u201d]$/g,"")+"\u201d. ";
-  // 3) location single-frame + depth framing scoped to size
-  s += shotLocationClause(loc);
-  s += shotFramingClause(loc, sh.size);
-  // 4) composition note (the editable "vary" layer)
-  if(sh.composition) s += "COMPOSITION: "+sh.composition.replace(/\.$/,"")+". ";
-  // 5) the scene's Style Bible GRADE — applied at the shot, the canonical place for it
-  if(typeof scenePreset==="function" && typeof buildStyleClause==="function"){
-    const preset = scenePreset(ctx.project, scene.id);
-    if(preset) s += buildStyleClause(preset);
-  }
-  // 5b) the project's film-stock / capture look, layered on top of the grade
-  if(typeof filmStockClause==="function") s += filmStockClause(ctx.project);
-  // 6) consistency contract for the reference images
-  const refNouns = [];
-  if(subjects.length) refNouns.push(subjects.length>1?"character sheets":"character sheet");
-  if(loc) refNouns.push("location coverage sheet");
-  if(props.length) refNouns.push(props.length>1?"prop sheets":"prop sheet");
-  if(refNouns.length){
-    s += "The reference image"+(refNouns.length>1?"s are":" is")+" the canonical "+refNouns.join(", ")
-      + " for this film — match the "
-      + [subjects.length?"people":null, loc?"place":null, props.length?"objects":null].filter(Boolean).join(", ")
-      + " to them EXACTLY for continuity (faces, wardrobe, geometry, materials); do not redesign them. "
-      + "Compose them into this ONE frame as described. ";
-  }
-  // 6b) LOCATION LOCK — the location reference is a MULTI-VIEW sheet of ONE set, not six moods
-  if(loc){
-    s += "LOCATION LOCK: the location reference is a MULTI-VIEW coverage sheet — six photographs of ONE single real set "
-      + "seen from different angles, NOT six different places. Reproduce THAT EXACT set from this shot's viewpoint: "
-      + "identical architecture, wall and floor surfaces, tiling, colour, fixtures, and any SIGNAGE TEXT in the same "
-      + "spelling and same positions. Never invent a different-looking space. ";
-  }
+  /* JSON shot spec \u2014 the continuity database in prompt form: every entity is a
+     key:value object, props carry worn_by / carried_by, every reference image is
+     named so the model ties each mention to its attachment. All previous content
+     survives as fields (camera grammar, action, dialogue, depth framing, location
+     lock, grade, film stock, negative). */
+  const clean = (x)=>String(x||"").replace(/\.$/,"").trim();
+  const preset = (typeof scenePreset==="function") ? scenePreset(ctx.project, scene.id) : null;
   const _asp = (typeof aspectFor==="function") ? aspectFor(ctx.project) : "16:9";
-  s += "Photoreal, filmic, a single "+(_asp==="9:16"?"VERTICAL 9:16 (phone) frame":_asp+" frame")+"; natural production lighting; no text, no watermark, no split panels — a single frame.";
-  return s;
+  const lockLook = (c)=>{ const look=(typeof sbCharLock==="function")?sbCharLock(c):"";
+    return clean(look.replace(/^[^:]{1,40}:\s*/,"")) || undefined; };
+  const spec = {
+    task: "a single cinematic film FRAME \u2014 one shot from a live-action feature",
+    camera: {
+      size: size.name+" ("+size.desc+")",
+      angle: angle.label+" ("+angle.desc+")",
+      lens: lens.label+" ("+lens.desc+")",
+      movement: (sh.move && sh.move!=="static") ? (move.label+" ("+move.desc+")") : "static",
+    },
+    action: {
+      what_happens: clean(sh.action) || undefined,
+      dialogue_mid_line: clean(sh.dialogue).replace(/^["\u201c]|["\u201d]$/g,"") || undefined,
+      composition: clean(sh.composition) || undefined,
+    },
+    characters: subjects.length ? subjects.map(c=>({
+      name: c.name,
+      look: lockLook(c),
+      reference_image: c.name+" character sheet",
+      match: "EXACTLY \u2014 face, hair, wardrobe, identity; do not redesign",
+    })) : undefined,
+    props: props.length ? props.map(p=>{
+      const o = { name: p.name };
+      if(p.ownerName) o[(p.kind==="worn")?"worn_by":"carried_by"] = p.ownerName;
+      o.reference_image = p.name+" prop sheet";
+      o.match = "exactly as designed";
+      return o;
+    }) : undefined,
+    // continuity carry-forward: props established earlier in the scene that this beat's text
+    // doesn't re-name but are still present (the ledger) — so they don't pop out of the cut.
+    carried_forward: (ctx.carriedForward && ctx.carriedForward.length) ? ctx.carriedForward.map(p=>({
+      name: p.name,
+      held_by: p.ownerName || undefined,
+      note: "still present from an earlier beat of this scene — keep it in frame, consistent with its sheet, unless the action shows it set down",
+      reference_image: p.name+" prop sheet",
+    })) : undefined,
+    location: loc ? {
+      name: loc.name||"the location",
+      int_ext: loc.intExt||"INT",
+      space: clean(loc.architecture) || undefined,
+      materials_palette: clean(loc.materials) || undefined,
+      light: clean(loc.lighting) || undefined,
+      reference_image: (loc.name||"location")+" location coverage sheet",
+      lock: "the reference is a MULTI-VIEW coverage sheet \u2014 multiple photographs of ONE single real set; reproduce THAT EXACT set from this shot's viewpoint: identical architecture, surfaces, fixtures and signage text in the same spelling and positions; never invent a different-looking space",
+    } : undefined,
+    depth_framing: clean(shotFramingClause(loc, sh.size)) || undefined,
+    style: preset ? {
+      grade_name: preset.name,
+      grade: clean(preset.grade) || undefined,
+      palette_60_30_10: (preset.palette||[]).length>=3 ? {
+        dominant_60: (preset.dominantLabel||"dominant")+" "+preset.palette[0],
+        secondary_30: (preset.secondaryLabel||"secondary")+" "+preset.palette[1],
+        accent_10: (preset.accentLabel||"accent")+" "+preset.palette[2],
+      } : undefined,
+      lighting: clean(preset.lighting)||undefined,
+      lens: clean(preset.lens)||undefined,
+      texture: clean(preset.texture)||undefined,
+    } : undefined,
+    film_stock: (typeof filmStockClause==="function") ? (clean(filmStockClause(ctx.project))||undefined) : undefined,
+    format: {
+      frame: "a single "+(_asp==="9:16"?"VERTICAL 9:16 (phone)":_asp)+" frame",
+      rules: ["photoreal, filmic, natural production lighting","no text, no watermark, no split panels \u2014 a single frame"],
+    },
+    negative: shotNegativePrompt(sh).split(/,\s*/),
+  };
+  return "Render a single cinematic film frame EXACTLY as specified by this JSON shot spec (continuity fields are binding):\n"+JSON.stringify(spec, null, 1);
 }
 window.buildShotPrompt = buildShotPrompt;
 
@@ -266,8 +297,8 @@ window.shotNegativePrompt = shotNegativePrompt;
 
 /* master + negative → the final string fed to the image model */
 function combinedShotPrompt(sh, ctx){
-  const neg = shotNegativePrompt(sh);
-  return buildShotPrompt(sh, ctx) + (neg ? (" NEGATIVE (exclude): "+neg) : "");
+  // the negative (custom per-shot, else the defaults) rides INSIDE the JSON spec
+  return buildShotPrompt(sh, ctx);
 }
 window.combinedShotPrompt = combinedShotPrompt;
 
@@ -281,26 +312,38 @@ function deriveShotPrompt(sh, ctx){
   ctx = ctx || {};
   const loc = ctx.location || null;
   const charById = ctx.charById || {};
-  const subjects = (sh.subjects||[]).map(id=>charById[id]).filter(Boolean);
+  const subjects = ((typeof inFrameCast==="function") ? inFrameCast(sh, ctx.scene, Object.values(charById)) : (sh.subjects||[])).map(id=>charById[id]).filter(Boolean);
   const size = sizeOf(sh.size), angle = angleOf(sh.angle), move = moveOf(sh.move), lens = lensOf(sh.lens);
-  let s = "The base image is THIS SAME SCENE — the scene's key frame: same set, same moment, same lighting, "
-    + "same colour grade, same people. RE-FRAME it to a different camera setup, as one continuous take would: ";
-  s += "SHOT: "+size.name+" ("+size.desc+"), "+angle.label.toLowerCase()+" ("+angle.desc+"), "
-     + "on a "+lens.label+" lens ("+lens.desc+")";
-  if(sh.move && sh.move!=="static") s += ", camera "+move.label.toLowerCase()+" ("+move.desc+")";
-  s += ". ";
-  if(subjects.length) s += "IN FRAME: "+subjects.map(c=>c.name).join(" and ")+". ";
-  if(sh.action) s += "ACTION: "+sh.action.replace(/\.$/,"")+". ";
-  if(sh.dialogue) s += "They are mid-line: “"+sh.dialogue.replace(/^["“]|["”]$/g,"")+"”. ";
-  if(sh.composition) s += "COMPOSITION: "+sh.composition.replace(/\.$/,"")+". ";
-  s += "EVERYTHING ELSE STAYS IDENTICAL TO THE BASE: the set's architecture, surfaces, signage and layout; "
-    + "the light sources and colour grade; every character's face, hair and wardrobe. ";
-  s += "If this new angle reveals space not visible in the base frame, extend the SAME set consistently"
-    + (loc ? " using the attached location coverage sheet (six views of this ONE set)" : "")+". ";
+  const clean = (x)=>String(x||"").replace(/\.$/,"").trim();
   const _asp = (typeof aspectFor==="function") ? aspectFor(ctx.project) : "16:9";
-  s += "Photoreal, filmic, a single "+(_asp==="9:16"?"VERTICAL 9:16 (phone) frame":_asp+" frame")+"; no text, no watermark, no split panels.";
-  const neg = shotNegativePrompt(sh);
-  return s + (neg ? (" NEGATIVE (exclude): "+neg) : "");
+  const spec = {
+    base_image: "THIS SAME SCENE's key frame \u2014 same set, same moment, same lighting, same colour grade, same people",
+    task: "RE-FRAME the base image to a different camera setup, as one continuous take would",
+    camera: {
+      size: size.name+" ("+size.desc+")",
+      angle: angle.label+" ("+angle.desc+")",
+      lens: lens.label+" ("+lens.desc+")",
+      movement: (sh.move && sh.move!=="static") ? (move.label+" ("+move.desc+")") : "static",
+    },
+    in_frame: subjects.length ? subjects.map(c=>c.name) : undefined,
+    still_in_frame: (ctx.carriedForward && ctx.carriedForward.length)
+      ? ctx.carriedForward.map(p=> p.name + (p.ownerName?(" ("+p.ownerName+"'s)"):"") + " \u2014 carried from an earlier beat; keep it present") : undefined,
+    action: clean(sh.action) || undefined,
+    dialogue_mid_line: clean(sh.dialogue).replace(/^["\u201c]|["\u201d]$/g,"") || undefined,
+    composition: clean(sh.composition) || undefined,
+    keep_identical_to_base: [
+      "the set's architecture, surfaces, signage and layout",
+      "the light sources and colour grade",
+      "every character's face, hair and wardrobe",
+    ],
+    if_new_space_revealed: "extend the SAME set consistently"+(loc?" using the attached location coverage sheet (multiple views of this ONE set)":""),
+    format: {
+      frame: "a single "+(_asp==="9:16"?"VERTICAL 9:16 (phone)":_asp)+" frame",
+      rules: ["photoreal, filmic","no text, no watermark, no split panels"],
+    },
+    negative: shotNegativePrompt(sh).split(/,\s*/),
+  };
+  return "The BASE IMAGE is this scene's key frame. Re-frame it EXACTLY as specified by this JSON spec:\n"+JSON.stringify(spec, null, 1);
 }
 window.deriveShotPrompt = deriveShotPrompt;
 
@@ -319,14 +362,28 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   // reference stack (the anchor rides as a reference only when it isn't the base)
   const refs = [];
   if(!base && !isAnchor && anchorSh){ const u=await grab(anchorSh.id); if(u) refs.push({ url:u, note:"scene key frame" }); }
-  if(ctx.location){ const u=await grab(ctx.location.id); if(u) refs.push({ url:u, note:(ctx.location.name||"location")+" location coverage sheet (six views of ONE set)" }); }
-  for(const id of (sh.subjects||[])){ const c=(ctx.charById||{})[id]; if(!c) continue;
+  if(ctx.location){ const u=await grab(ctx.location.id); if(u) refs.push({ url:u, note:(ctx.location.name||"location")+" location coverage sheet (multiple views of ONE set)" }); }
+  // identity anchors for the cast actually in THIS frame (derived from the action text)
+  const _chars = Object.values(ctx.charById||{});
+  const inCast = (typeof inFrameCast==="function") ? inFrameCast(sh, ctx.scene, _chars) : (sh.subjects||[]);
+  for(const id of inCast){ const c=(ctx.charById||{})[id]; if(!c) continue;
     const u=await grab(id); if(u) refs.push({ url:u, note:c.name+" character sheet" }); }
+  const inPr = (typeof inFrameProps==="function") ? inFrameProps(sh, ctx.scene, ctx.charById, ctx.propById) : (sh.props||[]);
+  for(const id of inPr){ const p=(ctx.propById||{})[id]; if(!p) continue;
+    const u=await grab(id); if(u) refs.push({ url:u, note:p.name+" prop sheet" }); }
+  // CONTINUITY LEDGER — props an in-frame character was established holding earlier in the
+  // scene that this beat's text doesn't re-name; carry them forward so they don't vanish.
+  let carried = [];
+  try{ const ledger = sceneContinuityLedger(ctx.scene, sceneShots, ctx.charById, ctx.propById);
+    carried = (ledger[sh.id]||[]).filter(pid=> inPr.indexOf(pid)<0); }catch(e){}
+  for(const id of carried){ const p=(ctx.propById||{})[id]; if(!p) continue;
+    const u=await grab(id); if(u) refs.push({ url:u, note:p.name+" prop sheet (carried over from an earlier beat)" }); }
+  ctx = { ...ctx, carriedForward: carried.map(id=>(ctx.propById||{})[id]).filter(Boolean) };
   let prompt = base ? deriveShotPrompt(sh, ctx) : combinedShotPrompt(sh, ctx);
   if(refs.length) prompt += " Reference images provided, IN ORDER: "+refs.map(r=>r.note).join("; ")
     +". Match the corresponding character(s), location and prop(s) to these reference designs EXACTLY (faces, wardrobe, geometry, materials).";
   if(isAnchor) prompt += " THIS FRAME IS THE SCENE'S KEY FRAME — every other shot in the scene will be derived from it. "
-    +"Lock it to the location coverage sheet exactly (ONE real set, six views): its architecture, surfaces, signage and light define the scene's look.";
+    +"Lock it to the location coverage sheet exactly (ONE real set, multiple views): its architecture, surfaces, signage and light define the scene's look.";
   if(opts.correction) prompt += " CORRECTIONS (the previous attempt failed visual QC): "+opts.correction.replace(/\.$/,"")+".";
   const gopts = { aspectRatio:(typeof aspectFor==="function") ? aspectFor(ctx.project) : "16:9", quality:"medium" };
   if(base) gopts.referenceImage = base;
@@ -396,13 +453,144 @@ function scanTextForChars(text, characters){
   (characters||[]).forEach(c=>{
     const full = (c.name||"").toLowerCase().trim();
     if(!full) return;
-    const parts = full.split(/\s+/).filter(w=>w.length>=3);
-    const names = Array.from(new Set([full, ...parts]));
-    if(names.some(nm=> nm && t.indexOf(" "+nm+" ")>=0)){ if(ids.indexOf(c.id)<0) ids.push(c.id); }
+    // split on ANY non-alphanumeric (not just whitespace) so a hyphenated/serial name like
+    // "VANYA-71" yields the human token "vanya" — otherwise the whole "vanya-71" token never
+    // matches the script's "Vanya" and the character is silently dropped from the frame.
+    const parts = full.split(/[^a-z0-9]+/).filter(w=> w.length>=3 && !/^[0-9]+$/.test(w));
+    const names = Array.from(new Set([full.replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ").trim(), ...parts])).filter(Boolean);
+    if(names.some(nm=> t.indexOf(" "+nm+" ")>=0)){ if(ids.indexOf(c.id)<0) ids.push(c.id); }
   });
   return ids;
 }
 window.scanTextForChars = scanTextForChars;
+
+/* WHO is in THIS frame — derived from the shot's own action/composition text (the most
+   reliable per-frame signal), not from fragile manual tags. Falls back to the scene's
+   DRIVER when the action names nobody (a pronoun-only beat), and to whatever was stored
+   only as a last resort. This is the single source the references + prompt read, so an
+   under-tagged shot can no longer drop a character's identity anchor — nor over-attach a
+   character who isn't in the frame. */
+function inFrameCast(sh, scene, characters){
+  const named = scanTextForChars(((sh&&sh.action)||"")+" "+((sh&&sh.composition)||""), characters);
+  if(named.length) return named;
+  if(scene && scene.driver && (characters||[]).some(c=>c.id===scene.driver)) return [scene.driver];
+  return ((sh&&sh.subjects)||[]).filter(id=>(characters||[]).some(c=>c.id===id));
+}
+window.inFrameCast = inFrameCast;
+
+/* THE scene's cast roster — the single authoritative answer to "who is in this scene",
+   so the bible, the prop mapping and any future consumer all read ONE definition instead
+   of each re-deriving (the source of contradictory rosters). A hand-authored `scene.cast`
+   (ids) WINS — it's the editable first-class edge. Otherwise it's the union of every
+   reliable signal: the driver, anyone named in the scene's own script text, and everyone
+   any of the scene's shots puts in frame (inFrameCast on the action). Computed, never a
+   stale stored copy — but honours the override when present. */
+function sceneRoster(scene, characters, drafts, shots){
+  const chars = characters || [];
+  const valid = (id)=> chars.some(c=>c.id===id);
+  if(scene && Array.isArray(scene.cast) && scene.cast.length) return scene.cast.filter(valid);
+  const ids = [];
+  if(scene && scene.driver && valid(scene.driver)) ids.push(scene.driver);
+  if(typeof scenesWhereCharacterAppears==="function" && scene){
+    chars.forEach(c=>{ if(ids.indexOf(c.id)<0 && scenesWhereCharacterAppears(c.id, c.name, [scene], drafts).length) ids.push(c.id); });
+  }
+  (shots||[]).forEach(sh=>{ inFrameCast(sh, scene, chars).forEach(id=>{ if(valid(id) && ids.indexOf(id)<0) ids.push(id); }); });
+  return ids;
+}
+window.sceneRoster = sceneRoster;
+
+/* WHICH props are in THIS frame — precise, so the model isn't handed sheets for objects
+   that aren't there. Two ways in: (a) a WORN item of an in-frame character (it's on their
+   body); (b) a prop NAMED in the action text. Naming requires a strong match — for a
+   multi-word name, at least TWO of its significant words must appear (so "forearm latch"
+   in the action picks "Forearm maintenance latch" but not "Seized door latch", which only
+   shares the generic word "latch"). Candidates are tied to the scene (owner in frame, or
+   mapped to this scene, or ownerless set dressing). Stored prop tags are NOT a source —
+   they were the unreliable input the action text now replaces. */
+function inFrameProps(sh, scene, charById, propById){
+  const props = Object.values(propById||{});
+  const castIds = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, Object.values(charById||{})) : ((sh&&sh.subjects)||[]);
+  const t = " "+(((sh&&sh.action)||"")+" "+((sh&&sh.composition)||"")).toLowerCase().replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ")+" ";
+  const out = [];
+  props.forEach(p=>{
+    const ownerIn = !!(p.ownerId && castIds.indexOf(p.ownerId)>=0);
+    // worn items ride with their in-frame owner
+    if((p.kind||"carried")==="worn" && ownerIn){ out.push(p.id); return; }
+    const words = Array.from(new Set(String(p.name||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ")
+      .split(/\s+/).filter(w=>w.length>=4 && !/^[0-9]+$/.test(w))));
+    if(!words.length) return;
+    const hits = words.filter(w=> t.indexOf(" "+w+" ")>=0).length;
+    const strong = hits >= Math.min(2, words.length);   // multi-word name needs 2 hits
+    if(!strong) return;
+    const tied = ownerIn || (scene && Array.isArray(p.scenes) && p.scenes.indexOf(scene.id)>=0) || !p.ownerId;
+    if(tied) out.push(p.id);
+  });
+  return out;
+}
+window.inFrameProps = inFrameProps;
+
+/* CONTINUITY LEDGER — the carry-forward fix. inFrameProps reads only THIS beat's text, so
+   a prop established in beat 1 (Vanya's doll) silently vanishes from beat 2 if beat 2's
+   action doesn't re-name it. This rolls a running "what each in-frame character was
+   established holding/wearing earlier in the scene" total, beat by beat (story order), and
+   returns, per shot, the prop ids to CARRY FORWARD (established earlier by someone in this
+   frame, not already named here). Deterministic — no AI. Scoped to the scene so a prop set
+   down in a later scene doesn't leak. Both the Shot List and Storyboard read it. */
+function sceneContinuityLedger(scene, sceneShots, charById, propById){
+  const ordered = (sceneShots||[]).slice().sort((a,b)=>(a.order||0)-(b.order||0) || (a.beatN||0)-(b.beatN||0));
+  const chars = Object.values(charById||{});
+  const held = {};   // charId -> Set(propId) established in this scene so far
+  const ledger = {};
+  ordered.forEach(sh=>{
+    const cast = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, chars) : ((sh&&sh.subjects)||[]);
+    const here = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, charById, propById) : ((sh&&sh.props)||[]);
+    const cf = [];
+    cast.forEach(cid=>{ const s=held[cid]; if(s) s.forEach(pid=>{ if(here.indexOf(pid)<0 && cf.indexOf(pid)<0) cf.push(pid); }); });
+    ledger[sh.id] = cf;
+    here.forEach(pid=>{ const p=(propById||{})[pid]; const owner=p&&p.ownerId; if(owner){ (held[owner]=held[owner]||new Set()).add(pid); } });
+  });
+  return ledger;
+}
+window.sceneContinuityLedger = sceneContinuityLedger;
+
+/* REFERENTIAL-COMPLETENESS LINT (Part 4) — runs over a scene's BEAT MAP text and flags beats
+   that aren't self-contained, BEFORE anything is generated: (a) a pronoun used while 2+
+   characters are in play (the frame could mis-resolve it), and (b) a prop established
+   earlier in the scene whose owner is still present but which this beat's text drops (it
+   may pop out of the cut). Deterministic. `props` = [{name, owner|ownerName, type|kind}]
+   (e.g. the Script Breakdown's tag-out). The lint reads the BEAT rows, never the screenplay
+   prose (prose is meant to use pronouns). */
+function beatContinuityLint(scene, beats, props, characters){
+  const rows = (beats && beats.rows) || [];
+  if(rows.length < 2) return [];
+  const chars = characters || [];
+  const propList = (props||[]).filter(p=> p && p.name && (p.type||p.kind)!=="dressing");
+  const matchProp = (text, name)=>{
+    const words = String(name||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/).filter(w=>w.length>=4 && !/^[0-9]+$/.test(w));
+    if(!words.length) return false;
+    const t = " "+text.toLowerCase().replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ")+" ";
+    return words.filter(w=> t.indexOf(" "+w+" ")>=0).length >= Math.min(2, words.length);
+  };
+  const flags = [], lastSeen = {}, flaggedDrop = {};
+  rows.forEach(r=>{
+    const text = ((r.drive&&r.drive.d)||"")+" "+((r.react&&r.react.d)||"");
+    const beatChars = (typeof scanTextForChars==="function") ? scanTextForChars(text, chars) : [];
+    if(/\b(she|her|hers|he|him|his|they|them|it|its)\b/i.test(text) && beatChars.length>=2)
+      flags.push({ beat:r.n, kind:"pronoun", msg:"Beat "+r.n+": a pronoun with "+beatChars.length+" characters in play — name who/what so the frame can't mis-resolve it." });
+    propList.forEach(p=>{
+      if(matchProp(text, p.name)){ lastSeen[p.name]=r.n; delete flaggedDrop[p.name]; return; }
+      if(lastSeen[p.name]!=null && !flaggedDrop[p.name]){
+        const owner = chars.find(c=> (c.name||"").toLowerCase() === String(p.owner||p.ownerName||"").toLowerCase());
+        if(owner && beatChars.indexOf(owner.id)>=0){
+          flags.push({ beat:r.n, kind:"drop", msg:"Beat "+r.n+": "+(p.owner||p.ownerName||"its owner")+" is present but “"+p.name+"” (last named beat "+lastSeen[p.name]+") isn't — it may drop out of that frame." });
+          flaggedDrop[p.name]=true;
+        }
+      }
+    });
+  });
+  return flags;
+}
+window.beatContinuityLint = beatContinuityLint;
 
 /* normalise one AI-returned shot into our model, resolving subjects/props by id|name */
 function normalizeShot(raw, scene, idx, locations, props, characters, beats){

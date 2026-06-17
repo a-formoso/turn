@@ -398,9 +398,7 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
               title: runtimes[s.id].hot
                 ? "Estimated screen time — runs long against the film's average scene"
                 : "Estimated screen time"+(runtimes[s.id].approx?" (rough — from beats, not yet drafted)":" (from the draft, ≈1 page/min)")},
-              (runtimes[s.id].approx?"~":"")+fmtClock(runtimes[s.id].sec)),
-            React.createElement("span",{className:"scard-dur",style:runtimes?null:{marginLeft:"auto"}},
-              `${s.seq}`)));
+              (runtimes[s.id].approx?"~":"")+fmtClock(runtimes[s.id].sec))));
       }),
       onAddScene && React.createElement("button",{className:"spine-add",style:{height:"auto"},
         onClick:()=>onAddScene(scenes.length?scenes[scenes.length-1].id:null)},

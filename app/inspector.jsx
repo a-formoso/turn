@@ -75,7 +75,7 @@ function capFirst(s){ s = String(s||""); return s ? s.charAt(0).toUpperCase()+s.
    field (edit in place, commit on blur) with a remove button; an "Add item" row
    appends a new bullet. The value stays a comma-joined string so prop-seeding and
    scene-mapping keep working unchanged. */
-function EditableItemList({ value, placeholder, onCommit, onItemRemoved, ownerName }){
+function EditableItemList({ value, placeholder, onCommit, onItemRemoved, onItemRenamed, ownerName }){
   const [items,setItems] = React.useState(()=>splitListItems(value));
   // only re-sync from the outside when the external value actually changed
   // (e.g. an AI re-draft) — never clobber mid-edit from our own commits
@@ -89,7 +89,13 @@ function EditableItemList({ value, placeholder, onCommit, onItemRemoved, ownerNa
     lastStr.current = joined;
     onCommit(joined);
   };
-  const setAt = (i,val)=>{ const next=items.slice(); next[i]=val; setItems(next); commit(next); };
+  const setAt = (i,val)=>{
+    const old = (items[i]||"").trim(); const nu = String(val||"").trim();
+    const next=items.slice(); next[i]=val; setItems(next); commit(next);
+    // editing an existing item = a RENAME → keep the matching prop card in sync
+    // (skip the add case where there was no previous text)
+    if(onItemRenamed && old && nu && old!==nu) onItemRenamed(old, nu);
+  };
   const removeAt = async (i)=>{
     const itemText = (items[i]||"").trim();
     // When this list is wired to the Props tab, deleting a bullet also deletes the
@@ -165,7 +171,34 @@ function Verdict({ scene }){
 }
 
 /* ---------- editable beat map ---------- */
-function BeatEditor({ scene, beats, onBeats, focusBeat }){
+function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
+  const [deriving, setDeriving] = React.useState(false);
+  const hasScript = !!(draft && ((draft.blocks && draft.blocks.length) || (Array.isArray(draft) && draft.length)));
+  const deriveFromScript = async ()=>{
+    if(!(hasScript && typeof window.aiBeatsFromScript==="function" && typeof aiAvailable==="function" && aiAvailable())) return null;
+    try{ return await window.aiBeatsFromScript(scene, draft, characters); }catch(e){ return null; }
+  };
+  // empty-state button: derive from the script if it exists, else drop a blank skeleton.
+  const createMap = async ()=>{
+    if(deriving) return;
+    if(hasScript){ setDeriving(true); const m = await deriveFromScript(); setDeriving(false);
+      if(m && m.rows && m.rows.length){ onBeats(scene.id, m); return; } }
+    onBeats(scene.id, { driverLabel:"DRIVER", reactorLabel:"REACTOR", desire:"", obstacle:"", turnAt:0,
+      rows:[{n:1,drive:{a:"Action",d:""},react:{a:"Reaction",d:""}}] });
+  };
+  // in-editor button: (re)build the beats from the script WITHOUT clobbering on failure;
+  // confirms first if the current map already has the user's content.
+  const rebuildFromScript = async (blank)=>{
+    if(deriving) return;
+    if(!blank && typeof window.appConfirm==="function"){
+      const ok = await window.appConfirm({ title:"Rebuild the beat map from the script?",
+        body:"This replaces the current beats with ones derived from this scene's screenplay.",
+        confirmLabel:"Rebuild", cancelLabel:"Cancel", danger:true });
+      if(!ok) return;
+    }
+    setDeriving(true); const m = await deriveFromScript(); setDeriving(false);
+    if(m && m.rows && m.rows.length) onBeats(scene.id, m);
+  };
   const id = scene.id;
   // reveal the beat the user clicked in the Script gutter — scroll it into view + flag it
   const rowRefs = React.useRef({});
@@ -177,11 +210,11 @@ function BeatEditor({ scene, beats, onBeats, focusBeat }){
   if(!beats) return React.createElement("div",{className:"empty",style:{minHeight:150}},
     React.createElement(Icon.grid,{s:30}),
     React.createElement("div",{className:"empty-t"},"No beat map yet"),
-    React.createElement("div",{className:"empty-d"},"Break this scene into beats \u2014 the action / reaction exchanges that carry its subtext."),
-    React.createElement("button",{className:"flag-btn primary",style:{marginTop:4},
-      onClick:()=>onBeats(id,{ driverLabel:"DRIVER", reactorLabel:"REACTOR", desire:"", obstacle:"", turnAt:0,
-        rows:[{n:1,drive:{a:"Action",d:""},react:{a:"Reaction",d:""}}] })},
-      "Create beat map"));
+    React.createElement("div",{className:"empty-d"}, hasScript
+      ? "This scene is already written \u2014 build its beat map FROM the script (the action / reaction subtext of each beat)."
+      : "Break this scene into beats \u2014 the action / reaction exchanges that carry its subtext."),
+    React.createElement("button",{className:"flag-btn primary",style:{marginTop:4},disabled:deriving,onClick:createMap},
+      deriving ? "Reading the script\u2026" : (hasScript ? "Create beat map from script" : "Create beat map")));
 
   const commit = (next)=>onBeats(id,next);
   const renumber = (rows)=>rows.map((r,k)=>({...r,n:k+1}));
@@ -197,7 +230,17 @@ function BeatEditor({ scene, beats, onBeats, focusBeat }){
     commit({...beats, rows:renumber(rows)}); };
   const toggleTurn = (n)=>commit({...beats, turnAt: beats.turnAt===n?0:n});
 
+  // a beat map can be a bare skeleton (one empty row, no desire/obstacle) — detect it so
+  // the "Build from script" button reads right and skips the overwrite confirm.
+  const blankMap = (beats.rows||[]).length<=1
+    && !(beats.rows||[]).some(r=>((r.drive&&r.drive.d)||"").trim() || ((r.react&&r.react.d)||"").trim())
+    && !((beats.desire||"").trim()) && !((beats.obstacle||"").trim());
   return React.createElement("div",null,
+    hasScript && React.createElement("button",{className:"beat-build-btn",disabled:deriving,
+      onClick:()=>rebuildFromScript(blankMap),
+      title:"Read this scene's screenplay and build the beat / subtext map from it"},
+      React.createElement(Icon.sparkles,{s:12}),
+      deriving ? "Reading the script…" : (blankMap ? "Build from script" : "Rebuild from script")),
     React.createElement("div",{className:"beat-labels"},
       React.createElement("div",{className:"cell"},
         React.createElement("div",{className:"obj-lab",style:{marginBottom:3}},"Driver"),
@@ -253,7 +296,7 @@ const ANALYSIS = (scene, beats) => [
   { lab:"Turning Point", txt: scene.turningPoint || "Locate the beat where the gap opens." },
 ];
 
-function Inspector({ scene, beats, onCharge, onUpdate, characters, scenes, onAddScene, onDeleteScene, onMove, onBeats,
+function Inspector({ scene, beats, draft, onCharge, onUpdate, characters, scenes, onAddScene, onDeleteScene, onMove, onBeats,
                      sceneIndex, sceneCount, onCollapse, project, tab:tabProp, onTab, focusBeat }){
   // tab is controllable by the parent (e.g. the Script gutter opens the Beats tab);
   // falls back to local state when no controller is wired.
@@ -374,7 +417,7 @@ function Inspector({ scene, beats, onCharge, onUpdate, characters, scenes, onAdd
         React.createElement("div",{className:"insp-eyebrow",style:{marginBottom:10}},
           React.createElement("span",{className:"insp-scene-no"},String(scene.no).padStart(2,"0")),
           React.createElement("span",{className:"eyebrow"},"Beat / Subtext map \u2014 editable")),
-        React.createElement(BeatEditor,{scene,beats,onBeats,focusBeat})),
+        React.createElement(BeatEditor,{scene,beats,onBeats,focusBeat,draft,characters})),
 
       tab==="analysis" && React.createElement("div",{style:{paddingTop:2}},
         React.createElement("div",{className:"divider"},

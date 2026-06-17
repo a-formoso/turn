@@ -42,6 +42,10 @@ const Icon = {
   target:(p)=>I({...p,children:[
     React.createElement("circle",{key:1,cx:12,cy:12,r:8}),
     React.createElement("circle",{key:2,cx:12,cy:12,r:3.2})]}),
+  mic:(p)=>I({...p,children:[
+    React.createElement("rect",{key:1,x:9,y:2.5,width:6,height:11,rx:3}),
+    React.createElement("path",{key:2,d:"M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"})]}),
+  play:(p)=>I({...p,d:"M7 4l13 8-13 8V4z",fill:"currentColor"}),
   eye:(p)=>I({...p,children:[
     React.createElement("path",{key:1,d:"M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"}),
     React.createElement("circle",{key:2,cx:12,cy:12,r:2.6})]}),
@@ -95,6 +99,7 @@ const Icon = {
   wand:(p)=>I({...p,d:"M15 4V2M15 10V8M11 6H9M21 6h-2M6 21L20 7l-3-3L3 18l3 3zM18 9l-3-3"}),
   undo:(p)=>I({...p,d:"M3 9h13a5 5 0 010 10h-3M3 9l4-4M3 9l4 4"}),
   redo:(p)=>I({...p,d:"M21 9H8a5 5 0 000 10h3M21 9l-4-4M21 9l-4 4"}),
+  pencil:(p)=>I({...p,d:"M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"}),
   robot:(p)=>I({...p,children:[
     React.createElement("rect",{key:1,x:4,y:8,width:16,height:11,rx:2.5}),
     React.createElement("path",{key:2,d:"M12 4v4M9 13h.01M15 13h.01M9.5 16h5"}),

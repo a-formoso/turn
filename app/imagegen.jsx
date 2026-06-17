@@ -122,8 +122,8 @@ function buildSimpleCharPrompt(c){
 window.buildSimpleCharPrompt = buildSimpleCharPrompt;
 
 /* master reference prompt + negative prompt -> one final prompt the model receives */
-function combinedImagePrompt(c, project){
-  const master = (typeof buildCharRefPrompt==="function") ? buildCharRefPrompt(c, project) : "";
+function combinedImagePrompt(c, project, props){
+  const master = (typeof buildCharRefPrompt==="function") ? buildCharRefPrompt(c, project, props) : "";
   const v = (typeof charVisualDefaults==="function") ? charVisualDefaults(c) : {};
   const neg = (c.negativePrompt || v.negativePrompt || "").trim();
   let s = master;
