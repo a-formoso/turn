@@ -493,6 +493,7 @@ function useImageGen(opts){
     if(gopts.aspectRatio) genOpts.aspectRatio = gopts.aspectRatio;   // caller can force aspect…
     if(gopts.imageSize)   genOpts.imageSize   = gopts.imageSize;     // …and resolution (e.g. storyboard: 16:9 / 2K)
     if(gopts.quality)     genOpts.quality     = gopts.quality;       // …and GPT Image 2 quality (low/medium/high — lower = far faster, dodges the proxy timeout)
+    else if(opts.quality) genOpts.quality     = opts.quality;        // per-surface reliability default (callers can still override it)
     if(gopts.referenceMaxDim) genOpts.referenceMaxDim = gopts.referenceMaxDim;
     else if(opts.referenceMaxDim) genOpts.referenceMaxDim = opts.referenceMaxDim;
     if(refImage) genOpts.referenceImage = refImage;
@@ -1108,7 +1109,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
     React.createElement("input",{ref:uploadRef,type:"file",accept:"image/png,image/jpeg,image/webp,image/avif",
       style:{display:"none"},onChange:onUploadPicked}),
     // when the empty slot already imports on drop/click (dropToImport), this button is redundant
-    !genUrl && importSheet && !dropToImport && React.createElement("button",{className:"sheet-upload-btn",onClick:pickUpload,disabled:gening,
+    !genUrl && importSheet && !dropToImport && noun!=="location plate" && React.createElement("button",{className:"sheet-upload-btn",onClick:pickUpload,disabled:gening,
       title:"Generated this elsewhere (e.g. GPT Image 2 in ChatGPT)? Upload it at full resolution — it becomes this "+noun+", with zoom, the … menu and clear, just like a generated one."},
       React.createElement(Icon.image,{s:12}),"Upload a finished "+noun),
     specBlocked && React.createElement("div",{className:"sheet-gen-gate"},
@@ -2323,26 +2324,26 @@ window.preProdStatus = preProdStatus;
 
 /* ---- shared SCENE PAGER — one scene at a time with ← / → (and arrow keys),
    used by the Stage, Shots and Storyboards instead of one long scroll. ---- */
-function useScenePager(total){
+function useScenePager(total, locked){
   const [idx, setIdx] = React.useState(0);
   React.useEffect(()=>{ setIdx(i=> Math.min(i, Math.max(0, total-1))); },[total]);
   React.useEffect(()=>{
-    const onKey=(e)=>{ const t=e.target; if(t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName||"")) return;
+    const onKey=(e)=>{ if(locked) return; const t=e.target; if(t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName||"")) return;
       if(e.key==="ArrowLeft") setIdx(i=>Math.max(0,i-1));
       else if(e.key==="ArrowRight") setIdx(i=>Math.min(Math.max(0,total-1),i+1)); };
     window.addEventListener("keydown",onKey); return ()=>window.removeEventListener("keydown",onKey);
-  },[total]);
+  },[total,locked]);
   return [ Math.min(idx, Math.max(0,total-1)), setIdx ];
 }
 window.useScenePager = useScenePager;
-function ScenePager({ idx, total, title, sub, onPrev, onNext, scenes, onJump }){
+function ScenePager({ idx, total, title, sub, onPrev, onNext, scenes, onJump, disabled }){
   const [open, setOpen] = React.useState(false);
-  const canJump = !!(onJump && scenes && scenes.length>1);
+  const canJump = !disabled && !!(onJump && scenes && scenes.length>1);
   React.useEffect(()=>{ if(!open) return;
     const close=(e)=>{ if(!e.target.closest || !e.target.closest(".scene-pager-mid")) setOpen(false); };
     document.addEventListener("mousedown", close); return ()=>document.removeEventListener("mousedown", close); },[open]);
   return React.createElement("div",{className:"scene-pager"},
-    React.createElement("button",{className:"scene-pager-arrow",onClick:onPrev,disabled:idx<=0,
+    React.createElement("button",{className:"scene-pager-arrow",onClick:onPrev,disabled:!!disabled||idx<=0,
       title:"Previous scene (←)","aria-label":"Previous scene"}, React.createElement(Icon.chevL,{s:18})),
     React.createElement("div",{className:"scene-pager-mid"+(canJump?" jump":""),
         onClick: canJump?()=>setOpen(o=>!o):undefined, title: canJump?"Jump to a scene":undefined,
@@ -2358,7 +2359,7 @@ function ScenePager({ idx, total, title, sub, onPrev, onNext, scenes, onJump }){
           React.createElement("span",{className:"scene-pager-menu-no"}, String(s.no||(i+1)).padStart(2,"0")),
           React.createElement("span",{className:"scene-pager-menu-t"}, s.title||"Untitled scene"),
           i===idx && React.createElement(Icon.check,{s:13}))))),
-    React.createElement("button",{className:"scene-pager-arrow",onClick:onNext,disabled:idx>=total-1,
+    React.createElement("button",{className:"scene-pager-arrow",onClick:onNext,disabled:!!disabled||idx>=total-1,
       title:"Next scene (→)","aria-label":"Next scene"}, React.createElement(Icon.chevR,{s:18})));
 }
 window.ScenePager = ScenePager;

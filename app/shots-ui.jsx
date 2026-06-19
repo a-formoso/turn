@@ -131,9 +131,10 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, prevShot, isHead, is
       "Edit this film frame. Apply ONLY this change: "+instr+". Keep the same shot size, lens, staging, "
       +"the same characters (identical faces & wardrobe), the same location and the same colour grade. Do not re-imagine the frame.",
     // Shot frames commonly carry a rolling seed plus several canon sheets. A
-    // 768px reference is ample for identity/composition and keeps GPT Image 2
-    // comfortably inside the proxy window; output remains the selected 2K size.
-    referenceMaxDim: 768,
+    // 640px reference is ample for identity/composition and keeps GPT Image 2
+    // comfortably inside the proxy window. These are input references only:
+    // generated quality and resolution always follow the user's selected controls.
+    referenceMaxDim: 640,
   });
 
   // Every manual Generate / Regenerate enters the scene's ordered runner. If an earlier
@@ -151,8 +152,11 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, prevShot, isHead, is
   const genGuarded = Object.assign({}, gen, { generate: guardedGenerate });
 
   // batch auto-generate when this card is the active queue member
-  const batchStarted = React.useRef(false);
-  const wasGening = React.useRef(false);
+  // If this card remounts off-screen while its generation is already running
+  // (the user navigated to another scene), resume watching that same run instead
+  // of accidentally starting it again when it finishes.
+  const batchStarted = React.useRef(batchActiveId===sh.id && gen.gening);
+  const wasGening = React.useRef(gen.gening);
   React.useEffect(()=>{
     const mine = batchActiveId===sh.id;
     if(!mine){ batchStarted.current=false; wasGening.current=gen.gening; return; }
@@ -379,7 +383,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   const chainRef = React.useRef(null); chainRef.current = chain;
   const chainStartingRef = React.useRef(false);
   // small centered popup — e.g. "generate the earlier shot first" when a chain is clicked
-  // out of order. Auto-dismisses; click the scrim or press Esc to close sooner.
+  // out of order. Auto-dismisses; click X/the scrim or press Esc to close sooner.
   const [notice, setNotice] = React.useState("");
   React.useEffect(()=>{
     if(!notice) return;
@@ -443,20 +447,19 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     Object.values(m).forEach(arr=>arr.sort((a,b)=>(a.order||0)-(b.order||0) || (a.beatN||0)-(b.beatN||0))); return m; },[shots]);
   const scenesWithShots = ordered.filter(s=>(shotsByScene[s.id]||[]).length);
 
-  // scene FOCUS (same pattern as Props / Characters / Locations): pick one scene
-  // from the dropdown to see only its shots and batch-generate the whole scene.
-  // A focused scene is always rendered OPEN — the batch queue needs its cards mounted.
-  // one scene at a time — the ← / → pager (with a jump menu) IS the scene focus;
-  // a search or an active batch shows the full set so every needed card stays mounted
+  // Always show ONE user-selected scene. A generating scene may remain mounted
+  // off-screen so its request can finish while the arrows browse elsewhere.
   const [pIdx, setPIdx] = useScenePager(scenesWithShots.length);
   const shotsForGroup = (sid)=> shotsByScene[sid]||[];
-  // the pager IS the scene focus: browse ONE scene at a time. A running batch / chain shows the
-  // full set so every needed card stays mounted (between chain steps batchActiveId is
-  // briefly null and the runner must still drive the next card).
-  const pagerMode = !batchActiveId && !chain;
   const pIdxC = Math.min(pIdx, Math.max(0, scenesWithShots.length-1));
-  const curScene = scenesWithShots[pIdxC];
-  const visibleScenes = pagerMode ? [curScene].filter(Boolean) : scenesWithShots;
+  const activeShotId = batchActiveId || (chain && chain.ids && chain.ids[chain.idx]) || null;
+  const activeShot = activeShotId ? shotById[activeShotId] : null;
+  const activeSceneIdx = activeShot ? scenesWithShots.findIndex(s=>s.id===activeShot.sceneId) : -1;
+  const visibleIdx = pIdxC;
+  const curScene = scenesWithShots[visibleIdx];
+  const visibleScenes = [curScene].filter(Boolean);
+  const renderBusy = !!batchActiveId || !!chain;
+  const runnerScene = activeSceneIdx>=0 && activeSceneIdx!==visibleIdx ? scenesWithShots[activeSceneIdx] : null;
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s ? s.no : sid; };
 
   // ---- the rolling-keyframe CHAIN runner ----------------------------------------
@@ -590,7 +593,9 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     notice && _el("div",{className:"shot-notice-scrim",onMouseDown:()=>setNotice("")},
       _el("div",{className:"shot-notice",role:"status",onMouseDown:e=>e.stopPropagation()},
         _el(Icon.info,{s:17,className:"shot-notice-ic"}),
-        _el("div",{className:"shot-notice-msg"},notice))),
+        _el("div",{className:"shot-notice-msg"},notice),
+        _el("button",{type:"button",className:"shot-notice-x","aria-label":"Close message",
+          title:"Close",onClick:()=>setNotice("")},"\u00d7"))),
     _el(NbKeyBar,null), _el(NbControls,null),
     _el("div",{className:"art-intro"},
       _el("div",{className:"art-intro-row"},
@@ -608,23 +613,30 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
           _el("button",{className:"art-draftall",disabled:!!batchActiveId||!!chain||!shots.length,onClick:startAll,
             title:"Render every shot in chain order, each seeded by the previous frame. Locked (approved) frames are kept and used as seeds; the rest render."},
             _el(Icon.sparkles,{s:14}), (batchActiveId||chain)?"Rendering\u2026":"Generate all shots")))),
-    BatchBar && _el(BatchBar,{batch,noun:"shot"}),
-    // chain progress bar \u2014 the ordered chain renders straight through, auto-approving each frame
-    chain && _el("div",{className:"shot-chain-bar running"},
-      _el("div",{className:"shot-chain-msg"},
-        _el(Icon.sparkles,{s:14}),"Rendering shot "+(chain.idx+1)+" of "+chain.total+" in order\u2026"),
-      _el("button",{className:"art-draftall ghost",onClick:stopChain,title:"Stop the chain \u2014 already-rendered frames are kept"},
-        _el(Icon.x,{s:13}),"Stop")),
-    (pagerMode && (typeof ScenePager!=="undefined") && scenesWithShots.length>0) && (()=>{ const cs=scenesWithShots[pIdxC]; const cl=cs&&ctxFor(cs).location;
-      return _el(ScenePager,{ idx:pIdxC, total:scenesWithShots.length, title:cs&&cs.title, sub:cl&&cl.name, scenes:scenesWithShots, onJump:setPIdx,
+    // A chain already has its own progress + Stop bar below. Hiding the generic
+    // batch bar here avoids duplicate Cancel/Stop controls for the same request.
+    !chain && BatchBar && _el(BatchBar,{batch,noun:"shot"}),
+    ((typeof ScenePager!=="undefined") && scenesWithShots.length>0) && (()=>{ const cs=scenesWithShots[visibleIdx]; const cl=cs&&ctxFor(cs).location;
+      return _el(ScenePager,{ idx:visibleIdx, total:scenesWithShots.length, title:cs&&cs.title, sub:cl&&cl.name, scenes:scenesWithShots,
+        onJump:setPIdx,
         onPrev:()=>setPIdx(i=>Math.max(0,i-1)), onNext:()=>setPIdx(i=>Math.min(scenesWithShots.length-1,i+1)) }); })(),
     visibleScenes.map(scene=>_el(SceneShotGroup,{key:scene.id,scene,shots:shotsForGroup(scene.id),
       ctx:ctxFor(scene),characters:characters||[],beatsMap,propsAvail:(typeof propsForScene==="function")?propsForScene(props,scene.id):[],
       onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
       onAddShot,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===scene.id,
       batchActiveId,onBatchDone:handleBatchDone,onGenerateShot:startShot,onRegenDownstream,
-      onRenderScene:startScene,renderBusy:!!batchActiveId||!!chain,onStopChain:stopChain,
-      open: pagerMode ? true : !collapsed[scene.id],onToggle:()=>toggleScene(scene.id)})));
+      onRenderScene:startScene,renderBusy,onStopChain:stopChain,
+      open:true,onToggle:()=>toggleScene(scene.id)})),
+    // Keep only the active runner mounted when the user browses away. display:none
+    // preserves its generation/completion effects without showing a second scene.
+    runnerScene && _el("div",{style:{display:"none"},"aria-hidden":"true"},
+      _el(SceneShotGroup,{key:"runner-"+runnerScene.id,scene:runnerScene,shots:shotsForGroup(runnerScene.id),
+        ctx:ctxFor(runnerScene),characters:characters||[],beatsMap,
+        propsAvail:(typeof propsForScene==="function")?propsForScene(props,runnerScene.id):[],
+        onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
+        onAddShot,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===runnerScene.id,
+        batchActiveId,onBatchDone:handleBatchDone,onGenerateShot:startShot,onRegenDownstream,
+        onRenderScene:startScene,renderBusy,onStopChain:stopChain,open:true,onToggle:()=>{}})));
 }
 window.ShotList = ShotList;
 

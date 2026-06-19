@@ -112,6 +112,9 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
     React.createElement(SheetFrame,{ gen, slotId:"locref-"+l.id, name:l.name, avatarColor:locSwatch(l.intExt),
       initials, drafted, drafting, onDraft:()=>onDraft(l), entity:l, onView,
       slotPlaceholder:"Drop a photo of the place", noun:"location plate",
+      // The empty plate is also the finished-image importer, so the separate
+      // "Upload a finished location plate" button is intentionally omitted.
+      dropToImport:true,
       specGate:{ ready:(drafted || !l.manual), hint:"Draft the design spec first \u2014 architecture, materials & light are what the plate is built from." },
       // edit ONE view of the plate (works on generated or uploaded plates)
       menuExtra: gen.genUrl ? [{ label: panelEdit?"Close panel edit":"Edit a panel\u2026",
@@ -209,11 +212,10 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
         React.createElement(SheetField,{label:"Render style \u2014 edit freely",value:l.renderStyle||d.renderStyle,multiline:true,
           placeholder:"photoreal architectural cinematography, wide lens, natural light\u2026",onCommit:val=>onUpdate(l.id,{renderStyle:val})})),
 
-      React.createElement(CardFold,{label:"Master reference prompt",defaultOpen:false},
-        React.createElement(CopyBox,{label:"Coverage plate (2\u00d72, 4 views) \u2014 feed to your image tool",text:buildLocationRefPrompt(l,project,{})}),
+      React.createElement(CardFold,{label:"Final prompt",defaultOpen:false},
+        React.createElement(CopyBox,{label:"Final prompt \u2014 sent to the image model",text:finalPrompt}),
         React.createElement(SheetField,{label:"Negative prompt \u2014 exclude",value:l.negativePrompt||d.negativePrompt,multiline:true,
-          onCommit:val=>onUpdate(l.id,{negativePrompt:val})}),
-        React.createElement(CopyBox,{label:"Final prompt \u2014 master + negative (sent to Nano Banana)",text:finalPrompt}))));
+          onCommit:val=>onUpdate(l.id,{negativePrompt:val})}))));
 }
 
 /* the 3×3 depth-grid staging editor — a top-down map of the space. Each cell is

@@ -54,11 +54,17 @@ function json(body: unknown, status = 200) {
   });
 }
 
-// OpenAI wants a pixel size string; mirror the client's aspect→size mapping.
-function sizeForAspect(aspect: string): string {
-  if (aspect === "9:16") return "1024x1536";
-  if (aspect === "21:9") return "1536x1024"; // closest wide size OpenAI offers
-  return "1536x1024"; // 16:9-ish default
+// GPT Image 2 accepts custom dimensions (multiples of 16, max edge 3840).
+// Map TURN's resolution tier + native aspect to exact provider output pixels.
+// These are generated dimensions, not a client-side upscale after the fact.
+function sizeForAspect(aspect: string, imageSize: string): string {
+  const tier = ["1K", "2K", "4K"].includes(imageSize) ? imageSize : "2K";
+  const sizes: Record<string, Record<string, string>> = {
+    "16:9": { "1K": "1280x720",  "2K": "2048x1152", "4K": "3840x2160" },
+    "9:16": { "1K": "720x1280",  "2K": "1152x2048", "4K": "2160x3840" },
+    "21:9": { "1K": "1344x576", "2K": "2688x1152", "4K": "3808x1632" },
+  };
+  return (sizes[aspect] || sizes["16:9"])[tier];
 }
 
 function dataUrlToBlob(dataUrl: string): Blob | null {
@@ -436,7 +442,7 @@ Deno.serve(async (req) => {
     return json({ error: "Server is missing OPENAI_API_KEY. Set it with: supabase secrets set OPENAI_API_KEY=sk-..." }, 500);
   }
 
-  const size = sizeForAspect(aspect);
+  const size = sizeForAspect(aspect, imageSize);
 
   // ── call OpenAI server-side (no CORS here) ──────────────────────────────────
   try {

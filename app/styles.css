@@ -4150,7 +4150,12 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   box-shadow:0 24px 80px rgba(0,0,0,.45);padding:16px 18px;
   animation:appconfirm-pop .14s cubic-bezier(.2,.8,.3,1)}
 .shot-notice-ic{flex:0 0 auto;color:var(--accent,#d8a657);display:flex}
-.shot-notice-msg{font-size:13px;color:var(--txt-1);line-height:1.5}
+.shot-notice-msg{flex:1;min-width:0;font-size:13px;color:var(--txt-1);line-height:1.5}
+.shot-notice-x{flex:0 0 auto;align-self:flex-start;width:25px;height:25px;margin:-5px -7px -5px 0;padding:0;
+  display:grid;place-items:center;border:0;border-radius:7px;background:transparent;color:var(--txt-3);
+  font:500 20px/1 var(--f-ui);cursor:pointer;transition:background .12s,color .12s}
+.shot-notice-x:hover{background:var(--bg-3);color:var(--txt-1)}
+.shot-notice-x:focus-visible{outline:2px solid var(--accent,#d8a657);outline-offset:1px}
 
 /* add-a-reference control + picker on a shot card (app/shots-ui.jsx) */
 .shot-ref-thumb.added{border-color:#4ca596}
