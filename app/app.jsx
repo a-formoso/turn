@@ -1750,15 +1750,17 @@ function App(){
       shotsOf: _shotsOf,
       pickAnchor: (arr)=>{ const w=(arr||[]).find(s=>_WIDE.has(s.size)); return ((w||(arr||[])[0])||{}).id; },
       grammarList: (arr, anchorId, turnAt)=> (arr||[]).map((s,i)=> (i+1)+". "+((typeof shotGrammarLabel==="function")?shotGrammarLabel(s):s.size)
-        + (s.id===anchorId?"  ⚓ anchor":"") + ((turnAt&&s.beatN===turnAt)?"  ← lands the turn":"")),
+        + (i===0?"  ◆ chain head":"") + ((turnAt&&s.beatN===turnAt)?"  ← lands the turn":"")),
       turnAtOf: (sid)=> ((beatsMap||{})[sid]||{}).turnAt,
       draftCoverage: async (scene)=>{ if(typeof aiDraftShots!=="function" || typeof normalizeShot!=="function") return null;
         const raw = await aiDraftShots(scene, beatsMap, drafts, locations, props, characters, lbProject("shots"));
         return (raw && raw.length) ? raw.map((r,i)=>normalizeShot(r, scene, i, locations, props, characters, beatsMap)) : null; },
       applyCoverage: (sceneId, newShots, anchorId)=>{
-        const withAnchor = (newShots||[]).map(s=>({...s, anchor:s.id===anchorId}));
-        _workShots = _workShots.filter(s=>s.sceneId!==sceneId).concat(withAnchor);
-        setShots(ss=> ss.filter(s=>s.sceneId!==sceneId).concat(withAnchor.map(s=>({...s})))); },
+        // chain model: the head is the FIRST shot in order, so coverage shots carry no
+        // explicit .anchor (that flag now means a manual fresh-start / chain break).
+        const fresh = (newShots||[]).map(s=>({...s, anchor:false}));
+        _workShots = _workShots.filter(s=>s.sceneId!==sceneId).concat(fresh);
+        setShots(ss=> ss.filter(s=>s.sceneId!==sceneId).concat(fresh.map(s=>({...s})))); },
       setAnchorOnly: (sceneId, anchorId)=>{
         _workShots = _workShots.map(s=> s.sceneId===sceneId ? {...s, anchor:s.id===anchorId} : s);
         setShots(ss=> ss.map(s=> s.sceneId===sceneId ? {...s, anchor:s.id===anchorId} : s)); },

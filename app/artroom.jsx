@@ -320,6 +320,23 @@ function nbAspectLabel(w,h){ if(!w||!h) return "—"; const r=w/h;
   if(bd/best[1] < 0.06) return best[0];
   const g=(a,b)=>b?g(b,a%b):a; const d=g(w,h)||1; return (w/d)+":"+(h/d); }
 
+/* Cancel an in-flight generation by entity id. Aborts the network request (where the
+   transport supports it — the direct Google fetch does; the Supabase proxy may still
+   finish server-side), flags the run as cancelled so its result is DISCARDED rather than
+   committed, clears the inflight marker, and fires "nb-gen-cancel" so the owning card
+   drops its spinner immediately. The matching useImageGen checks __nbGenCancel before it
+   commits, so a late-resolving request never overwrites the frame. */
+if(typeof window.nbCancelGen!=="function"){
+  window.nbCancelGen = function(gid){
+    if(!gid) return;
+    window.__nbGenCancel = window.__nbGenCancel || {};
+    window.__nbGenCancel[gid] = true;
+    if(window.__nbGenAbort && window.__nbGenAbort[gid]){ try{ window.__nbGenAbort[gid].abort(); }catch(e){} }
+    if(window.__nbGenInflight) window.__nbGenInflight[gid] = false;
+    try{ window.dispatchEvent(new CustomEvent("nb-gen-cancel",{ detail:{ id:gid } })); }catch(e){}
+  };
+}
+
 /* ============================================================
    useImageGen — shared Nano Banana generation engine for any
    "sheet" entity (characters, props, …). Owns image state, the
@@ -378,7 +395,11 @@ function useImageGen(opts){
       else if(typeof nbLoadImage==="function"){ nbLoadImage(id).then(x=>{ if(alive && x){ setGenUrl(x); setGenTier("idb"); } }); }
     };
     window.addEventListener("nb-gen-done", onDone);
-    return ()=>{ alive=false; window.removeEventListener("nb-gen-done", onDone); window.removeEventListener("nb-prefetched", onPrefetched); };
+    // user cancelled this id's generation elsewhere (chain Stop / per-card Stop): drop the
+    // spinner now; the in-flight generate() sees __nbGenCancel and won't commit its result.
+    const onCancel = (e)=>{ if(!alive || !e.detail || e.detail.id!==id) return; setGening(false); setRetrying(false); };
+    window.addEventListener("nb-gen-cancel", onCancel);
+    return ()=>{ alive=false; window.removeEventListener("nb-gen-done", onDone); window.removeEventListener("nb-prefetched", onPrefetched); window.removeEventListener("nb-gen-cancel", onCancel); };
   },[id]);
 
   /* watch the reference-photo slot for drops */
@@ -404,6 +425,12 @@ function useImageGen(opts){
        result via the "nb-gen-done" event. */
     setGenErr(""); setGening(true); setRetrying(false);
     window.__nbGenInflight[id] = true;
+    // cancellation: clear any stale flag, and register an AbortController so a Stop can
+    // both kill the request (where supported) and have us DISCARD a late result.
+    window.__nbGenCancel = window.__nbGenCancel || {};
+    window.__nbGenCancel[id] = false;
+    const abortCtl = (typeof AbortController!=="undefined") ? new AbortController() : null;
+    if(abortCtl){ window.__nbGenAbort = window.__nbGenAbort || {}; window.__nbGenAbort[id] = abortCtl; }
     /* optional pre-generate gate (e.g. warn + optionally generate linked props first).
        Skipped for batch runs, in-place edits, and the simplified retry — those
        shouldn't pop a modal (a batch would pop one per card). */
@@ -461,10 +488,13 @@ function useImageGen(opts){
     const groundEnabled = typeof nbGetGroundSearch==="function" && nbGetGroundSearch();
     const isFlash = usedModel === "gemini-3.1-flash-image";
     const genOpts = { metaOut:{} };
+    if(abortCtl) genOpts.signal = abortCtl.signal;
     if(overrideModel) genOpts.model = overrideModel;
     if(gopts.aspectRatio) genOpts.aspectRatio = gopts.aspectRatio;   // caller can force aspect…
     if(gopts.imageSize)   genOpts.imageSize   = gopts.imageSize;     // …and resolution (e.g. storyboard: 16:9 / 2K)
     if(gopts.quality)     genOpts.quality     = gopts.quality;       // …and GPT Image 2 quality (low/medium/high — lower = far faster, dodges the proxy timeout)
+    if(gopts.referenceMaxDim) genOpts.referenceMaxDim = gopts.referenceMaxDim;
+    else if(opts.referenceMaxDim) genOpts.referenceMaxDim = opts.referenceMaxDim;
     if(refImage) genOpts.referenceImage = refImage;
     if(groundEnabled){ genOpts.groundSearch = true; if(isFlash) genOpts.groundImageSearch = true; }
 
@@ -534,6 +564,8 @@ function useImageGen(opts){
           url = await nbGenerate(opts.buildSimple(), genOpts);
         } else { throw e; }
       }
+      // cancelled mid-flight (Stop): discard the result — don't commit over the frame.
+      if(window.__nbGenCancel && window.__nbGenCancel[id]) throw { __cancelled:true };
       /* version number from existing history (nbCommit rolls history internally) */
       let priorCount = 0;
       try{
@@ -567,13 +599,18 @@ function useImageGen(opts){
       setGenTier((saveResult && saveResult.tier) || "local");
       setGenMeta(meta);
       if(isEditMode){ setEditMode(false); setEditText(""); }
-    }catch(e){ setGenErr((e && e.message) || "Generation failed."); }
+    }catch(e){ if(!(e && (e.__cancelled || e.name==="AbortError"))) setGenErr((e && e.message) || "Generation failed."); }
+    const wasCancelled = !!(window.__nbGenCancel && window.__nbGenCancel[id]);
     setGening(false); setRetrying(false);
     delete window.__nbGenInflight[id];
+    if(window.__nbGenAbort) delete window.__nbGenAbort[id];
+    if(window.__nbGenCancel) delete window.__nbGenCancel[id];
     // notify any (re)mounted card for this id so it adopts the result even if the
-    // card that started the generation has since unmounted (tab switch mid-generate)
-    try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, url: committedUrl } })); }catch(e){}
+    // card that started the generation has since unmounted (tab switch mid-generate).
+    // Skip when cancelled — there's no result to adopt.
+    if(!wasCancelled){ try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, url: committedUrl } })); }catch(e){} }
   };
+  const cancelGen = ()=>{ if(gening && typeof window.nbCancelGen==="function") window.nbCancelGen(id); };
   const clearGen = async ()=>{
     if(typeof nbClearAsset==="function") await nbClearAsset(id);
     // cascade: also clear this entity's variant sub-sheets (a character's appearance
@@ -641,7 +678,7 @@ function useImageGen(opts){
   };
 
   return { genUrl, genMeta, genTier, gening, genErr, retrying, slotHasRef,
-    editMode, setEditMode, editText, setEditText, generate, clearGen, importSheet, relatedClearCount, loadDetails, revertTo, revertPrevious, deleteVersion, layers, allModels };
+    editMode, setEditMode, editText, setEditText, generate, cancelGen, clearGen, importSheet, relatedClearCount, loadDetails, revertTo, revertPrevious, deleteVersion, layers, allModels };
 }
 window.useImageGen = useImageGen;
 
@@ -922,15 +959,23 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
 /* SheetFrame — the visual half of any reference-sheet card: generated image (with
    options menu + inline AI edit), or the reference-photo drop slot, then the
    Generate button, error recovery, and the metadata caption. Driven by useImageGen. */
-function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate, extraMeta, menuExtra }){
+function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate, extraMeta, menuExtra, dropToImport, onStop }){
   const { genUrl, genMeta, genTier, gening, genErr, retrying, slotHasRef,
-    editMode, setEditMode, editText, setEditText, generate, clearGen, importSheet, relatedClearCount, revertPrevious, layers, allModels } = gen;
+    editMode, setEditMode, editText, setEditText, generate, cancelGen, clearGen, importSheet, relatedClearCount, revertPrevious, layers, allModels } = gen;
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const menuRef = React.useRef(null);
   const uploadRef = React.useRef(null);
   const pickUpload = ()=>{ if(uploadRef.current) uploadRef.current.click(); };
   const onUploadPicked = (e)=>{ const f=e.target.files&&e.target.files[0]; if(f&&importSheet) importSheet(f); e.target.value=""; };
+  // dropToImport: the empty slot itself imports a FINISHED frame at full resolution (drop or
+  // click-to-browse) — same job as the old "Upload a finished" button, so it can replace it.
+  const [dropOver, setDropOver] = React.useState(false);
+  const onZoneDragOver = (e)=>{ if(!importSheet || gening) return; e.preventDefault(); e.stopPropagation(); if(e.dataTransfer) e.dataTransfer.dropEffect="copy"; if(!dropOver) setDropOver(true); };
+  const onZoneDragLeave = (e)=>{ e.preventDefault(); setDropOver(false); };
+  const onZoneDrop = (e)=>{ e.preventDefault(); e.stopPropagation(); setDropOver(false);
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f && importSheet && !gening) importSheet(f); };
   const [pendingGenerate, setPendingGenerate] = React.useState(false);
   const sawDraftingRef = React.useRef(false);
   noun = noun || "sheet";
@@ -965,11 +1010,21 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
           React.createElement("img",{className:"sheet-genimg",src:genUrl,alt:name+" "+noun,
             decoding:"async",loading:"lazy",
             onClick:()=>onView&&onView(genUrl, entity)}))
-      : React.createElement(React.Fragment,null,
-          React.createElement("image-slot",{id:slotId,className:"sheet-slot",
-            shape:"rounded",radius:"10",placeholder:slotPlaceholder||"Drop reference art"}),
-          slotHasRef && React.createElement("div",{className:"sheet-ref-pill"},
-            React.createElement(Icon.bolt,{s:10,sw:2}),"Reference art active \u00b7 guides generation")),
+      : dropToImport
+        // the drop zone IS the upload: drop a finished frame or click to browse \u2014 imported at
+        // full resolution and committed as this frame, so it previews exactly like a generated one.
+        ? React.createElement("div",{className:"sheet-dropzone"+(dropOver?" over":"")+(gening?" busy":""),
+            role:"button",tabIndex:0,onClick:()=>{ if(!gening) pickUpload(); },
+            onDragEnter:onZoneDragOver,onDragOver:onZoneDragOver,onDragLeave:onZoneDragLeave,onDrop:onZoneDrop,
+            title:"Drop a finished "+noun+" here, or click to browse \u2014 it's imported at full resolution and becomes this "+noun},
+            React.createElement(Icon.image,{s:26}),
+            React.createElement("div",{className:"sheet-dropzone-cap"}, slotPlaceholder||("Drop a "+noun)),
+            React.createElement("div",{className:"sheet-dropzone-sub"}, "or click to browse files"))
+        : React.createElement(React.Fragment,null,
+            React.createElement("image-slot",{id:slotId,className:"sheet-slot",
+              shape:"rounded",radius:"10",placeholder:slotPlaceholder||"Drop reference art"}),
+            slotHasRef && React.createElement("div",{className:"sheet-ref-pill"},
+              React.createElement(Icon.bolt,{s:10,sw:2}),"Reference art active \u00b7 guides generation")),
     (genUrl || onDelete || importSheet) && React.createElement("div",{className:"sheet-gen-tools"},
       React.createElement("div",{className:"sheet-tools-menu",ref:menuRef},
         React.createElement("button",{className:"sheet-gen-tool",onClick:()=>setMenuOpen(m=>!m),title:"Options"},
@@ -1030,6 +1085,8 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
       layers>0 && React.createElement("div",{className:"sheet-edit-layers"},
         React.createElement(Icon.history,{s:10}),
         layers+" earlier version"+(layers!==1?"s":"")+" \u00b7 see all in the \u2026 menu \u203a Details")),
+    // generate + (while running) stop sit on ONE row — full-width when idle, 50/50 while generating
+    React.createElement("div",{className:"sheet-gen-row"},
     React.createElement("button",{className:"sheet-gen-btn",onClick:handleGenerateClick,disabled:gening||(drafting&&pendingGenerate)||specBlocked,
       title:(!drafted && !genUrl && !slotHasRef)
         ? "Fills the text spec from the script first, then generates the sheet in one step"
@@ -1043,10 +1100,15 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
             genUrl ? ("Regenerate "+noun) :
             (slotHasRef ? "Generate from photo" :
             (!drafted ? "Draft & Generate" : ("Generate "+noun))))),
+    // Stop an in-flight generation — discards the result so it won't commit over the frame.
+    gening && React.createElement("button",{className:"sheet-gen-stop",onClick:()=> onStop ? onStop() : (cancelGen && cancelGen()),
+      title:"Stop this generation — nothing will be saved over the current frame"},
+      React.createElement(Icon.x,{s:13}),"Stop")),
     // import a finished, full-res sheet generated outside the app (GPT Image 2, etc.)
     React.createElement("input",{ref:uploadRef,type:"file",accept:"image/png,image/jpeg,image/webp,image/avif",
       style:{display:"none"},onChange:onUploadPicked}),
-    !genUrl && importSheet && React.createElement("button",{className:"sheet-upload-btn",onClick:pickUpload,disabled:gening,
+    // when the empty slot already imports on drop/click (dropToImport), this button is redundant
+    !genUrl && importSheet && !dropToImport && React.createElement("button",{className:"sheet-upload-btn",onClick:pickUpload,disabled:gening,
       title:"Generated this elsewhere (e.g. GPT Image 2 in ChatGPT)? Upload it at full resolution — it becomes this "+noun+", with zoom, the … menu and clear, just like a generated one."},
       React.createElement(Icon.image,{s:12}),"Upload a finished "+noun),
     specBlocked && React.createElement("div",{className:"sheet-gen-gate"},
@@ -2429,7 +2491,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
 
   return React.createElement("div",{className:"artroom"},
     // fixed engine dock — Model / Aspect / Resolution, always reachable while
-    // scrolling (desktop only; below 1100px the in-flow controls remain)
+    // scrolling at every viewport
     React.createElement(NbDock,null),
     // #1 — pre-production readiness strip, visible across every tab
     React.createElement(PreProductionStatus,{project,characters,props,locations,shots,scenes,setArtView}),

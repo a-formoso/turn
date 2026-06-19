@@ -198,7 +198,9 @@ function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap, opts){
     style: {
       base: "cinematic"+(genre?(", "+genre+" tone"):"")+", live-action, photorealistic, lifelike, subtle 35mm film grain",
       grade: _clean(grade) || undefined,
-      page_layout: vertical ? "9:16 vertical" : "16:9",
+      page_layout: vertical
+        ? "a 2:3 PORTRAIT sheet (1024×1536 canvas) that is a GRID of separate 9:16 panels — the SHEET is 2:3; each PANEL is 9:16; do NOT make the whole sheet a single 9:16 image"
+        : "a 3:2 LANDSCAPE sheet (1536×1024 canvas) that is a GRID of separate 16:9 panels — the SHEET is 3:2; each PANEL is 16:9; do NOT squeeze the whole sheet into 16:9 (that distorts the panels)",
     },
     atmosphere_light: light+"; "+mood,
     visual_references: _lb ? ("translate their look (framing, composition, atmosphere), NOT their content: "+_lb.replace(/\s+/g," ")) : undefined,
@@ -384,8 +386,10 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
       }
       if(ctx.location && !seen.has(ctx.location.id)){ const u=await grab(ctx.location.id); if(u) out.push({url:u, note:(ctx.location.name||"the location")+" plate"}); }
       // everyone in frame across the page's shots — derived from each shot's action
-      // text (inFrameCast), capped to keep the reference set lean
-      const shots = page.shots||[];
+      // text (inFrameCast), capped to keep the reference set lean.
+      // SCENE-WIDE: derive cast/props from ALL the scene's shots (not just this page's),
+      // so paginated pages 2,3… of the same scene attach the SAME referent input.
+      const shots = (ctx.sceneShots && ctx.sceneShots.length) ? ctx.sceneShots : (page.shots||[]);
       const ids = [];
       const _chars = Object.values(ctx.charById||{});
       shots.forEach(sh=>{ const inc=(typeof inFrameCast==="function")?inFrameCast(sh, scene, _chars):(sh.subjects||[]);
@@ -461,14 +465,17 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
   // references. Recomputed live so they're always displayable.
   const [refImgs, setRefImgs] = React.useState([]);   // auto influences, DERIVED from Characters/Props/Locations
   const _sbRefKey = [page.id, gen.genUrl||"", (page.shots||[]).map(s=>s.id).join(","),
-    (ctx.location&&ctx.location.id)||""].join("|");
+    (ctx.location&&ctx.location.id)||"", prevSheetId||""].join("|");
   React.useEffect(()=>{
     let alive = true;
     (async()=>{
       const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
         if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u||""; };
       const out=[], seen=new Set();
-      const shots = page.shots||[];
+      // PREVIOUS sheet (e.g. page 1 → page 2 of the same scene) leads as the continuity
+      // anchor — the same sheet the generation chains in (see attachments prevSheetId).
+      if(prevSheetId){ const pu=await grab(prevSheetId); if(pu){ out.push({ url:pu, label:"Previous sheet — continuity anchor", kind:"anchor" }); seen.add(prevSheetId); } }
+      const shots = (ctx.sceneShots && ctx.sceneShots.length) ? ctx.sceneShots : (page.shots||[]);   // scene-wide refs (same across pages)
       if(ctx.location){ const u=await grab(ctx.location.id); if(u){ out.push({ url:u, label:(ctx.location.name||"Location")+" plate", kind:"location" }); seen.add(ctx.location.id); } }
       const ids=[]; const _chars=Object.values(ctx.charById||{});
       shots.forEach(sh=>{ const inc=(typeof inFrameCast==="function")?inFrameCast(sh, scene, _chars):(sh.subjects||[]); inc.forEach(id=>{ if(ids.indexOf(id)<0) ids.push(id); }); });
@@ -485,11 +492,13 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
   const [editRefSel, setEditRefSel] = React.useState([]);
   const editRefOptions = React.useMemo(()=>{
     const seen = new Set(), out = [];
-    (page.shots||[]).forEach(sh=> (sh.subjects||[]).forEach(cid=>{
+    const refShots = (ctx.sceneShots && ctx.sceneShots.length) ? ctx.sceneShots : (page.shots||[]);
+    const _chars = Object.values(ctx.charById||{});
+    refShots.forEach(sh=> ((typeof inFrameCast==="function")?inFrameCast(sh, scene, _chars):(sh.subjects||[])).forEach(cid=>{
       if(seen.has(cid)) return; seen.add(cid);
       const c = ctx.charById[cid]; if(c) out.push({ id:c.id, label:c.name, note:c.name+"'s character sheet" });
     }));
-    sbPropIdsForPage(scene, page.shots||[], ctx).forEach(pid=>{
+    sbPropIdsForPage(scene, refShots, ctx).forEach(pid=>{
       if(seen.has(pid)) return; seen.add(pid);
       const p = ctx.propById[pid]; if(p) out.push({ id:p.id, label:p.name||"Prop", note:(p.name||"Prop")+" prop sheet" });
     });
@@ -873,7 +882,7 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
   }, [shots]);
   const charById = React.useMemo(()=>{ const m={}; (characters||[]).forEach(c=>m[c.id]=c); return m; },[characters]);
   const propById = React.useMemo(()=>{ const m={}; (props||[]).forEach(p=>m[p.id]=p); return m; },[props]);
-  const ctxFor = (scene)=>({ scene, location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null, charById, propById, project, locations:locations||[] });
+  const ctxFor = (scene)=>({ scene, location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null, charById, propById, project, locations:locations||[], sceneShots:(shotsByScene[scene.id]||[]) });
 
   // Storyboards are fixed to scene sheets in a 2×2 grid. This keeps every panel in
   // the strongest 16:9 geometry.

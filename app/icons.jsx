@@ -46,6 +46,7 @@ const Icon = {
     React.createElement("rect",{key:1,x:9,y:2.5,width:6,height:11,rx:3}),
     React.createElement("path",{key:2,d:"M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"})]}),
   play:(p)=>I({...p,d:"M7 4l13 8-13 8V4z",fill:"currentColor"}),
+  maximize:(p)=>I({...p,d:"M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"}),
   eye:(p)=>I({...p,children:[
     React.createElement("path",{key:1,d:"M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"}),
     React.createElement("circle",{key:2,cx:12,cy:12,r:2.6})]}),

@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
   let body: any;
   try { body = await req.json(); } catch (_e) { return json({ error: "Bad request body." }, 400); }
   const provider = body.provider || "openai";
-  const model = body.model || "gpt-image-2-2026-04-21";
+  const model = body.model || "gpt-image-2";
   const prompt = (body.prompt || "").toString();
   const aspect = body.aspect || "16:9";
   const quality = body.quality || "high";

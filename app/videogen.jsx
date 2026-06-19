@@ -9,7 +9,7 @@
      seedanceGenerate(id, { frameUrl, audioUrl, prompt, durationMs, aspectRatio,
                             resolution, fast, seed, force, onStatus, shouldCancel })
        -> { videoUrl, seed, cached }
-     vidGetVideo(id) / vidGetMeta(id) / vidLoadVideo(id) / vidClear(id)
+     vidGetVideo(id) / vidGetMeta(id) / vidGetTakes(id) / vidLoadVideo(id) / vidLoadTakes(id) / vidClear(id)
      useSeedanceGen(id) -> { videoUrl, status, gening, err, generate, clear }
 */
 
@@ -47,12 +47,19 @@ const _vidMem = new Map();      // id -> { url, meta }
 function vidKey(id){ return "v:"+id; }
 function vidGetVideo(id){ const e=_vidMem.get(id); return (e&&e.url)||""; }
 function vidGetMeta(id){ const e=_vidMem.get(id); return (e&&e.meta)||null; }
+function vidGetTakes(id){
+  const e=_vidMem.get(id), out=[];
+  if(e&&e.url) out.push({ id:id+":current", url:e.url, meta:e.meta||null, current:true });
+  (((e&&e.meta&&e.meta.takes)||[])).forEach((t,i)=>{ if(t&&t.url) out.push({ id:id+":take-"+i, url:t.url, meta:t.meta||null, current:false }); });
+  return out;
+}
 async function vidLoadVideo(id){
   const sync=vidGetVideo(id); if(sync) return sync;
   try{ const v=await vidIdbGet(vidKey(id)); if(v && v.url){ _vidMem.set(id,{url:v.url,meta:v.meta||null}); return v.url; } }catch(e){}
   return "";
 }
-window.vidGetVideo=vidGetVideo; window.vidGetMeta=vidGetMeta; window.vidLoadVideo=vidLoadVideo;
+async function vidLoadTakes(id){ await vidLoadVideo(id); return vidGetTakes(id); }
+window.vidGetVideo=vidGetVideo; window.vidGetMeta=vidGetMeta; window.vidGetTakes=vidGetTakes; window.vidLoadVideo=vidLoadVideo; window.vidLoadTakes=vidLoadTakes;
 // drop the in-memory clip cache (call on project switch so no video leaks across films)
 function vidResetAll(){ _vidMem.clear(); }
 window.vidResetAll=vidResetAll;
@@ -74,6 +81,13 @@ function vidHash(assets, prompt, settings){
 window.vidHash=vidHash;
 
 async function vidCommit(id, url, meta){
+  const prev = _vidMem.get(id) || (async()=>{ try{ return await vidIdbGet(vidKey(id)); }catch(e){ return null; } })();
+  const old = prev && typeof prev.then==="function" ? await prev : prev;
+  const takes = [];
+  const oldMeta = (old&&old.meta)||null;
+  if(old&&old.url&&old.url!==url) takes.push({ url:old.url, meta:oldMeta, savedAt:(oldMeta&&oldMeta.createdAt)||Date.now() });
+  ((oldMeta&&oldMeta.takes)||[]).forEach(t=>{ if(t&&t.url&&t.url!==url&&!takes.some(x=>x.url===t.url)) takes.push(t); });
+  meta = { ...(meta||{}), createdAt:Date.now(), takes:takes.slice(0,8) };
   _vidMem.set(id, { url, meta:meta||null });
   if(typeof window.cloudCommitVideo==="function" && typeof window.nbBackend==="function" && window.nbBackend()==="cloud"){
     try{ const r=await window.cloudCommitVideo(id, url, meta); if(r && r.url){ _vidMem.set(id,{url:r.url,meta:meta||null}); } }catch(e){}

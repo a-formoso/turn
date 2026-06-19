@@ -67,7 +67,7 @@ function ClipBar({ shots, onUpdate, clipMax }){
       title:"Clear the hand grouping and re-pack the clips automatically by duration"},"Auto-pack"));
 }
 
-function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnchor, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, clipNo }){
+function ShotCard({ sh, scene, ctx, characters, propsAvail, prevShot, isHead, isFirst, onToggleHead, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, onRegenDownstream, onStopChain, clipNo }){
   const loc = ctx.location;
   // who/what is in frame is DERIVED from the action text (single source of truth) — the
   // old manual tags are gone; this is what the prompt + references actually use.
@@ -76,42 +76,44 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
   const subjects = inCastIds.map(id=>ctx.charById[id]).filter(Boolean);
   const inPropIds = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, ctx.charById, ctx.propById) : (sh.props||[]);
   const inProps = inPropIds.map(id=>ctx.propById[id]).filter(Boolean);
-  const finalPrompt = combinedShotPrompt(sh, ctx);
-  const isAnchor = !!(anchorShot && anchorShot.id===sh.id);
+  const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
+  // the "Shot prompt" preview reflects what WILL generate: a non-head shot chains from the
+  // previous frame (continuity_anchor present); the head renders fresh from the sheets.
+  const promptCtx = { ...ctx, prevShot:prevShot||null };
+  const finalPrompt = combinedShotPrompt(sh, promptCtx);
+  const chainPrompt = (typeof buildShotPrompt==="function") ? buildShotPrompt(sh, { ...promptCtx, prevFrameRole:true }) : finalPrompt;
+  const previewPrompt = isHead ? finalPrompt : chainPrompt;
 
-  // DERIVE-FROM-ANCHOR: when this scene's key frame exists, a non-anchor shot is
-  // generated as a RE-FRAME of that frame (image-edit base) rather than a fresh
-  // text-to-image sample — single-sample physics, so the set/light/identity can't
-  // re-roll per shot. {fresh:true} (the card menu's "Generate fresh sample")
-  // bypasses it for the rare reframe an edit can't reach.
-  // ASYNC on purpose: in cloud mode the anchor frame often isn't in the sync memory
-  // cache (e.g. right after a reload) — falling back to nbLoadImage keeps the derive
-  // chain intact instead of silently degrading to a fresh sample that drifts.
+  // THE ROLLING SEED: a non-head shot generates as an image-edit off the PREVIOUS shot's
+  // committed frame — it carries the colour grade AND the progressive physical state
+  // (wetness, dirt, damage, wardrobe wear) forward, while this shot stages its own action.
+  // A chain head renders from the sheets alone. ASYNC on purpose: in cloud mode
+  // the previous frame often isn't in the sync cache
+  // right after a reload — falling back to nbLoadImage keeps the chain intact.
   const deriveBase = async (gopts)=>{
-    if(isAnchor || !anchorShot || (gopts && (gopts.fresh || gopts.editInstruction))) return null;
-    let u = (typeof nbGetImage==="function") ? nbGetImage(anchorShot.id) : "";
-    if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(anchorShot.id); }catch(e){} }
+    if(!prevShot || (gopts && (gopts.fresh || gopts.editInstruction))) return null;
+    let u = (typeof nbGetImage==="function") ? nbGetImage(prevShot.id) : "";
+    if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(prevShot.id); }catch(e){} }
     return u || null;
   };
 
-  // reference images. Deriving: the anchor IS the base image, so attachments slim to
-  // the location coverage sheet + character sheets (for reverse angles and close-ups
-  // the base can't supply). Fresh sample: the anchor rides first, as before.
+  // reference SHEETS (the locked canon) — the seed frame rides separately as the base image.
+  // Ordered by location weight: a wide leads with the set plate (geography reads); a tight
+  // leads with the cast and demotes the plate to a background/grade anchor.
   const collectShotRefs = async (gopts)=>{
     const grab = async (id)=>{ let u = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
       if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(id); }catch(e){} } return u; };
-    const out = [];
-    const deriving = !!(await deriveBase(gopts));
-    if(!deriving && anchorShot && anchorShot.id!==sh.id){ const u = await grab(anchorShot.id); if(u) out.push({ url:u, note:"scene key frame", anchor:true }); }
-    if(loc){ const u = await grab(loc.id); if(u) out.push({ url:u, note:(loc.name||"location")+" location coverage sheet (multiple views of ONE set)" }); }
+    const locSpec = loc ? [{ id:loc.id, note:(loc.name||"location")+" location coverage sheet (multiple views of ONE set)" }] : [];
     // identity anchors for the cast & props actually in THIS frame — derived from the
-    // action text (inFrameCast/inFrameProps), never the fragile manual tags, so an
-    // under-tagged shot can't drop an anchor and an off-frame character isn't forced in.
+    // action text (inFrameCast/inFrameProps), never the fragile manual tags.
     const _chars = Object.values(ctx.charById||{});
     const inCast = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, _chars) : (sh.subjects||[]);
-    for(const id of inCast){ const c = ctx.charById[id]; if(!c) continue; const u = await grab(id); if(u) out.push({ url:u, note:c.name+" character sheet" }); }
-    const inPr = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, ctx.charById, ctx.propById) : (sh.props||[]);
-    for(const id of inPr){ const p = ctx.propById[id]; if(!p) continue; const u = await grab(id); if(u) out.push({ url:u, note:p.name+" prop sheet" }); }
+    const inPr   = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, ctx.charById, ctx.propById) : (sh.props||[]);
+    const castSpec = inCast.map(id=>{ const c=ctx.charById[id]; return c?{ id, note:c.name+" character sheet" }:null; }).filter(Boolean);
+    const propSpec = inPr.map(id=>{ const p=ctx.propById[id]; return p?{ id, note:p.name+" prop sheet" }:null; }).filter(Boolean);
+    const ordered = (locWeight==="ambient") ? [...castSpec, ...locSpec, ...propSpec] : [...locSpec, ...castSpec, ...propSpec];
+    const out = [];
+    for(const s of ordered){ const u = await grab(s.id); if(u) out.push({ url:u, note:s.note }); }
     return out;
   };
 
@@ -120,45 +122,31 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
     buildFinal: ()=> finalPrompt,
     buildSimple: ()=> buildShotPrompt(sh, ctx),
     referenceFallback: deriveBase,
-    buildFromBase: ()=> (typeof deriveShotPrompt==="function") ? deriveShotPrompt(sh, ctx) : finalPrompt,
+    buildFromBase: ()=> chainPrompt,
     attachments: collectShotRefs,
-    attachmentsText: (attach)=>{
-      const hasAnchor = attach[0] && attach[0].anchor;
-      let s = "Reference images provided, IN ORDER: "+attach.map(a=>a.note).join("; ")+". ";
-      if(hasAnchor) s += "The FIRST image is this SCENE'S KEY FRAME — match its lighting, colour grade, atmosphere and the world/space EXACTLY, and keep every character's appearance consistent with it; only re-compose to THIS shot's size, angle and staging. ";
-      s += "Match the corresponding character(s), location and prop(s) to these reference designs EXACTLY "
-        +"(faces, wardrobe, geometry, materials) for cross-shot continuity; compose them into this one frame.";
-      if(isAnchor) s += " THIS FRAME IS THE SCENE'S KEY FRAME — every other shot in the scene will be derived from it. "
-        +"Lock it to the location coverage sheet exactly (ONE real set, multiple views): its architecture, surfaces, "
-        +"signage and light define the scene's look from here on.";
-      return s;
-    },
+    // buildShotPrompt now names the reference stack in-prose (the spine + staging + References
+    // block), so we don't append a second reference sentence here — that would just duplicate it.
+    attachmentsText: ()=> "",
     buildEdit: (instr)=>
       "Edit this film frame. Apply ONLY this change: "+instr+". Keep the same shot size, lens, staging, "
       +"the same characters (identical faces & wardrobe), the same location and the same colour grade. Do not re-imagine the frame.",
+    // Shot frames commonly carry a rolling seed plus several canon sheets. A
+    // 768px reference is ample for identity/composition and keeps GPT Image 2
+    // comfortably inside the proxy window; output remains the selected 2K size.
+    referenceMaxDim: 768,
   });
 
-  // Manual generate of a NON-anchor shot whose anchor frame doesn't exist yet: notify which
-  // shot (and scene) is the anchor before spending a generation, and only proceed on the user's
-  // say-so. The batch path is left untouched (it already renders anchor-first).
-  const guardedGenerate = async ()=>{
-    if(anchorShot && anchorShot.id!==sh.id && typeof window.appConfirm==="function"){
-      const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
-        if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; };
-      const anchorImg = await grab(anchorShot.id);
-      if(!anchorImg){
-        const aLab = "Beat "+(anchorShot.beatN||"?")+" · "+(sizeOf(anchorShot.size).label||"shot");
-        const sLab = "Scene "+((scene&&scene.no!=null)?scene.no:"?")+((scene&&scene.title)?(" — "+scene.title):"");
-        const ans = await window.appConfirm({
-          title:"Generate before the scene's anchor?",
-          body:"This scene's visual ANCHOR — "+aLab+" in "+sLab+" — hasn't been generated yet. The anchor's frame pins the scene's lighting, colour grade and world so every shot matches. Generate this shot now and it won't be locked to that look, so it may drift from its scene-mates.",
-          confirmLabel:"Generate anyway", altLabel:"Generate the anchor first", cancelLabel:"Cancel" });
-        if(ans===true){ gen.generate(); }
-        else if(ans==="alt" && onGenerateShot){ onGenerateShot(anchorShot.id); }
-        return;
-      }
+  // Every manual Generate / Regenerate enters the scene's ordered runner. If an earlier
+  // shot in the chain isn't rendered yet, the runner asks the user to generate it first
+  // (it's the anchor) rather than rendering out of order. Raw gen.generate() runs when active.
+  const guardedGenerate = (gopts)=>{
+    // An edit operates on THIS already-generated frame in place — it isn't a new chain
+    // request, so it bypasses the ordered runner and edits the current frame directly.
+    if(gopts && gopts.editInstruction){
+      if(sh.locked) onUpdate(sh.id,{locked:false});
+      return gen.generate(gopts);
     }
-    gen.generate();
+    return onGenerateShot ? onGenerateShot(sh.id) : gen.generate(gopts);
   };
   const genGuarded = Object.assign({}, gen, { generate: guardedGenerate });
 
@@ -180,20 +168,32 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
   // from, the LOCATION coverage plate, and the in-frame CHARACTER & PROP sheets. Shown as
   // small thumbnails (click to enlarge) so it's clear what canon art the generation locks
   // to. Recomputed from the live entity sheets (always displayable), keyed off the ids.
-  const [refImgs, setRefImgs] = React.useState([]);    // auto influences, DERIVED from Characters/Props/Locations
-  const _refKey = [sh.id, anchorShot&&anchorShot.id, loc&&loc.id,
+  const [refImgs, setRefImgs] = React.useState([]);    // seed frame + the canon sheets, ordered by location weight
+  // the SEED is the previous shot's frame, whose image isn't part of this card's props — so when
+  // it commits (uploaded OR generated), bump on its nb-gen-done so the seed thumb appears without a reload.
+  const [prevSeedBump, setPrevSeedBump] = React.useState(0);
+  React.useEffect(()=>{
+    if(!prevShot) return;
+    const pid = prevShot.id;
+    const onDone = (e)=>{ if(e && e.detail && e.detail.id===pid) setPrevSeedBump(b=>b+1); };
+    window.addEventListener("nb-gen-done", onDone);
+    return ()=>window.removeEventListener("nb-gen-done", onDone);
+  },[prevShot && prevShot.id]);
+  const _refKey = [sh.id, prevShot&&prevShot.id, prevShot&&prevShot.locked?1:0, prevSeedBump, loc&&loc.id, locWeight,
     subjects.map(c=>c.id).join(","), inProps.map(p=>p.id).join(","), gen.genUrl||""].join("|");
   React.useEffect(()=>{
     let alive = true;
     (async ()=>{
       const grab = async (id)=>{ let u = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
         if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(id); }catch(e){} } return u||""; };
-      const out = [];
-      if(anchorShot && anchorShot.id!==sh.id){ const u=await grab(anchorShot.id); if(u) out.push({ url:u, label:"Scene key frame", kind:"anchor" }); }
-      if(loc){ const u=await grab(loc.id); if(u) out.push({ url:u, label:(loc.name||"Location")+" plate", kind:"location" }); }
-      for(const c of subjects){ const u=await grab(c.id); if(u) out.push({ url:u, label:c.name, kind:"character" }); }
-      for(const p of inProps){ const u=await grab(p.id); if(u) out.push({ url:u, label:p.name, kind:"prop" }); }
-      if(alive) setRefImgs(out);
+      // the rolling SEED leads (the previous shot's frame), then the canon sheets ordered by weight
+      const seedU = prevShot ? await grab(prevShot.id) : "";
+      const seed = (prevShot && seedU) ? [{ url:seedU, label:"Previous shot · Beat "+(prevShot.beatN||"—"), kind:"seed", approved:!!prevShot.locked }] : [];
+      const locItems = []; if(loc){ const u=await grab(loc.id); if(u) locItems.push({ url:u, label:(loc.name||"Location")+" plate", kind:"location" }); }
+      const castItems = []; for(const c of subjects){ const u=await grab(c.id); if(u) castItems.push({ url:u, label:c.name, kind:"character" }); }
+      const propItems = []; for(const p of inProps){ const u=await grab(p.id); if(u) propItems.push({ url:u, label:p.name, kind:"prop" }); }
+      const sheetOrder = (locWeight==="ambient") ? [...castItems, ...locItems, ...propItems] : [...locItems, ...castItems, ...propItems];
+      if(alive) setRefImgs([...seed, ...sheetOrder]);
     })();
     return ()=>{ alive=false; };
   },[_refKey]);
@@ -204,14 +204,14 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
   return _el("div",{className:"sheet-card shot-card"+(batchActiveId===sh.id?" batch-on":""),"data-shot-card":sh.id},
     _el(SheetFrame,{ gen:genGuarded, slotId:"shot-"+sh.id, name:beatLabel, avatarColor:"linear-gradient(135deg,#7a6cae,#2a2440)",
       initials, drafted:true, drafting:false, onDraft:()=>{}, entity:sh, onView,
-      slotPlaceholder:"Generate or drop a frame", noun:"frame",
-      // derive-mode escape hatch: re-sample from scratch when an anchor re-frame
-      // can't reach the framing (the anchor still rides along as a reference)
-      menuExtra: (!isAnchor && anchorShot) ? [{
-        label:"Generate fresh sample",
-        title:"Ignore the anchor as the base image and generate this frame from scratch (the anchor still rides along as a reference). Use when a re-frame of the key frame can't reach this shot's framing.",
-        onClick:()=>gen.generate({ fresh:true }),
-      }] : null,
+      slotPlaceholder:"Generate or drop a frame", noun:"frame", dropToImport:true, onStop:onStopChain,
+      menuExtra: [
+        onRegenDownstream ? {
+          label:"Regenerate downstream",
+          title:"Re-render every later shot in this scene in order, re-seeding each from the one before — use after changing this frame so propagated state stays current.",
+          onClick:()=>onRegenDownstream(sh),
+        } : null,
+      ].filter(Boolean),
       extraMeta:[
         { k:"Size",  v: sizeOf(sh.size).label + (sizeOf(sh.size).name?(" — "+sizeOf(sh.size).name):"") },
         { k:"Angle", v: angleOf(sh.angle).label },
@@ -220,28 +220,38 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
       ],
       onDelete:()=>onDelete(sh.id), deleteLabel:"Delete shot" }),
     _el("div",{className:"sheet-body"},
-      // reference images this frame is DERIVED from — the in-frame Characters, Props &
-      // Location sheets (+ the scene key frame). Click a thumb to enlarge. Read-only: who/
-      // what is in frame is auto-read from the Action line, not added by hand.
+      // reference images this frame is built from — the rolling SEED (the previous shot's
+      // frame) leads, then the in-frame Character, Prop & Location sheets, ordered by weight.
+      // Click a thumb to enlarge. Read-only: who/what is in frame is auto-read from the Action.
       refImgs.length>0 && _el("div",{className:"shot-refs"},
-        _el("div",{className:"shot-refs-lab"},
-          _el(Icon.layers,{s:11}),"Built from — derived from Characters, Props & Locations"),
         _el("div",{className:"shot-refs-row"},
-          refImgs.map((r,i)=>_el("button",{key:"a"+i,className:"shot-ref-thumb "+r.kind,
-            title:r.label+" — click to enlarge",
+          refImgs.map((r,i)=>_el("button",{key:"a"+i,className:"shot-ref-thumb "+r.kind+(r.kind==="seed"&&r.approved===false?" provisional":""),
+            title:(r.kind==="seed" ? (r.label+" — "+(r.approved?"approved seed":"provisional seed (not yet approved)")) : r.label)+" — click to enlarge",
             onClick:()=>onView&&onView(r.url,{name:r.label})},
-            _el("img",{src:r.url,alt:r.label,loading:"lazy"}))))),
+            _el("img",{src:r.url,alt:r.label,loading:"lazy"}),
+            r.kind==="seed" && _el("span",{className:"shot-ref-seedtag"+(r.approved?" ok":"")}, r.approved?"✓":"·"))))),
       _el("div",{className:"shot-head"},
-        _el("div",{className:"shot-grammar-line"},shotGrammarLabel(sh)),
+        // order, left-to-right: Beat · Clip · Head · (Approve, once a frame exists)
         _el("div",{className:"shot-head-right"},
-          _el("button",{className:"shot-anchor-btn"+(isAnchor?" on":""),
-            title:isAnchor
-              ? "This shot is the scene's visual ANCHOR — every other shot in the scene references its frame to match lighting, grade and world. Generate it first."
-              : "Make this the scene's visual anchor — other shots will match its look",
-            onClick:()=>onSetAnchor&&onSetAnchor(sh)},
-            _el(Icon.pin,{s:11}), isAnchor && _el("span",null,"Anchor")),
+          _el("div",{className:"shot-beat-tag"},beatLabel),
           clipNo && _el("div",{className:"shot-beat-tag clip",title:"This shot is part of clip "+clipNo+" — one generated video clip on the Stage"},"Clip "+clipNo),
-          _el("div",{className:"shot-beat-tag"},beatLabel))),
+          // chain head — the scene's first shot is always a head; flagging a later shot
+          // starts a FRESH look (a hard cut that won't inherit the previous frame's state)
+          _el("button",{className:"shot-anchor-btn"+(isHead?" on":""), disabled:isFirst,
+            title: isFirst
+              ? "This is the scene's first shot — always the chain head; the scene's whole look starts here."
+              : (isHead
+                ? "This shot is a FRESH START (chain break) — it won't be seeded by the previous frame. Click to rejoin the chain."
+                : "Make this a fresh start — a hard cut that won't inherit the previous frame's look or state."),
+            onClick:()=> !isFirst && onToggleHead && onToggleHead(sh)},
+            _el(Icon.pin,{s:11}), isHead && _el("span",null, isFirst?"Head":"Fresh")),
+          // approve / lock — marks this frame as the APPROVED seed the next shot chains from
+          gen.genUrl && _el("button",{className:"shot-lock-btn"+(sh.locked?" on":""),
+            title: sh.locked
+              ? "Approved — this frame is the locked seed the next shot builds on. Click to unlock."
+              : "Approve this frame as the seed the next shot chains from.",
+            onClick:()=>onUpdate(sh.id,{ locked: !sh.locked })},
+            _el(Icon.check,{s:11}), _el("span",null, sh.locked?"Approved":"Approve")))),
 
       // cinematographer grammar
       _el("div",{className:"shot-grammar-grid"},
@@ -282,7 +292,7 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, anchorShot, onSetAnc
               : _el("span",null,"No location resolved for this scene \u2014 set the scene's slugline / pull locations."))),
 
       _el(CardFold,{label:"Shot prompt",defaultOpen:false},
-        _el(CopyBox,{label:"Final frame prompt \u2014 master + grade + references",text:finalPrompt}),
+        _el(CopyBox,{label: isHead ? "Final frame prompt \u2014 master + grade + references" : "Final frame prompt \u2014 master + grade + continuity anchor + references",text:previewPrompt}),
         _el(SheetField,{label:"Negative prompt \u2014 exclude",value:sh.negativePrompt||"",multiline:true,
           placeholder:shotNegativePrompt({}),onCommit:v=>onUpdate(sh.id,{negativePrompt:v})}))));
 }
@@ -294,7 +304,8 @@ function SceneCtxItem({ k, v }){
 }
 
 function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, onUpdate, onDelete, onView,
-  onAddShot, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot }){
+  onAddShot, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot, onRegenDownstream,
+  onRenderScene, renderBusy, onStopChain }){
   const loc = ctx.location;
   const driver = scene.driver ? ctx.charById[scene.driver] : null;
   // scene-level context (driver/reactor/antagonism/goal/conflict) — driver+goal+conflict from the
@@ -302,9 +313,12 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
   const bm = (beatsMap||{})[scene.id] || {};
   const driverName = driver ? driver.name : (bm.driverLabel||"");
   const confLab = scene.conf ? CONF_LABELS[scene.conf-1] : "";
-  // the scene's visual anchor: the shot flagged .anchor, else the first shot in order
-  const anchorShot = shots.find(s=>s.anchor) || shots[0] || null;
-  const setAnchor = (target)=> shots.forEach(s=> onUpdate(s.id, { anchor: s.id===target.id }));
+  // the rolling chain: shots render in order, each seeding from its predecessor. The first
+  // shot is always the chain HEAD; a shot flagged .anchor is an explicit FRESH START (a hard
+  // cut mid-scene that won't inherit the previous frame). toggleHead flips that flag.
+  const ordered = (typeof sceneShotsOrdered==="function") ? sceneShotsOrdered(shots) : shots;
+  const firstId = ordered[0] && ordered[0].id;
+  const toggleHead = (target)=> { if(target && target.id!==firstId) onUpdate(target.id, { anchor: !target.anchor }); };
   // the scene's clip sequences (shared partition — Storyboard clip boards + the Stage);
   // the per-clip budget comes from the project FORMAT (clipMaxFor)
   const clipMax = (typeof clipMaxFor==="function") ? clipMaxFor(ctx.project) : 15;
@@ -323,6 +337,9 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
           +"   \u00b7   "+shots.length+" shot"+(shots.length!==1?"s":"")
           +(seqs.length?("  \u00b7  "+seqs.length+" clip"+(seqs.length!==1?"s":"")):""))),
       _el("div",{className:"shot-scene-acts"},
+        onRenderScene && _el("button",{className:"char-draft-btn primary",disabled:!!renderBusy,onClick:()=>onRenderScene(scene),
+          title:"Render this scene in order, each shot seeded by the previous frame, auto-approving each. Approved frames are retained as seeds."},
+          _el(Icon.sparkles,{s:12}), renderBusy?"Rendering\u2026":("Render Scene "+String(scene.no).padStart(2,"0")+" in order")),
         _el("button",{className:"char-draft-btn ghost"+(draftingScene?" busy":""),disabled:!!draftingScene,onClick:()=>onDraftScene(scene),
           title:"Re-derive this scene's shot list from its beats (replaces the current shots)"},
           _el(Icon.layers,{s:12}), draftingScene?"Drafting\u2026":"Re-draft shots"),
@@ -345,15 +362,32 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
               [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")}))))))),
     open && _el(ClipBar,{shots,onUpdate,clipMax}),
     open && _el("div",{className:"sheet-grid"},
-      shots.map(sh=>_el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,anchorShot,onSetAnchor:setAnchor,onUpdate,onDelete,onView,
-        batchActiveId,onBatchDone,onGenerateShot,clipNo:clipOf[sh.id]}))));
+      shots.map(sh=>{ const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
+        return _el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,
+          prevShot, isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
+          onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,clipNo:clipOf[sh.id]}); })));
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,
-  onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onShoot, onDirectScene }){
+  onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onShoot }){
   const [view, setView] = React.useState(null);
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
+  // the rolling-keyframe CHAIN: render a scene's shots in order, each seeded by the previous
+  // frame. Each rendered frame auto-locks (becomes the approved seed) and the chain continues.
+  const [chain, setChain] = React.useState(null);   // { ids, idx, total } | null while running
+  const chainRef = React.useRef(null); chainRef.current = chain;
+  const chainStartingRef = React.useRef(false);
+  // small centered popup — e.g. "generate the earlier shot first" when a chain is clicked
+  // out of order. Auto-dismisses; click the scrim or press Esc to close sooner.
+  const [notice, setNotice] = React.useState("");
+  React.useEffect(()=>{
+    if(!notice) return;
+    const t = setTimeout(()=>setNotice(""), 4000);
+    const onKey = (e)=>{ if(e.key==="Escape"){ e.preventDefault(); setNotice(""); } };
+    window.addEventListener("keydown", onKey, true);
+    return ()=>{ clearTimeout(t); window.removeEventListener("keydown", onKey, true); };
+  },[notice]);
   // per-scene fold state (persisted). DEFAULT: everything folded except the first
   // scene — a long shot list opens scannable, not as one endless scroll.
   const [collapsed, setCollapsed] = React.useState(()=>{ try{ return JSON.parse(localStorage.getItem("turn_shots_collapsed")||"{}")||{}; }catch(e){ return {}; } });
@@ -372,6 +406,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
 
   const charById = React.useMemo(()=>{ const m={}; (characters||[]).forEach(c=>m[c.id]=c); return m; },[characters]);
   const propById = React.useMemo(()=>{ const m={}; (props||[]).forEach(p=>m[p.id]=p); return m; },[props]);
+  const shotById = React.useMemo(()=>{ const m={}; (shots||[]).forEach(s=>m[s.id]=s); return m; },[shots]);
 
   // one-time sanity pass: re-anchor each shot's subjects to the cast NAMED in its
   // action/composition text (earlier drafts could drift to background cast — e.g. a
@@ -414,36 +449,119 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   // one scene at a time — the ← / → pager (with a jump menu) IS the scene focus;
   // a search or an active batch shows the full set so every needed card stays mounted
   const [pIdx, setPIdx] = useScenePager(scenesWithShots.length);
-  // free-text search across each shot's ACTION, composition, dialogue, who's in frame, and
-  // its camera grammar (size/angle/move/lens) — word-boundary match, like the other tabs.
-  const [query, setQuery] = React.useState("");
-  const q = query.trim().toLowerCase();
-  const shotHay = (sh)=>{ const subs=(sh.subjects||[]).map(id=>(charById[id]||{}).name||"").join(" ");
-    return [sh.action, sh.composition, sh.dialogue, subs, (typeof shotGrammarLabel==="function"?shotGrammarLabel(sh):"")].filter(Boolean).join("  "); };
-  const matchShot = (sh)=> (typeof searchWordMatch==="function") ? searchWordMatch(shotHay(sh), q) : (!q || shotHay(sh).toLowerCase().indexOf(q)>=0);
-  const shotsForGroup = (sid)=> q ? (shotsByScene[sid]||[]).filter(matchShot) : (shotsByScene[sid]||[]);
-  // the pager IS the scene focus: browse pages ONE scene at a time; a search or a
-  // running batch shows the full set (so every needed card stays mounted)
-  const pagerMode = !q && !batchActiveId;
+  const shotsForGroup = (sid)=> shotsByScene[sid]||[];
+  // the pager IS the scene focus: browse ONE scene at a time. A running batch / chain shows the
+  // full set so every needed card stays mounted (between chain steps batchActiveId is
+  // briefly null and the runner must still drive the next card).
+  const pagerMode = !batchActiveId && !chain;
   const pIdxC = Math.min(pIdx, Math.max(0, scenesWithShots.length-1));
   const curScene = scenesWithShots[pIdxC];
-  const baseScenes = pagerMode ? [curScene].filter(Boolean) : scenesWithShots;
-  const visibleScenes = q ? scenesWithShots.filter(s=>shotsForGroup(s.id).length) : baseScenes;
-  const shownCount = q ? scenesWithShots.reduce((n,s)=>n+shotsForGroup(s.id).length,0) : (shots||[]).length;
+  const visibleScenes = pagerMode ? [curScene].filter(Boolean) : scenesWithShots;
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s ? s.no : sid; };
 
-  // order a scene's shots with its anchor FIRST, so the anchor frame exists before the
-  // other shots generate and reference it (the source of cross-shot consistency).
-  const anchorFirstIds = (list)=>{ const arr=(list||[]).slice(); const i=arr.findIndex(s=>s.anchor);
-    if(i>0){ const [a]=arr.splice(i,1); arr.unshift(a); } return arr.map(s=>s.id); };
-  const startAll = ()=>{ if(batchActiveId) return; const ids=scenesWithShots.flatMap(s=>anchorFirstIds(shotsByScene[s.id]));
+  // ---- the rolling-keyframe CHAIN runner ----------------------------------------
+  // Render a scene's shots IN ORDER, each seeded by the previous one's frame. A LOCKED
+  // (approved) shot is treated as done \u2014 it seeds the next but isn't re-rendered. Gate ON \u2192
+  // pause after each shot for approval; OFF \u2192 auto-lock and continue. Drives the existing
+  // sequential batch one shot at a time (useBatchGen is shared, so it isn't modified).
+  const chainOrderIds = (list)=> ((typeof sceneShotsOrdered==="function")?sceneShotsOrdered(list):(list||[])).map(s=>s.id);
+  const chainKeyOk = ()=> !(typeof nbHasKeyForCurrent==="function") || nbHasKeyForCurrent();
+  // A shot counts as DONE (skipped on a non-forced run) only if it's locked AND actually has a
+  // committed frame. A locked-but-FRAMELESS shot \u2014 e.g. one whose generation errored or timed
+  // out before being approved \u2014 must still render, never be silently skipped as "done".
+  const shotHasFrame = (id)=> (typeof nbGetImage==="function") ? !!nbGetImage(id) : false;
+  const shotIsDone = (s)=> !!(s && s.locked && shotHasFrame(s.id));
+  // Advance to the next shot. Normal scene/all runs retain shots that are already done
+  // (locked + framed); manual card runs use force=true so the clicked frame can be regenerated.
+  const stepChain = (ids, fromIdx, force)=>{
+    let i = fromIdx;
+    while(i<ids.length){ const s=shotById[ids[i]]; if(s && (force || !shotIsDone(s))) break; i++; }
+    if(i>=ids.length){ setChain(null); batch.setMsg("Chain complete \u2014 every shot rendered in order."); return; }
+    setChain({ ids, idx:i, total:ids.length, force:!!force });
+    batch.run([ids[i]]); batch.setMsg("Rendering shot "+(i+1)+" of "+ids.length+" in order\u2026");
+  };
+  // a chain step finished. Did it actually produce a frame? A FAILED / timed-out / cancelled
+  // render commits nothing (nbGetImage stays empty).
+  const handleBatchDone = (id)=>{
+    batch.advance(id);
+    const c = chainRef.current;
+    if(!c || c.ids[c.idx]!==id) return;           // a lone (non-chain) generation \u2014 just advance
+    const hasFrame = (typeof nbGetImage==="function") ? !!nbGetImage(id) : true;
+    if(!hasFrame){
+      // STOP the chain here \u2014 do NOT advance. Every later shot is seeded by THIS frame as its
+      // continuity anchor, so we can't render the next one without it. The shot is left UNLOCKED
+      // so a re-run retries it; the frame's own card shows why it failed.
+      setChain(null);
+      const more = (c.idx+1) < c.ids.length;
+      batch.setMsg("Stopped at shot "+(c.idx+1)+" \u2014 it didn't generate"
+        + (more ? ", and the next shot needs it as its anchor. Fix the issue on that frame, then render again." : ". See the frame's error and try again."));
+      return;
+    }
+    onUpdateShot(id, { locked:true });            // it's the approved seed for the next shot
+    stepChain(c.ids, c.idx+1, c.force);
+  };
+  // Stop: abort the frame currently rendering (clears its spinner + discards its result),
+  // then halt the queue so no further shots start.
+  const stopChain = ()=>{
+    if(batchActiveId && typeof nbCancelGen==="function") nbCancelGen(batchActiveId);
+    setChain(null); batch.cancel();
+  };
+
+  const startScene = (scene)=>{ if(batchActiveId||chain) return; if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
+    const ids = chainOrderIds(shotsByScene[scene.id]); if(!ids.length) return;
+    setCollapsed(c=>({ ...c, [scene.id]:false }));   // keep the scene's cards mounted through the run
+    stepChain(ids, 0, false); };
+  const startAll = ()=>{ if(batchActiveId||chain) return; if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
+    const ids = scenesWithShots.flatMap(s=>chainOrderIds(shotsByScene[s.id]));
     if(!ids.length){ batch.setMsg("Draft the shots first \u2014 nothing to generate yet."); return; }
-    setCollapsed({});   // batch shows the full set (pagerMode is off while batchActiveId), cards mounted
-    batch.begin(ids, 0); };
-  const startScene = (scene)=>{ if(batchActiveId) return; const ids=anchorFirstIds(shotsByScene[scene.id]);
-    if(!ids.length) return; batch.begin(ids, 0); };
-  // generate a single shot (used when the user opts to render the scene's anchor first)
-  const startShot = (id)=>{ if(batchActiveId || !id) return; batch.begin([id], 0); };
+    setCollapsed({});   // expand all so each card is mounted as the chain reaches it
+    stepChain(ids, 0, false); };
+  // re-run a scene's chain from the shot AFTER `sh` \u2014 used after re-rolling a frame so the
+  // propagated state stays current. Unlocks the downstream shots so they actually re-render.
+  const onRegenDownstream = (sh)=>{ if(batchActiveId||chain || !sh) return; if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
+    const ids = chainOrderIds(shotsByScene[sh.sceneId]); const at = ids.indexOf(sh.id);
+    if(at<0 || at>=ids.length-1){ batch.setMsg("No later shots in this scene to regenerate."); return; }
+    ids.slice(at+1).forEach(id=> onUpdateShot(id,{ locked:false }));
+    setCollapsed(c=>({ ...c, [sh.sceneId]:false }));
+    stepChain(ids, at+1, true); };
+  // Manual card generation. A shot seeds off the PREVIOUS shot's frame (its anchor), so
+  // every earlier shot in this sub-chain must already be rendered. If one is missing we
+  // DON'T silently render it \u2014 we ask the user to generate the earlier shot first, so
+  // they stay in control of the chain order. Only the clicked shot renders here.
+  const startShot = async (id)=>{
+    if(batchActiveId || chain || chainStartingRef.current || !id) return;
+    if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
+    chainStartingRef.current=true;
+    try{
+      const target=shotById[id]; if(!target) return;
+      const orderedShots=(typeof sceneShotsOrdered==="function")?sceneShotsOrdered(shotsByScene[target.sceneId]):shotsByScene[target.sceneId];
+      const at=orderedShots.findIndex(s=>s.id===id); if(at<0) return;
+      // A deliberately marked Fresh shot is a hard-cut head. It starts a new
+      // sub-chain; otherwise find the nearest earlier Fresh boundary.
+      let startAt=0;
+      for(let i=at;i>0;i--){ if(orderedShots[i].anchor){ startAt=i; break; } }
+      // which earlier shots in this sub-chain aren't rendered yet?
+      const missing=[];
+      for(let i=startAt;i<at;i++){
+        const s=orderedShots[i];
+        let u=(typeof nbGetImage==="function")?nbGetImage(s.id):"";
+        if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(s.id); }catch(e){} }
+        if(!u) missing.push(s);
+      }
+      if(missing.length){
+        const beatLab=(s)=> s.beatN ? ("Beat "+s.beatN) : "the earlier shot";
+        const near=missing[missing.length-1];   // the immediate anchor this shot builds on
+        setNotice(missing.length===1
+          ? "Generate "+beatLab(near)+" first \u2014 this shot builds on its frame as the anchor."
+          : "Generate the earlier shots first, starting with "+beatLab(missing[0])+" \u2014 each shot chains off the previous frame.");
+        return;
+      }
+      setCollapsed(c=>({ ...c, [target.sceneId]:false }));
+      stepChain([id],0,true);
+    } finally {
+      chainStartingRef.current=false;
+    }
+  };
 
   // ---- empty state ----
   if(!scenesWithShots.length){
@@ -469,13 +587,17 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
 
   return _el("div",{className:"art-scroll"},
     view && _el(ImageLightbox,{url:view.url,character:view.character,onClose:()=>setView(null)}),
+    notice && _el("div",{className:"shot-notice-scrim",onMouseDown:()=>setNotice("")},
+      _el("div",{className:"shot-notice",role:"status",onMouseDown:e=>e.stopPropagation()},
+        _el(Icon.info,{s:17,className:"shot-notice-ic"}),
+        _el("div",{className:"shot-notice-msg"},notice))),
     _el(NbKeyBar,null), _el(NbControls,null),
     _el("div",{className:"art-intro"},
       _el("div",{className:"art-intro-row"},
         _el("div",{style:{flex:1}},
           _el("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Cinematographer (Shot Designer)",
             _el(window.InfoTip,{label:"About the Shot List",
-              text:"One shot per beat, grouped by scene. Each frame composes the scene's Style Bible grade, the location plate and the character & prop sheets into a single image \u2014 so every shot stays on-model and on-palette. Each scene's CLIPS strip groups its shots into clip sequences \u2014 one generated video clip each (\u226415s, the Stage's render unit): it auto-packs by estimated duration (dialogue shots from their line's length, else \u22485s); click a joint to split or merge by hand. The Storyboards tab can board these same clips. Move between scenes with the ← / → pager (or its jump menu) — one scene at a time — and generate the whole scene at once. 'Design all shots' breaks any scene that has none into coverage; 'Generate all shots' renders every frame, anchor first."}))),
+              text:"One shot per beat, grouped by scene. Every frame generation follows a rolling chain in scene order: the first shot renders from the locked sheets, and every later shot is seeded by the immediately previous generated frame. Generate the shots in order — if you click Generate on a later shot before an earlier one is rendered, TURN asks you to generate the earlier shot first (it's the anchor this frame builds on). 'Generate all shots' and 'Render Scene X in order' render the whole chain straight through, auto-approving each frame as the next shot's seed. The CLIPS strip groups the resulting shots into Stage video clips."}))),
         _el("div",{className:"art-intro-actions"},
           _el("button",{className:"art-draftall ghost",onClick:()=>exportShotList(scenesWithShots, shotsByScene, ctxFor, project),
             title:"Preview the shot list as a printable table, then print / save as PDF or download the HTML"},
@@ -483,32 +605,16 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
           _el("button",{className:"art-draftall ghost",disabled:draftingAllShots||!ordered.length,onClick:onDraftAllShots,
             title:"Break any scene that has no shots yet into full coverage \u2014 size, angle, move and lens per beat"},
             _el(Icon.sparkles,{s:14}), draftingAllShots?"Designing\u2026":"Design all shots"),
-          onDirectScene && _el("button",{className:"art-draftall ghost",disabled:!scenesWithShots.length,onClick:()=>onDirectScene(null),
-            title:"Scene Director — scene by scene: lock the key frame, derive every shot from it, visually inspect each result against the anchor, repair drift. Asks before spending on each scene."},
-            _el(Icon.clapper,{s:14}),"Direct all scenes"),
-          _el("button",{className:"art-draftall",disabled:!!batchActiveId||!shots.length,onClick:startAll,
-            title:"Generate (or regenerate) the frame for every shot \u2014 you choose whether to redo ones that already have a frame"},
-            _el(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all shots")))),
+          _el("button",{className:"art-draftall",disabled:!!batchActiveId||!!chain||!shots.length,onClick:startAll,
+            title:"Render every shot in chain order, each seeded by the previous frame. Locked (approved) frames are kept and used as seeds; the rest render."},
+            _el(Icon.sparkles,{s:14}), (batchActiveId||chain)?"Rendering\u2026":"Generate all shots")))),
     BatchBar && _el(BatchBar,{batch,noun:"shot"}),
-    // search + scene focus (the same toolbar Props / Characters / Locations use)
-    _el("div",{className:"prop-toolbar"},
-     _el("div",{className:"prop-searchbar"},
-       _el(Icon.search,{s:14}),
-       _el("input",{className:"prop-search-input",type:"text",value:query,
-         placeholder:"Search shots — action, who's in frame, size…",
-         onChange:e=>setQuery(e.target.value), onKeyDown:e=>{ if(e.key==="Escape") setQuery(""); }}),
-       q && _el("span",{className:"prop-search-count"}, shownCount+" of "+(shots||[]).length),
-       q && _el("button",{className:"prop-search-clear",title:"Clear search",onClick:()=>setQuery("")},_el(Icon.x,{s:13}))),
-     pagerMode && curScene && _el("div",{className:"prop-scenebar"},
-      _el("button",{className:"art-draftall",disabled:!!batchActiveId,
-        onClick:()=>startScene(curScene),
-        title:"Generate (or regenerate) the frame for every shot in this scene — the anchor renders first; you choose whether to redo frames that already exist"},
-        _el(Icon.sparkles,{s:14}),
-        batchActiveId?"Generating…":("Generate all in Scene "+String(curScene.no).padStart(2,"0"))),
-      onDirectScene && _el("button",{className:"art-draftall ghost",disabled:!!batchActiveId,
-        onClick:()=>onDirectScene(curScene.id),
-        title:"Scene Director — locks this scene's key frame, derives every other shot from it, visually inspects each result against the anchor and repairs drift. Asks before it spends."},
-        _el(Icon.clapper,{s:14}),"Direct scene "+String(curScene.no).padStart(2,"0")))),
+    // chain progress bar \u2014 the ordered chain renders straight through, auto-approving each frame
+    chain && _el("div",{className:"shot-chain-bar running"},
+      _el("div",{className:"shot-chain-msg"},
+        _el(Icon.sparkles,{s:14}),"Rendering shot "+(chain.idx+1)+" of "+chain.total+" in order\u2026"),
+      _el("button",{className:"art-draftall ghost",onClick:stopChain,title:"Stop the chain \u2014 already-rendered frames are kept"},
+        _el(Icon.x,{s:13}),"Stop")),
     (pagerMode && (typeof ScenePager!=="undefined") && scenesWithShots.length>0) && (()=>{ const cs=scenesWithShots[pIdxC]; const cl=cs&&ctxFor(cs).location;
       return _el(ScenePager,{ idx:pIdxC, total:scenesWithShots.length, title:cs&&cs.title, sub:cl&&cl.name, scenes:scenesWithShots, onJump:setPIdx,
         onPrev:()=>setPIdx(i=>Math.max(0,i-1)), onNext:()=>setPIdx(i=>Math.min(scenesWithShots.length-1,i+1)) }); })(),
@@ -516,8 +622,9 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
       ctx:ctxFor(scene),characters:characters||[],beatsMap,propsAvail:(typeof propsForScene==="function")?propsForScene(props,scene.id):[],
       onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
       onAddShot,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===scene.id,
-      batchActiveId,onBatchDone:batch.advance,onGenerateShot:startShot,
-      open:(q || pagerMode) ? true : !collapsed[scene.id],onToggle:()=>toggleScene(scene.id)})));
+      batchActiveId,onBatchDone:handleBatchDone,onGenerateShot:startShot,onRegenDownstream,
+      onRenderScene:startScene,renderBusy:!!batchActiveId||!!chain,onStopChain:stopChain,
+      open: pagerMode ? true : !collapsed[scene.id],onToggle:()=>toggleScene(scene.id)})));
 }
 window.ShotList = ShotList;
 

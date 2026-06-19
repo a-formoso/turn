@@ -50,6 +50,45 @@ function stageShotScriptText(scene, drafts, sh, max){
   }
   return "";
 }
+function stageCharNameMatch(name, characters){
+  const n = _normStageText(String(name||"").replace(/\(cont'?d\)/ig,""));
+  if(!n) return null;
+  return (characters||[]).find(c=>{
+    const cn = _normStageText(c&&c.name);
+    return cn && (cn===n || cn.indexOf(n)>=0 || n.indexOf(cn)>=0);
+  }) || null;
+}
+function stageDialogueSpeaker(scene, drafts, beatsMap, sh, ctx){
+  const blocks = (((drafts||{})[scene.id]||{}).blocks||[]).filter(b=>Number(b.beat)===Number(sh&&sh.beatN));
+  const line = _normStageText(sh&&sh.dialogue);
+  for(let i=0;i<blocks.length;i++){
+    const b = blocks[i] || {}, next = blocks[i+1] || {};
+    if(b.type==="char" && (next.type==="dia" || next.type==="paren")){
+      const nextText = _normStageText(next.text);
+      if(!line || !nextText || nextText.indexOf(line)>=0 || line.indexOf(nextText)>=0){
+        const c = stageCharNameMatch(b.text, ctx&&ctx.characters);
+        if(c) return { id:c.id, name:c.name };
+        const nm = String(b.text||"").replace(/\(cont'?d\)/ig,"").trim();
+        if(nm) return { id:"", name:nm };
+      }
+    }
+  }
+  const script = stageShotScriptText(scene, drafts, sh, 220);
+  const m = String(script||"").match(/^\s*([A-Z0-9][A-Z0-9 _.'-]{1,40})\s*:/);
+  if(m){
+    const c = stageCharNameMatch(m[1], ctx&&ctx.characters);
+    if(c) return { id:c.id, name:c.name };
+    return { id:"", name:m[1].replace(/\(cont'?d\)/ig,"").trim() };
+  }
+  const la = sh && sh.lineAudio;
+  if(la && (la.speaker || la.speakerId)){
+    const c = (la.speakerId && ctx && ctx.charById && ctx.charById[la.speakerId]) || stageCharNameMatch(la.speaker, ctx&&ctx.characters);
+    return { id:(c&&c.id)||la.speakerId||"", name:(c&&c.name)||la.speaker||"" };
+  }
+  const ids = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, (ctx&&ctx.characters)||[]) : ((sh&&sh.subjects)||[]);
+  const first = (ids||[]).map(id=>ctx&&ctx.charById&&ctx.charById[id]).filter(Boolean)[0];
+  return first ? { id:first.id, name:first.name } : { id:"", name:"the speaker" };
+}
 function stageShotSheetText(scene, beatsMap, sh, max){
   let t = String((sh&&sh.action)||"").replace(/\s+/g," ").trim();
   if(!t){
@@ -100,10 +139,12 @@ function buildClipData(scene, g, ctx){
   // composed director prompt (prose, multi-beat) — readable, not the image-gen JSON
   const panelLines = shots.map((sh,i)=>{
     const meta = stageSheetPanelMeta(g, i);
+    const speaker = String(sh&&sh.dialogue||"").trim() ? stageDialogueSpeaker(scene, ctx.drafts, ctx.beatsMap, sh, ctx) : null;
     return { shotId:sh.id, beatN:sh.beatN, sheetPage:meta.page, sheetPanel:meta.panel, half:meta.half,
       text:stageShotCanonLine(scene, ctx.drafts, ctx.beatsMap, sh, 190),
       script:stageShotScriptText(scene, ctx.drafts, sh, 190),
-      sheet:stageShotSheetText(scene, ctx.beatsMap, sh, 190) };
+      sheet:stageShotSheetText(scene, ctx.beatsMap, sh, 190),
+      speaker };
   });
   const actions = _uniq(panelLines.map(p=>String(p.text||"").trim()).filter(Boolean));
   const body = actions.join(" ");
@@ -114,11 +155,11 @@ function buildClipData(scene, g, ctx){
   // tag chips
   const chips = [
     cast.length && { k:"subject", v:cast.map(c=>c.name).join(", ") },
-    actions.length && { k:"action", v:_firstWords(actions[0], 4) },
+    actions.length && { k:"action", v:actions.join(" "), label:_firstWords(actions[0], 4) },
     setting && { k:"setting", v:setting },
     { k:"camera", v:camera.toLowerCase() },
     preset && { k:"style", v:preset.name.toLowerCase() },
-    preset && { k:"mood", v:_firstWords(preset.grade, 4).toLowerCase() },
+    preset && { k:"mood", v:String(preset.grade||"").trim().toLowerCase(), label:_firstWords(preset.grade, 4).toLowerCase() },
   ].filter(Boolean);
   return { shots, first, cast, props:clipProps, loc, preset, camera, lighting, lead, prompt, chips, setting, panelLines,
     dur:_clipDur(g), lineShots: shots.filter(sh=>String(sh.dialogue||"").trim()) };
@@ -171,7 +212,7 @@ function clipPrimaryFrame(clip, imgs, visualSource){
    fields (Structured), and an audio-anchored lip-sync phrasing (Dialogue). ---- */
 const SEEDANCE_RECIPES = [
   ["narrative",  "Narrative",        "One flowing paragraph — the default."],
-  ["panels",     "Panel-by-panel",   "One line per beat/panel, with dialogue durations + anti-hallucination rules."],
+  ["panels",     "Panel-by-panel",   "Shot units tied to the screenplay, storyboard panel, camera, motion, dialogue and reference anchors."],
   ["structured", "Structured",       "Labelled fields: Subject / Action / Setting / Camera / Lighting / Style."],
   ["lipsync",    "Dialogue / lip-sync","Phrased around the spoken line in @Audio1 for accurate lip-sync."],
 ];
@@ -181,14 +222,42 @@ function _seedanceVoiceSec(sh){
   const w = String((sh&&sh.dialogue)||"").trim().split(/\s+/).filter(Boolean).length;
   return w ? Math.max(1, Math.round(w/2.4)) : 0;                        // estimate from word count
 }
+function _seedanceShotGrammar(sh){
+  if(typeof shotGrammarLabel==="function") return shotGrammarLabel(sh);
+  const size = (typeof shotSizeOf==="function") ? shotSizeOf(sh&&sh.size).label : (sh&&sh.size);
+  const angle = (typeof shotAngleOf==="function") ? shotAngleOf(sh&&sh.angle).label : (sh&&sh.angle);
+  const move = (typeof shotMoveOf==="function") ? shotMoveOf(sh&&sh.move).label : (sh&&sh.move);
+  const lens = (typeof shotLensOf==="function") ? shotLensOf(sh&&sh.lens).label : (sh&&sh.lens);
+  return [size, angle, move, lens].filter(Boolean).join(" · ");
+}
+function _seedancePanelText(sh, p, i, clip){
+  const label = p.sheetPage ? ("Sheet "+p.sheetPage+" Panel "+p.sheetPanel) : ("Panel "+(((clip.scene&&clip.scene.no)||1)+"."+(i+1)));
+  const grammar = _seedanceShotGrammar(sh);
+  const script = String(p.script||"").trim();
+  const blocking = String(p.sheet||sh.action||"").trim();
+  const speaker = (p.speaker&&p.speaker.name) || "the speaker";
+  const dialogue = String(sh&&sh.dialogue||"").trim().replace(/^["“]|["”]$/g,"");
+  const dur = dialogue ? _seedanceVoiceSec(sh) : 0;
+  return [
+    "SHOT "+(i+1)+" — "+label+" · Beat "+(sh.beatN||"—"),
+    grammar && ("Camera: "+grammar+"."),
+    script && ("Script intent: "+script),
+    blocking && (!script || _normStageText(blocking)!==_normStageText(script)) && ("Storyboard blocking: "+blocking),
+    dialogue && ("Dialogue/audio: "+speaker+" says \""+dialogue+"\""+(dur?(" (~"+dur+"s; sync to the matching audio reference if included)"):"")+"."),
+    "Motion: animate only this beat's physical change; keep it continuous from the prior shot unit and ready for the next."
+  ].filter(Boolean).join("\n");
+}
 function seedancePrompt(recipe, clip){
   const d = (clip&&clip.data) || {}, shots = d.shots || [];
   const cast = (d.cast||[]).map(c=>c.name);
+  const props = (d.props||[]).map(p=>p.name);
   const setting = d.setting || "";
   const style = d.preset ? (d.preset.name+" — "+d.preset.grade) : "";
   const lead = d.lead || (cast[0] || "the subject");
   const panelLines = d.panelLines || [];
   const actionLines = _uniq((panelLines.length ? panelLines.map(p=>p.text) : shots.map(s=>String(s.action||"").trim())).filter(Boolean));
+  const dialogueSpeakers = _uniq(panelLines.filter(p=>p&&p.speaker&&p.speaker.name).map(p=>p.speaker.name));
+  const voiceLead = dialogueSpeakers[0] || lead;
   if(recipe==="structured"){
     return [
       cast.length && ("Subject: "+cast.join(", ")+"."),
@@ -200,41 +269,98 @@ function seedancePrompt(recipe, clip){
     ].filter(Boolean).join("\n");
   }
   if(recipe==="lipsync"){
-    return "@Image1 comes alive. "+lead+" delivers the line in @Audio1 with natural, accurate lip-sync — a grounded, in-character performance. Subtle, motivated motion; hold the framing, lighting and identity steady."
+    return "@Image1 comes alive. "+voiceLead+" delivers the line in @Audio1 with natural, accurate lip-sync — a grounded, in-character performance. Subtle, motivated motion; hold the framing, lighting and identity steady."
       + (setting?(" "+setting+"."):"") + (style?(" "+style+"."):"");
   }
   if(recipe==="panels"){
-    const header = [ setting&&(setting+"."), style&&(style+"."), cast.length&&("Cast: "+cast.join(", ")+".") ].filter(Boolean).join(" ");
-    const panels = shots.map(function(sh,i){
-      const p = panelLines[i] || {};
-      const label = p.sheetPage ? ("Sheet "+p.sheetPage+" Panel "+p.sheetPanel) : ("Panel "+(((clip.scene&&clip.scene.no)||1)+"."+(i+1)));
-      let line = "["+label+" · Beat "+(sh.beatN||"—")+"] "+(String(p.text||sh.action||"").trim());
-      if(String(sh.dialogue||"").trim()){ const dur=_seedanceVoiceSec(sh);
-        line += " "+lead+" speaks"+(dur?(" (~"+dur+"s of dialogue, may begin mid-panel)"):"")+"."; }
-      return line;
-    }).join("\n");
-    const rules = "Rules: match the referenced storyboard sheet half/page panel order exactly; the bracketed Sheet/Panel labels refer to the 2x2 Storyboards sheet. Do not invent different beats, props or blocking. Let Seedance pace the cut; hold every character's identity, wardrobe, props, location geometry and lighting continuous across panels.";
-    return [header, panels, rules].filter(Boolean).join("\n");
+    const context = [
+      "SEEDANCE MULTIMODAL SHOT PLAN",
+      "Clip: "+((clip&&clip.label)||"selected clip")+" from "+((clip&&clip.scene&&clip.scene.title)||"the scene")+".",
+      setting && ("Setting: "+setting+"."),
+      cast.length && ("Cast in frame: "+cast.join(", ")+"."),
+      props.length && ("Props that must carry through when present: "+props.join(", ")+"."),
+      style && ("Look: "+style+"."),
+      d.lighting && ("Lighting: "+d.lighting+"."),
+      d.camera && ("Camera arc: "+d.camera+"."),
+      "Reference roles: the selected start image or storyboard half/page controls composition and blocking; character, prop and location references control identity, objects and geography; audio references control spoken timing and lip-sync.",
+      "Generate one continuous "+(d.dur||"4-15")+"s clip. Treat the shot units below as ordered key moments inside that clip, not as separate unrelated images."
+    ].filter(Boolean).join("\n");
+    const panels = shots.map((sh,i)=>_seedancePanelText(sh, panelLines[i]||{}, i, clip)).join("\n\n");
+    const rules = [
+      "Continuity rules:",
+      "1. Match the referenced storyboard panel order and the screenplay beat order exactly.",
+      "2. If screenplay intent and storyboard blocking differ, keep the screenplay dialogue/intent but use storyboard blocking for where bodies, props and camera begin.",
+      "3. Do not invent extra beats, extra speakers, new props, new costumes or a different location.",
+      "4. Preserve character identity, wardrobe, carried props, lighting and location geometry across the whole clip.",
+      "5. Let Seedance pace the motion naturally inside the target duration; avoid freeze-frame panel cuts unless the action demands a cut."
+    ].join("\n");
+    return [context, panels, rules].filter(Boolean).join("\n\n");
   }
   return d.prompt || "";   // narrative (default)
 }
 
-function ClipConsole({ clip, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId, aspect, visualSource, setVisualSource, onVoiceLine }){
+function seedanceBeatPrompt(clip, sh){
+  const d = (clip&&clip.data) || {};
+  const p = ((d.panelLines||[]).find(x=>x.shotId===(sh&&sh.id))) || {};
+  const cast = (d.cast||[]).map(c=>c.name).filter(Boolean);
+  const props = (d.props||[]).map(p=>p.name).filter(Boolean);
+  const setting = d.setting || (clip&&clip.scene&&clip.scene.loc) || "";
+  const style = d.preset ? (d.preset.name+" — "+d.preset.grade) : "";
+  const script = String(p.script||stageShotScriptText(clip&&clip.scene, {}, sh, 220)||"").trim();
+  const blocking = String(p.sheet||sh&&sh.action||"").trim();
+  const dialogue = String(sh&&sh.dialogue||"").trim().replace(/^["“]|["”]$/g,"");
+  const speaker = (p.speaker&&p.speaker.name) || "the speaker";
+  const parts = [
+    cast.length && ("Subject: "+cast.join(", ")+"."),
+    (script || blocking) && ("Action: "+(script || blocking)+(script && blocking && _normStageText(script)!==_normStageText(blocking) ? (" Storyboard blocking: "+blocking) : "")),
+    dialogue && ("Dialogue/audio: "+speaker+" says \""+dialogue+"\"; sync performance to the locked audio if present."),
+    setting && ("Setting: "+setting+"."),
+    "Camera: "+(_seedanceShotGrammar(sh)||d.camera||"static")+".",
+    d.lighting && ("Lighting: "+d.lighting+"."),
+    style && ("Style: "+style+"."),
+    "Continuity: preserve identity, wardrobe, carried props, lighting and location geography from the references; animate only this beat's physical change."
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
+function ClipConsole({ clip, selectedShot, sceneShots, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId, aspect, visualSource, setVisualSource, onVoiceLine, onSelectShot }){
   const scene = clip.scene, g = clip.g, d = clip.data;
-  const gen = useSeedanceGen(clip.id);
-  const shotStartFrame = imgs[(d.first||{}).id] || "";
+  const activeShot = selectedShot || d.first || (d.shots||[])[0] || {};
+  const beatVideoId = stageBeatVidId(activeShot) || clip.id;
+  const gen = useSeedanceGen(beatVideoId);
+  const [takeList, setTakeList] = React.useState(()=> typeof vidGetTakes==="function" ? vidGetTakes(beatVideoId) : []);
+  const [activeTakeUrl, setActiveTakeUrl] = React.useState(()=> (typeof vidGetVideo==="function" ? vidGetVideo(beatVideoId) : "") || "");
+  React.useEffect(()=>{ let alive=true;
+    const sync = typeof vidGetTakes==="function" ? vidGetTakes(beatVideoId) : [];
+    setTakeList(sync);
+    setActiveTakeUrl((sync[0]&&sync[0].url) || "");
+    if(typeof vidLoadTakes==="function"){
+      vidLoadTakes(beatVideoId).then(t=>{ if(alive){ setTakeList(t||[]); setActiveTakeUrl((t&&t[0]&&t[0].url) || ""); } });
+    } else if(typeof vidLoadVideo==="function") {
+      vidLoadVideo(beatVideoId).then(u=>{ if(alive&&u){ const t=typeof vidGetTakes==="function"?vidGetTakes(beatVideoId):[{id:beatVideoId+":current",url:u,current:true}]; setTakeList(t); setActiveTakeUrl((t[0]&&t[0].url)||u); } });
+    }
+    return ()=>{ alive=false; };
+  }, [beatVideoId, gen.videoUrl]);
+  const visibleTakes = (takeList&&takeList.length) ? takeList : (gen.videoUrl ? [{ id:beatVideoId+":current", url:gen.videoUrl, meta:(typeof vidGetMeta==="function"?vidGetMeta(beatVideoId):null), current:true }] : []);
+  const playerUrl = activeTakeUrl || (visibleTakes[0]&&visibleTakes[0].url) || gen.videoUrl || "";
+  const shotStartFrame = imgs[activeShot.id] || imgs[(d.first||{}).id] || "";
   const storyAssets = storyboardClipAssets(clip, imgs);
   const hasHalves = !!((storyAssets.halves||[]).length || storyAssets.top || storyAssets.bottom);
   const hasStoryboardSource = !!(hasHalves || storyAssets.sheet);
-  const useHalves = visualSource==="halves";
+  const useHalves = hasStoryboardSource;
   const firstStoryHalf = ((storyAssets.halves||[])[0]||{}).url || storyAssets.top || storyAssets.bottom || "";
   const startFrame = useHalves ? (firstStoryHalf || storyAssets.sheet || "") : shotStartFrame;
   const prevVideo = prevClipVideoId ? ((typeof vidGetVideo==="function") ? vidGetVideo(prevClipVideoId) : "") : "";
   // the clip's shots ARE its takes — each shot covers a beat. Click one to preview its frame.
   const beatRows = ((beatsMap||{})[scene.id]||{}).rows || [];
   const shotBeat = (sh)=> screenplayBeatTitle(scene, drafts, sh.beatN, 32) || _firstWords(sh.action||sh.dialogue||"", 6) || (()=>{ const r=beatRows.find(x=>x.n===sh.beatN); return (r && r.drive && r.drive.a) || ("Beat "+(sh.beatN||"—")); })();
-  const [previewId, setPreviewId] = React.useState((d.first||{}).id || null);
+  const [previewId, setPreviewId] = React.useState(activeShot.id || (d.first||{}).id || null);
+  React.useEffect(()=>{ setPreviewId(activeShot.id || (d.first||{}).id || null); }, [activeShot.id, clip.id]);
   const previewFrame = useHalves ? startFrame : (imgs[previewId] || startFrame);
+  const beatShots = ((sceneShots||d.shots||[]).filter(sh=>Number(sh&&sh.beatN)===Number(activeShot&&activeShot.beatN)));
+  const shownShots = beatShots.length ? beatShots : [activeShot].filter(Boolean);
+  const beatLabel = stageBeatLabel(scene, sceneShots||d.shots, activeShot);
+  const beatName = shotBeat(activeShot);
 
   // ---- the derived INPUT ASSETS (tagged, toggleable), capped to Seedance's 12 ----
   const assets = React.useMemo(()=>{
@@ -248,7 +374,7 @@ function ClipConsole({ clip, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId,
       hs.forEach((h,i)=>out.push({ key:"sb-half-"+i, kind:"image", label:"Storyboard "+(i+1)+" / "+hs.length+" for this clip", url:h.url, ready:true, locked:true }));
       if(storyAssets.sheet && !hs.length) out.push({ key:"sb-sheet", kind:"image", label:"Full storyboard sheet", url:storyAssets.sheet, ready:true, locked:true });
       else if(storyAssets.sheet) out.push({ key:"sb-sheet", kind:"image", label:"Full storyboard sheet", url:storyAssets.sheet, ready:true, locked:false });
-      if(!hasStoryboardSource) out.push({ key:"sb-missing", kind:"image", label:"Storyboard halves", ready:false, locked:true });
+      if(!hasStoryboardSource) out.push({ key:"sb-missing", kind:"image", label:"Storyboard sheet", ready:false, locked:true });
     } else {
       if(shotStartFrame) out.push({ key:"frame", kind:"image", label:(d.cast[0]?d.cast[0].name+" — shot frame":"Shot start frame"), url:shotStartFrame, ready:true, locked:true });
       else out.push({ key:"frame-missing", kind:"image", label:"Shot start frame", ready:false, locked:true });
@@ -257,9 +383,14 @@ function ClipConsole({ clip, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId,
     if(d.loc){ const u=imgs[d.loc.id]; out.push({ key:"loc", kind:"image", label:(d.loc.name||"Location")+" plate", url:u, ready:!!u, id:d.loc.id }); }
     d.props.forEach(p=>{ const u=imgs[p.id]; if(u) out.push({ key:"p:"+p.id, kind:"image", label:p.name, url:u, ready:true, id:p.id }); });
     if(prevVideo) out.push({ key:"prev", kind:"video", label:"Previous clip (continuity)", url:prevVideo, ready:true });
-    d.lineShots.forEach((sh,i)=>{ const u=auds[sh.id]; if(u) out.push({ key:"a:"+sh.id, kind:"audio", label:(d.cast[0]?d.cast[0].name+" line":"Line audio")+(d.lineShots.length>1?(" "+(i+1)):""), url:u, ready:true, locked:true, shotId:sh.id }); });
+    const activeLineShots = String(activeShot&&activeShot.dialogue||"").trim() ? [activeShot] : [];
+    activeLineShots.forEach((sh,i)=>{ const u=auds[sh.id]; if(u){
+      const p = (d.panelLines||[]).find(x=>x.shotId===sh.id);
+      const speaker = (p&&p.speaker&&p.speaker.name) || (sh.lineAudio&&sh.lineAudio.speaker) || "Line";
+      out.push({ key:"a:"+sh.id, kind:"audio", label:speaker+" line", url:u, ready:true, locked:true, shotId:sh.id });
+    } });
     return out;
-  }, [clip.id, visualSource, shotStartFrame, JSON.stringify((storyAssets.halves||[]).map(h=>h.id+":"+!!h.url)), storyAssets.top, storyAssets.bottom, storyAssets.sheet, prevVideo, JSON.stringify(d.cast), JSON.stringify(d.props), JSON.stringify(d.lineShots), d.loc&&d.loc.id, imgs, auds]);
+  }, [clip.id, activeShot.id, shotStartFrame, JSON.stringify((storyAssets.halves||[]).map(h=>h.id+":"+!!h.url)), storyAssets.top, storyAssets.bottom, storyAssets.sheet, prevVideo, JSON.stringify(d.cast), JSON.stringify(d.props), d.loc&&d.loc.id, imgs, auds]);
 
   // assets default ON when ready; user can toggle (off set). tag numbers per kind.
   const [off, setOff] = React.useState(()=>new Set());
@@ -290,25 +421,29 @@ function ClipConsole({ clip, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId,
   const budgetText = assetOver ? (budgetOverBy+" over cap") : budgetLeft===0 ? "At cap" : (budgetLeft+" slot"+(budgetLeft!==1?"s":"")+" left");
   const counts = { text:tagged.filter(a=>a.kind==="text" && on(a)).length, images:onImages.length, videos:onVideos.length, audio:onAudios.length };
   const sourceReady = useHalves ? hasStoryboardSource : !!shotStartFrame;
-  const sourceLabel = useHalves ? (hasHalves ? "sheet halves" : (storyAssets.sheet ? "full sheet" : "storyboard halves")) : "shot frame";
+  const sourceLabel = useHalves ? (hasHalves ? "sheet halves" : (storyAssets.sheet ? "full sheet" : "storyboard sheet")) : "shot frame";
 
   // ---- console controls (the original right-panel design) ----
+  const dialogueSpeakers = _uniq((d.panelLines||[]).filter(p=>p&&p.speaker&&p.speaker.name).map(p=>p.speaker.name));
   const [camera, setCamera] = React.useState(d.camera);
   const [lighting, setLighting] = React.useState(d.lighting);
-  const [perf, setPerf] = React.useState(d.lead);
+  const [perf, setPerf] = React.useState(dialogueSpeakers[0] || d.lead);
   const [quality, setQuality] = React.useState("standard");
-  const measuredSec = _clipMeasuredSec(clip);
-  const hasDialogue = (d.lineShots||[]).length>0;
-  const voicedLineCount = (d.lineShots||[]).filter(sh=>_shotAudioReady(sh, auds)).length;
-  const voiceReady = !hasDialogue || voicedLineCount===(d.lineShots||[]).length;
+  const measuredSec = activeShot && activeShot.lineAudio && activeShot.lineAudio.durationMs
+    ? Math.max(1, Math.round((Number(activeShot.lineAudio.durationMs)/1000)*10)/10)
+    : 0;
+  const beatLineShots = String(activeShot&&activeShot.dialogue||"").trim() ? [activeShot] : [];
+  const hasDialogue = beatLineShots.length>0;
+  const voicedLineCount = beatLineShots.filter(sh=>_shotAudioReady(sh, auds)).length;
+  const voiceReady = !hasDialogue || voicedLineCount===beatLineShots.length;
   const needsVoice = hasDialogue && !voiceReady;
-  const duration = measuredSec || d.dur;
-  const [prompt, setPrompt] = React.useState(d.prompt);
+  const duration = measuredSec || stageShotRuntime(activeShot) || d.dur;
+  const beatPrompt = seedanceBeatPrompt(clip, activeShot);
+  const [prompt, setPrompt] = React.useState(beatPrompt);
   const [modeOverride, setModeOverride] = React.useState(null);
   const [voicingClip, setVoicingClip] = React.useState(false);
-  const [recipe, setRecipe] = React.useState("narrative");
-  React.useEffect(()=>{ setRecipe("narrative"); setPrompt(d.prompt); }, [clip.id, d.prompt]);
-  const applyRecipe = (k)=>{ setRecipe(k); setPrompt(seedancePrompt(k, clip)); };
+  const [maxImg, setMaxImg] = React.useState(null);   // {url,label,kind} — maximised reference viewer
+  React.useEffect(()=>{ setPrompt(beatPrompt); setPerf(dialogueSpeakers[0] || d.lead); }, [clip.id, activeShot.id, beatPrompt, dialogueSpeakers.join("|"), d.lead]);
   // mode auto-inferred from which asset kinds are on (overridable in the selector)
   const autoMode = (()=>{ const hasI=onImages.length>0, hasV=onVideos.length>0, hasA=onAudios.length>0;
     if(hasV && (hasI||hasA)) return "multimodal";
@@ -331,20 +466,20 @@ function ClipConsole({ clip, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId,
     try{
       await gen.generate({ frameUrl, imageUrls, videoUrls, audioUrls, prompt, controls,
         durationMs:duration*1000, aspectRatio:aspect||"auto", fast:quality==="turbo", force:true });
-      if(typeof window.appToast==="function") window.appToast("Clip "+clip.label+" rendered","ok");
+      if(typeof window.appToast==="function") window.appToast("Beat "+beatLabel+" rendered","ok");
     }catch(e){ if(typeof window.appToast==="function") window.appToast(String((e&&e.message)||e),"err"); }
   };
   const onExtend = async ()=>{
-    if(!gen.videoUrl) return;
+    if(!playerUrl) return;
     const controls = "Camera movement: "+camera+". Lighting: "+lighting+". Performance: "+perf+".";
     try{
-      await gen.generate({ frameUrl:startFrame, videoUrls:[gen.videoUrl], prompt, controls,
+      await gen.generate({ frameUrl:startFrame, videoUrls:[playerUrl], prompt, controls,
         durationMs:duration*1000, aspectRatio:aspect||"auto", fast:quality==="turbo", force:true });
     }catch(e){ if(typeof window.appToast==="function") window.appToast(String((e&&e.message)||e),"err"); }
   };
   const onVoiceClip = async ()=>{
     if(!onVoiceLine || voicingClip) return;
-    const todo = (d.lineShots||[]).filter(sh=>String(sh.dialogue||"").trim() && !_shotAudioReady(sh, auds));
+    const todo = beatLineShots.filter(sh=>String(sh.dialogue||"").trim() && !_shotAudioReady(sh, auds));
     if(!todo.length) return;
     setVoicingClip(true);
     for(const sh of todo){ await onVoiceLine(sh); }
@@ -365,62 +500,65 @@ function ClipConsole({ clip, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId,
   // ----- CENTER: player + filmstrip + prompt + input assets -----
   const center = _stEl("div",{className:"stage2-center"},
     _stEl("div",{className:"stage2-clip-head"},
-      _stEl("div",{className:"stage2-clip-slug"}, clip.label+"  ",
+      _stEl("div",{className:"stage2-clip-slug"}, beatLabel+"  ",
         _stEl("span",{className:"stage2-clip-loc"}, scene.loc),
-        _stEl("span",{className:"stage2-clip-name"}, " · "+(d.first.action?_firstWords(d.first.action,3):(scene.title||"")))),
-      _stEl("span",{className:"stage2-ver"}, gen.videoUrl?"Rendered":"Not rendered")),
-    _stEl("div",{className:"stage2-sourcebar"},
-      _stEl("div",{className:"stage2-source-copy"},
-        _stEl("span",{className:"stage2-source-k"},"Visual source"),
-        _stEl("span",{className:"stage2-source-v"}, useHalves
-          ? (hasHalves ? "Using saved storyboard halves" : (storyAssets.sheet ? "Using full storyboard sheet" : "No saved halves for this clip"))
-          : (shotStartFrame ? "Using Shot List frame" : "No shot frame yet"))),
-      _stEl("div",{className:"stage2-source-toggle"},
-        _stEl("button",{className:"stage2-source-btn"+(!useHalves?" on":""),onClick:()=>setVisualSource("shots"),
-          title:"Use individual Shot List frames as the Seedance start frame"},"Shot frames"),
-        _stEl("button",{className:"stage2-source-btn"+(useHalves?" on":""),
-          onClick:()=>setVisualSource("halves"),
-          title:hasStoryboardSource?"Use saved storyboard sheet halves as Seedance image inputs":"Save halves from this clip's 2x2 storyboard sheet first"},"Sheet halves"))),
+        _stEl("span",{className:"stage2-clip-name"}, " · "+_firstWords(beatName, 6))),
+      _stEl("span",{className:"stage2-ver"}, playerUrl?"Rendered":"Not rendered")),
     // player
     _stEl("div",{className:"stage2-player",style:_stageAspectCss(aspect)},
-      gen.videoUrl
-        ? _stEl("video",{src:gen.videoUrl,poster:startFrame||undefined,controls:true,playsInline:true})
-        : _stEl("div",{className:"stage2-player-poster"},
-            previewFrame ? _stEl("img",{src:previewFrame,alt:""}) : _stEl("div",{className:"stage2-noframe"}, Icon.image&&_stEl(Icon.image,{s:24}), useHalves ? "No storyboard halves yet — save halves in Storyboards" : "No frame yet — generate these shots in the Shot List"),
-            _stEl("div",{className:"stage2-player-badge"}, gening ? (gen.status||"Rendering…") : (previewFrame?(sourceLabel+" · not rendered yet"):"")))),
-    !gen.videoUrl && _stEl("div",{className:"stage2-ruler"},
+      playerUrl
+        ? _stEl("video",{src:playerUrl,poster:shotStartFrame||undefined,controls:true,playsInline:true})
+        : _stEl("div",{className:"stage2-player-empty"},
+            _stEl("span",{className:"stage2-player-playring"+(gening?" busy":"")}, Icon.play&&_stEl(Icon.play,{s:22})),
+            _stEl("div",{className:"stage2-player-msg"}, gening ? (gen.status||"Rendering…") : "Not rendered yet"),
+            _stEl("div",{className:"stage2-player-sub"}, gening ? "Seedance is generating this beat…" : "Generate this beat to create the video"))),
+    !playerUrl && _stEl("div",{className:"stage2-ruler"},
       _stEl("div",{className:"stage2-ruler-fill",style:{width:"22%"}}),
       _stEl("span",{className:"stage2-ruler-dur"}, "0:00 / 0:"+_pad2(duration))),
-    // filmstrip — the SHOTS (takes) that make up THIS clip; each covers a beat. Click to preview.
-    _stEl("div",{className:"stage2-strip-cap"}, "Shots in "+clip.label+" — "+(d.shots||[]).length+" take"+((d.shots||[]).length!==1?"s":"")),
-    _stEl("div",{className:"stage2-strip"},
-      (d.shots||[]).map(function(sh,i){ const u=imgs[sh.id]; const sd=(typeof shotDur==="function")?shotDur(sh):5;
-        return _stEl("button",{key:sh.id,className:"stage2-strip-cell"+(sh.id===previewId?" on":""),onClick:()=>setPreviewId(sh.id),
-          title:shotBeat(sh)+((typeof shotGrammarLabel==="function")?(" — "+shotGrammarLabel(sh)):"")},
-          _stEl("div",{className:"stage2-strip-thumb",style:_stageAspectCss(aspect)},
-            u ? _stEl("img",{src:u,alt:"",loading:"lazy"}) : _stEl("div",{className:"stage2-strip-blank"}),
-            _stEl("span",{className:"stage2-strip-no"}, (i+1))),
-          _stEl("div",{className:"stage2-strip-meta"},
-            _stEl("span",{className:"stage2-strip-lab"}, shotBeat(sh)),
-            _stEl("span",{className:"stage2-strip-dur"}, sd+"s"))); })),
+    // generated videos for THIS selected beat — not sheets and not shot/beat text buttons.
+    (function(){
+      return _stEl(React.Fragment,null,
+        _stEl("div",{className:"stage2-strip-cap"}, "Generated videos for "+beatLabel+" — "+visibleTakes.length+" take"+(visibleTakes.length!==1?"s":"")),
+        visibleTakes.length
+          ? _stEl("div",{className:"stage2-take-list"},
+              visibleTakes.map((take,i)=>{
+                const active = (activeTakeUrl || playerUrl) === take.url;
+                const meta = take.meta || {};
+                const dur = meta.durationMs ? _fmtSecs(Number(meta.durationMs)/1000) : _fmtSecs(duration);
+                return _stEl("button",{key:take.id||take.url,type:"button",className:"stage2-take-card"+(active?" on":""),
+                    onClick:()=>setActiveTakeUrl(take.url),title:"Preview generated take "+(i+1)},
+                  _stEl("div",{className:"stage2-take-thumb"},
+                    _stEl("video",{src:take.url,muted:true,playsInline:true,preload:"metadata"}),
+                    _stEl("span",{className:"stage2-take-play"}, Icon.play&&_stEl(Icon.play,{s:13}))),
+                  _stEl("div",{className:"stage2-take-meta"},
+                    _stEl("span",{className:"stage2-take-title"}, take.current ? "Current render" : "Earlier render "+i),
+                    _stEl("span",{className:"stage2-take-sub"}, dur+" · "+(meta.model?String(meta.model).split("/").pop():"Seedance")))); }))
+          : _stEl("div",{className:"stage2-take-empty"},
+              Icon.play&&_stEl(Icon.play,{s:16}),
+              _stEl("span",null,"No generated videos for this beat yet"),
+              _stEl("small",null,"Use Generate to create the first take."))); })(),
     // prompt box
       _stEl("div",{className:"sd-prompt"},
-        _stEl("div",{className:"sd-recipes"},
-          _stEl("span",{className:"sd-recipes-lab"}, Icon.wand&&_stEl(Icon.wand,{s:12}), "Recipe"),
-          SEEDANCE_RECIPES.map(r=> _stEl("button",{key:r[0],type:"button",
-            className:"sd-recipe"+(recipe===r[0]?" on":""), title:r[2], onClick:()=>applyRecipe(r[0])}, r[1]))),
+        _stEl("div",{className:"stage2-prompt-head"},
+          _stEl("div",null,
+            _stEl("span",{className:"stage2-panel-t"},"Seedance 2.0 Director"),
+            _stEl("span",{className:"stage2-panel-v"},"Primary prompt")),
+          _stEl("button",{className:"stage2-generate small",onClick:onGenerate,disabled:gening||assetOver||needsVoice||!sourceReady},
+            Icon.sparkles&&_stEl(Icon.sparkles,{s:14}), gening?"Rendering…":playerUrl?"Re-generate":"Generate")),
         _stEl("textarea",{className:"sd-prompt-ta",value:prompt,placeholder:"Describe your scene in detail…",
           maxLength:PROMPT_MAX,rows:3,spellCheck:false,onChange:e=>setPrompt(e.target.value)}),
         _stEl("div",{className:"sd-prompt-foot"},
-          _stEl("button",{className:"sd-prompt-helper",onClick:()=>setPrompt(d.prompt),title:"Rebuild the prompt from this clip's beats"},
+          _stEl("button",{className:"sd-prompt-helper",onClick:()=>setPrompt(beatPrompt),title:"Rebuild the prompt from this beat"},
             Icon.wand&&_stEl(Icon.wand,{s:13}), "Prompt helper"),
+          needsVoice && onVoiceLine && _stEl("button",{className:"sd-prompt-helper",onClick:onVoiceClip,disabled:voicingClip},
+            Icon.mic&&_stEl(Icon.mic,{s:13}), voicingClip?"Voicing…":"Voice beat"),
           _stEl("span",{className:"sd-prompt-count"}, prompt.length+" / "+PROMPT_MAX)),
         (d.chips||[]).length>0 && _stEl("div",{className:"stage2-chipbox"},
           _stEl("div",{className:"stage2-chipbox-lab"},"Prompt ingredients"),
           _stEl("div",{className:"stage2-chips"},
             d.chips.map((ch,i)=>_stEl("button",{key:i,type:"button",className:"stage2-chip "+_chipClass(ch.k),
-              title:"Add "+ch.k+" to the prompt",onClick:()=>onChip(ch)},
-              _stEl("b",null,ch.k),_stEl("span",null,ch.v)))))),
+              title:"Add "+ch.k+": "+(ch.v||""),onClick:()=>onChip(ch)},
+              _stEl("b",null,ch.k),_stEl("span",null,ch.label||ch.v)))))),
     // input assets (references)
     _stEl("div",{className:"stage2-assets"},
       _stEl("div",{className:"stage2-assets-lab"}, "INPUT ASSETS ("+onAssets.length+"/"+assetLimit+")",
@@ -439,7 +577,10 @@ function ClipConsole({ clip, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId,
             : a.url ? _stEl("img",{src:a.url,alt:"",loading:"lazy"})
             : _stEl("span",{className:"stage2-asset-ph"}, "—"),
             on(a) && _stEl("span",{className:"stage2-asset-tick"}, Icon.check&&_stEl(Icon.check,{s:11})),
-            a.kind==="video" && _stEl("span",{className:"stage2-asset-vid"}, Icon.play&&_stEl(Icon.play,{s:12}))),
+            a.kind==="video" && _stEl("span",{className:"stage2-asset-vid"}, Icon.play&&_stEl(Icon.play,{s:12})),
+            (a.kind==="image"||a.kind==="video") && a.url && _stEl("span",{className:"stage2-asset-max",role:"button","aria-label":"Maximise",title:"Maximise",
+              onClick:(e)=>{ e.stopPropagation(); e.preventDefault(); setMaxImg({url:a.url, label:a.label, kind:a.kind}); }},
+              Icon.maximize&&_stEl(Icon.maximize,{s:13}))),
           _stEl("div",{className:"stage2-asset-lab"}, a.label),
           _stEl("div",{className:"stage2-asset-foot"},
             _stEl("span",{className:"stage2-asset-tag"}, a.tag),
@@ -455,35 +596,53 @@ function ClipConsole({ clip, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId,
         _stEl("div",{className:"stage2-budget-bar"}, _stEl("i",{style:{width:budgetPct+"%"}}))),
       assetOver && _stEl("div",{className:"stage2-warn"}, Icon.alert&&_stEl(Icon.alert,{s:12}), "Too many inputs selected. Exclude "+budgetOverBy+" optional asset"+(budgetOverBy!==1?"s":"")+" before rendering.")));
 
-  // ----- RIGHT: the original Seedance panel -----
-  const CAPS = ["Multimodal video generation","Up to 12 assets combined","Typical clip length 4–15s",
-    "Strong motion stability","Character consistency","Native audio","Director controls"];
+  // ----- RIGHT: dynamic context panel, scoped to the selected beat -----
+  const activePanel = (d.panelLines||[]).find(p=>p.shotId===activeShot.id) || {};
+  const scriptText = activePanel.script || stageShotScriptText(scene, drafts, activeShot, 280) || "";
+  const blockingText = activePanel.sheet || stageShotSheetText(scene, beatsMap, activeShot, 280) || "";
+  const castNames = (d.cast||[]).map(c=>c.name).filter(Boolean);
+  const propNames = (d.props||[]).map(p=>p.name).filter(Boolean);
+  const contextRows = [
+    ["Scene", _pad2(scene.no)+" · "+(scene.title||scene.loc||"Untitled")],
+    ["Beat", beatLabel+" · "+beatName],
+    ["Video", playerUrl ? "locked · "+_fmtSecs(duration) : "not rendered"],
+    ["Source", sourceReady ? sourceLabel : "missing visual source"],
+    ["Audio", hasDialogue ? (voiceReady ? "locked voice" : "needs voice") : "native / silent"]
+  ];
   const right = _stEl("div",{className:"stage2-panel"},
     _stEl("div",{className:"stage2-panel-card"},
       _stEl("div",{className:"stage2-panel-head"},
-        _stEl("span",{className:"stage2-panel-t"},"Seedance 2.0"),
-        _stEl("span",{className:"stage2-panel-v"},"v2.0")),
-      _stEl("div",{className:"stage2-caps"},
-        CAPS.map((c,i)=> _stEl("div",{key:i,className:"stage2-cap"}, _stEl("span",{className:"stage2-cap-d"}), c)))),
-    // mode selector
-    _stEl("div",{className:"stage2-modes"},
-      MODES.map(m=> _stEl("button",{key:m[0],className:"stage2-mode"+(mode===m[0]?" on":""),
-        onClick:()=>setModeOverride(m[0])}, m[1]))),
-    // assets summary
-    _stEl("div",{className:"stage2-sec-lab"},"ASSETS SUMMARY"),
-    _stEl("div",{className:"stage2-summary"},
-      [["Text",counts.text],["Images",counts.images],["Videos",counts.videos],["Audio",counts.audio]].map((s,i)=>
-        _stEl("div",{key:i,className:"stage2-sum"},
-          _stEl("div",{className:"stage2-sum-k"},s[0]),
-          _stEl("div",{className:"stage2-sum-n"}, s[1])))),
-    _stEl("div",{className:"stage2-budget stage2-budget-panel "+budgetState},
-      _stEl("div",{className:"stage2-budget-top"},
-        _stEl("span",null,"Budget"),
-        _stEl("b",null,budgetUsed+" / "+assetLimit),
-        _stEl("em",null,budgetText)),
-      _stEl("div",{className:"stage2-budget-bar"}, _stEl("i",{style:{width:budgetPct+"%"}}))),
-    // controls
-    _stEl("div",{className:"stage2-sec-lab"},"CONTROLS"),
+        _stEl("span",{className:"stage2-panel-t"},"Beat context"),
+        _stEl("span",{className:"stage2-panel-v"}, beatLabel)),
+      _stEl("div",{className:"stage2-context-list"},
+        contextRows.map((r,i)=>_stEl("div",{key:i,className:"stage2-context-row"},
+          _stEl("span",null,r[0]), _stEl("b",null,r[1]))))),
+    _stEl("div",{className:"stage2-panel-card"},
+      _stEl("div",{className:"stage2-panel-head"},
+        _stEl("span",{className:"stage2-panel-t"},"Story match"),
+        _stEl("span",{className:"stage2-panel-v"},"live")),
+      _stEl("div",{className:"stage2-context-copy"},
+        _stEl("label",null,"Screenplay"),
+        _stEl("p",null, scriptText || "No screenplay excerpt mapped to this beat yet."),
+        blockingText && _stEl(React.Fragment,null,
+          _stEl("label",null,"Storyboard blocking"),
+          _stEl("p",null, blockingText)))),
+    _stEl("div",{className:"stage2-panel-card"},
+      _stEl("div",{className:"stage2-panel-head"},
+        _stEl("span",{className:"stage2-panel-t"},"References"),
+        _stEl("span",{className:"stage2-panel-v"}, budgetUsed+" / "+assetLimit)),
+      _stEl("div",{className:"stage2-ref-tags"},
+        castNames.map(n=>_stEl("span",{key:"c"+n,className:"stage2-ref-tag cast"}, n)),
+        (d.loc&&d.loc.name) && _stEl("span",{className:"stage2-ref-tag loc"}, d.loc.name),
+        propNames.map(n=>_stEl("span",{key:"p"+n,className:"stage2-ref-tag prop"}, n)),
+        !castNames.length && !propNames.length && !(d.loc&&d.loc.name) && _stEl("span",{className:"stage2-ref-empty"},"No derived references yet")),
+      _stEl("div",{className:"stage2-budget stage2-budget-panel "+budgetState},
+        _stEl("div",{className:"stage2-budget-top"},
+          _stEl("span",null,"Budget"),
+          _stEl("b",null,budgetUsed+" / "+assetLimit),
+          _stEl("em",null,budgetText)),
+        _stEl("div",{className:"stage2-budget-bar"}, _stEl("i",{style:{width:budgetPct+"%"}})))),
+    _stEl("div",{className:"stage2-sec-lab"},"DIRECTOR CONTROLS"),
     _stEl("div",{className:"stage2-ctrls"},
       _ctrlRow("Camera movement", _stEl("input",{className:"stage2-inp",value:camera,onChange:e=>setCamera(e.target.value)})),
       _ctrlRow("Lighting", _stEl("input",{className:"stage2-inp",value:lighting,onChange:e=>setLighting(e.target.value)})),
@@ -491,36 +650,37 @@ function ClipConsole({ clip, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId,
       _ctrlRow("Audio", hasDialogue
         ? (voiceReady
           ? _stEl("div",{className:"stage2-lockval",title:"Locked to rendered character line audio"}, "Locked voice", _stEl("span",null, voicedLineCount+" line"+(voicedLineCount!==1?"s":"")))
-          : _stEl("div",{className:"stage2-lockval warn",title:"Run Voice all lines before rendering this dialogue clip"}, "Needs voice", _stEl("span",null, voicedLineCount+" / "+(d.lineShots||[]).length)))
+          : _stEl("div",{className:"stage2-lockval warn",title:"Voice this beat before rendering dialogue"}, "Needs voice", _stEl("span",null, voicedLineCount+" / "+beatLineShots.length)))
         : _stEl("div",{className:"stage2-lockval",title:"No dialogue in this clip"}, "Native audio", _stEl("span",null,"silent clip"))),
       _ctrlRow("Quality mode", _stEl("div",{className:"stage2-toggle"},
         _stEl("button",{className:"stage2-tg"+(quality==="standard"?" on":""),onClick:()=>setQuality("standard")},"Standard"),
         _stEl("button",{className:"stage2-tg"+(quality==="turbo"?" on":""),onClick:()=>setQuality("turbo")}, Icon.sparkles&&_stEl(Icon.sparkles,{s:12}),"Turbo"))),
       needsVoice
-        ? _ctrlRow("Clip duration", _stEl("div",{className:"stage2-lockval warn",title:"Duration is created by the line audio"}, "Needs voice", _stEl("span",null,"not timed")))
+        ? _ctrlRow("Beat duration", _stEl("div",{className:"stage2-lockval warn",title:"Duration is created by the line audio"}, "Needs voice", _stEl("span",null,"not timed")))
         : measuredSec
-        ? _ctrlRow("Clip duration", _stEl("div",{className:"stage2-lockval",title:"Locked to measured line audio"}, _fmtSecs(measuredSec), _stEl("span",null,"from voice")))
-        : _ctrlRow("Clip duration", _stEl("div",{className:"stage2-lockval",title:"Estimated from the shot sequence until real audio exists"}, _fmtSecs(duration), _stEl("span",null,"estimate")))),
-    // generate
+        ? _ctrlRow("Beat duration", _stEl("div",{className:"stage2-lockval",title:"Locked to measured line audio"}, _fmtSecs(measuredSec), _stEl("span",null,"from voice")))
+        : _ctrlRow("Beat duration", _stEl("div",{className:"stage2-lockval",title:"Estimated from the selected beat until real audio exists"}, _fmtSecs(duration), _stEl("span",null,"estimate")))),
     gen.err && _stEl("div",{className:"stage2-err"}, Icon.alert&&_stEl(Icon.alert,{s:13}), gen.err),
     !sourceReady && _stEl("div",{className:"stage2-err"}, Icon.alert&&_stEl(Icon.alert,{s:13}), useHalves
-      ? "Sheet halves are selected, but this clip has no saved storyboard halves yet. In Storyboards, generate or upload the matching 2x2 sheet, then Save halves."
-      : "Shot frames are selected, but this clip has no first shot frame yet. Generate the frame in the Shot List or switch to Sheet halves."),
+      ? "No storyboard sheet source is ready yet. Generate or upload the matching 2x2 sheet, then Save halves if you want row-level control."
+      : "This beat has no shot frame yet. Generate its frame in the Shot List."),
     assetOver && _stEl("div",{className:"stage2-err"}, Icon.alert&&_stEl(Icon.alert,{s:13}), "Asset budget is over by "+budgetOverBy+". Exclude optional assets before rendering."),
       gening
         ? _stEl("div",{className:"stage2-gen-busy"},
             _stEl("div",{className:"stage2-gen-prog"}, _stEl("div",{className:"orb"}), (gen.status||"Rendering…")),
             _stEl("button",{className:"stage2-extend",onClick:gen.cancel},"Cancel render"))
       : _stEl(React.Fragment,null,
-          needsVoice && onVoiceLine && _stEl("button",{className:"stage2-extend",onClick:onVoiceClip,disabled:voicingClip},
-            Icon.mic&&_stEl(Icon.mic,{s:13}), voicingClip?"Voicing clip…":"Voice this clip"),
-          _stEl("button",{className:"stage2-generate",onClick:onGenerate,disabled:assetOver||needsVoice||!sourceReady},
-            Icon.sparkles&&_stEl(Icon.sparkles,{s:15}), gen.videoUrl?"Re-generate clip":"Generate clip"),
-          _stEl("button",{className:"stage2-extend",onClick:onExtend,disabled:!gen.videoUrl},
-            Icon.pencil&&_stEl(Icon.pencil,{s:13}),"Extend / edit")),
+          _stEl("button",{className:"stage2-extend",onClick:onExtend,disabled:!playerUrl},
+            Icon.pencil&&_stEl(Icon.pencil,{s:13}),"Extend / edit beat")),
     _stEl("div",{className:"stage2-credit"}, Icon.sparkles&&_stEl(Icon.sparkles,{s:11}),"Uses 1 generation credit"));
 
-  return _stEl("div",{className:"stage2-console"}, center, right);
+  const lightbox = maxImg && _stEl("div",{className:"stage2-lightbox",onClick:()=>setMaxImg(null)},
+    _stEl("button",{className:"stage2-lightbox-x",title:"Close",onClick:()=>setMaxImg(null)}, Icon.x&&_stEl(Icon.x,{s:18})),
+    maxImg.kind==="video"
+      ? _stEl("video",{className:"stage2-lightbox-media",src:maxImg.url,controls:true,autoPlay:true,playsInline:true,onClick:(e)=>e.stopPropagation()})
+      : _stEl("img",{className:"stage2-lightbox-media",src:maxImg.url,alt:maxImg.label||"",onClick:(e)=>e.stopPropagation()}),
+    maxImg.label && _stEl("div",{className:"stage2-lightbox-cap"}, maxImg.label));
+  return _stEl("div",{className:"stage2-console"}, center, right, lightbox);
 }
 function _ctrlRow(label, control){ return _stEl("div",{className:"stage2-ctrl"},
   _stEl("span",{className:"stage2-ctrl-l"}, label), control); }
@@ -565,6 +725,73 @@ function clipFrameState(clip, imgs, visualSource){
   return id && imgs && imgs[id] ? { key:"ready", label:"frame ✓" } : { key:"missing", label:"needs frame" };
 }
 function clipVideoReady(clip, vids){ return !!(clip && ((vids&&vids[clip.id]) || (typeof vidGetVideo==="function" && vidGetVideo(clip.id)))); }
+function stageBeatVidId(sh){ return sh && sh.id ? ("beat-"+sh.id) : ""; }
+function stageBeatVideoReady(sh, vids){
+  const id = stageBeatVidId(sh);
+  return !!(id && ((vids&&vids[id]) || (typeof vidGetVideo==="function" && vidGetVideo(id))));
+}
+function stageShotRuntime(sh){
+  const ms = sh && sh.lineAudio && sh.lineAudio.durationMs;
+  if(ms) return Math.max(1, Math.round((Number(ms)/1000)*10)/10);
+  if(typeof shotDur==="function") return Math.max(1, Number(shotDur(sh))||5);
+  return Math.max(1, Number(sh&&sh.dur)||5);
+}
+function stageBeatLabel(scene, sceneShots, sh){
+  const i = Math.max(0, (sceneShots||[]).findIndex(x=>x&&sh&&x.id===sh.id));
+  return _pad2(scene&&scene.no)+_clipLetter(i);
+}
+
+function sceneStoryboardItems(scene, sceneShots, imgs, visualSource){
+  const out = [];
+  const total = Math.max(1, Math.ceil(((sceneShots||[]).length||1) / 4));
+  for(let i=0;i<total;i++){
+    const sheetId = "sbsheet-sbpage-"+scene.id+"-2x2-"+i;
+    const sheet = imgs[sheetId] || "";
+    const topId = sheetId+":half-top", bottomId = sheetId+":half-bottom";
+    const top = imgs[topId] || "", bottom = imgs[bottomId] || "";
+    if(visualSource==="halves" && (top || bottom)){
+      out.push({ id:topId, kind:"half", half:"top", page:i+1, label:"Page "+(i+1)+" · top half", url:top, missing:!top });
+      out.push({ id:bottomId, kind:"half", half:"bottom", page:i+1, label:"Page "+(i+1)+" · bottom half", url:bottom, missing:!bottom });
+    } else {
+      out.push({ id:sheetId, kind:"sheet", page:i+1, label:"Page "+(i+1)+" · full sheet", url:sheet, missing:!sheet,
+        note:visualSource==="halves" ? "No saved halves yet" : "" });
+    }
+  }
+  return out;
+}
+
+function StageSceneSheets({ scene, sceneShots, clips, imgs, visualSource, aspect, onOpenClip }){
+  const items = sceneStoryboardItems(scene, sceneShots, imgs, visualSource);
+  const clipForItem = (it)=>{
+    const start = (it.page-1)*4 + (it.kind==="half" && it.half==="bottom" ? 2 : 0);
+    return (clips||[]).find(c=>{
+      const a = Number(c&&c.g&&c.g.start)||0;
+      const b = a + (((c&&c.g&&c.g.shots)||[]).length||1) - 1;
+      return b>=start && a<=start+(it.kind==="half"?1:3);
+    }) || (clips||[])[0] || null;
+  };
+  const cards = items.map(it=>{
+    const c = clipForItem(it);
+    const canOpen = !!(c && onOpenClip);
+    return _stEl("button",{key:it.id,type:"button",className:"stage2-sheet-card "+it.kind+(it.missing?" missing":""),
+      disabled:!canOpen, onClick:()=>canOpen&&onOpenClip(c.id),
+      title:canOpen ? ("Open "+c.label+" from "+it.label) : it.label},
+      _stEl("div",{className:"stage2-sheet-thumb",style:it.kind==="half"?{"--stage-aspect":"3 / 1"}:_stageAspectCss(aspect)},
+        it.url ? _stEl("img",{src:it.url,alt:"",loading:"lazy"})
+          : _stEl("div",{className:"stage2-sheet-missing"}, Icon.image&&_stEl(Icon.image,{s:20}), it.note||"Not saved yet")),
+      _stEl("div",{className:"stage2-sheet-meta"},
+        _stEl("span",{className:"stage2-sheet-label"}, it.label),
+        c && _stEl("span",{className:"stage2-sheet-clip"}, c.label)));
+  });
+  return _stEl("div",{className:"stage2-sheets"},
+    _stEl("div",{className:"stage2-sheets-head"},
+      _stEl("div",null,
+        _stEl("div",{className:"stage2-board-scene-k"},"SCENE "+_pad2(scene.no)),
+        _stEl("div",{className:"stage2-sheets-title"}, scene.title||scene.loc)),
+      _stEl("div",{className:"stage2-board-progress"},
+        items.filter(x=>!x.missing).length+" / "+items.length+" "+(visualSource==="halves"?"halves":"sheets"))),
+    _stEl("div",{className:"stage2-sheets-grid"}, cards));
+}
 
 function StageBoard({ scenesWithShots, allClips, imgs, auds, vids, beatsMap, drafts, visualSource, selectedId, onSelect, aspect }){
   return _stEl("div",{className:"stage2-board-scroll"},
@@ -642,16 +869,38 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
   const neededIds = React.useMemo(()=>{ const s=new Set();
     (shots||[]).forEach(sh=>s.add(sh.id)); (characters||[]).forEach(c=>s.add(c.id));
     (locations||[]).forEach(l=>s.add(l.id)); (props||[]).forEach(p=>s.add(p.id));
+    scenesWithShots.forEach(scene=>{
+      const total = Math.max(1, Math.ceil((((shotsByScene||{})[scene.id]||[]).length||1) / 4));
+      for(let i=0;i<total;i++){
+        const sheetId = "sbsheet-sbpage-"+scene.id+"-2x2-"+i;
+        s.add(sheetId); s.add(sheetId+":half-top"); s.add(sheetId+":half-bottom");
+      }
+    });
     allClips.forEach(c=>{ const ids=storyboardClipIds(c); (ids.all||[]).forEach(id=>s.add(id)); });
-    return Array.from(s); }, [shotIdsKey, charIdsKey, locIdsKey, propIdsKey, allClips.map(c=>c.id).join(",")]);
+    return Array.from(s); }, [shotIdsKey, charIdsKey, locIdsKey, propIdsKey, allClips.map(c=>c.id).join(","), scenesWithShots.map(s=>s.id).join(",")]);
   const [imgs, setImgs] = React.useState({});
   const [imgTick, setImgTick] = React.useState(0);
   React.useEffect(()=>{ const h=()=>setImgTick(x=>x+1); window.addEventListener("nb-gen-done", h); window.addEventListener("nb-prefetched", h); return ()=>{ window.removeEventListener("nb-gen-done", h); window.removeEventListener("nb-prefetched", h); }; }, []);
   React.useEffect(()=>{ let alive=true;
-    (async()=>{ const out={};
-      for(const id of neededIds){ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
-        if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } if(u) out[id]=u; }
-      if(alive) setImgs(out); })();
+    const ids = Array.from(new Set(neededIds||[]));
+    const sync = {}, missing = [];
+    ids.forEach(id=>{ const u=(typeof nbGetImage==="function")?nbGetImage(id):""; if(u) sync[id]=u; else missing.push(id); });
+    setImgs(sync);
+    if(typeof nbLoadImage!=="function" || !missing.length){ return ()=>{ alive=false; }; }
+    (async()=>{
+      const limit = 8;
+      let idx = 0;
+      const worker = async()=>{
+        while(alive && idx<missing.length){
+          const id = missing[idx++];
+          try{
+            const u = await nbLoadImage(id);
+            if(alive && u) setImgs(prev=> prev[id] ? prev : ({...prev, [id]:u}));
+          }catch(e){}
+        }
+      };
+      await Promise.all(Array.from({length:Math.min(limit, missing.length)}, worker));
+    })();
     return ()=>{ alive=false; }; }, [neededIds.join(","), imgTick]);
 
   // load voiced line audio for shots that have it
@@ -666,20 +915,22 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
       if(alive) setAuds(out); })();
     return ()=>{ alive=false; }; }, [(shots||[]).map(s=>s.id+":"+(s.lineAudio?1:0)).join(","), audTick]);
 
-  const clipIdsKey = allClips.map(c=>c.id).join(",");
+  const videoIds = React.useMemo(()=>Array.from(new Set([].concat(allClips.map(c=>c.id), (shots||[]).map(stageBeatVidId).filter(Boolean)))), [allClips.map(c=>c.id).join(","), shotIdsKey]);
+  const clipIdsKey = videoIds.join(",");
   const [vids, setVids] = React.useState({});
   const [vidTick, setVidTick] = React.useState(0);
   React.useEffect(()=>{ const h=()=>setVidTick(x=>x+1); window.addEventListener("vid-done", h); return ()=>window.removeEventListener("vid-done", h); }, []);
   React.useEffect(()=>{ let alive=true;
     (async()=>{ const out={};
-      for(const c of allClips){ let u=(typeof vidGetVideo==="function")?vidGetVideo(c.id):"";
-        if(!u && typeof vidLoadVideo==="function"){ try{ u=await vidLoadVideo(c.id); }catch(e){} } if(u) out[c.id]=u; }
+      for(const id of videoIds){ let u=(typeof vidGetVideo==="function")?vidGetVideo(id):"";
+        if(!u && typeof vidLoadVideo==="function"){ try{ u=await vidLoadVideo(id); }catch(e){} } if(u) out[id]=u; }
       if(alive) setVids(out); })();
     return ()=>{ alive=false; }; }, [clipIdsKey, vidTick]);
 
   const [selId, setSelId] = React.useState(allClips[0] ? allClips[0].id : null);
-  const [mode, setMode] = React.useState("board");
-  const [actOpen, setActOpen] = React.useState({1:true,2:true,3:true});
+  const [selShotId, setSelShotId] = React.useState((shots||[])[0] ? (shots||[])[0].id : null);
+  React.useEffect(()=>{ if(!(shots||[]).some(s=>s.id===selShotId)) setSelShotId((shots||[])[0] ? (shots||[])[0].id : null); },
+    [shotIdsKey, selShotId]);
 
   if(!scenesWithShots.length){
     return _stEl("div",{className:"stage2-root"},
@@ -689,62 +940,59 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
         _stEl("div",{className:"art-soon-d"},"The Stage turns your shots into video clips. Break your scenes into shots in the Art Room → Shots first, then come back.")));
   }
 
-  // the director console — one clip at a time
-  const clip = allClips.find(c=>c.id===selId) || allClips[0];
-  const clipIdx = allClips.findIndex(c=>c.id===clip.id);
-  const prevClipVideoId = clipIdx>0 ? allClips[clipIdx-1].id : null;
-  // left rail: the STORY SPINE — acts → scenes (charge dot) → clips (beat names),
-  // mirroring the Writers' Room rail. Acts collapse; clips are the selectable leaves.
-  const acts = [1,2,3].map(a=>({ act:a, scenes:scenesWithShots.filter(s=>(s.act||1)===a) })).filter(a=>a.scenes.length);
+  // the director console — one beat at a time
+  const selectedShot = (shots||[]).find(s=>s.id===selShotId) || (shotsByScene[scenesWithShots[0].id]||[])[0];
+  const selectedScene = ordered.find(s=>s.id===(selectedShot&&selectedShot.sceneId)) || scenesWithShots[0];
+  const selectedSceneShots = (shotsByScene[selectedScene.id]||[]);
+  const selectedSceneClips = allClips.filter(c=>c.scene.id===selectedScene.id);
+  const clip = selectedSceneClips.find(c=>(c.g.shots||[]).some(sh=>sh.id===selectedShot.id)) || allClips.find(c=>c.id===selId) || selectedSceneClips[0] || allClips[0];
+  const flatShots = scenesWithShots.reduce((arr,scene)=>arr.concat(shotsByScene[scene.id]||[]), []);
+  const beatIdx = flatShots.findIndex(sh=>sh.id===(selectedShot&&selectedShot.id));
+  const prevBeatVideoId = beatIdx>0 ? stageBeatVidId(flatShots[beatIdx-1]) : null;
+  const sceneRow = (scene)=>{
+    const sceneShots = shotsByScene[scene.id]||[];
+    const sceneDur = sceneShots.reduce((t,sh)=>t+stageShotRuntime(sh),0);
+    const done = sceneShots.filter(sh=>stageBeatVideoReady(sh, vids)).length;
+    return _stEl("div",{key:scene.id,className:"stage2-scene-block"},
+      _stEl("button",{type:"button",className:"stage2-scene-headrow"+(selectedScene.id===scene.id?" on":""),
+          onClick:()=>{ if(sceneShots[0]){ setSelShotId(sceneShots[0].id); const c=allClips.find(x=>x.scene.id===scene.id && (x.g.shots||[]).some(sh=>sh.id===sceneShots[0].id)); if(c) setSelId(c.id); } },
+          title:"Select Scene "+_pad2(scene.no)},
+        _stEl("span",{className:"tree-scene-no"}, _pad2(scene.no)),
+        _stEl("span",{className:"tree-scene-dot",style:{background:done===sceneShots.length&&sceneShots.length?"var(--pos)":chargeColor(scene)}}),
+        _stEl("span",{className:"stage2-scene-ttl"}, scene.title||scene.loc),
+        _stEl("span",{className:"stage2-scene-meta"}, _fmtSecs(sceneDur))),
+      _stEl("div",{className:"stage2-beat-list"},
+        sceneShots.map((sh,i)=>{
+          const c = allClips.find(x=>x.scene.id===scene.id && (x.g.shots||[]).some(s=>s.id===sh.id));
+          const rendered = stageBeatVideoReady(sh, vids);
+          const lab = stageBeatLabel(scene, sceneShots, sh);
+          const name = screenplayBeatTitle(scene, drafts, sh.beatN, 28) || _firstWords(sh.action||sh.dialogue||"", 4) || ("Beat "+(sh.beatN||i+1));
+          return _stEl("button",{key:sh.id,type:"button",className:"stage2-beat-row"+(selectedShot&&selectedShot.id===sh.id?" on":"")+(rendered?" done":""),
+              onClick:()=>{ setSelShotId(sh.id); if(c) setSelId(c.id); },
+              title:lab+" · "+name},
+            _stEl("span",{className:"stage2-beat-code"}, lab),
+            _stEl("span",{className:"stage2-beat-name"}, name),
+            _stEl("span",{className:"stage2-beat-dur"}, _fmtSecs(stageShotRuntime(sh))),
+            _stEl("span",{className:"stage2-beat-dot"}));
+        })));
+  };
   const rail = _stEl("div",{className:"stage2-rail"},
     _stEl("div",{className:"stage2-rail-head"},
-      Icon.layers&&_stEl(Icon.layers,{s:12}), _stEl("span",null,"Story Spine")),
-    acts.map(a=> _stEl("div",{key:a.act,className:"tree-act"},
-      _stEl("div",{className:"tree-act-head",onClick:()=>setActOpen(o=>({...o,[a.act]:!o[a.act]}))},
-        _stEl("span",{style:{color:"var(--txt-2)",display:"flex"}}, _stEl(actOpen[a.act]?Icon.chevD:Icon.chevR,{s:13})),
-        _stEl("span",{className:"tree-act-no"}, ["I","II","III"][a.act-1]),
-        _stEl("span",{className:"tree-act-title"}, STAGE_ACT_TITLES[a.act]||("Act "+a.act)),
-        _stEl("span",{className:"tree-act-count"}, a.scenes.length)),
-      actOpen[a.act] && _stEl("div",{className:"tree-scenes"},
-        a.scenes.map(scene=>{ const cs=allClips.filter(c=>c.scene.id===scene.id);
-          return _stEl("div",{key:scene.id,className:"stage2-scene-grp"},
-            _stEl("div",{className:"stage2-scene-row"},
-              _stEl("span",{className:"tree-scene-no"}, _pad2(scene.no)),
-              _stEl("span",{className:"tree-scene-dot",style:{background:chargeColor(scene)}}),
-              _stEl("span",{className:"stage2-scene-ttl"}, scene.title||scene.loc)),
-            _stEl("div",{className:"stage2-cliplist"},
-              cs.map(function(c){
-                const done=clipVideoReady(c, vids);
-                return _stEl("button",{key:c.id,className:"stage2-cliprow"+(c.id===clip.id?" on":""),onClick:()=>{ setSelId(c.id); setMode("timeline"); },title:scene.loc+" — "+clipBeatName(c, beatsMap, drafts)},
-                  _stEl("span",{className:"stage2-clip-lab"}, c.label),
-                  _stEl("span",{className:"stage2-clip-beat"}, clipBeatName(c, beatsMap, drafts)),
-                  done
-                    ? _stEl("span",{className:"stage2-clip-done",title:"Rendered"}, Icon.play&&_stEl(Icon.play,{s:9}))
-                    : _stEl("span",{className:"stage2-clip-dur"}, c.data.dur+"s")
-                );
-              })
-            )
-          );
-        })
-      )
-    ))
-    );
-    const renderedCount = allClips.filter(c=>clipVideoReady(c, vids)).length;
-    const voicedCount = allClips.filter(c=>clipVoiceState(c,auds).key==="ready").length;
-    const frameCount = allClips.filter(c=>clipFrameState(c,imgs,visualSource).key==="ready").length;
+      Icon.layers&&_stEl(Icon.layers,{s:12}), _stEl("span",null,"Scenes")),
+    _stEl("div",{className:"stage2-scene-list"}, scenesWithShots.map(sceneRow)));
+    const renderedCount = flatShots.filter(sh=>stageBeatVideoReady(sh, vids)).length;
+    const voicedCount = flatShots.filter(sh=>!String(sh.dialogue||"").trim() || _shotAudioReady(sh, auds)).length;
+    const frameCount = flatShots.filter(sh=>!!imgs[sh.id]).length;
     const stageHead = _stEl("div",{className:"stage2-head"},
       _stEl("div",{className:"stage2-head-left"},
         _stEl("div",{className:"stage2-head-title"},"The Stage"),
         _stEl("div",{className:"stage2-head-meta"},
-          _stEl("span",null, allClips.length+" clips"),
-          _stEl("span",null, frameCount+" "+(visualSource==="halves"?"halves":"frames")),
+          _stEl("span",null, flatShots.length+" beats"),
+          _stEl("span",null, frameCount+" sources"),
           _stEl("span",null, voicedCount+" voiced"),
           _stEl("span",null, renderedCount+" rendered"),
           _stEl("span",null, aspect))),
       _stEl("div",{className:"stage2-head-actions"},
-        _stEl("div",{className:"stage2-nav"},
-          [["board","Board"],["timeline","Timeline"]].map(m=>
-            _stEl("button",{key:m[0],className:"stage2-navbtn"+(mode===m[0]?" on":""),onClick:()=>setMode(m[0])}, m[1]))),
         onVoiceAll && _stEl("div",{className:"stage2-voiceall"},
           voicingLines
             ? _stEl(React.Fragment,null,
@@ -755,9 +1003,7 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
       _stEl("div",{className:"stage2-body"}, rail,
         _stEl("div",{className:"stage2-main"},
           stageHead,
-          mode==="board"
-            ? _stEl(StageBoard,{scenesWithShots,allClips,imgs,auds,vids,beatsMap,drafts,visualSource,selectedId:clip.id,aspect,
-                onSelect:(id)=>{ setSelId(id); setMode("timeline"); }})
-            : _stEl(ClipConsole,{ key:clip.id, clip, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId, aspect, visualSource, setVisualSource, onVoiceLine }))));
+          _stEl(ClipConsole,{ key:clip.id+"-"+(selectedShot&&selectedShot.id), clip, selectedShot, sceneShots:selectedSceneShots, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId:prevBeatVideoId, aspect, visualSource, setVisualSource, onVoiceLine,
+            onSelectShot:(id)=>{ setSelShotId(id); const c=allClips.find(x=>(x.g.shots||[]).some(s=>s.id===id)); if(c) setSelId(c.id); } }))));
   }
 window.StageView = StageView;

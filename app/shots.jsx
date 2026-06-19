@@ -64,6 +64,43 @@ const moveOf  = (id)=> SHOT_MOVES.find(x=>x.id===id)  || SHOT_MOVES[0];
 const lensOf  = (id)=> SHOT_LENSES.find(x=>x.id===id) || SHOT_LENSES[3];
 window.shotSizeOf = sizeOf; window.shotAngleOf = angleOf; window.shotMoveOf = moveOf; window.shotLensOf = lensOf;
 
+/* ---- the rolling keyframe CHAIN ----------------------------------------------- */
+/* The keyframe pass renders a scene's shots IN ORDER, each one seeded by the
+   PREVIOUS shot's approved frame so the look AND progressive state (wetness, dirt,
+   damage, wardrobe wear, a face crack introduced late) carry forward down the cut —
+   on top of the locked sheets, which pin identity & set. These three helpers define
+   that order, each shot's predecessor, and how hard the location plate should weigh. */
+
+/* a scene's shots in render order — the order the chain renders and carries state */
+function sceneShotsOrdered(list){
+  return (list||[]).slice().sort((a,b)=>(a.order||0)-(b.order||0) || (a.beatN||0)-(b.beatN||0));
+}
+window.sceneShotsOrdered = sceneShotsOrdered;
+
+/* the shot a given shot CHAINS FROM — its immediate predecessor in render order,
+   whose approved frame seeds this one. null = a chain HEAD: the scene's first shot,
+   or any shot explicitly flagged a fresh start (.anchor — a hard cut mid-scene).
+   A head renders from the locked sheets alone, with no previous-frame seed. */
+function prevShotOf(sh, sceneShots){
+  if(!sh || sh.anchor) return null;               // explicit fresh start (chain break)
+  const ord = sceneShotsOrdered(sceneShots);
+  const i = ord.findIndex(s=>s.id===sh.id);
+  return i>0 ? ord[i-1] : null;                    // i<=0 → first shot = head
+}
+window.prevShotOf = prevShotOf;
+/* convenience: is this shot a chain head (no predecessor to seed from)? */
+function isShotHead(sh, sceneShots){ return !prevShotOf(sh, sceneShots); }
+window.isShotHead = isShotHead;
+
+/* how hard the location plate weighs, by shot size: the set is the SUBJECT of a wide
+   (its geography must read) but only a background/grade anchor in a tight close-up,
+   where the character is the subject. Drives the prompt's location lock AND the order
+   references are attached in (wides lead with the set, tights lead with the cast). */
+function locWeightForSize(sizeId){
+  return (["MCU","CU","ECU","INSERT"].indexOf(sizeId)>=0) ? "ambient" : "primary";
+}
+window.locWeightForSize = locWeightForSize;
+
 /* a one-line human label for a shot's grammar, e.g. "MS · Low angle · Push in · 50mm" */
 function shotGrammarLabel(sh){
   return [sizeOf(sh.size).label, angleOf(sh.angle).label, moveOf(sh.move).label, lensOf(sh.lens).label].join(" · ");
@@ -196,8 +233,61 @@ function shotLocationClause(location){
 }
 window.shotLocationClause = shotLocationClause;
 
+/* Preserve screen direction through the rolling chain. Shot specs are drafted
+   before frames exist, so their prose can contradict the approved predecessor
+   (e.g. "Vanya right-of-frame" after she was established left). Read explicit
+   sides from the previous shot's blocking, infer the opposite side for a
+   two-person setup, and remove contradictory side clauses from this prompt. */
+function shotScreenDirection(prevShot, subjects, composition){
+  if(!prevShot || !(subjects||[]).length) return { composition, clause:"" };
+  const prior = [prevShot.composition, prevShot.action].filter(Boolean).join(". ");
+  const esc = (s)=>String(s||"").replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const aliases = (c)=>{
+    const full=String(c.name||"").trim();
+    const bits=full.split(/[\s_-]+/).filter(Boolean);
+    return Array.from(new Set([full, bits[0], bits.length>1?bits[bits.length-1]:""].filter(Boolean)));
+  };
+  const sides = {};
+  (subjects||[]).forEach(c=>{
+    let best=null;
+    aliases(c).some(name=>{
+      const re = new RegExp("\\b"+esc(name)+"\\b([^.;]{0,55})","i");
+      const m = prior.match(re);
+      if(!m) return false;
+      const side = m[1].match(/\b(left|right)(?:[- ](?:of[- ]frame|hand|side|third))?\b/i);
+      if(side){ best=side[1].toLowerCase(); return true; }
+      return false;
+    });
+    if(best) sides[c.id]=best;
+  });
+  const known = Object.keys(sides);
+  if((subjects||[]).length===2 && known.length===1){
+    const other = subjects.find(c=>!sides[c.id]);
+    if(other) sides[other.id] = sides[known[0]]==="left" ? "right" : "left";
+  }
+  if(!Object.keys(sides).length) return { composition, clause:"" };
+
+  // Drop only comma/semicolon clauses that attach a conflicting side to a named
+  // character. The rest of the composition (depth, lens falloff, smoke, etc.) stays.
+  const chunks = String(composition||"").split(/([,;])/);
+  const kept = [];
+  for(let i=0;i<chunks.length;i+=2){
+    const text=chunks[i]||"", sep=chunks[i+1]||"";
+    const names=(subjects||[]).some(c=>aliases(c).some(n=>new RegExp("\\b"+esc(n)+"\\b","i").test(text)));
+    const hasSide=/\b(left|right)(?:[- ](?:of[- ]frame|hand|side|third))?\b/i.test(text);
+    if(!(names&&hasSide)){ kept.push(text); if(sep) kept.push(sep); }
+  }
+  let cleanComp=kept.join("").replace(/^[,;\s]+|[,;\s]+$/g,"").replace(/([,;])\s*([,;])/g,"$1").trim();
+  const sideText=(subjects||[]).filter(c=>sides[c.id]).map(c=>(c.name||"Subject")+" remains on the "+sides[c.id]+" side of frame").join("; ");
+  return {
+    composition:cleanComp,
+    clause:"SCREEN DIRECTION CONTINUITY: match the previous approved frame's axis and eyelines; "+sideText+". Do not flip or mirror their established positions.",
+  };
+}
+window.shotScreenDirection = shotScreenDirection;
+
 /* ---- THE COMPOSER: a shot → one final image prompt ---------------------------- */
-/* ctx = { scene, location, charById, propById, project } */
+/* ctx = { scene, location, charById, propById, project, prevShot } */
 function buildShotPrompt(sh, ctx){
   ctx = ctx || {};
   const scene = ctx.scene || {};
@@ -210,81 +300,84 @@ function buildShotPrompt(sh, ctx){
   const subjects = ((typeof inFrameCast==="function") ? inFrameCast(sh, scene, _chars) : (sh.subjects||[])).map(id=>charById[id]).filter(Boolean);
   const props    = ((typeof inFrameProps==="function") ? inFrameProps(sh, scene, charById, propById) : (sh.props||[])).map(id=>propById[id]).filter(Boolean);
   const size = sizeOf(sh.size), angle = angleOf(sh.angle), move = moveOf(sh.move), lens = lensOf(sh.lens);
+  const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
 
-  /* JSON shot spec \u2014 the continuity database in prompt form: every entity is a
-     key:value object, props carry worn_by / carried_by, every reference image is
-     named so the model ties each mention to its attachment. All previous content
-     survives as fields (camera grammar, action, dialogue, depth framing, location
-     lock, grade, film stock, negative). */
-  const clean = (x)=>String(x||"").replace(/\.$/,"").trim();
+  /* PROSE, not JSON. The user's structure: a constant STYLE SPINE (render mode, grade,
+     60/30/10 palette, grade-lighting, lens, film stock, the locked location, format)
+     pasted verbatim into every shot in the scene; then the one STAGING LINE that
+     changes per shot (camera + action + cast + depth + dialogue); then the named
+     REFERENCE stack (the attached sheets + the rolling seed) and the constraints.
+     Same data the old JSON spec carried, re-emitted as prose. */
+  const clean = (x)=>String(x||"").replace(/\s+/g," ").trim().replace(/\.$/,"");
   const preset = (typeof scenePreset==="function") ? scenePreset(ctx.project, scene.id) : null;
   const _asp = (typeof aspectFor==="function") ? aspectFor(ctx.project) : "16:9";
-  const lockLook = (c)=>{ const look=(typeof sbCharLock==="function")?sbCharLock(c):"";
-    return clean(look.replace(/^[^:]{1,40}:\s*/,"")) || undefined; };
-  const spec = {
-    task: "a single cinematic film FRAME \u2014 one shot from a live-action feature",
-    camera: {
-      size: size.name+" ("+size.desc+")",
-      angle: angle.label+" ("+angle.desc+")",
-      lens: lens.label+" ("+lens.desc+")",
-      movement: (sh.move && sh.move!=="static") ? (move.label+" ("+move.desc+")") : "static",
-    },
-    action: {
-      what_happens: clean(sh.action) || undefined,
-      dialogue_mid_line: clean(sh.dialogue).replace(/^["\u201c]|["\u201d]$/g,"") || undefined,
-      composition: clean(sh.composition) || undefined,
-    },
-    characters: subjects.length ? subjects.map(c=>({
-      name: c.name,
-      look: lockLook(c),
-      reference_image: c.name+" character sheet",
-      match: "EXACTLY \u2014 face, hair, wardrobe, identity; do not redesign",
-    })) : undefined,
-    props: props.length ? props.map(p=>{
-      const o = { name: p.name };
-      if(p.ownerName) o[(p.kind==="worn")?"worn_by":"carried_by"] = p.ownerName;
-      o.reference_image = p.name+" prop sheet";
-      o.match = "exactly as designed";
-      return o;
-    }) : undefined,
-    // continuity carry-forward: props established earlier in the scene that this beat's text
-    // doesn't re-name but are still present (the ledger) — so they don't pop out of the cut.
-    carried_forward: (ctx.carriedForward && ctx.carriedForward.length) ? ctx.carriedForward.map(p=>({
-      name: p.name,
-      held_by: p.ownerName || undefined,
-      note: "still present from an earlier beat of this scene — keep it in frame, consistent with its sheet, unless the action shows it set down",
-      reference_image: p.name+" prop sheet",
-    })) : undefined,
-    location: loc ? {
-      name: loc.name||"the location",
-      int_ext: loc.intExt||"INT",
-      space: clean(loc.architecture) || undefined,
-      materials_palette: clean(loc.materials) || undefined,
-      light: clean(loc.lighting) || undefined,
-      reference_image: (loc.name||"location")+" location coverage sheet",
-      lock: "the reference is a MULTI-VIEW coverage sheet \u2014 multiple photographs of ONE single real set; reproduce THAT EXACT set from this shot's viewpoint: identical architecture, surfaces, fixtures and signage text in the same spelling and positions; never invent a different-looking space",
-    } : undefined,
-    depth_framing: clean(shotFramingClause(loc, sh.size)) || undefined,
-    style: preset ? {
-      grade_name: preset.name,
-      grade: clean(preset.grade) || undefined,
-      palette_60_30_10: (preset.palette||[]).length>=3 ? {
-        dominant_60: (preset.dominantLabel||"dominant")+" "+preset.palette[0],
-        secondary_30: (preset.secondaryLabel||"secondary")+" "+preset.palette[1],
-        accent_10: (preset.accentLabel||"accent")+" "+preset.palette[2],
-      } : undefined,
-      lighting: clean(preset.lighting)||undefined,
-      lens: clean(preset.lens)||undefined,
-      texture: clean(preset.texture)||undefined,
-    } : undefined,
-    film_stock: (typeof filmStockClause==="function") ? (clean(filmStockClause(ctx.project))||undefined) : undefined,
-    format: {
-      frame: "a single "+(_asp==="9:16"?"VERTICAL 9:16 (phone)":_asp)+" frame",
-      rules: ["photoreal, filmic, natural production lighting","no text, no watermark, no split panels \u2014 a single frame"],
-    },
-    negative: shotNegativePrompt(sh).split(/,\s*/),
-  };
-  return "Render a single cinematic film frame EXACTLY as specified by this JSON shot spec (continuity fields are binding):\n"+JSON.stringify(spec, null, 1);
+
+  // ---- THE STYLE SPINE (constant; pasted into every shot) ----
+  const spine = [];
+  spine.push("Cinematic live-action photorealistic still" + ((preset && clean(preset.texture)) ? (", "+clean(preset.texture)) : ", subtle 35mm film grain"));
+  if(preset){
+    const gName = clean(preset.name), gTxt = clean(preset.grade);
+    if(gName && gTxt) spine.push('"'+gName+'" grade: '+gTxt);
+    else if(gTxt) spine.push(gTxt);
+    else if(gName) spine.push('"'+gName+'" grade');
+    const pal = preset.palette||[];
+    if(pal.length>=3) spine.push("Colour follows 60/30/10 — ~60% "+clean(preset.dominantLabel||"dominant")+" "+pal[0]
+      +", ~30% "+clean(preset.secondaryLabel||"secondary")+" "+pal[1]
+      +", ~10% "+clean(preset.accentLabel||"accent")+" "+pal[2]+" accent");
+    if(clean(preset.lighting)) spine.push(clean(preset.lighting));
+    if(clean(preset.lens))     spine.push(clean(preset.lens));
+  }
+  const _stock = (typeof filmStockClause==="function") ? clean(filmStockClause(ctx.project)) : "";
+  if(_stock) spine.push(_stock);
+  if(loc){
+    const _intext = (loc.intExt==="EXT") ? "Exterior" : (loc.intExt==="INT" ? "Interior" : clean(loc.intExt));
+    const _locBits = [clean(loc.architecture), clean(loc.materials), clean(loc.lighting)].filter(Boolean).join(", ");
+    spine.push((_intext?(_intext+". "):"") + (loc.name||"the location") + (_locBits?(": "+_locBits):""));
+  }
+  spine.push((_asp==="9:16"?"Vertical 9:16 (phone frame)":_asp) + ", no text, no border");
+  const STYLE_SPINE = spine.filter(Boolean).join(". ").replace(/\.\s*\./g,".") + ".";
+
+  // ---- THE STAGING LINE (the only part that changes per shot) ----
+  const SIZE_PHRASE = { EWS:"Extreme wide shot", WS:"Wide shot", FS:"Full shot", MWS:"Medium-wide shot",
+    MS:"Medium shot", MCU:"Medium close-up", CU:"Close-up", ECU:"Extreme close-up", INSERT:"Insert shot" };
+  const camBits = [ SIZE_PHRASE[sh.size] || (size.name+" shot"), clean(angle.label).toLowerCase(), clean(lens.label) ];
+  if(sh.move && sh.move!=="static") camBits.push(clean(move.label).toLowerCase());
+  const cap = (s)=> s ? (s.charAt(0).toUpperCase()+s.slice(1)) : s;
+  const screenDir = shotScreenDirection(ctx.prevShot, subjects, sh.composition);
+  const stage = [ camBits.join(", ") ];
+  if(clean(sh.action))      stage.push(cap(clean(sh.action)));
+  if(clean(screenDir.composition)) stage.push(cap(clean(screenDir.composition)));
+  if(clean(screenDir.clause)) stage.push(clean(screenDir.clause));
+  const _depth = (typeof shotFramingClause==="function") ? clean(shotFramingClause(loc, sh.size)) : "";
+  if(_depth) stage.push(_depth);
+  const _dlg = clean(sh.dialogue).replace(/^["“]|["”]$/g,"");
+  if(_dlg) stage.push('Caught mid-line as the character speaks "'+_dlg+'"');
+  const STAGING = stage.join(". ") + ".";
+
+  // ---- THE NUMBERED IMAGE MAP (the FIRST thing in the prompt) — tells the generator
+  // which attached file is which, BY POSITION. The order MUST mirror the real attachment
+  // order in collectShotRefs (shots-ui.jsx) and generateShotFrame: the seed (previous
+  // approved frame) leads as Image 1 when present, then the sheets by location weight
+  // (wide → set first; tight → cast first), then props, then carried-forward. ----
+  const imgs = [];
+  if(ctx.prevFrameRole) imgs.push("the PREVIOUS approved frame — carry its colour grade, lighting and every established physical state (wardrobe wear, wetness, dirt, damage) forward exactly, but do NOT copy its framing");
+  const _locLabel = loc ? ((loc.name||"the location")+" location plate — "
+    + (locWeight==="ambient" ? "a background reference for the grade and surfaces only; the character fills this tight frame" : "reproduce its architecture, surfaces, fixtures and signage exactly")) : null;
+  const _castLabels = subjects.map(c=> c.name+"'s character sheet — match the face, build, hair and wardrobe exactly");
+  const _propLabels = props.map(p=> "the "+p.name+" (prop sheet"+(p.ownerName?(", "+((p.kind==="worn")?"worn by ":"carried by ")+p.ownerName):"")+") — match it exactly as designed");
+  const _carriedLabels = (ctx.carriedForward||[]).map(p=> "the "+p.name+" (prop sheet) — still in frame from an earlier beat; keep it present, matching its sheet");
+  if(locWeight==="ambient"){ _castLabels.forEach(l=>imgs.push(l)); if(_locLabel) imgs.push(_locLabel); }
+  else { if(_locLabel) imgs.push(_locLabel); _castLabels.forEach(l=>imgs.push(l)); }
+  _propLabels.forEach(l=>imgs.push(l));
+  _carriedLabels.forEach(l=>imgs.push(l));
+  const MAP = imgs.length
+    ? ("Compose a new cinematic still. " + imgs.map((m,i)=>"Image "+(i+1)+" is "+m+".").join(" "))
+    : "Compose a new cinematic still.";
+
+  // ---- ASSEMBLE: image map, then the style spine, then the staging line, then constraints ----
+  let out = MAP + "\n\n" + STYLE_SPINE + "\n\n— " + STAGING;
+  out += "\n\nConstraints: " + shotNegativePrompt(sh) + ".";
+  return out;
 }
 window.buildShotPrompt = buildShotPrompt;
 
@@ -302,12 +395,10 @@ function combinedShotPrompt(sh, ctx){
 }
 window.combinedShotPrompt = combinedShotPrompt;
 
-/* DERIVE-FROM-ANCHOR — the consistency fix. A fresh text-to-image sample
-   re-synthesizes the whole world every time (references bias, they don't
-   constrain), so independent shots drift in set/light/identity. This prompt
-   instead treats the scene's KEY FRAME as the BASE IMAGE and asks the model to
-   RE-FRAME the same moment — single-sample physics, per shot. The base carries
-   the set, light and grade implicitly; we only restate what changes. */
+/* DERIVE-FROM-ANCHOR — RETIRED. The old star topology re-framed a single scene
+   anchor for every shot; the rolling chain (buildShotPrompt + continuity_anchor,
+   seeded by the previous shot's frame) replaces it because the star can't carry
+   progressive state. Kept only for reference; no longer called. Safe to delete. */
 function deriveShotPrompt(sh, ctx){
   ctx = ctx || {};
   const loc = ctx.location || null;
@@ -348,50 +439,58 @@ function deriveShotPrompt(sh, ctx){
 window.deriveShotPrompt = deriveShotPrompt;
 
 /* HEADLESS shot-frame generation — the Scene Director's primitive (no mounted
-   card). Mirrors ShotCard's pipeline exactly: derive-from-anchor when the
-   scene's key frame exists (fresh sample otherwise), the same reference stack,
-   quality "medium", commit + nb-gen-done so any mounted card adopts the result.
-   opts: { fresh, correction } — correction is the QC repair instruction. */
+   card). Mirrors ShotCard's pipeline exactly: the ROLLING CHAIN — every shot after
+   the scene's head seeds from the PREVIOUS shot's committed frame (so the look AND
+   progressive state carry forward) on top of the locked sheets; the head renders
+   from the sheets alone. References are ordered by the shot's location weight
+   (wides lead with the set, tights with the cast). quality "medium", commit +
+   nb-gen-done so any mounted card adopts the result.
+   opts: { fresh, correction } — fresh ignores the chain seed; correction is the QC repair. */
 async function generateShotFrame(sh, sceneShots, ctx, opts){
   opts = opts || {};
-  const anchorSh = (sceneShots||[]).find(s=>s.anchor) || (sceneShots||[])[0] || null;
-  const isAnchor = !!(anchorSh && anchorSh.id===sh.id);
+  const prevSh = (typeof prevShotOf==="function") ? prevShotOf(sh, sceneShots) : null;
+  const isHead = !prevSh;
   const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
     if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; };
-  const base = (!isAnchor && anchorSh && !opts.fresh) ? await grab(anchorSh.id) : "";
-  // reference stack (the anchor rides as a reference only when it isn't the base)
-  const refs = [];
-  if(!base && !isAnchor && anchorSh){ const u=await grab(anchorSh.id); if(u) refs.push({ url:u, note:"scene key frame" }); }
-  if(ctx.location){ const u=await grab(ctx.location.id); if(u) refs.push({ url:u, note:(ctx.location.name||"location")+" location coverage sheet (multiple views of ONE set)" }); }
-  // identity anchors for the cast actually in THIS frame (derived from the action text)
+  // the SEED: the previous shot's committed frame — the rolling reference (carries grade + state)
+  const seed = (prevSh && !opts.fresh) ? await grab(prevSh.id) : "";
+  const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
+  // the locked-reference sheets for what's actually in THIS frame (derived from the action text)
   const _chars = Object.values(ctx.charById||{});
   const inCast = (typeof inFrameCast==="function") ? inFrameCast(sh, ctx.scene, _chars) : (sh.subjects||[]);
-  for(const id of inCast){ const c=(ctx.charById||{})[id]; if(!c) continue;
-    const u=await grab(id); if(u) refs.push({ url:u, note:c.name+" character sheet" }); }
-  const inPr = (typeof inFrameProps==="function") ? inFrameProps(sh, ctx.scene, ctx.charById, ctx.propById) : (sh.props||[]);
-  for(const id of inPr){ const p=(ctx.propById||{})[id]; if(!p) continue;
-    const u=await grab(id); if(u) refs.push({ url:u, note:p.name+" prop sheet" }); }
+  const inPr   = (typeof inFrameProps==="function") ? inFrameProps(sh, ctx.scene, ctx.charById, ctx.propById) : (sh.props||[]);
   // CONTINUITY LEDGER — props an in-frame character was established holding earlier in the
   // scene that this beat's text doesn't re-name; carry them forward so they don't vanish.
   let carried = [];
   try{ const ledger = sceneContinuityLedger(ctx.scene, sceneShots, ctx.charById, ctx.propById);
     carried = (ledger[sh.id]||[]).filter(pid=> inPr.indexOf(pid)<0); }catch(e){}
-  for(const id of carried){ const p=(ctx.propById||{})[id]; if(!p) continue;
-    const u=await grab(id); if(u) refs.push({ url:u, note:p.name+" prop sheet (carried over from an earlier beat)" }); }
-  ctx = { ...ctx, carriedForward: carried.map(id=>(ctx.propById||{})[id]).filter(Boolean) };
-  let prompt = base ? deriveShotPrompt(sh, ctx) : combinedShotPrompt(sh, ctx);
-  if(refs.length) prompt += " Reference images provided, IN ORDER: "+refs.map(r=>r.note).join("; ")
-    +". Match the corresponding character(s), location and prop(s) to these reference designs EXACTLY (faces, wardrobe, geometry, materials).";
-  if(isAnchor) prompt += " THIS FRAME IS THE SCENE'S KEY FRAME — every other shot in the scene will be derived from it. "
-    +"Lock it to the location coverage sheet exactly (ONE real set, multiple views): its architecture, surfaces, signage and light define the scene's look.";
-  if(opts.correction) prompt += " CORRECTIONS (the previous attempt failed visual QC): "+opts.correction.replace(/\.$/,"")+".";
-  const gopts = { aspectRatio:(typeof aspectFor==="function") ? aspectFor(ctx.project) : "16:9", quality:"medium" };
-  if(base) gopts.referenceImage = base;
+  // build the sheet-reference specs, then ORDER by location weight
+  const locSpec  = ctx.location ? [{ id:ctx.location.id, note:(ctx.location.name||"location")+" location coverage sheet (multiple views of ONE set)" }] : [];
+  const castSpec = inCast.map(id=>{ const c=(ctx.charById||{})[id]; return c?{ id, note:c.name+" character sheet" }:null; }).filter(Boolean);
+  const propSpec = inPr.map(id=>{ const p=(ctx.propById||{})[id]; return p?{ id, note:p.name+" prop sheet" }:null; }).filter(Boolean);
+  const carrySpec= carried.map(id=>{ const p=(ctx.propById||{})[id]; return p?{ id, note:p.name+" prop sheet (carried over from an earlier beat)" }:null; }).filter(Boolean);
+  const orderedSpecs = (locWeight==="ambient")
+    ? [...castSpec, ...locSpec, ...propSpec, ...carrySpec]   // tight: the cast leads, the set recedes
+    : [...locSpec, ...castSpec, ...propSpec, ...carrySpec];  // wide: the set leads
+  const refs = [];
+  for(const s of orderedSpecs){ const u=await grab(s.id); if(u) refs.push({ url:u, note:s.note }); }
+  // buildShotPrompt now emits the STYLE SPINE + staging + the named reference stack itself
+  // (it reads ctx.carriedForward + ctx.prevFrameRole), so we don't re-list references here.
+  ctx = { ...ctx, carriedForward: carried.map(id=>(ctx.propById||{})[id]).filter(Boolean),
+    prevFrameRole: !!seed, prevShot:seed?prevSh:null };
+  let prompt = combinedShotPrompt(sh, ctx);
+  if(opts.correction) prompt += "\n\nCORRECTIONS (the previous attempt failed visual QC): "+opts.correction.replace(/\.$/,"")+".";
+  const gopts = {
+    aspectRatio:(typeof aspectFor==="function") ? aspectFor(ctx.project) : "16:9",
+    quality:"medium",
+    referenceMaxDim:768,
+  };
+  if(seed) gopts.referenceImage = seed;
   if(refs.length) gopts.extraImages = refs.map(r=>r.url);
   const url = await nbGenerate(prompt, gopts);
   const now = new Date();
   const prior = (typeof nbGetMeta==="function") ? (nbGetMeta(sh.id)||{}) : {};
-  const meta = { ...prior, mode: base?"base":"final", prompt, director:true,
+  const meta = { ...prior, mode: seed?"base":"final", prompt, director:true,
     date:now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
     time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}), iso:now.toISOString(),
     version:((prior.version||0)+1), ...(opts.correction?{editInstruction:opts.correction}:{}) };
@@ -504,8 +603,9 @@ window.sceneRoster = sceneRoster;
    body); (b) a prop NAMED in the action text. Naming requires a strong match — for a
    multi-word name, at least TWO of its significant words must appear (so "forearm latch"
    in the action picks "Forearm maintenance latch" but not "Seized door latch", which only
-   shares the generic word "latch"). Candidates are tied to the scene (owner in frame, or
-   mapped to this scene, or ownerless set dressing). Stored prop tags are NOT a source —
+   shares the generic word "latch"). Candidates are tied to the scene (owner in frame, mapped
+   to this scene, or UNMAPPED ownerless set dressing — a prop mapped to OTHER scenes can't
+   leak in). Stored prop tags are NOT a source —
    they were the unreliable input the action text now replaces. */
 function inFrameProps(sh, scene, charById, propById){
   const props = Object.values(propById||{});
@@ -522,8 +622,12 @@ function inFrameProps(sh, scene, charById, propById){
     const hits = words.filter(w=> t.indexOf(" "+w+" ")>=0).length;
     const strong = hits >= Math.min(2, words.length);   // multi-word name needs 2 hits
     if(!strong) return;
-    const tied = ownerIn || (scene && Array.isArray(p.scenes) && p.scenes.indexOf(scene.id)>=0) || !p.ownerId;
-    if(tied) out.push(p.id);
+    // tied to THIS scene when: owner in frame, OR mapped to this scene, OR it's ownerless
+    // set dressing with NO scene mapping at all (truly global). An ownerless prop mapped to
+    // OTHER scenes is NOT global — it must not leak in here just because its name matches.
+    const mappedHere = !!(scene && Array.isArray(p.scenes) && p.scenes.indexOf(scene.id)>=0);
+    const globalDressing = !p.ownerId && !(Array.isArray(p.scenes) && p.scenes.length);
+    if(ownerIn || mappedHere || globalDressing) out.push(p.id);
   });
   return out;
 }

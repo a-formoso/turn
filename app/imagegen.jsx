@@ -28,7 +28,7 @@ const _imageProxyOn = !!(window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxy
 const NB_MODELS = [
   { id:"gemini-3.1-flash-image", label:"Nano Banana 2",   provider:"google", note:"fast \u00b7 high quality" },
   { id:"gemini-3-pro-image",     label:"Nano Banana Pro", provider:"google", note:"highest fidelity" },
-  ...(_imageProxyOn ? [{ id:"gpt-image-2-2026-04-21", label:"GPT Image 2", provider:"openai", via:"proxy", note:"server-side \u00b7 in-image text" }] : []),
+  ...(_imageProxyOn ? [{ id:"gpt-image-2", label:"GPT Image 2", provider:"openai", via:"proxy", note:"server-side \u00b7 in-image text" }] : []),
 ];
 const NB_ASPECTS = ["16:9","21:9","9:16"];
 const NB_RESOLUTIONS = ["1K","2K","4K"];
@@ -37,7 +37,18 @@ window.NB_MODELS = NB_MODELS; window.NB_ASPECTS = NB_ASPECTS; window.NB_RESOLUTI
 function nbGetKey(){ try{ return localStorage.getItem(NB_KEY)||""; }catch(e){ return ""; } }
 function nbSetKey(k){ try{ k=(typeof sanitizeKey==="function"?sanitizeKey(k):k); k ? localStorage.setItem(NB_KEY,k) : localStorage.removeItem(NB_KEY); }catch(e){} }
 function nbHasKey(){ return !!nbGetKey(); }
-function nbGetModel(){ try{ const s=localStorage.getItem(NB_MODEL_KEY); if(s && NB_MODELS.find(m=>m.id===s)) return s; if(s){ try{ localStorage.setItem(NB_MODEL_KEY, NB_MODELS[0].id); }catch(e){} } return NB_MODELS[0].id; }catch(e){ return NB_MODELS[0].id; } }
+function nbGetModel(){ try{
+  let s=localStorage.getItem(NB_MODEL_KEY);
+  // Preserve GPT Image selection across the move from the dated preview id to
+  // OpenAI's stable public alias instead of silently falling back to Nano Banana.
+  if(/^gpt-image-2-\d{4}-\d{2}-\d{2}$/.test(s||"") && NB_MODELS.find(m=>m.id==="gpt-image-2")){
+    s="gpt-image-2";
+    localStorage.setItem(NB_MODEL_KEY,s);
+  }
+  if(s && NB_MODELS.find(m=>m.id===s)) return s;
+  if(s){ try{ localStorage.setItem(NB_MODEL_KEY, NB_MODELS[0].id); }catch(e){} }
+  return NB_MODELS[0].id;
+}catch(e){ return NB_MODELS[0].id; } }
 function nbSetModel(m){ try{ localStorage.setItem(NB_MODEL_KEY,m); }catch(e){} }
 function nbGetAspect(){ try{ const a=localStorage.getItem(NB_AR_KEY)||"16:9"; return (NB_ASPECTS.indexOf(a)>=0)?a:"16:9"; }catch(e){ return "16:9"; } }
 function nbSetAspect(a){ try{ localStorage.setItem(NB_AR_KEY,a); }catch(e){} }
@@ -704,6 +715,38 @@ async function downscaleRef(dataUrl, maxDim, quality){
   }catch(e){ return dataUrl; }
 }
 window.downscaleRef = downscaleRef;
+
+/* GPT Image's landscape/portrait Image API canvases are 3:2 / 2:3 even when
+   TURN requests a cinematic ratio. Crop the returned pixels to the exact chosen
+   ratio before committing the asset, so a frame labelled 16:9 really is 16:9.
+   This is a crop only (no stretch, no invented pixels). */
+async function cropImageToAspect(src, aspect){
+  const ratios = { "16:9":16/9, "21:9":21/9, "9:16":9/16, "1:1":1 };
+  const target = ratios[aspect];
+  if(!src || !target) return src;
+  return await new Promise((resolve,reject)=>{
+    const img = new Image();
+    if(/^https?:/i.test(src)) img.crossOrigin = "anonymous";
+    img.onload = ()=>{
+      try{
+        const w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+        if(!w||!h){ reject(new Error("The generated image has no readable dimensions.")); return; }
+        if(Math.abs((w/h)-target)<0.005){ resolve(src); return; }
+        let sx=0, sy=0, sw=w, sh=h;
+        if(w/h>target){ sw=Math.round(h*target); sx=Math.round((w-sw)/2); }
+        else { sh=Math.round(w/target); sy=Math.round((h-sh)/2); }
+        const cv=document.createElement("canvas"); cv.width=sw; cv.height=sh;
+        cv.getContext("2d").drawImage(img,sx,sy,sw,sh,0,0,sw,sh);
+        const out=cv.toDataURL("image/png");
+        if(!out || out==="data:,"){ reject(new Error("The generated frame could not be normalized to "+aspect+".")); return; }
+        resolve(out);
+      }catch(e){ reject(new Error("The generated frame could not be normalized to "+aspect+": "+((e&&e.message)||e))); }
+    };
+    img.onerror=()=>reject(new Error("The generated frame could not be read for "+aspect+" normalization."));
+    img.src=src;
+  });
+}
+
 /* Generate through the SERVER-SIDE proxy (Supabase Edge Function), provider-agnostic.
    The browser never holds a provider key and never calls the provider directly — it
    calls our `image-proxy` function, which holds the key as a server secret and makes
@@ -723,7 +766,8 @@ async function proxyGenerate(prompt, opts, provider){
   if(opts.referenceImage) refs.push(opts.referenceImage);
   if(opts.extraImages && opts.extraImages.length) refs.push(...opts.extraImages);
   const images = [];
-  for(const src of refs){ let du = await oaiToDataUrl(src); if(du) du = await downscaleRef(du); if(du) images.push(du); }
+  const referenceMaxDim = Math.max(512, Math.min(1536, Number(opts.referenceMaxDim)||1024));
+  for(const src of refs){ let du = await oaiToDataUrl(src); if(du) du = await downscaleRef(du, referenceMaxDim); if(du) images.push(du); }
 
   const sb = (typeof window.sbClient==="function") ? window.sbClient() : null;
   if(!sb || !sb.functions){
@@ -758,8 +802,11 @@ async function proxyGenerate(prompt, opts, provider){
   }
   if(data && data.error) throw new Error(data.error);          // provider error relayed by the proxy
   if(opts.metaOut && data && typeof data.grounded!=="undefined") opts.metaOut.grounded = !!data.grounded;
-  if(data && data.b64) return "data:"+(data.mime||"image/png")+";base64,"+data.b64;
-  if(data && data.url) return data.url;
+  // Provider-native landscape/portrait canvases are not always TURN's selected
+  // ratio (GPT Image landscape is 3:2). Normalize BEFORE returning, so callers
+  // can only commit a frame whose pixels match its 16:9 / 9:16 / 21:9 label.
+  if(data && data.b64) return await cropImageToAspect("data:"+(data.mime||"image/png")+";base64,"+data.b64, aspect);
+  if(data && data.url) return await cropImageToAspect(data.url, aspect);
   throw new Error("The proxy returned no image. Try simplifying the prompt.");
 }
 async function oaiGenerate(prompt, opts){ return proxyGenerate(prompt, opts||{}, "openai"); }
@@ -807,9 +854,10 @@ async function nbGenerate(prompt, opts){
     }
     res = await fetch(endpoint+"?key="+encodeURIComponent(key), {
       method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify(reqBody)
+      body: JSON.stringify(reqBody), signal: opts.signal
     });
   }catch(e){
+    if(e && (e.name==="AbortError" || opts.signal && opts.signal.aborted)) throw e;   // user cancelled — propagate as-is
     if(typeof navigator!=="undefined" && navigator.onLine===false)
       throw new Error("You appear to be offline. Reconnect and try again.");
     throw new Error("Couldn't reach Google's image API. Check your connection and try again.");
