@@ -1654,6 +1654,21 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
       +"Do not replace or re-imagine the character.",
   });
 
+  // SCALE SHEET — the height-chart asset (its own slot). Rendered FROM the master sheet so
+  // identity matches, on a PORTRAIT canvas, with the ruler markings for this character's
+  // scale class. The generate button forces 9:16 regardless of the engine-dock aspect.
+  const scaleSheetGen = useImageGen({
+    id: "charscale-"+c.id, slotId: "charscale-"+c.id,
+    buildFinal:    ()=> (typeof buildScaleSheetPrompt==="function") ? buildScaleSheetPrompt(c) : "",
+    buildSimple:   ()=> (typeof buildScaleSheetPrompt==="function") ? buildScaleSheetPrompt(c) : "",
+    buildFromBase: ()=> (typeof buildScaleSheetPrompt==="function") ? buildScaleSheetPrompt(c) : "",
+    referenceFallback: async ()=>{ let u=(typeof nbGetImage==="function")?nbGetImage(c.id):"";
+      if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(c.id); }catch(e){} } return u||null; },
+    referenceMaxDim: 768,
+    buildEdit: (instr)=> "Edit this height/scale chart. Apply ONLY this change: "+instr+". Keep the figure, the vertical ruler and its markings otherwise identical.",
+  });
+  const scaleGenWrapped = Object.assign({}, scaleSheetGen, { generate:(o)=>scaleSheetGen.generate({ aspectRatio:"9:16", ...(o||{}) }) });
+
   // batch generation: when this card is the active queue member, fire one generate
   // and report back when it settles (mirrors the Props/Locations cards).
   const batchStarted = React.useRef(false);
@@ -1904,6 +1919,14 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
         React.createElement("div",{className:"sheet-field"},
           React.createElement("div",{className:"obj-lab"},"Colour palette \u00b7 base \u2192 climax"),
           React.createElement(PaletteRow,{palette}))),
+
+      React.createElement(CardFold,{label:"Scale sheet",defaultOpen:false},
+        React.createElement("div",{className:"char-scalesheet-hint"},
+          React.createElement(Icon.sparkles,{s:11}),
+          "A full-body height chart on the "+((typeof scaleInfoOf==="function")?scaleInfoOf(c).label:"Human")+" ruler \u2014 rendered from the master sheet. Used as the scale reference in shots; set the class in Identity \u25b8 Scale."),
+        React.createElement(SheetFrame,{ gen:scaleGenWrapped, slotId:"charscale-"+c.id, name:(c.name||"")+" \u00b7 scale", avatarColor:c.color,
+          initials:"H", drafted:true, drafting:false, onDraft:()=>{}, entity:c, onView,
+          slotPlaceholder:"Generate the height chart", noun:"scale sheet", dropToImport:true })),
 
       React.createElement(CardFold,{label:"Master reference prompt",defaultOpen:false},
         React.createElement(CopyBox,{label:"10-panel grid \u2014 feed to your image tool",text:promptText}),
@@ -2165,6 +2188,19 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
   // style per character (each unique), so it confirms the per-character AI cost first.
   const [allStyling, setAllStyling] = React.useState(null);   // null | {i,total}
   const cast = characters || [];
+  // CAST SCALE CHART — the whole cast on one shared ruler at true relative heights (the
+  // relative-scale anchor for shots). References every character's master sheet. Wide canvas.
+  const castChartId = "castscale-"+((project&&project.id)||"film");
+  const castGen = useImageGen({
+    id: castChartId, slotId: castChartId,
+    buildFinal:  ()=> (typeof buildCastChartPrompt==="function") ? buildCastChartPrompt(cast) : "",
+    buildSimple: ()=> (typeof buildCastChartPrompt==="function") ? buildCastChartPrompt(cast) : "",
+    attachments: async ()=>{ const out=[]; for(const c of cast){ let u=(typeof nbGetImage==="function")?nbGetImage(c.id):"";
+      if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(c.id); }catch(e){} }
+      if(u) out.push({ url:u, note:c.name+(c.height?(" — "+c.height):"") }); } return out; },
+    attachmentsText: ()=>"", referenceMaxDim: 640,
+  });
+  const genCastChart = ()=> castGen.generate({ aspectRatio:"21:9" });
   const allStyleKey = (cast.length && cast.every(c=>(c.renderStyleKey||"photoreal")===(cast[0].renderStyleKey||"photoreal")))
     ? (cast[0].renderStyleKey||"photoreal") : "";
   const applyStyleAll = async (key)=>{
@@ -2297,7 +2333,18 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":(eligibleAll>0?"Draft remaining":"Draft all characters")),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the reference sheet for every drafted character \u2014 you choose whether to redo ones that already have a sheet"},
-            React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all characters")))),
+            React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all characters"),
+          // CAST SCALE CHART \u2014 one shared-ruler height comparison of the whole cast
+          cast.length>1 && ((castGen.genUrl && !castGen.gening)
+            ? React.createElement(React.Fragment,null,
+                React.createElement("button",{className:"art-draftall ghost",onClick:()=>setView({url:castGen.genUrl,character:{name:"Cast scale chart"}}),
+                  title:"View the cast scale chart (the cast on one shared ruler)"},
+                  React.createElement(Icon.image,{s:14}),"Cast scale chart"),
+                React.createElement("button",{className:"art-draftall ghost",onClick:genCastChart,title:"Regenerate the cast scale chart"},
+                  React.createElement(Icon.undo,{s:13})))
+            : React.createElement("button",{className:"art-draftall ghost",disabled:castGen.gening,onClick:genCastChart,
+                title:"Generate a shared-ruler height comparison of the whole cast \u2014 the relative-scale anchor for shots"},
+                React.createElement(Icon.sparkles,{s:14}), castGen.gening?"Charting\u2026":"Cast scale chart"))))),
     list.length>0 && React.createElement("div",{className:"prop-toolbar"},
       React.createElement("div",{className:"prop-searchbar"},
         React.createElement(Icon.search,{s:14}),

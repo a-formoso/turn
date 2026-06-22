@@ -231,6 +231,40 @@ function shotScaleClause(subjects){
 window.SCALE_CLASSES = SCALE_CLASSES; window.scaleClassOf = scaleClassOf;
 window.scaleInfoOf = scaleInfoOf; window.shotScaleClause = shotScaleClause;
 
+/* The SCALE SHEET prompt (the user's "height chart" / Option A): a full-body front view
+   beside a vertical ruler whose markings come from the entity's scale class. Built from the
+   character's body + texture + height; rendered FROM the master sheet so identity matches. */
+function buildScaleSheetPrompt(c){
+  const info = scaleInfoOf(c);
+  const clean = (x)=>String(x||"").replace(/\s+/g," ").trim().replace(/\.$/,"");
+  const body = clean(c && (c.coreBody||c.look)) || "the character";
+  const tex  = clean(c && c.materialTexture);
+  const ht   = clean(c && c.height);
+  const ruler = info.ruler.join(", ");
+  return "A full-body FRONT view of "+body+(tex?(", "+tex):"")+". "
+    + (ht?("The figure is "+ht+" tall. "):"")
+    + "They stand in a relaxed, neutral pose, head to toe fully in frame, against a solid light-grey studio background, "
+    + "directly beside a VERTICAL measurement bar positioned on the LEFT edge. "
+    + "The bar strictly displays height markings for "+ruler+" in clear black text. "
+    + "Soft, even studio lighting, sharp focus. No text anywhere except the ruler's numeric markings.";
+}
+window.buildScaleSheetPrompt = buildScaleSheetPrompt;
+
+/* The CAST SCALE CHART prompt: the whole cast lined up against ONE shared ruler at TRUE
+   relative heights — the relative-scale anchor for shots. Each figure matches its sheet. */
+function buildCastChartPrompt(characters){
+  const list = (characters||[]).filter(Boolean);
+  const lines = list.map(c=>{ const info=scaleInfoOf(c); const h=String(c.height||"").trim();
+    return (c.name||"a figure")+" ("+(h?(h+", "):"")+info.short+")"; });
+  const hasGiant = list.some(c=>scaleClassOf(c)==="C");
+  const ruler = (hasGiant ? SCALE_CLASSES.C.ruler : SCALE_CLASSES.A.ruler).join(", ");
+  return "A character SCALE COMPARISON CHART. The following characters stand side by side in a single line-up — full-body FRONT views against a solid light-grey studio background — measured against ONE shared VERTICAL ruler on the LEFT marked "+ruler+" in clear black text. "
+    + "Render every character at their TRUE RELATIVE height so the size differences are obvious (giants tower over the line; critters are tiny beside the others). "
+    + "Each figure matches its reference sheet exactly — face, build and wardrobe. "
+    + "Left to right: "+lines.join("; ")+". Soft, even studio lighting; no text anywhere except the ruler markings.";
+}
+window.buildCastChartPrompt = buildCastChartPrompt;
+
 /* props that appear in a scene (their scene chips include this scene) */
 function propsForScene(props, sceneId){
   return (props||[]).filter(p=> Array.isArray(p.scenes) && p.scenes.indexOf(sceneId)>=0);
