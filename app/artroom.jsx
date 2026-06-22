@@ -118,6 +118,16 @@ const CHAR_RENDER_STYLES = {
     "background": "seamless soft warm light-cream studio sweep with a gentle gradient and a soft grounded contact shadow under the feet",
     "rules": ["no text, labels, watermarks, annotations, typography or captions","clean high-sample render, appealing animated-feature finish, no noise","lively expression and personality, not a stiff neutral sculpt","consistent shaders and lighting across all panels","clean, evenly divided panel layout"]
   },
+  pixar: {
+    "rendering": "high-end Pixar-style animated-feature 3D character render — appealing stylized proportions (slightly oversized head and large expressive eyes, soft rounded forms), physically-based shading with soft subsurface scattering and fine peach-fuzz on skin, clean polished surfaces, ray-traced soft shadows and warm global illumination",
+    "engine_look": "top-tier animated-movie pipeline render (RenderMan-quality) — pristine, high-sample, idealized, no noise or fireflies",
+    "character_appeal": "maximum 'appeal' — warm, expressive, lively face with large emotive eyes, charming readable acting in the pose, squash-and-stretch-friendly construction; personality and warmth over gritty realism",
+    "materials": "stylized-but-tactile PBR true to THIS character's design — soft fuzzy fabrics, supple rounded leather, cheerfully refractive glass, glowing translucent accents, simplified clean grime and gentle worn-edge wear",
+    "lighting": "soft, warm, flattering key lighting — broad key, generous bounce fill, gentle rim, an appealing glow; the 'every frame is a painting' look; even enough to read every panel",
+    "color_grade": "warm, inviting, gently saturated palette honouring the character's own colours; soft cheerful filmic contrast",
+    "background": "seamless soft warm light-cream studio sweep with a gentle gradient and a soft grounded contact shadow under the feet",
+    "rules": ["no text, labels, watermarks, annotations, typography or captions","clean high-sample render, appealing Pixar-style finish, no noise","lively expression, charm and appeal — not a stiff neutral sculpt","consistent character design, shaders and lighting across all panels","clean, evenly divided panel layout"]
+  },
   stopmotion: {
     "rendering": "photograph of a real handmade stop-motion puppet on a miniature set — NOT a digital CG render, not a drawing; tactile physical materials captured by a real camera",
     "construction": "visible handmade craft — sculpted silicone skin with faint mould/replacement seams, real felted wool and fabric at true tiny scale with weave and hand-stitching, needle-felted hair, real leather and glass, an armature-posable feel",
@@ -177,6 +187,7 @@ const CHAR_RENDER_STYLE_OPTIONS = [
   { key:"horror",     label:"Cinematic horror" },
   { key:"ghibli",     label:"Studio Ghibli" },
   { key:"animated3d", label:"Animated feature 3D" },
+  { key:"pixar",      label:"Pixar-style 3D" },
   { key:"stopmotion", label:"Stop-motion" },
   { key:"claymation", label:"Claymation" },
   { key:"adv1960s",   label:"1960s advertising" },
