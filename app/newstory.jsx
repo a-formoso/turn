@@ -26,29 +26,81 @@ const onCmdEnter = (fn, plainToo)=> (e)=>{
 };
 
 /* ---- Voice adapter — the swappable speak()/listen() layer for "Talk it through".
-   Phase 1: the browser's free Web Speech API. Phase 2 can drop in an ElevenLabs
-   conversational agent here WITHOUT touching the interview/logline logic above. ---- */
+   PREFERS ElevenLabs (TTS via window.elSpeak, STT via MediaRecorder → window.elTranscribe,
+   both through the signed-in proxy) and FALLS BACK to the browser's free Web Speech API when
+   the proxy isn't available. The interview/logline logic above is untouched: it still just
+   calls speak()/listen(). ElevenLabs STT has no live interim transcript and is tap-to-stop
+   (record until the user clicks the mic again), unlike Web Speech's auto-stop on a pause. ---- */
 const Voice = (()=>{
   const SR = (typeof window!=="undefined") && (window.SpeechRecognition || window.webkitSpeechRecognition);
   const synth = (typeof window!=="undefined") && window.speechSynthesis;
-  let rec = null;
+  const mediaOk = (typeof navigator!=="undefined") && navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+    && (typeof window!=="undefined") && window.MediaRecorder;
+  const elReady = ()=> (typeof window!=="undefined") && typeof window.voiceProxyReady==="function" && window.voiceProxyReady()
+    && typeof window.elSpeak==="function" && typeof window.elTranscribe==="function";
+  let rec = null, mr = null, mrStream = null, currentAudio = null, speakSeq = 0;
+  const pickRecMime = ()=>{
+    const want = ["audio/webm;codecs=opus","audio/webm","audio/mp4","audio/ogg;codecs=opus","audio/ogg"];
+    for(const m of want){ try{ if(window.MediaRecorder.isTypeSupported(m)) return m; }catch(e){} }
+    return "";
+  };
+  const blobToB64 = (blob)=> new Promise((res,rej)=>{ const fr=new FileReader();
+    fr.onload=()=>{ const s=String(fr.result||""); res(s.slice(s.indexOf(",")+1)); }; fr.onerror=()=>rej(fr.error); fr.readAsDataURL(blob); });
+  const synthSpeak = (text, onend)=>{
+    if(!synth){ onend&&onend(); return; }
+    try{ synth.cancel(); const u=new SpeechSynthesisUtterance(String(text||"")); u.rate=1.03; u.pitch=1;
+      u.onend=()=>onend&&onend(); u.onerror=()=>onend&&onend(); synth.speak(u); }catch(e){ onend&&onend(); }
+  };
   return {
-    sttSupported: !!SR,
-    ttsSupported: !!synth,
-    speak(text, onend){
-      if(!synth){ onend&&onend(); return; }
-      try{
-        synth.cancel();
-        const u = new SpeechSynthesisUtterance(String(text||""));
-        u.rate = 1.03; u.pitch = 1;
-        u.onend = ()=>onend&&onend();
-        u.onerror = ()=>onend&&onend();
-        synth.speak(u);
-      }catch(e){ onend&&onend(); }
+    // capability is dynamic: ElevenLabs (proxy + mic) OR the browser fallback
+    get sttSupported(){ return (elReady() && !!mediaOk) || !!SR; },
+    get ttsSupported(){ return elReady() || !!synth; },
+    async speak(text, onend){
+      this.stopSpeaking();   // cancel anything playing (bumps speakSeq)
+      const seq = speakSeq;  // this call now owns the latest generation
+      if(elReady()){
+        let url=""; try{ url = await window.elSpeak(text); }catch(e){}
+        if(seq!==speakSeq) return;                 // superseded or stopped while fetching
+        if(url){
+          try{
+            const a = new Audio(url); currentAudio = a;
+            a.onended = a.onerror = ()=>{ if(currentAudio===a) currentAudio=null; onend&&onend(); };
+            await a.play();
+            return;
+          }catch(e){ if(seq!==speakSeq) return; /* autoplay/format blocked → fall back */ }
+        }
+      }
+      if(seq!==speakSeq) return;
+      synthSpeak(text, onend);
     },
-    stopSpeaking(){ try{ synth && synth.cancel(); }catch(e){} },
-    // begin a single listening turn; callbacks deliver partial + final transcripts
+    stopSpeaking(){ speakSeq++; try{ if(currentAudio){ currentAudio.pause(); currentAudio=null; } }catch(e){} try{ synth && synth.cancel(); }catch(e){} },
+    // begin a single listening turn; callbacks deliver partial (Web Speech only) + final transcripts
     listen({ onInterim, onFinal, onError }){
+      if(elReady() && mediaOk){
+        navigator.mediaDevices.getUserMedia({ audio:true }).then(stream=>{
+          mrStream = stream;
+          try{
+            const mime = pickRecMime();
+            const chunks = [];
+            mr = new MediaRecorder(stream, mime?{ mimeType:mime }:undefined);
+            mr.ondataavailable = (e)=>{ if(e.data && e.data.size) chunks.push(e.data); };
+            mr.onstop = async ()=>{
+              try{ mrStream && mrStream.getTracks().forEach(t=>t.stop()); }catch(e){} mrStream=null;
+              const type = (mr && mr.mimeType) || mime || "audio/webm";
+              const blob = new Blob(chunks, { type });
+              if(!blob.size){ onFinal && onFinal(""); return; }
+              try{
+                const b64 = await blobToB64(blob);
+                const text = await window.elTranscribe(b64, type.split(";")[0]);
+                onFinal && onFinal(text||"");
+              }catch(e){ onError && onError("stt-failed"); }
+            };
+            mr.start();
+          }catch(e){ try{ stream.getTracks().forEach(t=>t.stop()); }catch(_){} onError && onError(String(e)); }
+        }).catch(err=>{ onError && onError(err && (err.name==="NotAllowedError"||err.name==="SecurityError") ? "not-allowed" : "error"); });
+        return;
+      }
+      // Web Speech fallback
       if(!SR){ onError&&onError("unsupported"); return; }
       try{
         rec = new SR();
@@ -67,7 +119,11 @@ const Voice = (()=>{
         rec.start();
       }catch(e){ onError&&onError(String(e)); }
     },
-    stopListening(){ try{ rec && rec.stop(); }catch(e){} },
+    stopListening(){
+      try{ if(mr && mr.state!=="inactive"){ mr.stop(); mr=null; return; } }catch(e){}
+      try{ if(mrStream){ mrStream.getTracks().forEach(t=>t.stop()); mrStream=null; } }catch(e){}
+      try{ rec && rec.stop(); }catch(e){}
+    },
   };
 })();
 

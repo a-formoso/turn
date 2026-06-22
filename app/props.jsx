@@ -452,6 +452,9 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
     React.createElement(SheetFrame,{ gen:genForFrame, slotId:"propref-"+p.id, name:p.name, avatarColor:propSwatch(p.kind),
       initials, drafted, drafting, onDraft:()=>onDraft(p), entity:p, onView,
       slotPlaceholder:"Drop a photo of the object", noun:"prop sheet",
+      // The empty slot is also the finished-image importer (full resolution, like the Locations
+      // plate), so the separate "Upload a finished sheet" button is intentionally omitted.
+      dropToImport:true,
       specGate:{ ready:(drafted || !p.manual), hint:"Draft the design spec first \u2014 form & material are what the sheet is built from." },
       onDelete:()=>onDelete(p.id), deleteLabel:"Delete prop" }),
     React.createElement("div",{className:"sheet-body"},

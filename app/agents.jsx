@@ -659,6 +659,22 @@ async function agentScriptBreakdown(ctx){
         if(ok){ const i=ctx.model.characters.findIndex(x=>x.id===ch.id);
           if(i>=0){ ctx.model.characters[i]={...ctx.model.characters[i], pronouns:scriptPron}; charByName[(ch.name||"").toLowerCase()]=ctx.model.characters[i]; ctx.sync(); reconciled++; ctx.emit({k:"ok", t:ch.name+" → "+scriptPron}); } }
       }
+      // (1b) SCALE DRIFT — the script implies a scale class that contradicts the sheet's
+      const SCALE_MAP = { human:"A", critter:"B", giant:"C" };
+      const SCALE_LAB = { A:"Human scale", B:"Small / critter", C:"Massive / giant" };
+      const scriptCls = SCALE_MAP[c.scale_used];
+      const canonCls = (typeof window.scaleClassOf==="function") ? window.scaleClassOf(ch) : "A";
+      if(scriptCls && scriptCls!==canonCls){
+        drift++;
+        const ok = await ctx.propose({
+          title:"Scale drift — "+ch.name,
+          reason:"Sc "+s.no+" reads "+ch.name+" as “"+c.scale_used+"” scale, but the sheet is "+(SCALE_LAB[canonCls]||canonCls)+".",
+          rationale:"Approve to set "+ch.name+"'s scale class to "+(SCALE_LAB[scriptCls]||scriptCls)+" — it drives the height sheet's ruler and how the world is rendered from their POV in shots.",
+          before:"Sheet: "+(SCALE_LAB[canonCls]||canonCls), after:"Sheet: "+(SCALE_LAB[scriptCls]||scriptCls) });
+        if(ctx.cancelled()) return;
+        if(ok){ const i=ctx.model.characters.findIndex(x=>x.id===ch.id);
+          if(i>=0){ ctx.model.characters[i]={...ctx.model.characters[i], scaleClass:scriptCls}; charByName[(ch.name||"").toLowerCase()]=ctx.model.characters[i]; ctx.sync(); reconciled++; ctx.emit({k:"ok", t:ch.name+" → "+(SCALE_LAB[scriptCls]||scriptCls)}); } }
+      }
       // (2) ENRICH — features the scene reveals that aren't on the sheet yet
       const existing = ((ch.coreBody||"")+" "+(ch.physique?Object.values(ch.physique).join(" "):"")).toLowerCase();
       const newFeats = c.features.filter(f=> f && !existing.includes(f.toLowerCase().slice(0,16)));

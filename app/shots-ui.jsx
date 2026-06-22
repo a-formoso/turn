@@ -392,6 +392,19 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     window.addEventListener("keydown", onKey, true);
     return ()=>{ clearTimeout(t); window.removeEventListener("keydown", onKey, true); };
   },[notice]);
+  // "Design all shots" is non-destructive — it only breaks down scenes that have NO shots yet.
+  // Track how many it set out to do so we can show a live progress bar (and tell the user when
+  // there's nothing to do, instead of the click appearing to do nothing).
+  const scenesNeedingShots = ()=>{ const have = new Set((shots||[]).map(s=>s.sceneId)); return (scenes||[]).filter(s=>!have.has(s.id)); };
+  const [designTotal, setDesignTotal] = React.useState(0);
+  React.useEffect(()=>{ if(!draftingAllShots) setDesignTotal(0); },[draftingAllShots]);   // clear the bar when the run ends
+  const handleDesignAll = ()=>{
+    if(draftingAllShots) return;
+    const need = scenesNeedingShots().length;
+    if(!need){ setNotice("Every scene already has shots. Open a scene and use ‘Re-draft shots’ to redesign just that one."); return; }
+    setDesignTotal(need);
+    onDraftAllShots && onDraftAllShots();
+  };
   // per-scene fold state (persisted). DEFAULT: everything folded except the first
   // scene — a long shot list opens scannable, not as one endless scroll.
   const [collapsed, setCollapsed] = React.useState(()=>{ try{ return JSON.parse(localStorage.getItem("turn_shots_collapsed")||"{}")||{}; }catch(e){ return {}; } });
@@ -577,14 +590,14 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
               _el(window.InfoTip,{label:"About the Shots tab",
                 text:"Every beat becomes a shot. \u201cDesign all shots\u201d breaks each scene into coverage \u2014 size, angle, movement and lens \u2014 then composes each frame from the scene's grade, the location plate and the character & prop sheets. Generate the frames here; the Storyboards tab lays them out next."}))),
           _el("div",{className:"art-intro-actions"},
-            _el("button",{className:"art-draftall",disabled:draftingAllShots||!ordered.length,onClick:onDraftAllShots,
+            _el("button",{className:"art-draftall",disabled:draftingAllShots||!ordered.length,onClick:handleDesignAll,
               title:"Break every scene into a shot list from its beats"},
               _el(Icon.sparkles,{s:14}), draftingAllShots?"Designing\u2026":"Design all shots")))),
       _el("div",{className:"prop-empty"},
         _el("div",{className:"art-soon-ic"},_el(Icon.film,{s:30})),
         _el("div",{className:"art-soon-t"},"No shots yet"),
         _el("div",{className:"art-soon-d"},"Break your scenes into shots \u2014 one shot per beat, with full coverage \u2014 then generate a frame for each."),
-        _el("button",{className:"art-draftall",style:{marginTop:16},disabled:draftingAllShots||!ordered.length,onClick:onDraftAllShots},
+        _el("button",{className:"art-draftall",style:{marginTop:16},disabled:draftingAllShots||!ordered.length,onClick:handleDesignAll},
           _el(Icon.sparkles,{s:14}), draftingAllShots?"Designing\u2026":"Design all shots")));
   }
 
@@ -607,7 +620,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
           _el("button",{className:"art-draftall ghost",onClick:()=>exportShotList(scenesWithShots, shotsByScene, ctxFor, project),
             title:"Preview the shot list as a printable table, then print / save as PDF or download the HTML"},
             _el(Icon.download,{s:14}),"Export shot list"),
-          _el("button",{className:"art-draftall ghost",disabled:draftingAllShots||!ordered.length,onClick:onDraftAllShots,
+          _el("button",{className:"art-draftall ghost",disabled:draftingAllShots||!ordered.length,onClick:handleDesignAll,
             title:"Break any scene that has no shots yet into full coverage \u2014 size, angle, move and lens per beat"},
             _el(Icon.sparkles,{s:14}), draftingAllShots?"Designing\u2026":"Design all shots"),
           _el("button",{className:"art-draftall",disabled:!!batchActiveId||!!chain||!shots.length,onClick:startAll,
@@ -616,6 +629,17 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     // A chain already has its own progress + Stop bar below. Hiding the generic
     // batch bar here avoids duplicate Cancel/Stop controls for the same request.
     !chain && BatchBar && _el(BatchBar,{batch,noun:"shot"}),
+    // "Design all shots" progress — determinate, driven by how many scenes still lack shots
+    (draftingAllShots && designTotal>0) && (()=>{
+      const remaining = scenesNeedingShots().length;
+      const done = Math.max(0, designTotal - remaining);
+      const pct = Math.round((done/designTotal)*100);
+      return _el("div",{className:"shot-design-bar"},
+        _el("div",{className:"shot-design-row"},
+          _el("span",{className:"ns-spin"}),
+          _el("span",{className:"shot-design-lab"},"Designing shots — scene "+Math.min(done+1,designTotal)+" of "+designTotal+"…")),
+        _el("div",{className:"shot-design-track"}, _el("div",{className:"shot-design-fill",style:{width:pct+"%"}})));
+    })(),
     ((typeof ScenePager!=="undefined") && scenesWithShots.length>0) && (()=>{ const cs=scenesWithShots[visibleIdx]; const cl=cs&&ctxFor(cs).location;
       return _el(ScenePager,{ idx:visibleIdx, total:scenesWithShots.length, title:cs&&cs.title, sub:cl&&cl.name, scenes:scenesWithShots,
         onJump:setPIdx,

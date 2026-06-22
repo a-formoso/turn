@@ -555,14 +555,28 @@ function useImageGen(opts){
     attachList.forEach(a=>refsUsed.push({ kind:"prop", label:a.note||"Prop sheet", url:a.url }));
     if(cameoUrl && mode==="base" && !isCloud) refsUsed.push({ kind:"cameo", label:"Cameo likeness", url:cameoUrl });
 
+    let actualModel = usedModel;     // may change if we fall back to another provider below
+    let policyFellBack = "";
     try{
       let url;
       try{
         url = await nbGenerate(genPrompt, genOpts);
       }catch(e){
-        if(!useSimple && !isEditMode && e.message && /no image/i.test(e.message) && opts.buildSimple){
+        const emsg = (e && e.message) || "";
+        const isPolicy = /content polic|violat|safety system|safety filter|moderation|flagged|not allowed|rejected by/i.test(emsg);
+        if(!useSimple && !isEditMode && /no image/i.test(emsg) && opts.buildSimple){
           setRetrying(true);
           url = await nbGenerate(opts.buildSimple(), genOpts);
+        } else if(isPolicy && typeof providerOfModel==="function" && providerOfModel(usedModel)==="openai"){
+          // GPT Image refused on CONTENT POLICY — auto-fall back to Google (Nano Banana),
+          // which is far more permissive for cinematic content (action, blood, intensity).
+          // One-off: the user's SELECTED engine is left unchanged, only this frame switches.
+          const gModel = allModels.find(m=> typeof providerOfModel==="function" && providerOfModel(m.id)==="google");
+          if(!gModel) throw e;
+          setRetrying(true);
+          policyFellBack = gModel.label || "Nano Banana";
+          actualModel = gModel.id;
+          url = await nbGenerate(genPrompt, { ...genOpts, model:gModel.id });
         } else { throw e; }
       }
       // cancelled mid-flight (Stop): discard the result — don't commit over the frame.
@@ -573,11 +587,12 @@ function useImageGen(opts){
         const histLen = (typeof nbGetHistory==="function") ? (await nbGetHistory(id)).length : 0;
         priorCount = genUrl ? Math.min(histLen+1, 12) : histLen;
       }catch(e){}
-      const mEntry = allModels.find(m=>m.id===usedModel) || allModels[0] || {};
+      const mEntry = allModels.find(m=>m.id===actualModel) || allModels[0] || {};
       const now = new Date();
       const meta = {
         modelLabel: mEntry.label || "Nano Banana",
-        modelId: usedModel,
+        modelId: actualModel,
+        policyFallback: !!policyFellBack,
         aspect: genOpts.aspectRatio || ((typeof nbGetAspect==="function") ? nbGetAspect() : "16:9"),
         size: genOpts.imageSize || ((typeof nbGetRes==="function") ? nbGetRes() : "2K"),
         date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
@@ -600,6 +615,9 @@ function useImageGen(opts){
       setGenTier((saveResult && saveResult.tier) || "local");
       setGenMeta(meta);
       if(isEditMode){ setEditMode(false); setEditText(""); }
+      // tell the user why this frame looks like the other engine
+      if(policyFellBack && typeof window.appToast==="function")
+        window.appToast("GPT Image blocked that for content policy — rendered with "+policyFellBack+" instead.", "info");
     }catch(e){ if(!(e && (e.__cancelled || e.name==="AbortError"))) setGenErr((e && e.message) || "Generation failed."); }
     const wasCancelled = !!(window.__nbGenCancel && window.__nbGenCancel[id]);
     setGening(false); setRetrying(false);
@@ -1652,6 +1670,9 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
     React.createElement(SheetFrame,{ gen, slotId:"charref-"+c.id, name:c.name, avatarColor:c.color,
       initials, drafted, drafting, onDraft:()=>onDraft(c), entity:c, onView,
       slotPlaceholder:"Drop reference art", noun:"sheet",
+      // The empty slot is also the finished-image importer (full resolution, like the Locations
+      // plate), so the separate "Upload a finished sheet" button is intentionally omitted.
+      dropToImport:true,
       specGate:{ ready:(drafted || !c.manual), hint:"Draft the design spec first \u2014 look & wardrobe are what the sheet is built from." },
       onDelete:(onDelete && c.manual)?(()=>onDelete(c.id)):null, deleteLabel:"Delete character" }),
     React.createElement("div",{className:"sheet-body"},
@@ -1775,7 +1796,17 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
             Row("Eyes",F.eyes,v2=>setPhys("eyes",v2),true),
             Row("Skin",F.skin,v2=>setPhys("skin",v2),true),
             Row("Facial features",F.face,v2=>setPhys("face",v2),true),
-            Row("Scale",c.scaleClass||v.scaleClass,v2=>onUpdate(c.id,{scaleClass:v2})));
+            // SCALE CLASS — drives the height sheet's ruler AND the per-shot world-POV rewrite
+            // (gigantism / miniaturization). A/B/C; resolves any legacy free-text value.
+            React.createElement("div",{className:"phys-row",key:"Scale"},
+              React.createElement("span",{className:"phys-lab"},"Scale"),
+              React.createElement("select",{className:"prop-select char-style-select",
+                value:(typeof scaleClassOf==="function"?scaleClassOf(c):"A"),
+                title:"Scale class — sets the character's height range and how the world is rendered from their POV in shots",
+                onChange:e=>onUpdate(c.id,{scaleClass:e.target.value})},
+                React.createElement("option",{value:"A"},"Class A · Human scale"),
+                React.createElement("option",{value:"B"},"Class B · Small / critter"),
+                React.createElement("option",{value:"C"},"Class C · Massive / giant"))));
         })(),
         c.bodyRationale && React.createElement("div",{className:"sheet-rationale"},
           React.createElement(Icon.sparkles,{s:11}),"Why this look: "+tidyTruncated(c.bodyRationale)),

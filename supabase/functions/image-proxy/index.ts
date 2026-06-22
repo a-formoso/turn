@@ -312,6 +312,25 @@ Deno.serve(async (req) => {
         return json({ voiceId: data.voice_id || "", name: (body.name || "Cloned voice").toString() });
       }
 
+      // Speech-to-text (Scribe) — transcribe a recorded answer (the "Talk it through" intake).
+      // Client sends base64 audio + its mime; we hand it to ElevenLabs as a file upload.
+      if (op === "stt") {
+        const audioB64 = (body.audioB64 || "").toString();
+        if (!audioB64) return json({ error: "Speech-to-text needs audio." }, 400);
+        const mime = (body.mime || "audio/webm").toString();
+        const blob = dataUrlToBlob("data:" + mime + ";base64," + audioB64);
+        if (!blob) return json({ error: "Couldn't read the recorded audio." }, 400);
+        const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : mime.includes("wav") ? "wav" : "webm";
+        const form = new FormData();
+        form.append("model_id", (body.modelId || "scribe_v1").toString());
+        form.append("file", blob, "answer." + ext);
+        if (body.languageCode) form.append("language_code", String(body.languageCode));
+        const r = await fetch(`${EL}/speech-to-text`, { method: "POST", headers: { "xi-api-key": elKey }, body: form });
+        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
+        const data = await r.json();
+        return json({ text: (data.text || "").toString() });
+      }
+
       return json({ error: `Unknown voice op "${op}".` }, 400);
     } catch (e) {
       return json({ error: "Proxy failed to reach ElevenLabs: " + ((e as any)?.message || e) }, 502);

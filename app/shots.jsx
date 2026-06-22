@@ -172,6 +172,65 @@ function locationForScene(locations, sceneId){
 }
 window.locationForScene = locationForScene;
 
+/* ---- SCALE & POV --------------------------------------------------------------
+   A character/creature/prop carries a SCALE CLASS that does two jobs: it sets a
+   canonical height (for the scale sheet's ruler) AND, more powerfully, it
+   recontextualizes how the WORLD is described from that subject's physical point of
+   view — a tiny critter sees colossal architecture; a giant sees a fragile diorama.
+   The class is the source of truth (A/B/C); `height` is an optional display string.
+   This is a third axis, orthogonal to LOOK (Lookbook) and COVERAGE (shot designer). */
+const SCALE_CLASSES = {
+  A: { id:"A", label:"Human", short:"Human scale",
+       ruler:["0cm","50cm","100cm","150cm","180cm","200cm"], rule:"", keywords:[] },
+  B: { id:"B", label:"Small / critter", short:"Critter scale",
+       ruler:["0cm","2cm","5cm","10cm","20cm","40cm"],
+       rule:"GIGANTISM RULE — this subject is tiny, so render the surrounding environment as MASSIVE architecture seen from its point of view: everyday objects become colossal structures (a dewdrop is a massive water sphere, a leaf a leathery emerald canopy).",
+       keywords:["towering","colossal","skyscraper-sized","monolithic","cavernous"] },
+  C: { id:"C", label:"Massive / giant", short:"Giant scale",
+       ruler:["0m","5m","15m","30m","60m","100m"],
+       rule:"MINIATURIZATION RULE — this subject is enormous, so render the world as a fragile diorama far below: landscapes become tabletop miniatures (a pine forest is a carpet of moss, a river a silver thread).",
+       keywords:["matchbox-sized","lilliputian","miniature","carpet-like","threads"] },
+};
+/* the scale class of an entity (character/prop): the explicit field wins; otherwise
+   derive a best-effort class from a numeric height, else default to Human. */
+function scaleClassOf(entity){
+  const raw = String((entity && entity.scaleClass) || "").trim();
+  const u = raw.toUpperCase();
+  // keyword sense FIRST — so a stray article ("a towering giant") can't be misread as class A
+  if(/GIANT|MASSIVE|COLOSSAL|TITAN|KAIJU|MECH|MONSTER|HUGE|TOWERING/.test(u)) return "C";
+  if(/CRITTER|TINY|SMALL|INSECT|BUG|MINIATURE|MICRO|MOUSE|FAIRY|SPRITE|PIXIE/.test(u)) return "B";
+  if(/HUMAN|STANDARD|NORMAL|PERSON|REGULAR/.test(u)) return "A";
+  // explicit "Class X"
+  let m = u.match(/\bCLASS\s*([ABC])\b/); if(m) return m[1];
+  // the whole value IS a class letter — "B", "B (critter)", "C - giant", "A:"
+  m = u.match(/^([ABC])(\s*[(\-:].*)?$/); if(m) return m[1];
+  // numeric height fallback (cm unless an explicit metre unit)
+  const hs = String(entity && (entity.heightCm||entity.height) || "");
+  const h = Number(hs.replace(/[^\d.]/g,""));
+  if(h){ const isM = /(\d\s*m\b|metre|meter)/i.test(hs) && !/cm/i.test(hs); const cm = isM ? h*100 : h;
+    if(cm < 60) return "B"; if(cm > 300) return "C"; return "A"; }
+  return "A";
+}
+function scaleInfoOf(entity){ return SCALE_CLASSES[scaleClassOf(entity)] || SCALE_CLASSES.A; }
+/* The dynamic scale directive for a SHOT, given the cast in frame. All-human → "" (no
+   rewrite, inert). One non-human class → that class's world rewrite. MIXED classes in
+   one frame → relative-scale phrasing (don't apply a single POV; show their size gap). */
+function shotScaleClause(subjects){
+  const list = (subjects||[]).filter(Boolean);
+  if(!list.length) return "";
+  const classes = [...new Set(list.map(scaleClassOf))];
+  const nonHuman = classes.filter(c=>c!=="A");
+  if(!nonHuman.length) return "";
+  if(classes.length>1){
+    const named = list.map(c=> (c.name||"a figure")+" ("+scaleInfoOf(c).short+")").join(", ");
+    return "SCALE — the subjects differ in scale ("+named+"): render their RELATIVE sizes faithfully (the larger truly dwarfing the smaller); do NOT normalize them to the same height.";
+  }
+  const info = SCALE_CLASSES[nonHuman[0]];
+  return "SCALE / POV — "+info.rule+" Lean on words like "+info.keywords.join(", ")+".";
+}
+window.SCALE_CLASSES = SCALE_CLASSES; window.scaleClassOf = scaleClassOf;
+window.scaleInfoOf = scaleInfoOf; window.shotScaleClause = shotScaleClause;
+
 /* props that appear in a scene (their scene chips include this scene) */
 function propsForScene(props, sceneId){
   return (props||[]).filter(p=> Array.isArray(p.scenes) && p.scenes.indexOf(sceneId)>=0);
@@ -350,6 +409,11 @@ function buildShotPrompt(sh, ctx){
   if(clean(screenDir.clause)) stage.push(clean(screenDir.clause));
   const _depth = (typeof shotFramingClause==="function") ? clean(shotFramingClause(loc, sh.size)) : "";
   if(_depth) stage.push(_depth);
+  // SCALE / POV — when an in-frame subject isn't human-scale, recontextualize the world
+  // from its perspective (gigantism / miniaturization), or render relative scale for a
+  // mixed-scale frame. All-human frames add nothing (inert).
+  const _scale = (typeof shotScaleClause==="function") ? shotScaleClause(subjects) : "";
+  if(_scale) stage.push(_scale);
   const _dlg = clean(sh.dialogue).replace(/^["“]|["”]$/g,"");
   if(_dlg) stage.push('Caught mid-line as the character speaks "'+_dlg+'"');
   const STAGING = stage.join(". ") + ".";

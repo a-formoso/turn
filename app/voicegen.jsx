@@ -133,6 +133,32 @@ async function elGenerate(id, text, opts){
 }
 window.elGenerate=elGenerate;
 
+// ---- New Story "Talk it through" voice: one-off speak (no caching/commit) + transcribe ----
+// Resolve a default interviewer voice once: the account's first voice, else a known public one.
+let _interviewVoiceId = "";
+async function elInterviewVoiceId(){
+  if(_interviewVoiceId) return _interviewVoiceId;
+  try{ const r = await elListVoices(); const v = r && r.voices && r.voices[0]; if(v && v.voiceId) _interviewVoiceId = v.voiceId; }catch(e){}
+  if(!_interviewVoiceId) _interviewVoiceId = "21m00Tcm4TlvDq8ikWAM";   // ElevenLabs default ("Rachel")
+  return _interviewVoiceId;
+}
+// speak one line and return an audio data URL — NOT committed to the asset store (ephemeral).
+async function elSpeak(text, opts){
+  opts = opts||{}; const t = String(text||"").trim(); if(!t) return "";
+  const voiceId = opts.voiceId || await elInterviewVoiceId();
+  const settings = { ...VG_DEFAULTS, ...(opts.settings||{}) };
+  const d = await vgProxy("tts", { voiceId, text:t, modelId:opts.modelId||VG_TTS_MODEL, settings, outputFormat:VG_OUTPUT_FORMAT });
+  if(!d.audioB64) throw new Error("The proxy returned no audio.");
+  return "data:"+(d.mime||"audio/mpeg")+";base64,"+d.audioB64;
+}
+// transcribe recorded audio (base64 + mime) → text, via the proxy's ElevenLabs Scribe route.
+async function elTranscribe(audioB64, mime){
+  if(!audioB64) return "";
+  const d = await vgProxy("stt", { audioB64, mime: mime||"audio/webm" });
+  return String(d.text||"").trim();
+}
+window.elInterviewVoiceId=elInterviewVoiceId; window.elSpeak=elSpeak; window.elTranscribe=elTranscribe;
+
 // ---- Voice Design: previews to audition before locking ----------------------
 async function elDesignVoice(description, opts){
   opts=opts||{};

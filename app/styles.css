@@ -3260,6 +3260,11 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .char-style-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 12px;padding:8px 11px;border:1px solid var(--line-2);border-radius:9px;background:var(--bg-3)}
 .char-style-lab{display:inline-flex;align-items:center;gap:5px;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-3)}
 .char-style-lab svg{color:var(--pos)}
+/* render-style + pronoun dropdowns: a subtle bordered control like .prop-select,
+   not the browser's default near-black select border */
+.char-style-select,.char-pronoun-sel{box-sizing:border-box;background:var(--bg-2);border:1px solid var(--line-3);
+  border-radius:6px;color:var(--txt-0);font:13px var(--f-ui);padding:0 9px;outline:none;cursor:pointer}
+.char-style-select:focus,.char-pronoun-sel:focus{border-color:var(--pos)}
 .char-style-select{flex:0 1 200px;height:30px}
 .char-pronoun-sel{height:28px;flex:0 1 140px;font-family:var(--f-body);font-size:12.5px}
 .char-style-busy{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--txt-2)}
@@ -4141,6 +4146,13 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .shot-chain-msg{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--txt-1)}
 .shot-chain-msg svg{flex:0 0 auto;color:var(--accent,#d8a657)}
 .shot-chain-acts{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+
+/* "Design all shots" progress bar */
+.shot-design-bar{margin:0 0 16px;padding:11px 14px;border-radius:11px;border:1px solid var(--line-2);background:var(--bg-3)}
+.shot-design-row{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--txt-1);margin-bottom:9px}
+.shot-design-lab{font-weight:600}
+.shot-design-track{height:6px;border-radius:99px;background:var(--bg-1);border:1px solid var(--line-2);overflow:hidden}
+.shot-design-fill{height:100%;border-radius:99px;background:var(--accent,#d8a657);transition:width .3s ease}
 
 /* small centered popup — out-of-order "generate the earlier shot first" notice */
 .shot-notice-scrim{position:fixed;inset:0;z-index:9991;display:flex;align-items:center;justify-content:center;
