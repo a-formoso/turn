@@ -277,6 +277,28 @@ function locScenePresets(l, project){
 }
 window.locScenePresets = locScenePresets;
 
+/* The effective SCALE CLASS of a location's WORLD: the project-wide "world scale" toggle
+   (project.worldScale = A/B/C) wins; otherwise it's derived from the scale of the characters
+   who DRIVE the scenes set here (a critter film's drivers are all Class B → the place renders
+   at critter scale). Returns A when nobody non-human occupies it (so it stays inert). */
+function locationScaleClass(l, project){
+  const wRaw = String((project && project.worldScale) || "").trim();
+  // project-wide override: any explicit value (A/B/C, or free text like "critter"/"giant")
+  // resolves; only empty or "auto" falls through to per-location derivation.
+  if(wRaw && !/^auto$/i.test(wRaw)) return (typeof scaleClassOf==="function") ? scaleClassOf({scaleClass:wRaw}) : "A";
+  if(typeof scaleClassOf!=="function") return "A";
+  const C = window.turnContinuity || {};
+  const chars = C.characters || [], scenes = C.scenes || [];
+  if(!chars.length || !scenes.length) return "A";
+  const byId = {}; chars.forEach(c=>{ if(c&&c.id) byId[c.id]=c; });
+  const sids = Array.isArray(l && l.scenes) ? l.scenes : [];
+  const counts = { A:0, B:0, C:0 };
+  sids.forEach(sid=>{ const sc=scenes.find(s=>s.id===sid); const drv=sc&&sc.driver&&byId[sc.driver]; if(drv) counts[scaleClassOf(drv)]++; });
+  const nonA = [["B",counts.B],["C",counts.C]].filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
+  return nonA.length ? nonA[0][0] : "A";
+}
+window.locationScaleClass = locationScaleClass;
+
 /* deterministic LOCATION coverage plate — full view of the place from several
    angles on one grid, so any shot set here matches geometry, materials & light.
    `opts.preset` applies a Style Bible look; `opts.time` specialises a variant. */
@@ -345,6 +367,12 @@ function buildLocationRefPrompt(l, project, opts){
         "photorealistic commercial photography","8k ultra detailed","consistent lighting across all views","clean layout","hyper realistic"],
     },
   };
+  // WORLD SCALE — when this place is inhabited by a non-human-scale cast (critter / giant),
+  // render the SPACE ITSELF at that scale (gigantism / miniaturization), so a bug's-world
+  // location doesn't default to a human-scale room. Inert (Class A) for ordinary films.
+  const _wcls = (typeof locationScaleClass==="function") ? locationScaleClass(l, P) : "A";
+  const _wclause = (typeof worldScaleClause==="function") ? worldScaleClause(_wcls) : "";
+  if(_wclause) spec.world_scale = _wclause;
   return "Render this environment reference sheet EXACTLY as specified by this JSON spec (continuity fields are binding):\n"+JSON.stringify(spec, null, 1);
 }
 window.buildLocationRefPrompt = buildLocationRefPrompt;

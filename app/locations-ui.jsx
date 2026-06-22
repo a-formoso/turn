@@ -299,7 +299,7 @@ function LocationVariant({ l, v, project, onTime, onRemove, onView }){
       entity:l, onView, slotPlaceholder:"Drop a photo", noun:"variant", compact:true }));
 }
 
-function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
+function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, onSetWorldScale }){
   const [view, setView] = React.useState(null);
   const [sceneFilter, setSceneFilter] = React.useState("");
   const [query, setQuery] = React.useState("");               // free-text name search
@@ -380,6 +380,17 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
               onChange:e=>applyStyleAll(e.target.value)},
               allStyleKey==="" && React.createElement("option",{value:""},"Mixed — per location"),
               (window.CHAR_RENDER_STYLE_OPTIONS||[]).map(o=>React.createElement("option",{key:o.key,value:o.key},o.label)))),
+          // WORLD SCALE — renders every location's plate at the chosen scale; "Auto" derives
+          // each place's scale from the characters who drive its scenes (critter cast → critter world).
+          list.length>0 && onSetWorldScale && React.createElement("label",{className:"char-style-all",
+            title:"Render every location's plate at this scale. 'Auto' derives each place's scale from the characters who drive its scenes — so a critter-cast film's worlds come out critter-scale automatically."},
+            React.createElement("span",{className:"char-style-all-lab"},"World scale"),
+            React.createElement("select",{className:"char-style-select",value:(project&&project.worldScale)||"",
+              onChange:e=>onSetWorldScale(e.target.value)},
+              React.createElement("option",{value:""},"Auto (by occupant)"),
+              React.createElement("option",{value:"A"},"Human scale"),
+              React.createElement("option",{value:"B"},"Critter scale"),
+              React.createElement("option",{value:"C"},"Giant scale"))),
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add location"),
           React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!scriptHasLocs),onClick:onDraftAll,

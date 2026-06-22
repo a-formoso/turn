@@ -228,8 +228,16 @@ function shotScaleClause(subjects){
   const info = SCALE_CLASSES[nonHuman[0]];
   return "SCALE / POV — "+info.rule+" Lean on words like "+info.keywords.join(", ")+".";
 }
+// Environment-scale directive for a LOCATION plate, keyed to its occupants' scale class.
+// B → render the SPACE itself at critter scale (gigantism); C → at giant scale. A → "" (inert).
+// This is the location-side counterpart to shotScaleClause (which works on in-frame subjects).
+function worldScaleClause(cls){
+  if(cls==="B") return "CRITTER SCALE — render this as a colossal, cavernous space exactly as a tiny insect-sized inhabitant (a couple of centimetres tall) would experience it: ordinary natural features (bark grain, a knot-hole, moss, a fallen leaf, a dewdrop) read as TOWERING architecture, landmarks and furniture at that scale; the whole space is built for and seen by something tiny.";
+  if(cls==="C") return "GIANT SCALE — render this as a vast expanse seen by an enormous, building-sized inhabitant: the ordinary world reads as a fragile MINIATURE diorama far below — structures matchbox-sized, paths like threads.";
+  return "";
+}
 window.SCALE_CLASSES = SCALE_CLASSES; window.scaleClassOf = scaleClassOf;
-window.scaleInfoOf = scaleInfoOf; window.shotScaleClause = shotScaleClause;
+window.scaleInfoOf = scaleInfoOf; window.shotScaleClause = shotScaleClause; window.worldScaleClause = worldScaleClause;
 
 /* The SCALE SHEET prompt (the user's "height chart" / Option A): a full-body front view
    beside a vertical ruler whose markings come from the entity's scale class. Built from the
