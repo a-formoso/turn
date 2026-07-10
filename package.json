@@ -1,0 +1,15 @@
+{
+  "name": "cinema-machine",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cinema Machine — build tooling for the buildless app. Dev is buildless (TURN.html + raw .jsx via Babel standalone); this only powers the production deploy build (scripts/build-dist.mjs → dist/). No top-level \"type\":\"module\" on purpose — the root serve.js is CommonJS; the build script is ESM via its .mjs extension.",
+  "scripts": {
+    "build": "node scripts/build-dist.mjs"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/preset-react": "^7.26.3",
+    "@babel/plugin-transform-block-scoping": "^7.25.9",
+    "terser": "^5.37.0"
+  }
+}

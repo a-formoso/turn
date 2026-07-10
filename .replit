@@ -1,7 +1,9 @@
 # Cinema Machine — Replit deployment config (Static Deployment).
-# The "build" just assembles dist/: TURN.html served as index.html + the app/
-# folder. No bundler — the app compiles JSX in the browser (Babel standalone).
-# docs/, supabase/ and the rest of the repo stay unpublished.
+# The deploy build (scripts/build-dist.mjs) transpiles + minifies every app/*.jsx
+# into dist/app/*.js and rewrites TURN.html → dist/index.html with plain <script>
+# tags (no Babel). So PROD ships transpiled/minified code (comments stripped, no
+# in-browser Babel = near-instant boot); DEV stays buildless (raw .jsx via Babel
+# standalone). docs/, supabase/ and the rest of the repo stay unpublished.
 
 # local preview inside the Replit workspace (optional)
 run = "python3 -m http.server 8099"
@@ -10,7 +12,7 @@ modules = ["nodejs-24"]
 [deployment]
 deploymentTarget = "static"
 publicDir = "dist"
-build = ["sh", "-c", "mkdir -p dist && cp TURN.html dist/index.html && cp -r app dist/app"]
+build = ["sh", "-c", "npm install && npm run build"]
 
 [[ports]]
 localPort = 5000
