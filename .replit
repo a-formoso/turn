@@ -5,6 +5,7 @@
 
 # local preview inside the Replit workspace (optional)
 run = "python3 -m http.server 8099"
+modules = ["nodejs-24"]
 
 [deployment]
 deploymentTarget = "static"
@@ -12,5 +13,36 @@ publicDir = "dist"
 build = ["sh", "-c", "mkdir -p dist && cp TURN.html dist/index.html && cp -r app dist/app"]
 
 [[ports]]
+localPort = 5000
+externalPort = 5000
+
+[[ports]]
 localPort = 8099
 externalPort = 80
+
+[agent]
+expertMode = true
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "node serve.js"
+waitForPort = 5000
