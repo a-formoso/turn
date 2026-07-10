@@ -200,6 +200,12 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
     if(m && m.rows && m.rows.length) onBeats(scene.id, m);
   };
   const id = scene.id;
+  // UNDO for beat deletion — the deleted row (with its position and the turn marker)
+  // is held until the user restores it, deletes another, or switches scenes. Before
+  // this, a mis-click destroyed the beat with no way back (auto-save had already
+  // written the deletion to the cloud within a second).
+  const [lastDeleted, setLastDeleted] = React.useState(null);   // {row, index, turnAt}
+  React.useEffect(()=>{ setLastDeleted(null); },[id]);
   // reveal the beat the user clicked in the Script gutter — scroll it into view + flag it
   const rowRefs = React.useRef({});
   React.useEffect(()=>{
@@ -223,8 +229,15 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
     j===i ? {...r,[side]:{...r[side],[field]:val}} : r)});
   const addBeat = ()=>commit({...beats, rows:[...beats.rows,
     {n:beats.rows.length+1, drive:{a:"Action",d:""}, react:{a:"Reaction",d:""}}]});
-  const delBeat = (i)=>{ const rows=renumber(beats.rows.filter((_,j)=>j!==i));
+  const delBeat = (i)=>{
+    setLastDeleted({ row: beats.rows[i], index: i, turnAt: beats.turnAt });
+    const rows=renumber(beats.rows.filter((_,j)=>j!==i));
     commit({...beats, rows, turnAt: beats.turnAt>rows.length?0:beats.turnAt}); };
+  const undoDelete = ()=>{ if(!lastDeleted) return;
+    const rows = beats.rows.slice();
+    rows.splice(Math.min(lastDeleted.index, rows.length), 0, lastDeleted.row);
+    commit({...beats, rows:renumber(rows), turnAt:lastDeleted.turnAt});
+    setLastDeleted(null); };
   const moveBeat = (i,dir)=>{ const j=i+dir; if(j<0||j>=beats.rows.length) return;
     const rows=beats.rows.slice(); const [m]=rows.splice(i,1); rows.splice(j,0,m);
     commit({...beats, rows:renumber(rows)}); };
@@ -236,6 +249,12 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
     && !(beats.rows||[]).some(r=>((r.drive&&r.drive.d)||"").trim() || ((r.react&&r.react.d)||"").trim())
     && !((beats.desire||"").trim()) && !((beats.obstacle||"").trim());
   return React.createElement("div",null,
+    // restore chip — appears right after a delete, until restored / next delete / scene switch
+    lastDeleted && React.createElement("button",{className:"beat-build-btn beat-undo-btn",
+      onClick:undoDelete,
+      title:"Put the beat you just deleted back in its place — with the scene's turn marker as it was"},
+      React.createElement(Icon.undo,{s:12}),
+      "Undo — restore deleted beat "+(lastDeleted.index+1)),
     hasScript && React.createElement("button",{className:"beat-build-btn",disabled:deriving,
       onClick:()=>rebuildFromScript(blankMap),
       title:"Read this scene's screenplay and build the beat / subtext map from it"},

@@ -1,4 +1,4 @@
-/* cloud.jsx — Supabase integration for TURN.
+/* cloud.jsx — Supabase integration for Cinema Machine.
    Increment 1: client initialisation + authentication (email + password).
    Projects, cloud doc sync, and the cloud image storage adapter are layered on
    in later increments. Everything here no-ops gracefully when Supabase isn't
@@ -59,6 +59,82 @@ window.cloudOnAuth = cloudOnAuth;
 window.cloudUserEmail = cloudUserEmail;
 window.cloudUserId = cloudUserId;
 
+/* ── credits / usage balance ─────────────────────────────────────────────────
+   The billing schema may evolve, so this reader is intentionally tolerant:
+   it first tries an RPC, then a few likely per-user balance tables, and finally
+   falls back to auth metadata. UI can show "unavailable" instead of inventing a
+   number when no backend balance source exists yet. */
+function _turnCreditShape(row, source){
+  if(!row || typeof row!=="object") return null;
+  const pick = (...ks)=>{
+    for(const k of ks){ if(row[k]!==undefined && row[k]!==null && row[k]!=="") return row[k]; }
+    return null;
+  };
+  const remaining = pick("remaining","credits_remaining","credit_balance","balance","credits","available_credits","available");
+  const used = pick("used","credits_used","usage","spent");
+  const limit = pick("limit","credits_limit","monthly_credits","included_credits","quota");
+  const plan = pick("plan","tier","subscription_tier");
+  const n = remaining==null ? null : Number(remaining);
+  if(!Number.isFinite(n)) return null;
+  return {
+    remaining:n,
+    used: used==null || !Number.isFinite(Number(used)) ? null : Number(used),
+    limit: limit==null || !Number.isFinite(Number(limit)) ? null : Number(limit),
+    plan: plan==null ? "" : String(plan),
+    source:source||"unknown"
+  };
+}
+async function cloudGetCreditBalance(){
+  const sb = sbClient(); if(!sb) return null;
+  const session = await cloudGetSession();
+  const uid = session && session.user && session.user.id;
+  if(!uid) return null;
+  const meta = {
+    ...((session.user&&session.user.user_metadata)||{}),
+    ...((session.user&&session.user.app_metadata)||{})
+  };
+  const fromMeta = _turnCreditShape(meta, "auth metadata");
+  try{
+    const { data, error } = await sb.rpc("turn_credit_balance");
+    if(!error){
+      const shaped = _turnCreditShape(Array.isArray(data)?data[0]:data, "turn_credit_balance");
+      if(shaped) return shaped;
+    }
+  }catch(e){}
+  const tables = [
+    ["turn_credit_balances","owner"],
+    ["turn_user_credits","owner"],
+    ["turn_credits","owner"],
+    ["turn_credit_balances","user_id"],
+    ["turn_user_credits","user_id"],
+    ["turn_credits","user_id"],
+  ];
+  for(const [table,col] of tables){
+    try{
+      const { data, error } = await sb.from(table).select("*").eq(col, uid).maybeSingle();
+      if(!error){
+        const shaped = _turnCreditShape(data, table);
+        if(shaped) return shaped;
+      }
+    }catch(e){}
+  }
+  return fromMeta;
+}
+window.cloudGetCreditBalance = cloudGetCreditBalance;
+
+/* decrement after a successful render (supabase/credits.sql turn_spend_credit).
+   Fire-and-forget from the render path; the UI refreshes via cloudGetCreditBalance
+   on the "turn-credits-changed" event either way. Returns the new balance or null. */
+async function cloudSpendCredit(cost){
+  const sb = sbClient(); if(!sb) return null;
+  try{
+    const { data, error } = await sb.rpc("turn_spend_credit", { cost: Math.max(1, Number(cost)||1) });
+    if(error) return null;
+    return _turnCreditShape(Array.isArray(data)?data[0]:data, "turn_spend_credit");
+  }catch(e){ return null; }
+}
+window.cloudSpendCredit = cloudSpendCredit;
+
 /* ── projects ────────────────────────────────────────────────────────────────
    A project row holds the whole story `doc` (scenes, characters, props, drafts,
    beats, continuity) as JSON, scoped to the signed-in user by RLS. */
@@ -71,9 +147,12 @@ async function cloudListProjects(){
     const { data, error } = await sb.from("turn_projects")
       .select("id,title,updated_at,created_at,isShow:doc->>isShow,showId:doc->>showId,episodeNo:doc->>episodeNo,cover:doc->>cover,fmt:doc->project->>format,logline:doc->project->>logline,ord:doc->>homeOrder")
       .order("updated_at",{ ascending:false });
-    if(error) return [];
+    // null = REQUEST FAILED (e.g. expired token → 401), [] = genuinely no projects.
+    // Callers must not treat a failure as "new user" — that's how an auth hiccup
+    // once spawned a create-first-project during boot and stranded the app.
+    if(error) return null;
     return data || [];
-  }catch(e){ return []; }
+  }catch(e){ return null; }
 }
 /* persist a film's poster (a downscaled data URL) onto its doc.cover, merging so the
    rest of the story doc is untouched. Used by the Home screen's poster generator. */
@@ -251,7 +330,20 @@ async function cloudCommit(projectId, uid, entityId, dataUrl, meta, refs, kind){
   const ver = (meta && meta.version) || 1;
   const newPath = await cloudUploadImage(projectId, uid, entityId, dataUrl, assetType, "sheet", ver);
   if(!newPath) return null;
-  const row = await cloudGetGen(projectId, entityId);
+  // HISTORY-SAFE previous-row lookup: a transient failure here (expired JWT mid-refresh,
+  // a network blip) must NEVER read as "no previous image" — that used to upsert
+  // history:[] and silently WIPE the sheet's whole version chain (uploads included).
+  // Distinguish error from empty, retry once after a session refresh, and on a
+  // persistent failure upsert WITHOUT the history column so the server-side value
+  // is preserved (one roll-in lost, not twelve versions).
+  const sb = sbClient();
+  const _get = async ()=>{ const { data, error } = await sb.from("turn_generations").select("*")
+      .eq("project_id", projectId).eq("entity_id", entityId).maybeSingle();
+    return { row: data||null, failed: !!error }; };
+  let looked = { row:null, failed:true };
+  try{ looked = await _get(); }catch(e){}
+  if(looked.failed){ try{ await sb.auth.refreshSession(); looked = await _get(); }catch(e){} }
+  const row = looked.row;
   let history = (row && row.history) || [];
   if(row && row.storage_path){
     history = [{ storage_path:row.storage_path, meta:row.meta||{}, refs:row.refs||[] }, ...history];
@@ -261,9 +353,11 @@ async function cloudCommit(projectId, uid, entityId, dataUrl, meta, refs, kind){
   for(const r of (refs || [])){
     let p = null;
     if(r.url) p = await cloudUploadImage(projectId, uid, entityId, r.url, assetType, "ref-"+turnSafeSeg(r.kind||"img"));
-    refRows.push({ kind:r.kind, label:r.label, storage_path:p });
+    refRows.push({ kind:r.kind, label:r.label, storage_path:p, refId:r.refId||undefined });
   }
-  await cloudUpsertGen(projectId, uid, entityId, { storage_path:newPath, meta:meta||{}, refs:refRows, history });
+  const fields = { storage_path:newPath, meta:meta||{}, refs:refRows };
+  if(!looked.failed) fields.history = history;   // never clobber history on a failed lookup
+  await cloudUpsertGen(projectId, uid, entityId, fields);
   const url = await cloudSignedUrl(newPath);
   return { tier:"cloud", url, path:newPath };
 }
@@ -332,6 +426,28 @@ async function cloudRevert(projectId, uid, entityId, index){
   const url = await cloudSignedUrl(chosen.storage_path);
   return { url, meta: chosen.meta || null };
 }
+/* delete the CURRENT image, promote the newest prior version, and do NOT keep the
+   deleted current image in history. Used by Image Details' "Delete current" action. */
+async function cloudDeleteCurrentAndPromote(projectId, uid, entityId){
+  const row = await cloudGetGen(projectId, entityId);
+  if(!row) return null;
+  const history = (row.history || []).slice();
+  if(!history.length) return null;
+  const chosen = history.shift();
+  const remove = [];
+  if(row.storage_path) remove.push(row.storage_path);
+  (row.refs||[]).forEach(r=>{ if(r.storage_path) remove.push(r.storage_path); });
+  await cloudUpsertGen(projectId, uid, entityId, {
+    storage_path:chosen.storage_path,
+    meta:chosen.meta||{},
+    refs:chosen.refs||[],
+    history:history.slice(0,12),
+  });
+  if(remove.length) cloudRemovePaths(remove);
+  const url = await cloudSignedUrl(chosen.storage_path);
+  return { url, meta: chosen.meta || null };
+}
+window.cloudDeleteCurrentAndPromote = cloudDeleteCurrentAndPromote;
 /* delete ONE history entry (and its stored image) from a cloud generation row. */
 async function cloudDeleteHistoryEntry(projectId, uid, entityId, index){
   const row = await cloudGetGen(projectId, entityId);
@@ -349,7 +465,7 @@ async function cloudLoadDetails(projectId, entityId){
   if(!row) return { id:entityId, url:"", meta:null, refs:[], history:[] };
   const url = row.storage_path ? await cloudSignedUrl(row.storage_path) : "";
   const refs = [];
-  for(const r of (row.refs||[])) refs.push({ kind:r.kind, label:r.label, url: r.storage_path ? await cloudSignedUrl(r.storage_path) : "" });
+  for(const r of (row.refs||[])) refs.push({ kind:r.kind, label:r.label, refId:r.refId, url: r.storage_path ? await cloudSignedUrl(r.storage_path) : "" });
   const history = [];
   for(const h of (row.history||[])) history.push({ url: h.storage_path ? await cloudSignedUrl(h.storage_path) : "", meta: h.meta || {} });
   return { id:entityId, url, meta: row.meta || null, refs, history };
@@ -409,3 +525,59 @@ async function cloudDeleteCameo(projectId, charId){
 window.cloudSyncCameo = cloudSyncCameo;
 window.cloudLoadCameo = cloudLoadCameo;
 window.cloudDeleteCameo = cloudDeleteCameo;
+
+/* ── render styles (locked "Surprise me" styles) ──────────────────────────────
+   Two tiers (see supabase/styles.sql):
+     • turn_user_styles   — PERSONAL, RLS-scoped to the owner (cross-device sync).
+     • turn_global_styles — admin-curated HOUSE styles; everyone reads, admin writes.
+   All no-op gracefully when Supabase isn't configured. Shapes: {key,label,render}.
+   Global render blocks may carry app metadata keys such as __hidden / __order;
+   artroom.jsx strips those before using the style block in prompts. */
+async function cloudListUserStyles(){
+  const sb = sbClient(); if(!sb) return [];
+  try{
+    const { data, error } = await sb.from("turn_user_styles").select("style_key,label,render").order("created_at",{ ascending:true });
+    if(error) return [];
+    return (data||[]).map(r=>({ key:r.style_key, label:r.label, render:r.render }));
+  }catch(e){ return []; }
+}
+async function cloudSaveUserStyle(key, label, render){
+  const sb = sbClient(); if(!sb || !key) return false;
+  const session = await cloudGetSession(); const uid = session && session.user && session.user.id; if(!uid) return false;
+  try{
+    const { error } = await sb.from("turn_user_styles")
+      .upsert({ owner:uid, style_key:key, label:label||"Locked style", render:render||{} }, { onConflict:"owner,style_key" });
+    return !error;
+  }catch(e){ return false; }
+}
+async function cloudDeleteUserStyle(key){
+  const sb = sbClient(); if(!sb || !key) return false;
+  try{ const { error } = await sb.from("turn_user_styles").delete().eq("style_key", key); return !error; }catch(e){ return false; }
+}
+async function cloudListGlobalStyles(){
+  const sb = sbClient(); if(!sb) return [];
+  try{
+    const { data, error } = await sb.from("turn_global_styles").select("style_key,label,render").order("created_at",{ ascending:true });
+    if(error) return [];
+    return (data||[]).map(r=>({ key:r.style_key, label:r.label, render:r.render }));
+  }catch(e){ return []; }
+}
+async function cloudSaveGlobalStyle(key, label, render){
+  const sb = sbClient(); if(!sb || !key) return false;
+  const session = await cloudGetSession(); const uid = session && session.user && session.user.id;
+  try{
+    const { error } = await sb.from("turn_global_styles")
+      .upsert({ style_key:key, label:label||"House style", render:render||{}, created_by:uid||null }, { onConflict:"style_key" });
+    return !error;     // RLS rejects non-admins → error truthy → false
+  }catch(e){ return false; }
+}
+async function cloudDeleteGlobalStyle(key){
+  const sb = sbClient(); if(!sb || !key) return false;
+  try{ const { error } = await sb.from("turn_global_styles").delete().eq("style_key", key); return !error; }catch(e){ return false; }
+}
+window.cloudListUserStyles = cloudListUserStyles;
+window.cloudSaveUserStyle = cloudSaveUserStyle;
+window.cloudDeleteUserStyle = cloudDeleteUserStyle;
+window.cloudListGlobalStyles = cloudListGlobalStyles;
+window.cloudSaveGlobalStyle = cloudSaveGlobalStyle;
+window.cloudDeleteGlobalStyle = cloudDeleteGlobalStyle;

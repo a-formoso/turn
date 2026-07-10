@@ -2,7 +2,7 @@
    shown as a wall of movie posters. Click a poster to open that film; "+ New film"
    spins up a blank one. Each card can mint an AI-generated poster (key art built
    from the title + logline) that persists on the project's doc.cover, so the wall
-   shows real covers across films. Reachable from the TURN brand mark in the top bar.
+   shows real covers across films. Reachable from the Cinema Machine brand mark in the top bar.
 
    Covers live on doc.cover (a downscaled data URL) and ride along in
    cloudListProjects via the `cover:doc->>cover` extract — no per-project asset
@@ -10,14 +10,17 @@
 
 /* The exact prompt used to mint a film's poster — shared so the "Copy prompt"
    action hands the user the SAME text generatePoster() sends (app.jsx reuses this). */
-function posterPrompt(proj){
+function posterPrompt(proj, styleLine){
   const title = (proj && proj.title) || "Untitled film";
   const logline = ((proj && proj.logline) || "").trim();
   return "Cinematic movie poster key art for the film “"+title+"”. "+
     (logline ? logline+". " : "")+
     "A single striking hero image; bold dramatic composition; rich cinematic colour and "+
-    "evocative lighting; the mood that sells the story at a glance. Vertical theatrical "+
-    "poster framing. Absolutely NO text, NO title, NO lettering or captions anywhere.";
+    "evocative lighting; the mood that sells the story at a glance. "+
+    // an animated/stylized film's one-sheet is drawn in the film's own medium — only
+    // added when the caller knows the film's render style (the currently open project)
+    (styleLine ? ("Render the key art in the film's own medium: "+styleLine+". ") : "")+
+    "Vertical theatrical poster framing. Absolutely NO text, NO title, NO lettering or captions anywhere.";
 }
 window.posterPrompt = posterPrompt;
 
@@ -101,7 +104,7 @@ function HomeScreen({ projects, currentId, onOpen, onCreate, onDelete, onGenerat
     React.createElement("div",{className:"home-top"},
       React.createElement("button",{className:"home-brand",onClick:onClose,title:"Back to your film"},
         (typeof BrandMark!=="undefined") && React.createElement(BrandMark,null),
-        React.createElement("span",{className:"brand-name"},"T",React.createElement("b",null,"U"),"RN")),
+        React.createElement("span",{className:"brand-name"},"Cinema ",React.createElement("b",null,"Machine"))),
       React.createElement("div",{className:"home-top-right"}, accountSlot || null)),
 
     React.createElement("div",{className:"home-body"},

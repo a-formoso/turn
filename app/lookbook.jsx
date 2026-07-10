@@ -8,6 +8,33 @@
 const LOOKBOOK_CATEGORIES = ["Palette","Lighting","Lens & format","Texture & grain","Composition","Production design","Wardrobe","Atmosphere"];
 window.LOOKBOOK_CATEGORIES = LOOKBOOK_CATEGORIES;
 
+function lookbookSourceKey(c){
+  return String((c&&c.source)||"")
+    .toLowerCase()
+    .replace(/\([^)]*\)/g,"")
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+}
+window.lookbookSourceKey = lookbookSourceKey;
+
+function dedupeLookbookCards(cards){
+  const out=[], pos=new Map();
+  const hasImg = (c)=>{ try{ return !!(c && typeof nbGetImage==="function" && nbGetImage(c.id)); }catch(e){ return false; } };
+  (cards||[]).forEach(c=>{
+    const key = lookbookSourceKey(c) || String(c&&c.id||"");
+    if(!key) return;
+    if(pos.has(key)){
+      const idx = pos.get(key), old = out[idx] || {};
+      if((hasImg(c) && !hasImg(old)) || (!(old.note||"").trim() && (c.note||"").trim())) out[idx] = c;
+      return;
+    }
+    pos.set(key, out.length);
+    out.push(c);
+  });
+  return out;
+}
+window.dedupeLookbookCards = dedupeLookbookCards;
+
 /* a reference is generatable once it has a "what to borrow" note — the note (the abstract
    visual quality) is what the mood frame is built from, never the named source IP. */
 function lookbookCardDrafted(c){ return !!((c && (c.note||"")).trim()); }
@@ -48,7 +75,7 @@ window.buildSimpleLookbookPrompt = buildSimpleLookbookPrompt;
 
 /* compose the lookbook into the free-text references the Colorist reads (styleBible.refs) */
 function composeLookbookRefs(statement, cards){
-  return [statement, ...(cards||[]).filter(c=>(c.note||"").trim())
+  return [statement, ...dedupeLookbookCards(cards).filter(c=>(c.note||"").trim())
     .map(c=> (c.source?c.source+" — ":"")+c.note)].filter(Boolean).join("\n");
 }
 window.composeLookbookRefs = composeLookbookRefs;
@@ -92,7 +119,7 @@ window.LOOKBOOK_ROUTING = LOOKBOOK_ROUTING;
    reference notes whose category routes to that department. Returns "" when there's nothing. */
 function lookbookBriefFor(dept, lookbook, statement){
   const cats = LOOKBOOK_ROUTING[dept] || [];
-  const lines = (lookbook||[])
+  const lines = dedupeLookbookCards(lookbook)
     .filter(c=> cats.indexOf(c.category)>=0 && (c.note||"").trim())
     .map(c=> (c.source?c.source+" — ":"")+c.note.trim());
   const st = (statement||"").trim();
@@ -163,6 +190,8 @@ async function generateLookbookFrame(c, project){
     const mEntry = (window.NB_MODELS||[]).find(m=>m.id===model) || {};
     const meta = { modelLabel:mEntry.label||"Nano Banana", modelId:model,
       aspect:(typeof nbGetAspect==="function"?nbGetAspect():"16:9"), size:(typeof nbGetRes==="function"?nbGetRes():"2K"),
+      date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
+      time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
       iso:now.toISOString(), prompt, mode:"final", version:1 };
     await nbCommit(c.id, url, meta, [], "asset");
     try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:c.id, url } })); }catch(e){}
@@ -200,6 +229,7 @@ function LookbookCard({ c, project, onUpdate, onDelete, onView, batchActiveId, o
     React.createElement(SheetFrame,{ gen, slotId:"lookref-"+c.id, name:c.source||"Reference", avatarColor:"#6b7280",
       initials, drafted, drafting:false, onDraft:()=>{}, entity:c, onView,
       slotPlaceholder:"Drop a reference image", noun:"reference frame",
+      hideUploadButton:true,
       specGate:{ ready:drafted, hint:"Add a ‘what to borrow’ note first — it's what the frame is built from." },
       onDelete:()=>onDelete(c.id), deleteLabel:"Delete reference" }),
     React.createElement("div",{className:"sheet-body"},
@@ -234,7 +264,7 @@ function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSe
   const [view, setView] = React.useState(null);
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
-  const list = lookbook || [];
+  const list = dedupeLookbookCards(lookbook || []);
   const draftedIds = (subset)=> subset.filter(c=>lookbookCardDrafted(c)).map(c=>c.id);
   const eligibleAll = list.filter(c=>lookbookCardDrafted(c)).length;
   const startAllBatch = ()=>{
@@ -253,16 +283,16 @@ function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSe
         React.createElement("div",{style:{flex:1}},
           React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Visual Researcher",
             React.createElement(window.InfoTip,{label:"About the Lookbook",
-              text:"The film's visual north star, built first so it can steer everything downstream. A short visual statement plus reference touchstones — palette, lighting, lens, texture — each with a mood frame in that visual language (original frames, never copies of the named films). 'Research the look' runs the Visual Researcher agent: it writes the statement, gathers the references, and renders a mood frame for each — then writes those references through to the Styles tab (Colorist), so the colour system is built from the same brief."}))),
+              text:"The film's visual north star, built first so it can steer everything downstream. A short visual statement plus reference touchstones — palette, lighting, lens, texture — each can have a mood frame in that visual language (original frames, never copies of the named films). 'Research the look' writes the statement and gathers/dedupes the references. 'Generate all frames' renders the mood frames afterwards."}))),
         React.createElement("div",{className:"art-intro-actions"},
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add reference"),
           onResearch && React.createElement("button",{className:"art-draftall",onClick:onResearch,
-            title:"Visual Researcher — writes the look statement, gathers reference touchstones, and renders a mood frame for each, on its own"},
+            title:"Visual Researcher — writes the look statement and gathers reference touchstones. Use Generate all frames when you want to render the mood frames."},
             React.createElement(Icon.robot,{s:14}),"Research the look"),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Render (or re-render) the mood frame for every reference that has a note"},
-            React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Rendering…":"Generate all frames"),
+            React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Rendering…":"Generate all frames", typeof window.nbCostChip==="function" && window.nbCostChip(1)),
           onClear && (list.length || (note||"").trim()) && React.createElement("button",{className:"art-draftall ghost",onClick:onClear,
             title:"Remove every reference and the visual statement — Art Room only, never touches your story"},
             React.createElement(Icon.trash,{s:13}),"Clear")))),
@@ -282,7 +312,7 @@ function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSe
       : React.createElement("div",{className:"prop-empty"},
           React.createElement("div",{className:"art-soon-ic"},React.createElement(Icon.image,{s:30})),
           React.createElement("div",{className:"art-soon-t"},"No references yet"),
-          React.createElement("div",{className:"art-soon-d"},"Build the film's visual brief first — ‘Research the look’ writes the statement and gathers reference touchstones (palette, lighting, lens, texture) with a mood frame each. Or add one by hand."),
+          React.createElement("div",{className:"art-soon-d"},"Build the film's visual brief first — ‘Research the look’ writes the statement and gathers reference touchstones (palette, lighting, lens, texture). Then use ‘Generate all frames’ when you want mood frames. Or add one by hand."),
           React.createElement("div",{style:{display:"flex",gap:8,marginTop:16}},
             onResearch && React.createElement("button",{className:"art-draftall",onClick:onResearch},
               React.createElement(Icon.robot,{s:14}),"Research the look"),

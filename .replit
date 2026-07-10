@@ -1,0 +1,16 @@
+# Cinema Machine — Replit deployment config (Static Deployment).
+# The "build" just assembles dist/: TURN.html served as index.html + the app/
+# folder. No bundler — the app compiles JSX in the browser (Babel standalone).
+# docs/, supabase/ and the rest of the repo stay unpublished.
+
+# local preview inside the Replit workspace (optional)
+run = "python3 -m http.server 8099"
+
+[deployment]
+deploymentTarget = "static"
+publicDir = "dist"
+build = ["sh", "-c", "mkdir -p dist && cp TURN.html dist/index.html && cp -r app dist/app"]
+
+[[ports]]
+localPort = 8099
+externalPort = 80

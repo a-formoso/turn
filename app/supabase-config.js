@@ -8,17 +8,14 @@ window.TURN_SUPABASE = {
   bucket: "turn-assets",
   /* local-first: the app works signed-out on local storage; cloud when signed in */
   localFirst: true,
-  /* Server-side proxy (the Higgsfield approach). When TRUE, generation is routed
-     through the `image-proxy` Supabase Edge Function, which holds the provider keys
-     as server secrets. It serves BOTH image providers — GPT Image / OpenAI (which
-     can't run from the browser at all) AND Nano Banana / Google (proxied too so NO
-     provider key lives in the browser) — AND the TEXT model behind MUSE, spec
-     drafting and the agents (the function's `text` task; Gemini/GPT, pick in the
-     MUSE header). So with the proxy on, the browser holds no keys at all. Keep FALSE until you've
-     deployed that function and set its OPENAI_API_KEY and GOOGLE_API_KEY secrets
-     (see supabase/functions/image-proxy/index.ts). While FALSE, GPT Image isn't
-     offered and Nano Banana runs in-browser with your local Google key — nothing
-     breaks. */
+  /* Server-side proxy. When TRUE, generation is routed through the `image-proxy`
+     Supabase Edge Function. The function can use user-saved provider keys sent
+     per request from the top-bar API Keys modal, or fall back to platform keys
+     stored as server secrets. It serves image providers (GPT Image / OpenAI must
+     be proxied; Nano Banana / Google can also be proxied), the TEXT model behind
+     MUSE/spec drafting/agents, plus voice/video routes. Keep FALSE until you've
+     deployed that function; while FALSE, GPT Image/voice/video aren't offered and
+     Nano Banana runs in-browser with the user's saved local Google key. */
   imageProxy: true,
   imageProxyFn: "image-proxy",
 };

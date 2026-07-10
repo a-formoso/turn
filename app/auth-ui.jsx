@@ -51,7 +51,7 @@ function AuthModal({ onClose, onAuthed, initialMode, plan, light }){
   return React.createElement("div",{className:"auth-overlay"+(light?" auth-light":""),onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose && onClose(); }},
     React.createElement("div",{className:"auth-panel"+(light?" light":"")},
       React.createElement("div",{className:"auth-head"},
-        React.createElement("div",{className:"auth-mark"},"TURN"),
+        React.createElement("div",{className:"auth-mark"},"Cinema Machine"),
         light && React.createElement("div",{className:"auth-act"}, mode==="signup"?"Prologue":"Welcome back"),
         React.createElement("div",{className:"auth-title"}, mode==="signup"?"Create your account":"Sign in"),
         (mode==="signup" && planName) && React.createElement("div",{className:"auth-plan"},
@@ -118,6 +118,25 @@ function AccountChip({ session, cloudActive, onSignIn, onSignOut }){
       React.createElement("div",{className:"acct-status"},
         cloudActive ? "Signed in \u00b7 cloud storage active"
                     : "Signed in, but cloud isn't reachable \u2014 check that the `turn` schema is exposed and the SQL has been run."),
+      // GENERATION CREDITS (video renders debit these) + WRITING-MODEL spend meter
+      // (display-only estimate of Claude/text use \u2014 counted per call in ai.jsx)
+      (()=>{
+        const bal = window.turnCreditBalance;
+        const ts = (typeof window.turnTextSpend==="function") ? window.turnTextSpend() : null;
+        const since = ts && ts.since ? new Date(ts.since) : null;
+        return React.createElement(React.Fragment,null,
+          bal && React.createElement("div",{className:"acct-status",title:"Generation credits \u2014 spent by video renders (see the Stage footer for per-render costs)"},
+            "Credits: "+bal.remaining+" remaining"+(bal.plan&&bal.plan!=="none"?(" \u00b7 "+bal.plan+" plan"):"")),
+          // upgrade / manage plan \u2014 opens the Cinema Machine plans modal
+          window.turnOpenPlans && React.createElement("button",{className:"acct-upgrade",
+            onClick:()=>{ setOpen(false); window.turnOpenPlans(); }},
+            React.createElement(Icon.sparkles,{s:12}),
+            (bal && bal.plan && bal.plan!=="none") ? "Change plan" : "Get credits \u00b7 Choose a plan"),
+          ts && React.createElement("div",{className:"acct-status",
+            title:"Writing model (Claude) use \u2014 every drafting, agent, MUSE and vision-QC call is counted here with a per-model estimate. Display-only: not deducted from your generation credits."},
+            "Writing model: "+ts.calls+" call"+(ts.calls===1?"":"s")+" \u00b7 \u2248"+(ts.credits||0)+" credits"
+              +(since?(" since "+since.toLocaleDateString()):"")));
+      })(),
       React.createElement("button",{className:"acct-signout",onClick:()=>{ setOpen(false); onSignOut && onSignOut(); }},
         "Sign out")));
 }

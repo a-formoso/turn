@@ -2,7 +2,7 @@
    Two modes:
    • SIGNED IN  — full, concise Claude-powered chat over your story (aiMuseChat), governed
      by the MUSE Protocol (docs/MUSE Protocol.md + museSystemPrompt() in ai.jsx).
-   • SIGNED OUT — a curated TEASER: a few hand-written tastes of what TURN is + the Infinite
+   • SIGNED OUT — a curated TEASER: a few hand-written tastes of what Cinema Machine is + the Infinite
      Studio method, capped, always nudging sign-up. No model call, no story access, so
      visitors get a feel without the platform being fully open for free.
    MUSE only talks; the Agents change the story. It's brand-silent about what powers it. */
@@ -16,7 +16,7 @@ const MUSE_CHIPS = [
 
 /* ---------- signed-out teaser (curated, no AI) ---------- */
 const VISITOR_CHIPS = [
-  "What is TURN?",
+  "What is Cinema Machine?",
   "What’s the Infinite Studio method?",
   "What can I build here?",
   "Is it free to sign up?",
@@ -24,15 +24,15 @@ const VISITOR_CHIPS = [
 const TEASER_LIMIT = 3;   // free messages before the sign-up gate
 const TEASER_QA = [
   { k:["what is turn","whats turn","what's turn","what is this","what's this","whats this","about turn","what do you do","what does turn","tell me about"],
-    a:"TURN is a story-architecture studio for AI filmmakers. You build your film as a value-charge spine — every scene plotted by its emotional charge, so you can see at a glance which scenes truly turn and which fall flat. Sign up free and I’ll architect yours with you." },
+    a:"Cinema Machine is a story-architecture studio for AI filmmakers. You build your film as a value-charge spine — every scene plotted by its emotional charge, so you can see at a glance which scenes truly turn and which fall flat. Sign up free and I’ll architect yours with you." },
   { k:["infinite studio method","method","the craft","how does it work","philosophy","approach","theory","what makes"],
-    a:"The Infinite Studio method is the craft TURN runs on: every scene should turn a value — swinging from positive to negative or back — driven by what your characters want against what stands in their way. Get that right and the whole film holds together. Sign up and I’ll pressure-test your scenes against it." },
+    a:"The Infinite Studio method is the craft Cinema Machine runs on: every scene should turn a value — swinging from positive to negative or back — driven by what your characters want against what stands in their way. Get that right and the whole film holds together. Sign up and I’ll pressure-test your scenes against it." },
   { k:["what can i make","what can i build","what can i do","make here","build here","capabilities","features","what's included","whats included","get out of"],
     a:"A complete film blueprint: the value-charge spine, scene beats, a generated screenplay, and a full Art Room for characters, props, locations, style and shots. Sign up free to start your first story." },
   { k:["why sign up","is it free","it free","for free","sign up","signup","create account","cost","price","pricing","worth it","why should i"],
     a:"Signing up is free and unlocks the whole studio — I’ll help you turn an idea into a logline, architect the spine, and refine it scene by scene. Create an account and let’s build your film." },
   { k:["who are you","what are you","your name","are you muse","hello","hi","hey"],
-    a:"I’m MUSE, your story guide inside TURN. Once you’re signed in I read your spine and help you shape scenes, fix the ones that don’t turn, and answer anything about your film. Sign up and put me to work." },
+    a:"I’m MUSE, your story guide inside Cinema Machine. Once you’re signed in I read your spine and help you shape scenes, fix the ones that don’t turn, and answer anything about your film. Sign up and put me to work." },
 ];
 const TEASER_GATE = "That’s part of the full studio — sign up free and I’ll walk you through it with your own story open.";
 function teaserAnswer(q){
@@ -123,11 +123,11 @@ function MuseDock({ scenes, selScene, aiOn, signedIn, onSignIn }){
     ? React.createElement("div",{className:"muse-greet"},
         React.createElement("div",{className:"muse-greet-t"},"Hi, I’m MUSE."),
         React.createElement("div",{className:"muse-greet-d"},
-          "Your guide to TURN. Ask me about your story, any department, or how to get something done."))
+          "Your guide to Cinema Machine. Ask me about your story, any department, or how to get something done."))
     : React.createElement("div",{className:"muse-greet"},
         React.createElement("div",{className:"muse-greet-t"},"Hi, I’m MUSE."),
         React.createElement("div",{className:"muse-greet-d"},
-          "Your story guide inside TURN. Ask me what this is about — then sign up free and I’ll build your film with you."));
+          "Your story guide inside Cinema Machine. Ask me what this is about — then sign up free and I’ll build your film with you."));
 
   // suggestion chips: show the questions NOT yet asked, after every answer, so a visitor
   // (or anyone) can keep tapping their next query instead of typing. Hidden once capped.

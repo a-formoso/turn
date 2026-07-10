@@ -4,20 +4,19 @@
 //
 // WHY THIS EXISTS
 //   The TURN web app runs entirely in the browser. This Edge Function runs on
-//   Supabase's servers, holds each provider's API key as a SERVER SECRET, and
-//   makes the call server-side. The browser calls THIS function; this function
-//   calls the provider. No provider key ever touches the browser. It serves two
-//   providers:
+//   Supabase's servers and makes provider calls server-side. It can use either
+//   a signed-in user's per-request key (sent from their local browser store) or
+//   the platform's provider key from SERVER SECRETS. It serves two image providers:
 //     • OpenAI GPT Image — MUST be proxied: OpenAI blocks direct cross-origin
 //       browser calls, so the page can't reach it at all.
-//     • Google Nano Banana (Gemini) — CAN run from the browser, but is routed
-//       here too so that NO provider key lives client-side ("fully key-free").
+//     • Google Nano Banana (Gemini) — CAN run from the browser, but can also be
+//       routed here so the app has one signed-in server-side path.
 //
 // SECURITY
 //   - Only signed-in TURN users may call it: we verify the caller's Supabase
 //     access token resolves to a real user (anonymous/anon-key calls are rejected).
-//   - Provider keys live only in the function's environment (`OPENAI_API_KEY`,
-//     `GOOGLE_API_KEY`), never in client code or localStorage.
+//   - Platform keys live in the function's environment. User-supplied keys are
+//     accepted only in the signed-in request body and are never returned.
 //
 // DEPLOY (you must run these — I can't deploy from the design environment):
 //   1. Log in (no global install — runs via npx):  npx supabase login
@@ -63,6 +62,9 @@ function sizeForAspect(aspect: string, imageSize: string): string {
     "16:9": { "1K": "1280x720",  "2K": "2048x1152", "4K": "3840x2160" },
     "9:16": { "1K": "720x1280",  "2K": "1152x2048", "4K": "2160x3840" },
     "21:9": { "1K": "1344x576", "2K": "2688x1152", "4K": "3808x1632" },
+    "1:1":  { "1K": "1024x1024", "2K": "2048x2048", "4K": "3840x3840" },
+    "3:4":  { "1K": "768x1024",  "2K": "1536x2048", "4K": "2880x3840" },
+    "4:3":  { "1K": "1024x768",  "2K": "2048x1536", "4K": "3840x2880" },
   };
   return (sizes[aspect] || sizes["16:9"])[tier];
 }
@@ -86,15 +88,18 @@ Deno.serve(async (req) => {
   const token = authHeader.replace(/^Bearer\s+/i, "");
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  let authUser: any = null;
+  let sbAuth: any = null;
   if (!token) return json({ error: "Sign in to use server-side image generation." }, 401);
   try {
-    const sb = createClient(supabaseUrl, anonKey, {
+    sbAuth = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
-    const { data: { user }, error } = await sb.auth.getUser(token);
+    const { data: { user }, error } = await sbAuth.auth.getUser(token);
     if (error || !user) {
       return json({ error: "Sign in to use server-side image generation." }, 401);
     }
+    authUser = user;
   } catch (_e) {
     return json({ error: "Could not verify your session." }, 401);
   }
@@ -113,6 +118,53 @@ Deno.serve(async (req) => {
   const images: string[] = Array.isArray(body.images) ? body.images : [];
   const task = body.task || "image";
   const messages: any[] = Array.isArray(body.messages) ? body.messages : [];
+  const cleanApiKey = (k: unknown) => String(k || "")
+    .replace(/[\s\u00a0\u200b-\u200d\ufeff]/g, "")
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+    .trim();
+  const userApiKey = (id: string): string => {
+    const keys = body && body.userApiKeys && typeof body.userApiKeys === "object" ? body.userApiKeys : {};
+    return cleanApiKey(keys[id]);
+  };
+  const providerKey = (id: string, envName: string): string => userApiKey(id) || cleanApiKey(Deno.env.get(envName));
+  const missingKey = (label: string, envName: string): string =>
+    `Missing ${label} API key. Add it in TURN's API Keys modal or set the ${envName} server secret.`;
+  const mediaExt = (mime: string): string => {
+    const m = (mime || "").toLowerCase();
+    if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
+    if (m.includes("webp")) return "webp";
+    if (m.includes("gif")) return "gif";
+    if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+    if (m.includes("wav")) return "wav";
+    if (m.includes("mp4")) return "mp4";
+    if (m.includes("webm")) return "webm";
+    return "png";
+  };
+  const videoInputUrl = async (src: unknown, kind: string, idx: number): Promise<string> => {
+    const s = String(src || "");
+    if (!s || !/^data:/i.test(s)) return s;
+    const blob = dataUrlToBlob(s);
+    if (!blob) return s;
+    const bucket = Deno.env.get("TURN_BUCKET") || "turn-assets";
+    const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(36).slice(2)).replace(/-/g, "");
+    const path = `${authUser.id}/stage-tmp/${Date.now()}-${kind}-${idx}-${id}.${mediaExt(blob.type || "")}`;
+    const up = await sbAuth.storage.from(bucket).upload(path, blob, {
+      contentType: blob.type || "application/octet-stream",
+      upsert: false,
+    });
+    if (up.error) throw new Error(`Could not stage ${kind} input for video rendering: ${up.error.message || "storage upload failed"}`);
+    const signed = await sbAuth.storage.from(bucket).createSignedUrl(path, 3600);
+    if (signed.error || !signed.data?.signedUrl) throw new Error(`Could not sign staged ${kind} input for video rendering.`);
+    return signed.data.signedUrl;
+  };
+  const videoInputUrls = async (arr: unknown, kind: string): Promise<string[]> => {
+    const out: string[] = [];
+    for (const [i, src] of (Array.isArray(arr) ? arr : []).entries()) {
+      const u = await videoInputUrl(src, kind, i + 1);
+      if (u) out.push(u);
+    }
+    return out;
+  };
 
   // ── task: TEXT completion (powers spec drafting, MUSE, and the agents) ────────
   // The client folds any system prompt into the user message, so we just pass the
@@ -120,8 +172,8 @@ Deno.serve(async (req) => {
   if (task === "text") {
     if (!messages.length) return json({ error: "No messages supplied." }, 400);
     if (provider === "google") {
-      const gkey = Deno.env.get("GOOGLE_API_KEY");
-      if (!gkey) return json({ error: "Server is missing GOOGLE_API_KEY." }, 500);
+      const gkey = providerKey("google", "GOOGLE_API_KEY");
+      if (!gkey) return json({ error: missingKey("Google", "GOOGLE_API_KEY") }, 500);
       const contents = messages.map((m: any) => ({
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: String(m.content || "") }],
@@ -146,8 +198,8 @@ Deno.serve(async (req) => {
       } catch (e) { return json({ error: "Proxy failed to reach Google: " + (e?.message || e) }, 502); }
     }
     if (provider === "openai") {
-      const apiKey = Deno.env.get("OPENAI_API_KEY");
-      if (!apiKey) return json({ error: "Server is missing OPENAI_API_KEY." }, 500);
+      const apiKey = providerKey("openai", "OPENAI_API_KEY");
+      if (!apiKey) return json({ error: missingKey("OpenAI", "OPENAI_API_KEY") }, 500);
       try {
         const r = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
@@ -165,8 +217,8 @@ Deno.serve(async (req) => {
       } catch (e) { return json({ error: "Proxy failed to reach OpenAI: " + (e?.message || e) }, 502); }
     }
     if (provider === "anthropic") {
-      const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-      if (!apiKey) return json({ error: "Server is missing ANTHROPIC_API_KEY." }, 500);
+      const apiKey = providerKey("anthropic", "ANTHROPIC_API_KEY");
+      if (!apiKey) return json({ error: missingKey("Anthropic", "ANTHROPIC_API_KEY") }, 500);
       // Anthropic takes system prompts as a top-level `system` field, not a message role.
       const sys = messages.filter((m: any) => m.role === "system").map((m: any) => String(m.content || "")).join("\n\n");
       const turns = messages
@@ -197,7 +249,7 @@ Deno.serve(async (req) => {
   }
 
   // ── task: VOICE (ElevenLabs) — powers the Voices tab + per-line audio (Stage) ──
-  // No `prompt`; branches on `op`. Key = the ELEVENLABS_API_KEY server secret.
+  // No `prompt`; branches on `op`. Key = userApiKeys.elevenlabs or ELEVENLABS_API_KEY.
   //   "tts"        → render a line WITH per-character timing → audio + durationMs (the clock).
   //   "design"     → Voice Design previews from a text descriptor (the "designed" origin).
   //   "saveVoice"  → lock a chosen preview into a permanent voice_id.
@@ -205,8 +257,8 @@ Deno.serve(async (req) => {
   //   "clone"      → instant clone from uploaded samples (consent-gated client-side).
   // ElevenLabs field names/model ids move — confirm against current docs at deploy.
   if (task === "voice") {
-    const elKey = Deno.env.get("ELEVENLABS_API_KEY");
-    if (!elKey) return json({ error: "Server is missing ELEVENLABS_API_KEY. Set it with: supabase secrets set ELEVENLABS_API_KEY=..." }, 500);
+    const elKey = providerKey("elevenlabs", "ELEVENLABS_API_KEY");
+    if (!elKey) return json({ error: missingKey("ElevenLabs", "ELEVENLABS_API_KEY") }, 500);
     const EL = "https://api.elevenlabs.io/v1";
     const op = (body.op || "tts").toString();
     const elErr = async (r: Response) => {
@@ -222,20 +274,24 @@ Deno.serve(async (req) => {
         if (!voiceId || !text) return json({ error: "Voice render needs voiceId and text." }, 400);
         const s = body.settings || {};
         const fmt = (body.outputFormat || "mp3_44100_128").toString();
-        const r = await fetch(`${EL}/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${encodeURIComponent(fmt)}`, {
-          method: "POST",
-          headers: { "xi-api-key": elKey, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text,
-            model_id: (body.modelId || "eleven_multilingual_v2").toString(),
-            voice_settings: {
-              stability: s.stability ?? 0.5,
+        const modelId = (body.modelId || "eleven_v3").toString();
+        // Eleven v3 uses DISCRETE stability (0 creative / 0.5 natural / 1 robust) and
+        // doesn't take style/speed — snap and trim the settings when v3 renders a line.
+        const isV3 = modelId.startsWith("eleven_v3");
+        const rawStab = Number(s.stability ?? 0.5);
+        const voiceSettings = isV3
+          ? { stability: rawStab < 0.25 ? 0.0 : rawStab > 0.75 ? 1.0 : 0.5,
+              similarity_boost: s.similarity ?? 0.75,
+              use_speaker_boost: s.speakerBoost ?? true }
+          : { stability: s.stability ?? 0.5,
               similarity_boost: s.similarity ?? 0.75,
               style: s.style ?? 0.0,
               speed: s.speed ?? 1.0,
-              use_speaker_boost: s.speakerBoost ?? true,
-            },
-          }),
+              use_speaker_boost: s.speakerBoost ?? true };
+        const r = await fetch(`${EL}/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${encodeURIComponent(fmt)}`, {
+          method: "POST",
+          headers: { "xi-api-key": elKey, "Content-Type": "application/json" },
+          body: JSON.stringify({ text, model_id: modelId, voice_settings: voiceSettings }),
         });
         if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
         const data = await r.json();
@@ -245,6 +301,8 @@ Deno.serve(async (req) => {
       }
 
       // Voice Design — returns candidate previews (each with a generated_voice_id).
+      // Defaults to the v3 design model (eleven_ttv_v3): noticeably better accent and
+      // character adherence than the older multilingual_ttv_v2 the API defaults to.
       if (op === "design") {
         const description = (body.description || "").toString();
         if (!description) return json({ error: "Voice design needs a description." }, 400);
@@ -253,8 +311,12 @@ Deno.serve(async (req) => {
           headers: { "xi-api-key": elKey, "Content-Type": "application/json" },
           body: JSON.stringify({
             voice_description: description,
-            ...(body.modelId ? { model_id: String(body.modelId) } : {}),
+            model_id: String(body.modelId || "eleven_ttv_v3"),
             ...(body.text ? { text: String(body.text) } : { auto_generate_text: true }),
+            ...(body.guidanceScale != null ? { guidance_scale: Number(body.guidanceScale) } : {}),
+            ...(body.loudness != null ? { loudness: Number(body.loudness) } : {}),
+            ...(body.quality != null ? { quality: Number(body.quality) } : {}),
+            ...(body.seed != null ? { seed: Number(body.seed) } : {}),
           }),
         });
         if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
@@ -341,15 +403,17 @@ Deno.serve(async (req) => {
   // Async (videos take minutes): the client SUBMITS, then POLLS until COMPLETED.
   //   "submit" → { requestId, statusUrl, responseUrl, status }
   //   "poll"   → { status } | { status:"COMPLETED", videoUrl, seed, contentType }
-  // Key = the FAL_KEY server secret. Model defaults to reference-to-video (frame +
+  // Key = userApiKeys.fal or FAL_KEY. Model defaults to reference-to-video (frame +
   // line audio → lip-synced clip). See docs/Voice & Lip-Sync (Seedance) Plan.md §6A.
   if (task === "video") {
-    const falKey = Deno.env.get("FAL_KEY");
-    if (!falKey) return json({ error: "Server is missing FAL_KEY. Set it with: supabase secrets set FAL_KEY=..." }, 500);
+    const falKey = providerKey("fal", "FAL_KEY");
+    if (!falKey) return json({ error: missingKey("fal.ai", "FAL_KEY") }, 500);
     const ALLOWED = new Set([
       "bytedance/seedance-2.0/reference-to-video", "bytedance/seedance-2.0/fast/reference-to-video",
       "bytedance/seedance-2.0/image-to-video",     "bytedance/seedance-2.0/fast/image-to-video",
       "bytedance/seedance-2.0/text-to-video",      "bytedance/seedance-2.0/fast/text-to-video",
+      "fal-ai/sora-2/image-to-video",              "fal-ai/sora-2/image-to-video/pro",
+      "fal-ai/kling-video/v3/standard/image-to-video", "fal-ai/kling-video/v3/pro/image-to-video",
     ]);
     const model = (body.model || "bytedance/seedance-2.0/reference-to-video").toString();
     if (!ALLOWED.has(model)) return json({ error: `Video model "${model}" isn't allowed on this proxy.` }, 400);
@@ -361,19 +425,71 @@ Deno.serve(async (req) => {
     };
     try {
       if (op === "submit") {
-        const input: any = {
-          prompt: (body.prompt || "").toString(),
-          resolution: (body.resolution || "720p").toString(),
-          duration: (body.duration != null ? String(body.duration) : "auto"),
-          aspect_ratio: (body.aspectRatio || "auto").toString(),
-          generate_audio: body.generateAudio !== false,
-        };
-        if (Array.isArray(body.image_urls) && body.image_urls.length) input.image_urls = body.image_urls;
-        if (Array.isArray(body.video_urls) && body.video_urls.length) input.video_urls = body.video_urls;
-        if (Array.isArray(body.audio_urls) && body.audio_urls.length) input.audio_urls = body.audio_urls;
-        if (body.image_url) input.image_url = String(body.image_url);
-        if (body.end_image_url) input.end_image_url = String(body.end_image_url);
-        if (body.seed != null) input.seed = body.seed;
+        const isSora = model.indexOf("sora-2") >= 0;
+        const imageUrls = await videoInputUrls(body.image_urls, "image");
+        let input: any;
+        if (isSora) {
+          // Sora 2 (fal): ONE start image; duration snapped to its 4/8/12/16/20s grid;
+          // resolution auto/720p (pro adds 1080p); aspect auto/16:9/9:16; audio is
+          // always native — no generate_audio flag, no refs, no seed, no bitrate.
+          const startImage = imageUrls[0] || (body.image_url ? await videoInputUrl(body.image_url, "image", 0) : "");
+          if (!startImage) return json({ error: "Sora 2 needs a start image." }, 400);
+          const want = Number(body.duration) || 4;
+          const dur = [4, 8, 12, 16, 20].reduce((b, v) => Math.abs(v - want) < Math.abs(b - want) ? v : b, 4);
+          const res = (body.resolution || "").toString();
+          const asp = (body.aspectRatio || "auto").toString();
+          input = {
+            prompt: (body.prompt || "").toString(),
+            image_url: startImage,
+            duration: dur,   // INTEGER — fal's Sora schema rejects "8" as a string ("Input should be 4, 8, 12, 16 or 20")
+            resolution: (res === "1080p" && model.endsWith("/pro")) ? "1080p" : (res === "720p" ? "720p" : "auto"),
+            aspect_ratio: (asp === "9:16" || asp === "16:9") ? asp : "auto",
+          };
+        } else if (model.indexOf("kling-video") >= 0) {
+          // Kling 3.0 (fal): ONE start image (+ optional end frame); audio is generated
+          // NATIVELY by the model (speech incl.) — no audio/video refs. NATIVE MULTI-SHOT:
+          // body.multi_prompt = [{prompt,duration}] renders each shot on its own prompt,
+          // total clamped to Kling's 15s ceiling (trimming from the end).
+          const startImage = imageUrls[0] || (body.image_url ? await videoInputUrl(body.image_url, "image", 0) : "");
+          if (!startImage) return json({ error: "Kling 3.0 needs a start image." }, 400);
+          input = {
+            start_image_url: startImage,
+            generate_audio: body.generateAudio !== false,
+            negative_prompt: (body.negativePrompt || "blur, distort, low quality, captions, subtitles, watermark, burned-in text").toString(),
+          };
+          const mp = Array.isArray(body.multi_prompt)
+            ? body.multi_prompt.map((s: any) => ({ prompt: String(s?.prompt || "").slice(0, 2000), duration: Math.max(1, Math.min(15, Math.round(Number(s?.duration) || 3))) })).filter((s: any) => s.prompt)
+            : [];
+          if (mp.length >= 2) {
+            let total = 0; const kept: any[] = [];
+            for (const s of mp) {
+              if (total + s.duration > 15) { const left = 15 - total; if (left >= 1) kept.push({ ...s, duration: left }); break; }
+              kept.push(s); total += s.duration;
+            }
+            input.multi_prompt = kept; input.shot_type = "customize";
+          } else {
+            input.prompt = (body.prompt || "").toString();
+            input.duration = Math.max(3, Math.min(15, Math.round(Number(body.duration) || 5)));
+          }
+          if (body.end_image_url) input.end_image_url = await videoInputUrl(body.end_image_url, "image", 99);
+        } else {
+          const videoUrls = await videoInputUrls(body.video_urls, "video");
+          const audioUrls = await videoInputUrls(body.audio_urls, "audio");
+          input = {
+            prompt: (body.prompt || "").toString(),
+            resolution: (body.resolution || "720p").toString(),
+            duration: (body.duration != null ? String(body.duration) : "auto"),
+            aspect_ratio: (body.aspectRatio || "auto").toString(),
+            generate_audio: body.generateAudio !== false,
+          };
+          if (imageUrls.length) input.image_urls = imageUrls;
+          if (videoUrls.length) input.video_urls = videoUrls;
+          if (audioUrls.length) input.audio_urls = audioUrls;
+          if (body.image_url) input.image_url = await videoInputUrl(body.image_url, "image", 0);
+          if (body.end_image_url) input.end_image_url = await videoInputUrl(body.end_image_url, "image", 99);
+          if (body.seed != null) input.seed = body.seed;
+          if (body.bitrateMode) input.bitrate_mode = body.bitrateMode === "high" ? "high" : "standard";
+        }
         const r = await fetch("https://queue.fal.run/" + model, { method: "POST", headers: falHead, body: JSON.stringify(input) });
         if (!r.ok) return json({ error: await falErr(r), status: r.status }, 200);
         const data = await r.json();
@@ -407,9 +523,9 @@ Deno.serve(async (req) => {
 
   // ── provider: Google (Nano Banana / Gemini) — mirrors the client's nbGenerate ──
   if (provider === "google") {
-    const gkey = Deno.env.get("GOOGLE_API_KEY");
+    const gkey = providerKey("google", "GOOGLE_API_KEY");
     if (!gkey) {
-      return json({ error: "Server is missing GOOGLE_API_KEY. Set it with: supabase secrets set GOOGLE_API_KEY=..." }, 500);
+      return json({ error: missingKey("Google", "GOOGLE_API_KEY") }, 500);
     }
     // prompt text + optional reference/edit images, IMAGE response, aspect + size
     const parts: any[] = [{ text: prompt }];
@@ -456,9 +572,9 @@ Deno.serve(async (req) => {
     return json({ error: `Provider "${provider}" is not configured on this proxy yet.` }, 400);
   }
 
-  const apiKey = Deno.env.get("OPENAI_API_KEY");
+  const apiKey = providerKey("openai", "OPENAI_API_KEY");
   if (!apiKey) {
-    return json({ error: "Server is missing OPENAI_API_KEY. Set it with: supabase secrets set OPENAI_API_KEY=sk-..." }, 500);
+    return json({ error: missingKey("OpenAI", "OPENAI_API_KEY") }, 500);
   }
 
   const size = sizeForAspect(aspect, imageSize);

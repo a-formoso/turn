@@ -169,8 +169,9 @@ const CONFLICT_KIND = {
 
 /* ---------- view ---------- */
 function isSpTransition(t){ return /^(?:CUT|DISSOLVE|SMASH CUT|MATCH CUT|FADE|WIPE|JUMP CUT)\b.*(?:TO|OUT|IN)[:.]?$/i.test(String(t).trim()); }
-function ScriptBlock({ b, contd, sceneNo }){
+function ScriptBlock({ b, contd, sceneNo, flash }){
   let type = b.type, text = b.text;
+  const fl = flash ? " spb-flash" : "";
   if(type==="action" && isSpTransition(text)){ type="trans"; text=text.toUpperCase(); }
   if(type==="char"){
     text = text.toUpperCase();
@@ -178,23 +179,23 @@ function ScriptBlock({ b, contd, sceneNo }){
   }
   // shooting-script convention: the scene number flanks the slugline in both margins
   if(type==="scene" && sceneNo!=null){
-    return React.createElement("div",{className:(BLOCK_CLASS.scene)+" numbered"},
+    return React.createElement("div",{className:(BLOCK_CLASS.scene)+" numbered"+fl},
       React.createElement("span",{className:"spb-scnum"},sceneNo),
       React.createElement("span",{className:"spb-sctext"},text),
       React.createElement("span",{className:"spb-scnum"},sceneNo));
   }
-  return React.createElement("div",{className:BLOCK_CLASS[type]||"spb-action"}, text);
+  return React.createElement("div",{className:(BLOCK_CLASS[type]||"spb-action")+fl}, text);
 }
 
 /* EDIT MODE: a single screenplay block as a directly-editable line. Uncontrolled
    contentEditable — React never manages its text (no children in the vdom), so
    re-renders mid-typing can't reset the caret; the raw text is pushed in via a ref
    effect on mount and after each committed change. Commits on blur only when changed. */
-function EditableBlock({ b, onCommit }){
+function EditableBlock({ b, onCommit, flash }){
   const ref = React.useRef(null);
   const raw = b.text || "";
   React.useEffect(()=>{ if(ref.current && ref.current.innerText !== raw) ref.current.innerText = raw; },[raw]);
-  const cls = (BLOCK_CLASS[b.type]||"spb-action") + " sp-editable";
+  const cls = (BLOCK_CLASS[b.type]||"spb-action") + " sp-editable" + (flash?" spb-flash":"");
   const commit = ()=>{
     if(!ref.current) return;
     const v = ref.current.innerText.replace(/ /g," ").replace(/\n+$/,"");
@@ -279,7 +280,24 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
   const [polishWait, setPolishWait] = React.useState(false);
   const [justPolished, setJustPolished] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
-  React.useEffect(()=>{ setActiveBeat(null); setPolishing(false); setPolishWait(false); setJustPolished(false); setEditing(false); },[scene && scene.id]);
+  // Undo/Redo flash — the Set of blocks (of the version being restored) that DIFFER
+  // from what's on screen, so the user sees exactly what the undo changed.
+  const [verFlash, setVerFlash] = React.useState(null);
+  const verFlashTimer = React.useRef(null);
+  React.useEffect(()=>{ setActiveBeat(null); setPolishing(false); setPolishWait(false); setJustPolished(false); setEditing(false); setVerFlash(null); },[scene && scene.id]);
+  // once the restored version renders, bring the first changed block into view if it's
+  // off-screen (essential on mobile, where the change is usually below the fold)
+  React.useEffect(()=>{
+    if(!verFlash) return;
+    const t = setTimeout(()=>{
+      const el = document.querySelector(".spb-flash");
+      if(!el) return;
+      const r = el.getBoundingClientRect();
+      if(r.top < 0 || r.bottom > (window.innerHeight||document.documentElement.clientHeight))
+        el.scrollIntoView({ behavior:"smooth", block:"center" });
+    }, 80);
+    return ()=>clearTimeout(t);
+  },[verFlash]);
 
   if(!scene) return React.createElement("div",{className:"script-scroll"},
     React.createElement("div",{className:"script-empty"},
@@ -355,17 +373,35 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
 
     // undo / redo — one linear history of the scene's screenplay states (manual edits,
     // MUSE polishes and drafts all push onto the same stack). Appears once there's history.
+    // Before swapping versions, diff the incoming blocks against what's on screen and
+    // FLASH the changed ones (the version's block objects become the rendered ones, so
+    // identity survives the swap), scrolling the first change into view if off-screen.
+    const flashDiff = (target)=>{
+      if(!target || !Array.isArray(target.blocks)) return;
+      const cur = (screenplay && screenplay.blocks) || [];
+      const nxt = target.blocks;
+      const changed = new Set();
+      for(let i=0; i<Math.max(cur.length, nxt.length); i++){
+        const a=cur[i], b=nxt[i];
+        if(!b){ if(nxt.length) changed.add(nxt[nxt.length-1]); break; }   // lines removed at the end — mark the new last block
+        if(!a || a.text!==b.text || a.type!==b.type) changed.add(b);
+      }
+      if(!changed.size) return;
+      setVerFlash(changed);
+      clearTimeout(verFlashTimer.current);
+      verFlashTimer.current = setTimeout(()=>setVerFlash(null), 2600);
+    };
     if(hb.back.length || hb.fwd.length){
       const prevLabel = hb.back.length ? labelOf(hb.back[hb.back.length-1]) : null;
       const nextLabel = hb.fwd.length ? labelOf(hb.fwd[0]) : null;
       versionUI = React.createElement("div",{className:"ver-ctl"},
         React.createElement("button",{className:"ver-btn",disabled:!hb.back.length||polishing,
           title: prevLabel?("Undo — back to "+prevLabel):"Nothing to undo",
-          onClick:()=>!polishing&&onRevert(scene.id)},
+          onClick:()=>{ if(polishing) return; flashDiff(hb.back[hb.back.length-1]); onRevert(scene.id); }},
           React.createElement(Icon.undo,{s:13}), "Undo"),
         React.createElement("button",{className:"ver-btn",disabled:!hb.fwd.length||polishing,
           title: nextLabel?("Redo — forward to "+nextLabel):"Nothing to redo",
-          onClick:()=>!polishing&&onRedo(scene.id)},
+          onClick:()=>{ if(polishing) return; flashDiff(hb.fwd[0]); onRedo(scene.id); }},
           React.createElement(Icon.redo,{s:13}), "Redo"));
     }
 
@@ -402,8 +438,8 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
               React.createElement("div",{className:"sp-page-inner"},
                 (fg[n]||[]).length
                   ? (fg[n]||[]).map((b,i)=> editing
-                  ? React.createElement(EditableBlock,{key:i,b,onCommit:(t)=>commitEdit(b,t)})
-                  : React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:scene.no}))
+                  ? React.createElement(EditableBlock,{key:i,b,onCommit:(t)=>commitEdit(b,t),flash:!!(verFlash&&verFlash.has(b))})
+                  : React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:scene.no,flash:!!(verFlash&&verFlash.has(b))}))
                   : React.createElement("div",{className:"spb-action spb-missing"},"No screenplay text assigned to this beat."))));
         })),
       transOut && React.createElement(TransitionBar,{trans:transOut,out:true,

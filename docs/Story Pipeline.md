@@ -36,6 +36,11 @@ the *size and telling* of what's built — never the steps below.
 
 ### 1. Seed
 The user provides a seed: a logline, a premise, or a rough idea. Nothing is assumed beyond it.
+- *(approved 2026-07-04)* Developing the seed also **recommends the format + framework** for the
+  story — applied only to knobs the writer didn't explicitly pick at the Format step, shown with a
+  one-line rationale on the logline step, and reversible via a Change button.
+- *(approved 2026-07-04)* A **logline seed is always offered verbatim** as the first, pre-selected
+  candidate ("yours — untouched"); the sharpened variants are optional, never the default.
 
 ### 2. Research → Synopsis  *(the new, defining step; amended 2026-06-12 by owner approval: framework-shaped synopsis, seed pass-through, format-aware research)*
 Before any structure is built, expand the seed into a synopsis using the
@@ -84,6 +89,15 @@ costs; Story Circle builds the descent-and-return where every gain carries a pri
 **setting**, and **cast**, then **beats + screenplay** for every scene — threading
 continuity scene to scene.
 
+> **Cast voice block** *(approved 2026-07-02)*: every cast member is generated with a **voice
+> identity block** — `voice: { accent, pitch, pace, quirks }` — the same way physique and wardrobe
+> are captured for the face. The **accent is named as sound** (e.g. "noticeable Turkish accent,
+> London inflections"), consistent with the character's identity, the setting and the period — never
+> bare ethnicity or biography (voice models don't infer accent from backstory). **Script Breakdown**
+> later enriches this block from voice details the screenplay actually states (approval-gated, like
+> feature enrichment), and **Voice Design** builds its casting description from these fields before
+> any heuristic.
+
 ### 4. Structural core — the Spine
 Every story is a sequence of scenes, each carrying a **value charge** (opening → closing, e.g. +2 → −1).
 The **Spine view** plots that charge across all scenes so the rhythm of the whole arc is visible.
@@ -123,7 +137,8 @@ Each entity gets a canonical, reusable reference so every generated image stays 
 
 - **Voices** *(approved 2026-06-13; tab planned, not yet built — see Step 10)* — each speaking
   character gets a **locked voice** the way Cameo locks a face. A voice is **designed from the
-  character's own bible** (age, identity, archetype, drive), **picked from a library**, or **cloned from
+  character's own bible** (age, identity, archetype, drive — and the cast **voice block**:
+  accent / pitch / pace / quirks *(added 2026-07-02)*), **picked from a library**, or **cloned from
   a real voice sample** (consent-gated, exactly like a cameo). Locking writes a canonical `voiceId` so
   the same character sounds identical in every line. A candidate spec is auto-drafted on first Art Room
   open (mirroring the silent cast auto-draft); the user auditions and locks — never silently committed.

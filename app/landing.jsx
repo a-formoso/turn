@@ -1,5 +1,5 @@
 /* landing.jsx — the commercial landing page shown to signed-out visitors INSTEAD of the
-   app. Sells what TURN is (the departments / the Infinite Studio method) and drives sign-up.
+   app. Sells what Cinema Machine is (the departments / the Infinite Studio method) and drives sign-up.
    The actual app (spine, Writers' Room, Art Room, Agents) is never exposed until sign-in.
    The floating MUSE teaser still rides on top (mounted by app.jsx) for a live taste.
    DESIGN: light editorial look — white page, near-black ink, hairline-framed content
@@ -60,18 +60,15 @@ const LP_STEPS = [
   { n:"3", t:"Build the film", d:"Story, script, cast, places, shots — it all grows in one place." },
 ];
 
-/* Pricing — PLACEHOLDER amounts; set your real prices/limits here. */
-const LP_TIERS = [
-  { id:"free", name:"Free", price:"$0", per:"forever", blurb:"Plant the seed.",
-    feats:["1 film","Story & screenplay tools","MUSE — a taste"],
-    cta:"Start free" },
-  { id:"pro", name:"Pro", price:"$19", per:"/ month", blurb:"Finish your film.", featured:true, tag:"Most popular",
-    feats:["Unlimited films","The full studio — every department","All AI Agents","MUSE, unlimited","High-resolution generations"],
-    cta:"Choose Pro" },
-  { id:"studio", name:"Studio", price:"$49", per:"/ month", blurb:"For working filmmakers.",
-    feats:["Everything in Pro","Highest generation limits","Priority rendering","Early access to new features"],
-    cta:"Choose Studio" },
-];
+/* Pricing — derived from the SINGLE source of truth (plans.jsx CINEMA_PLANS), so
+   the homepage and the in-app checkout can never drift. Update tiers in one place. */
+function lpTiers(){
+  return (window.CINEMA_PLANS || []).map(p=>({
+    id:p.tier, name:p.name, price:p.price, per:"/ month", blurb:p.blurb,
+    feats:p.features, featured:!!p.popular, tag:p.popular?"Most popular":null,
+    cta:"Choose "+p.name,
+  }));
+}
 
 function Landing({ onStart, onSignIn }){
   const Icn = (name, s)=> React.createElement(Icon[name] || Icon.sparkles, {s:s||18});
@@ -88,17 +85,17 @@ function Landing({ onStart, onSignIn }){
     React.createElement("header",{className:"lp-nav"},
       React.createElement("div",{className:"lp-nav-in"},
         React.createElement("div",{className:"lp-brand"},
-          React.createElement("span",{className:"lp-logo"},"TURN")),
+          React.createElement("span",{className:"lp-logo"},"Cinema Machine")),
         React.createElement("div",{className:"lp-nav-cta"},
           React.createElement("button",{className:"lp-btn ghost",onClick:onSignIn},"Sign in"),
-          React.createElement("button",{className:"lp-btn primary",onClick:()=>onStart("free")},"Start creating for free")),
+          React.createElement("button",{className:"lp-btn primary",onClick:()=>onStart("free")},"Get started")),
         // mobile-only hamburger (the inline buttons hide below 560px)
         React.createElement("button",{className:"lp-burger"+(menuOpen?" open":""),"aria-label":"Menu",
           "aria-expanded":menuOpen?"true":"false",onClick:()=>setMenuOpen(o=>!o)},
           React.createElement("span",null),React.createElement("span",null),React.createElement("span",null))),
       menuOpen && React.createElement("div",{className:"lp-menu"},
         React.createElement("button",{className:"lp-menu-item",onClick:()=>{ setMenuOpen(false); onSignIn(); }},"Sign in"),
-        React.createElement("button",{className:"lp-menu-item primary",onClick:()=>{ setMenuOpen(false); onStart("free"); }},"Start creating for free"))),
+        React.createElement("button",{className:"lp-menu-item primary",onClick:()=>{ setMenuOpen(false); onStart("free"); }},"Get started"))),
 
     // hero — UNFRAMED (no hairlines), headline + CTAs left, supporting copy right
     React.createElement("section",{className:"lp-hero"},
@@ -106,11 +103,11 @@ function Landing({ onStart, onSignIn }){
         React.createElement("h1",{className:"lp-h1"},"Your film, told",React.createElement("br",null),
           "as ",React.createElement(RotatingWord,null),"."),
         React.createElement("div",{className:"lp-hero-cta"},
-          React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("free")},"Start creating for free"),
+          React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("free")},"Start creating"),
           React.createElement("button",{className:"lp-btn ghost big",onClick:onSignIn},"Sign in"))),
       React.createElement("div",{className:"lp-hero-aside"},
         React.createElement("p",{className:"lp-lede"},
-          "TURN is your AI film studio: bring an idea, choose one of four classic story structures, and watch it grow — a story spine built to hold an audience, a finished screenplay, a designed cast and world, and a storyboarded film."))),
+          "Cinema Machine is your AI film studio: bring an idea, choose one of four classic story structures, and watch it grow — a story spine built to hold an audience, a finished screenplay, a designed cast and world, and a storyboarded film."))),
 
     // hero media — the 21:9 short-film placeholder, still outside the frame
     React.createElement("section",{className:"lp-hero-media"},
@@ -146,7 +143,7 @@ function Landing({ onStart, onSignIn }){
           React.createElement("div",{className:"lp-act"},"Act III · The price"),
           React.createElement("h2",{className:"lp-h2"},"Simple pricing")),
         React.createElement("div",{className:"lp-tiers"},
-          LP_TIERS.map((t,i)=>React.createElement("div",{key:i,className:"lp-tier"+(t.featured?" featured":"")},
+          lpTiers().map((t,i)=>React.createElement("div",{key:i,className:"lp-tier"+(t.featured?" featured":"")},
             t.tag && React.createElement("div",{className:"lp-tier-tag"}, t.tag),
             React.createElement("div",{className:"lp-tier-name"}, t.name),
             React.createElement("div",{className:"lp-tier-price"},
@@ -165,11 +162,11 @@ function Landing({ onStart, onSignIn }){
           React.createElement("h2",{className:"lp-h2"},"Start building your film.")),
         React.createElement("div",{className:"lp-final-cta"},
           React.createElement("button",{className:"lp-btn ghost big",onClick:onSignIn},"Sign in"),
-          React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("free")},"Start creating for free")))),
+          React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("free")},"Start creating")))),
 
     React.createElement("footer",{className:"lp-foot"},
       React.createElement("div",{className:"lp-foot-in"},
-        React.createElement("span",{className:"lp-logo sm"},"TURN"),
+        React.createElement("span",{className:"lp-logo sm"},"Cinema Machine"),
         React.createElement("nav",{className:"lp-foot-links","aria-label":"Legal"},
           React.createElement("a",{className:"lp-foot-link",href:"#privacy"},"Privacy"),
           React.createElement("a",{className:"lp-foot-link",href:"#terms"},"Terms"),

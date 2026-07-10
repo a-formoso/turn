@@ -55,14 +55,95 @@ const SHOT_LENSES = [
   { id:"imax70", label:"70mm / IMAX", desc:"large-format capture; immense clarity and resolution, deep fine detail, sweeping epic grandeur" },
   { id:"vhs", label:"VHS / CCTV", desc:"lo-fi analog capture; soft low resolution, scanlines, chroma bleed, date-stamp surveillance aesthetic" },
 ];
+const SHOT_CAMERA_BODIES = [
+  { id:"auto", label:"Auto", desc:"let the shot designer infer the capture feel" },
+  { id:"cinema", label:"Cinema camera", desc:"high-end digital cinema capture with controlled dynamic range" },
+  { id:"film35", label:"35mm film camera", desc:"photochemical 35mm motion-picture capture with organic grain" },
+  { id:"largeformat", label:"Large-format camera", desc:"large-format clarity, scale and fine detail" },
+  { id:"macro", label:"Macro rig", desc:"specialized macro capture for tiny subjects and surface detail" },
+  { id:"handheld", label:"Handheld doc camera", desc:"reactive documentary camera feel" },
+  { id:"surveillance", label:"Surveillance / CCTV", desc:"fixed security-camera capture, compressed and observational" },
+  { id:"phone", label:"Phone camera", desc:"small-sensor mobile camera capture" },
+  { id:"drone", label:"Drone", desc:"aerial camera platform with floating spatial overview" },
+];
+const SHOT_LENS_TYPES = [
+  { id:"auto", label:"Auto", desc:"use the selected basic lens naturally" },
+  { id:"spherical", label:"Spherical", desc:"clean spherical cinema lens, natural geometry" },
+  { id:"anamorphic", label:"Anamorphic", desc:"wide cinematic lensing, oval bokeh and horizontal flares" },
+  { id:"macro", label:"Macro", desc:"close-focus macro optics, extreme surface detail" },
+  { id:"telephoto", label:"Telephoto", desc:"compressed planes and isolated subject" },
+  { id:"wide", label:"Wide-angle", desc:"expanded space, near objects loom larger" },
+  { id:"fisheye", label:"Fisheye", desc:"strong ultra-wide barrel distortion" },
+  { id:"tiltshift", label:"Tilt-shift", desc:"selective plane of focus, miniature-like control" },
+];
+const SHOT_FOCAL_LENGTHS = [
+  { id:"auto", label:"Auto", desc:"use the shot's Lens control" },
+  { id:"14", label:"14mm", desc:"ultra-wide" },
+  { id:"24", label:"24mm", desc:"wide environmental" },
+  { id:"35", label:"35mm", desc:"natural wide-normal" },
+  { id:"50", label:"50mm", desc:"normal perspective" },
+  { id:"85", label:"85mm", desc:"portrait compression" },
+  { id:"100macro", label:"100mm macro", desc:"macro close-up optics" },
+  { id:"135", label:"135mm", desc:"telephoto compression" },
+  { id:"200", label:"200mm", desc:"long telephoto" },
+];
+const SHOT_APERTURES = [
+  { id:"auto", label:"Auto", desc:"infer depth of field from shot size" },
+  { id:"f1_4", label:"f/1.4", desc:"very shallow depth of field, dreamy bokeh" },
+  { id:"f2", label:"f/2", desc:"shallow cinematic focus" },
+  { id:"f2_8", label:"f/2.8", desc:"controlled shallow focus" },
+  { id:"f4", label:"f/4", desc:"balanced focus separation" },
+  { id:"f5_6", label:"f/5.6", desc:"moderate depth" },
+  { id:"f8", label:"f/8", desc:"deep focus" },
+  { id:"f11", label:"f/11", desc:"very deep focus" },
+];
+const SHOT_SHUTTERS = [
+  { id:"auto", label:"Auto", desc:"natural motion rendering" },
+  { id:"crisp", label:"Crisp action", desc:"high shutter, minimal motion blur" },
+  { id:"natural", label:"Natural blur", desc:"standard 180-degree shutter motion blur" },
+  { id:"smeared", label:"Smeared motion", desc:"slow shutter, expressive motion smear" },
+  { id:"staccato", label:"Staccato", desc:"choppy action, urgent shutter feel" },
+];
+const SHOT_ISO_GRAIN = [
+  { id:"auto", label:"Auto", desc:"infer from the scene style" },
+  { id:"clean", label:"Clean", desc:"low-noise, polished capture" },
+  { id:"nightgrain", label:"Low-light grain", desc:"night exposure texture and sensor noise" },
+  { id:"pushedfilm", label:"Pushed film grain", desc:"coarse pushed-stock grain and contrast" },
+  { id:"noisy", label:"Noisy / degraded", desc:"visible noise, rough capture texture" },
+];
 window.SHOT_SIZES = SHOT_SIZES; window.SHOT_ANGLES = SHOT_ANGLES;
 window.SHOT_MOVES = SHOT_MOVES; window.SHOT_LENSES = SHOT_LENSES;
+window.SHOT_CAMERA_BODIES = SHOT_CAMERA_BODIES; window.SHOT_LENS_TYPES = SHOT_LENS_TYPES;
+window.SHOT_FOCAL_LENGTHS = SHOT_FOCAL_LENGTHS; window.SHOT_APERTURES = SHOT_APERTURES;
+window.SHOT_SHUTTERS = SHOT_SHUTTERS; window.SHOT_ISO_GRAIN = SHOT_ISO_GRAIN;
 
 const sizeOf  = (id)=> SHOT_SIZES.find(x=>x.id===id)  || SHOT_SIZES[4];
 const angleOf = (id)=> SHOT_ANGLES.find(x=>x.id===id) || SHOT_ANGLES[0];
 const moveOf  = (id)=> SHOT_MOVES.find(x=>x.id===id)  || SHOT_MOVES[0];
 const lensOf  = (id)=> SHOT_LENSES.find(x=>x.id===id) || SHOT_LENSES[3];
 window.shotSizeOf = sizeOf; window.shotAngleOf = angleOf; window.shotMoveOf = moveOf; window.shotLensOf = lensOf;
+
+function shotCameraSettingLabel(list, id){
+  return (list.find(x=>x.id===id) || list[0]).label;
+}
+function shotCameraSettingsClause(sh){
+  const c = (sh && sh.cameraSettings) || {};
+  const bits = [];
+  const add = (label, list, id)=>{ if(id && id!=="auto") bits.push(label+": "+shotCameraSettingLabel(list,id)); };
+  add("camera", SHOT_CAMERA_BODIES, c.camera);
+  add("lens type", SHOT_LENS_TYPES, c.lensType);
+  add("focal length", SHOT_FOCAL_LENGTHS, c.focalLength);
+  add("aperture", SHOT_APERTURES, c.aperture);
+  add("shutter", SHOT_SHUTTERS, c.shutter);
+  add("grain / ISO", SHOT_ISO_GRAIN, c.iso);
+  return bits.length ? ("Advanced camera settings — "+bits.join(", ")) : "";
+}
+function shotHasCameraSettings(sh){
+  const c = (sh && sh.cameraSettings) || {};
+  return ["camera","lensType","focalLength","aperture","shutter","iso"].some(k=>c[k] && c[k]!=="auto");
+}
+window.shotCameraSettingsClause = shotCameraSettingsClause;
+window.shotHasCameraSettings = shotHasCameraSettings;
 
 /* ---- the rolling keyframe CHAIN ----------------------------------------------- */
 /* The keyframe pass renders a scene's shots IN ORDER, each one seeded by the
@@ -115,6 +196,16 @@ window.shotGrammarLabel = shotGrammarLabel;
    the Storyboard's clip boards and the future Stage all read the SAME partition. */
 const CLIP_MAX_SECONDS = 15;   // one generated clip's budget (Seedance-class video models)
 window.CLIP_MAX_SECONDS = CLIP_MAX_SECONDS;
+/* Seedance-class per-clip input caps, researched against the 2.0 API:
+   - 3 shots/clip keeps per-shot frames + cast/location/prop refs inside the 9-image
+     budget at full resolution (4-5-shot clips force dropping identity references);
+   - 3 dialogue lines/clip is the hard audio-reference limit per generation.
+   Both are packing DEFAULTS the Stage can override per model (Seedance 2.5's 30s
+   single pass will lift them). */
+const CLIP_MAX_SHOTS = 3;
+const CLIP_MAX_DIALOGUE = 3;
+window.CLIP_MAX_SHOTS = CLIP_MAX_SHOTS;
+window.CLIP_MAX_DIALOGUE = CLIP_MAX_DIALOGUE;
 
 /* AUTO duration estimate. A shot's real length can't be predicted — the video
    model decides its own pacing; the only duration we control is the CLIP's total.
@@ -137,23 +228,36 @@ window.seqDuration = seqDuration;
 /* Partition a scene's ORDERED shots into clip sequences.
    MANUAL: any shot (beyond the first) carrying an explicit boolean `seqBreak`
    makes the scene hand-grouped — a new clip starts at every seqBreak:true.
-   AUTO (the default): greedy duration packing — a new clip starts whenever the
-   next shot would push the running clip past the budget.
+   AUTO (the default): greedy packing — a new clip starts whenever the next shot
+   would push the running clip past the DURATION budget, past the SHOT-COUNT cap
+   (default 3 — keeps per-shot frames + identity refs inside Seedance's 9-image
+   budget), or past the DIALOGUE cap (default 3 — Seedance's audio-reference
+   limit per generation), so spoken beats naturally land in their own small clips.
    `clipMax` (optional) is the format's per-clip budget — clipMaxFor(project).
-   Returns [{ index, start, shots, dur, over, manual }]. */
-function sceneSequences(sceneShots, clipMax){
+   `opts` (optional): { maxShots, maxDialogue } — 0/null lifts that cap (a future
+   whole-scene model like Seedance 2.5). Returns [{ index, start, shots, dur, over, manual }]. */
+function sceneSequences(sceneShots, clipMax, opts){
   const MAX = clipMax || CLIP_MAX_SECONDS;
+  const capShots = (opts && "maxShots" in opts) ? (Number(opts.maxShots)>0 ? Number(opts.maxShots) : Infinity) : CLIP_MAX_SHOTS;
+  const capDlg = (opts && "maxDialogue" in opts) ? (Number(opts.maxDialogue)>0 ? Number(opts.maxDialogue) : Infinity) : CLIP_MAX_DIALOGUE;
   const list = sceneShots || [];
   if(!list.length) return [];
+  // WHOLE-SCENE mode: one clip = the entire scene, ignoring budgets AND manual
+  // seqBreak splits (that's the point). `over` still flags when the scene runs past
+  // the per-clip budget so the console can warn that pacing will compress.
+  if(opts && opts.wholeScene){
+    const dur = seqDuration(list);
+    return [{ index:0, start:0, shots:list.slice(), dur, over: dur>MAX, manual:false }];
+  }
   const manual = list.some((s,i)=> i>0 && typeof s.seqBreak==="boolean");
   const groups = [];
   if(manual){
     list.forEach((s,i)=>{ if(i===0 || s.seqBreak===true) groups.push([]); groups[groups.length-1].push(s); });
   } else {
-    let cur=[], t=0;
-    list.forEach(s=>{ const d=shotDur(s);
-      if(cur.length && t+d>MAX){ groups.push(cur); cur=[]; t=0; }
-      cur.push(s); t+=d; });
+    let cur=[], t=0, dlg=0;
+    list.forEach(s=>{ const d=shotDur(s); const line=!!String(s.dialogue||"").trim();
+      if(cur.length && (t+d>MAX || cur.length>=capShots || (line && dlg>=capDlg))){ groups.push(cur); cur=[]; t=0; dlg=0; }
+      cur.push(s); t+=d; if(line) dlg++; });
     if(cur.length) groups.push(cur);
   }
   let start=0;
@@ -165,6 +269,38 @@ function sceneSequences(sceneShots, clipMax){
   });
 }
 window.sceneSequences = sceneSequences;
+
+/* WHOLE-SCENE video prompt — every shot's action + dialogue in chain order, plus
+   the camera arc (first→last move) and the scene's grade: ONE prompt for shooting
+   the entire scene. Shared by the Shots tab's "Copy video prompt" button and the
+   Stage's whole-scene packing mode (the clip console auto-fills with this text). */
+function sceneVideoPromptText(scene, sceneShots, opts){
+  const list = (typeof sceneShotsOrdered==="function") ? sceneShotsOrdered(sceneShots||[]) : (sceneShots||[]);
+  // opts.speakerOf(sh) → name: dialogue is ATTRIBUTED, never a bare trailing quote
+  // (a quote right after "…while FLICKER freezes" read as Flicker's line when it
+  // was Morwen's — the model needs the speaker named at the quote)
+  const speakerOf = (opts && typeof opts.speakerOf==="function") ? opts.speakerOf : null;
+  const lines = list.map(sh=>{
+    // sh.vidText = per-shot VIDEO description override (Stage Multi-shot editor)
+    const t = String(sh.vidText||sh.action||"").trim().replace(/\.+$/,"");
+    const d = String(sh.dialogue||"").trim();
+    let who = ""; if(d && speakerOf){ try{ who = String(speakerOf(sh)||""); }catch(e){} }
+    return t ? (t + "." + (d ? (" "+(who? who.toUpperCase()+": " : "")+'"'+d+'"') : "")) : "";
+  }).filter(Boolean);
+  if(!lines.length) return "";
+  const moves = Array.from(new Set(list.map(sh=> (typeof shotMoveOf==="function") ? shotMoveOf(sh.move).label : (sh.move||"")).filter(Boolean)));
+  const loc = opts && opts.location;
+  const preset = (opts && opts.project && typeof scenePreset==="function") ? scenePreset(opts.project, scene.id) : null;
+  // multi-line for readability: setting, then one line per shot, then camera/grade —
+  // video models take newlines fine, and humans can actually review the prompt
+  return [
+    loc ? ("Setting: "+loc.name+".") : "",
+    lines.join("\n"),
+    "Camera: "+(moves.length ? moves.join(" → ").toLowerCase() : "static")+".",
+    preset ? ("Style: "+preset.name+" — "+String(preset.grade||"").trim()+".") : "",
+  ].filter(Boolean).join("\n\n");
+}
+window.sceneVideoPromptText = sceneVideoPromptText;
 
 /* ---- resolution helpers (scene ▸ location / subjects / props) ----------------- */
 function locationForScene(locations, sceneId){
@@ -190,50 +326,245 @@ const SCALE_CLASSES = {
        ruler:["0m","5m","15m","30m","60m","100m"],
        rule:"MINIATURIZATION RULE — this subject is enormous, so render the world as a fragile diorama far below: landscapes become tabletop miniatures (a pine forest is a carpet of moss, a river a silver thread).",
        keywords:["matchbox-sized","lilliputian","miniature","carpet-like","threads"] },
+  D: { id:"D", label:"Microscopic / sub-insect", short:"Microscopic scale",
+       ruler:["0µm","200µm","400µm","600µm","800µm","1000µm"],
+       rule:"EXTREME GIGANTISM RULE — this subject is microscopic, so render the surrounding world as a COLOSSAL molecular / cellular realm seen from within: dust motes become boulders, a single water droplet a vast trembling wall held by surface tension, fibres and pollen grains become towering structures, and the very medium (air, water) becomes a tangible, visible environment.",
+       keywords:["molecular","cellular","boulder-sized dust mote","surface-tension wall","fibrous canyon","particulate haze"] },
 };
 /* the scale class of an entity (character/prop): the explicit field wins; otherwise
    derive a best-effort class from a numeric height, else default to Human. */
 function scaleClassOf(entity){
   const raw = String((entity && entity.scaleClass) || "").trim();
   const u = raw.toUpperCase();
-  // keyword sense FIRST — so a stray article ("a towering giant") can't be misread as class A
+  // an explicit "Class X" is the STRONGEST signal — it wins even over a co-occurring descriptor
+  // ("Class D · Insect" is D, not B) and can't be a false article match (it requires the word CLASS)
+  let m = u.match(/\bCLASS\s*([ABCD])\b/); if(m) return m[1];
+  // keyword sense next — so a stray article ("a towering giant") can't be misread as a bare letter
   if(/GIANT|MASSIVE|COLOSSAL|TITAN|KAIJU|MECH|MONSTER|HUGE|TOWERING/.test(u)) return "C";
-  if(/CRITTER|TINY|SMALL|INSECT|BUG|MINIATURE|MICRO|MOUSE|FAIRY|SPRITE|PIXIE/.test(u)) return "B";
+  if(/MICROSCOPIC|MICRO\b|MICRON|CELLULAR|MICROBE|BACTERIA|NANO|SUB.?INSECT|MITE|AMOEBA|PLANKTON|MOLECULAR/.test(u)) return "D";
+  if(/CRITTER|TINY|SMALL|INSECT|BUG|MINIATURE|MOUSE|FAIRY|SPRITE|PIXIE/.test(u)) return "B";
   if(/HUMAN|STANDARD|NORMAL|PERSON|REGULAR/.test(u)) return "A";
-  // explicit "Class X"
-  let m = u.match(/\bCLASS\s*([ABC])\b/); if(m) return m[1];
-  // the whole value IS a class letter — "B", "B (critter)", "C - giant", "A:"
-  m = u.match(/^([ABC])(\s*[(\-:].*)?$/); if(m) return m[1];
-  // numeric height fallback (cm unless an explicit metre unit)
+  // the whole value IS a bare class letter — "B", "B (critter)", "C - giant", "A:"
+  m = u.match(/^([ABCD])(\s*[(\-:].*)?$/); if(m) return m[1];
+  // numeric height fallback — convert to cm understanding µm / mm / m units (default cm)
   const hs = String(entity && (entity.heightCm||entity.height) || "");
   const h = Number(hs.replace(/[^\d.]/g,""));
-  if(h){ const isM = /(\d\s*m\b|metre|meter)/i.test(hs) && !/cm/i.test(hs); const cm = isM ? h*100 : h;
-    if(cm < 60) return "B"; if(cm > 300) return "C"; return "A"; }
+  if(h){ const isUm=/(µ|μ|micron|micromet|\bum\b)/i.test(hs), isMM=/mm|millimet/i.test(hs),
+           isM=/(\d\s*m\b|metre|meter)/i.test(hs) && !/cm/i.test(hs) && !isMM && !isUm;
+    const cm = isUm ? h*0.0001 : isMM ? h*0.1 : isM ? h*100 : h;
+    if(cm < 0.1) return "D"; if(cm < 60) return "B"; if(cm > 300) return "C"; return "A"; }
   return "A";
 }
 function scaleInfoOf(entity){ return SCALE_CLASSES[scaleClassOf(entity)] || SCALE_CLASSES.A; }
+function scaleMeasurementOf(entity){
+  const raw = String(entity && (entity.height||entity.heightCm||entity.scale||"") || "").replace(/\s+/g," ").trim();
+  const mm = (typeof heightMMOf==="function") ? heightMMOf(entity) : 0;
+  if(mm>0){
+    if(mm<1) return (Math.round((mm*1000)*10)/10)+" µm";
+    if(mm>=1000) return (Math.round((mm/1000)*100)/100)+" m";
+    if(mm>=100) return (Math.round((mm/10)*10)/10)+" cm";
+    return (Math.round(mm*10)/10)+" mm";
+  }
+  return raw;
+}
+function canonicalScaleLabel(entity){
+  const bits = [];
+  if(entity && entity.name) bits.push(entity.name);
+  const h = scaleMeasurementOf(entity);
+  if(h) bits.push(h);
+  bits.push(scaleInfoOf(entity).short);
+  return bits.join(" — ");
+}
+function relativeHeightSentence(a,b){
+  const ah = (typeof heightMMOf==="function") ? heightMMOf(a) : 0;
+  const bh = (typeof heightMMOf==="function") ? heightMMOf(b) : 0;
+  if(!(ah>0 && bh>0)) return "";
+  const taller = ah>=bh ? a : b, shorter = ah>=bh ? b : a;
+  const th = Math.max(ah,bh), sh = Math.min(ah,bh);
+  const ratio = th/sh;
+  const pct = Math.round((sh/th)*100);
+  const rn = Math.round(ratio*10)/10;
+  return (taller.name||"The taller subject")+" must read about "+rn+"× taller than "+(shorter.name||"the shorter subject")+
+    "; "+(shorter.name||"the shorter subject")+" is about "+pct+"% of "+(taller.name||"the taller subject")+"'s height.";
+}
+function firstMeasurementText(text){
+  const s = String(text||"").replace(/\s+/g," ").trim();
+  const m = s.match(/(?:~|about|approx(?:imately)?\s*)?(\d+(?:\.\d+)?)\s*(µm|μm|um|microns?|micromet(?:er|re)s?|mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?|m|met(?:er|re)s?)\b/i);
+  if(!m) return "";
+  const unit = m[2].toLowerCase();
+  const pretty = /^(µm|μm|um|micron|microns|micrometer|micrometre|micrometers|micrometres)$/.test(unit) ? "µm"
+    : /^mm|millimet/.test(unit) ? "mm"
+    : /^cm|centimet/.test(unit) ? "cm"
+    : "m";
+  return m[1]+" "+pretty;
+}
+function propPhysicalScaleLabel(p){
+  if(!p) return "";
+  const clean = (x)=>String(x||"").replace(/\s+/g," ").trim().replace(/\.$/,"");
+  const bits = [];
+  if(p.name) bits.push(p.name);
+  // the size FIELD carries the full dimension set ("~1.2 m tall × ~60 cm wide × ~45 cm
+  // deep") — pass it through VERBATIM so no axis is lost; only fall back to scanning
+  // prose for a first measurement when the field is empty
+  const sizeField = clean(p.size || p.dimensions || "");
+  const explicit = (sizeField && firstMeasurementText(sizeField))
+    ? sizeField
+    : firstMeasurementText([p.scale, p.form, p.material, p.detail].filter(Boolean).join(" "));
+  if(explicit) bits.push("described size "+explicit);
+  if(p.kind==="worn") bits.push("worn true-to-body scale"+(p.ownerName?(" on "+p.ownerName):""));
+  else if(p.kind==="carried" || p.ownerName) bits.push("handheld/carried scale"+(p.ownerName?(" for "+p.ownerName):""));
+  else bits.push("environment/set-dressing scale");
+  const form = (typeof clipWords==="function") ? clipWords(clean(p.form),90) : clean(p.form).slice(0,90);
+  if(form && !explicit) bits.push(form);
+  return bits.join(" — ");
+}
+/* SHOT-LEVEL ATTACH POLICY for SET-DRESSING sheets. The location plate is the canonical
+   carrier for fixtures — it shows them in context at true scale — so a dressing sheet
+   only rides as a reference image when the plate can't do the job: a TIGHT shot
+   (CU/MCU/ECU/INSERT) or the object being what the action is ABOUT (named in the
+   action's first clause). Wides and mediums trust the plate — one canon per fixture,
+   no two-designs conflict, no wasted reference slot. Worn/carried props are untouched.
+   Used by buildShotPrompt (image-map labels), collectShotRefs and generateShotFrame
+   (real attachments) — all three MUST apply it identically or labels mislabel files. */
+function shotPropAttachable(p, sh){
+  if(!p || p.kind!=="dressing") return true;
+  // SHELL GUARD (before the tight-shot rule): never attach an object's EXTERIOR sheet
+  // to a shot filmed INSIDE it — when the scene's location is marked "Interior of"
+  // this prop, the plate is canon (an exterior reference would invite the generator
+  // to put the whole object in frame).
+  try{
+    const C = window.turnContinuity || {};
+    const loc = locationForScene(C.locations||[], sh && sh.sceneId);
+    if(loc && loc.interiorOfPropId === p.id) return false;
+  }catch(e){}
+  // TIGHT SHOTS keep the dressing sheet: at CU/MCU magnification a background object
+  // reads LARGE, and the plate's small distant depiction can't hold its design — the
+  // sheet's detail is needed. Wides rely on the plate (it renders dressing in place).
+  if(/^(CU|MCU|ECU|INSERT)$/i.test(String((sh&&sh.size)||""))) return true;
+  /* SUBJECT test — in-frame props are derived from the action text, so "named in the
+     action" is true for every prop that gets here; what marks the shot as ABOUT the
+     object is the object LEADING the action ("The hollow log splits open…") rather
+     than a character leading it ("Flicker creeps past the hollow log…"). */
+  const act = " "+String((sh&&sh.action)||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ")+" ";
+  const words = String(p.name||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/).filter(w=>w.length>2);
+  if(!words.length) return false;
+  const idxs = words.map(w=>act.indexOf(" "+w+" "));
+  if(idxs.some(i=>i<0)) return false;
+  const objAt = Math.min.apply(null, idxs);
+  const chars = ((window.turnContinuity||{}).characters)||[];
+  const before = act.slice(0, objAt);
+  const charLeads = chars.some(c=>{
+    const n = String((c&&c.name)||"").toLowerCase().split(/\s+/)[0];
+    return n && n.length>2 && before.indexOf(" "+n)>=0;
+  });
+  return !charLeads;
+}
+window.shotPropAttachable = shotPropAttachable;
+
+function shotObjectScaleClause(subjects, props, loc){
+  const cast = (subjects||[]).filter(Boolean);
+  const pr = (props||[]).filter(Boolean);
+  if(!cast.length && !pr.length && !loc) return "";
+  const classes = [...new Set(cast.map(scaleClassOf))];
+  const cls = classes.filter(c=>c!=="A")[0] || "";
+  const measured = cast.map(c=>({ c, mm:(typeof heightMMOf==="function") ? heightMMOf(c) : 0 })).filter(x=>x.mm>0).sort((a,b)=>a.mm-b.mm);
+  const range = measured.length
+    ? (" visible character height range "+scaleMeasurementOf(measured[0].c)+"–"+scaleMeasurementOf(measured[measured.length-1].c))
+    : "";
+  const bits = [];
+  if(loc){
+    let env = "the "+(loc.name||"location")+" plate is the canonical environment scale; its architecture, floor plane, plants, bark, droplets, furniture, set dressing and surface textures must keep their own physical proportions";
+    if(cls==="B") env += " and read gigantic around critter-scale bodies"+range;
+    else if(cls==="D") env += " and read as a colossal particulate/cellular world around microscopic bodies"+range;
+    else if(cls==="C") env += " and read miniature beneath giant-scale bodies"+range;
+    bits.push(env);
+  }
+  if(pr.length) bits.push("prop scales: "+pr.map(propPhysicalScaleLabel).join("; "));
+  if(!bits.length) return "";
+  return "OBJECT / ENVIRONMENT SCALE CONTINUITY — "+bits.join(". ")+
+    ". Do NOT resize props, set dressing, plants, droplets, architecture, floor texture or environmental assets to make the composition easier; stage the camera instead so every object remains physically consistent with the characters and location.";
+}
 /* The dynamic scale directive for a SHOT, given the cast in frame. All-human → "" (no
    rewrite, inert). One non-human class → that class's world rewrite. MIXED classes in
    one frame → relative-scale phrasing (don't apply a single POV; show their size gap). */
-function shotScaleClause(subjects){
+function shotScaleClause(subjects, props){
   const list = (subjects||[]).filter(Boolean);
   if(!list.length) return "";
   const classes = [...new Set(list.map(scaleClassOf))];
   const nonHuman = classes.filter(c=>c!=="A");
-  if(!nonHuman.length) return "";
+  const measured = list.map(c=>({ c, mm:(typeof heightMMOf==="function") ? heightMMOf(c) : 0 })).filter(x=>x.mm>0).sort((a,b)=>b.mm-a.mm);
+  const heightLine = measured.length
+    ? " Canonical heights in this frame: "+measured.map(x=>canonicalScaleLabel(x.c)).join("; ")+"."
+    : "";
+  const relLine = measured.length>=2 ? (" "+relativeHeightSentence(measured[0].c, measured[measured.length-1].c)) : "";
+  const propLine = (props||[]).filter(Boolean).length
+    ? " Keep nearby props and set dressing at the same physical scale as the location; characters must not resize to match prop framing."
+    : "";
+  if(!nonHuman.length){
+    if(measured.length>=2) return "SCALE CONTINUITY — preserve the cast's relative heights exactly."+heightLine+relLine+" Do NOT normalize characters to the same eye-line or same head size."+propLine;
+    return "";
+  }
   if(classes.length>1){
     const named = list.map(c=> (c.name||"a figure")+" ("+scaleInfoOf(c).short+")").join(", ");
-    return "SCALE — the subjects differ in scale ("+named+"): render their RELATIVE sizes faithfully (the larger truly dwarfing the smaller); do NOT normalize them to the same height.";
+    return "SCALE CONTINUITY — the subjects differ in scale ("+named+")."+heightLine+relLine+" Render their RELATIVE sizes faithfully (the larger truly dwarfing the smaller); do NOT normalize them to the same height, eye-line or head size."+propLine;
   }
   const info = SCALE_CLASSES[nonHuman[0]];
-  return "SCALE / POV — "+info.rule+" Lean on words like "+info.keywords.join(", ")+".";
+  if(measured.length>=2){
+    return "SCALE CONTINUITY — all visible subjects share "+info.short+", but their individual heights still matter."+heightLine+relLine+
+      " Preserve this size gap within the same shot; do NOT normalize them to the same height, eye-line or head size. "+info.rule+" Lean on words like "+info.keywords.join(", ")+". "+propLine;
+  }
+  return "SCALE / POV — "+heightLine+" "+info.rule+" Lean on words like "+info.keywords.join(", ")+".";
 }
+/* HEIGHT-AWARE measurement ruler for a scale sheet. The figure must read against the bar, so
+   the markings span ~0 to a bit above the character's ACTUAL height, in the right unit
+   (mm/cm/m) — a 14 mm insect gets a 0–20 mm ruler, not the coarse 0–40 cm class default.
+   Falls back to the class ruler only when no height is parseable. Returns label strings. */
+// normalise a character's height to MILLIMETRES (0 if not parseable). Unit is read from the
+// text; with no unit it's guessed from the scale class (giant→m, critter→mm, human→cm).
+function heightMMOf(entity){
+  const hs = String((entity && (entity.height||entity.heightCm)) || "").trim();
+  const num = parseFloat(hs.replace(/[^0-9.]/g,"")); if(!(isFinite(num) && num>0)) return 0;
+  const cls = scaleClassOf(entity);
+  if(/µm|μm|micron|micromet|\bum\b/i.test(hs)) return num*0.001;
+  if(/mm|millimet/i.test(hs)) return num;
+  if(/cm|centimet/i.test(hs)) return num*10;
+  if(/\d\s*m\b|metre|meter/i.test(hs)){
+    // Explicit scale class wins over a bad/over-generic height unit from drafting.
+    // A Class B critter must never receive a metre ruler because its height text says
+    // "2.5 m"; ignore that invalid unit and fall back to the class ruler instead.
+    if(cls==="B" || cls==="D") return 0;
+    return num*1000;
+  }
+  return cls==="C" ? num*1000 : cls==="D" ? num*0.001 : cls==="B" ? num : num*10;
+}
+function scaleRulerFor(entity){
+  const cls = scaleClassOf(entity);
+  const mm = heightMMOf(entity);
+  if(mm>0){
+    const niceCeil=(x)=>{ if(x<=0) return 1; const p=Math.pow(10,Math.floor(Math.log10(x))); for(const m of [1,2,2.5,5,10]){ if(p*m>=x) return p*m; } return p*10; };
+    const topMM = niceCeil(mm*1.2);                          // a little headroom above the figure
+    let unit, div;
+    if(cls==="B"){
+      if(topMM>=1){ unit = topMM>=100 ? "cm" : "mm"; div = topMM>=100 ? 10 : 1; }
+      else { unit="µm"; div=0.001; }
+    } else if(cls==="D"){
+      unit="µm"; div=0.001;
+    } else if(topMM>=1000){ unit="m"; div=1000; } else if(topMM>=100){ unit="cm"; div=10; } else if(topMM>=1){ unit="mm"; div=1; } else { unit="µm"; div=0.001; }
+    const ticks=[]; for(let i=0;i<=5;i++){ let v=Math.round((topMM*i/5)/div*100)/100; ticks.push(v+unit); }
+    return ticks;
+  }
+  return ((window.SCALE_CLASSES&&window.SCALE_CLASSES[cls])||SCALE_CLASSES.A).ruler;
+}
+window.heightMMOf = heightMMOf; window.scaleRulerFor = scaleRulerFor;
+window.scaleMeasurementOf = scaleMeasurementOf; window.canonicalScaleLabel = canonicalScaleLabel;
+window.propPhysicalScaleLabel = propPhysicalScaleLabel; window.shotObjectScaleClause = shotObjectScaleClause;
 // Environment-scale directive for a LOCATION plate, keyed to its occupants' scale class.
 // B → render the SPACE itself at critter scale (gigantism); C → at giant scale. A → "" (inert).
 // This is the location-side counterpart to shotScaleClause (which works on in-frame subjects).
 function worldScaleClause(cls){
   if(cls==="B") return "CRITTER SCALE — render this as a colossal, cavernous space exactly as a tiny insect-sized inhabitant (a couple of centimetres tall) would experience it: ordinary natural features (bark grain, a knot-hole, moss, a fallen leaf, a dewdrop) read as TOWERING architecture, landmarks and furniture at that scale; the whole space is built for and seen by something tiny.";
   if(cls==="C") return "GIANT SCALE — render this as a vast expanse seen by an enormous, building-sized inhabitant: the ordinary world reads as a fragile MINIATURE diorama far below — structures matchbox-sized, paths like threads.";
+  if(cls==="D") return "MICROSCOPIC SCALE — render this as a vast molecular / cellular realm seen by a microscopic inhabitant: dust motes read as boulders, a single water droplet as a towering trembling wall held by surface tension, fibres and pollen grains as colossal structures, and the very medium (air, water) becomes a visible, tangible environment.";
   return "";
 }
 window.SCALE_CLASSES = SCALE_CLASSES; window.scaleClassOf = scaleClassOf;
@@ -248,30 +579,23 @@ function buildScaleSheetPrompt(c){
   const body = clean(c && (c.coreBody||c.look)) || "the character";
   const tex  = clean(c && c.materialTexture);
   const ht   = clean(c && c.height);
-  const ruler = info.ruler.join(", ");
+  const ruler = ((typeof scaleRulerFor==="function") ? scaleRulerFor(c) : info.ruler).join(", ");
+  const cls = scaleClassOf(c);
+  const unitRule = cls==="B"
+    ? "CRITTER SCALE: the ruler must use millimetres or centimetres only; NEVER use metres or an 'm' unit. "
+    : cls==="D"
+      ? "MICROSCOPIC SCALE: the ruler must use micrometres (µm) only; NEVER use mm, cm, metres or an 'm' unit. "
+      : cls==="C"
+        ? "GIANT SCALE: metre markings are allowed. "
+        : "";
   return "A full-body FRONT view of "+body+(tex?(", "+tex):"")+". "
     + (ht?("The figure is "+ht+" tall. "):"")
     + "They stand in a relaxed, neutral pose, head to toe fully in frame, against a solid light-grey studio background, "
     + "directly beside a VERTICAL measurement bar positioned on the LEFT edge. "
-    + "The bar strictly displays height markings for "+ruler+" in clear black text. "
+    + unitRule+"The bar strictly displays height markings for "+ruler+" in clear black text. "
     + "Soft, even studio lighting, sharp focus. No text anywhere except the ruler's numeric markings.";
 }
 window.buildScaleSheetPrompt = buildScaleSheetPrompt;
-
-/* The CAST SCALE CHART prompt: the whole cast lined up against ONE shared ruler at TRUE
-   relative heights — the relative-scale anchor for shots. Each figure matches its sheet. */
-function buildCastChartPrompt(characters){
-  const list = (characters||[]).filter(Boolean);
-  const lines = list.map(c=>{ const info=scaleInfoOf(c); const h=String(c.height||"").trim();
-    return (c.name||"a figure")+" ("+(h?(h+", "):"")+info.short+")"; });
-  const hasGiant = list.some(c=>scaleClassOf(c)==="C");
-  const ruler = (hasGiant ? SCALE_CLASSES.C.ruler : SCALE_CLASSES.A.ruler).join(", ");
-  return "A character SCALE COMPARISON CHART. The following characters stand side by side in a single line-up — full-body FRONT views against a solid light-grey studio background — measured against ONE shared VERTICAL ruler on the LEFT marked "+ruler+" in clear black text. "
-    + "Render every character at their TRUE RELATIVE height so the size differences are obvious (giants tower over the line; critters are tiny beside the others). "
-    + "Each figure matches its reference sheet exactly — face, build and wardrobe. "
-    + "Left to right: "+lines.join("; ")+". Soft, even studio lighting; no text anywhere except the ruler markings.";
-}
-window.buildCastChartPrompt = buildCastChartPrompt;
 
 /* props that appear in a scene (their scene chips include this scene) */
 function propsForScene(props, sceneId){
@@ -387,6 +711,47 @@ function shotScreenDirection(prevShot, subjects, composition){
 }
 window.shotScreenDirection = shotScreenDirection;
 
+/* ---- the SHOT's RENDER STYLE. Shots composite the Art Room sheets, so the frame
+   must speak the SAME language those sheets were rendered in — a hardcoded photoreal
+   spine on top of Pixar/anime sheets makes the model fight its own references.
+   Resolution: majority vote across the in-frame cast's style (explicit pick or the
+   inferred default), then the location's picked style, then photoreal. Tuned shot
+   phrasings for the photoreal family; every other style (incl. locked 🔒 and admin 🌐
+   styles) falls back to its own registry descriptor, so a new style works here from
+   one definition — same pattern as renderStyleText(). ---- */
+const SHOT_RENDER_TEXT = {
+  photoreal:           "Cinematic live-action photorealistic still",
+  photorealNatural:    "Cinematic photorealistic natural-history still — real biological macro realism, believable creature-scale world",
+  photorealCreature:   "Cinematic live-action photorealistic still — practical-effects / VFX creature-film realism",
+  photorealOrnamental: "Cinematic live-action photorealistic still — ornamental couture creature-world production design",
+  horror:              "Cinematic live-action photorealistic horror still — deep filmic blacks",
+};
+window.SHOT_RENDER_TEXT = SHOT_RENDER_TEXT;
+function shotRenderStyleKey(subjects, loc){
+  const keys = [];
+  (subjects||[]).forEach(c=>{ if(!c) return;
+    const k = (typeof inferCharacterRenderStyleKey==="function") ? inferCharacterRenderStyleKey(c) : (c.renderStyleKey||"");
+    if(k) keys.push(k); });
+  if(!keys.length && loc && loc.renderStyleKey && loc.renderStyleKey!=="surprise") keys.push(loc.renderStyleKey);
+  if(!keys.length) return "photoreal";
+  const tally = {}; let best = keys[0], n = 0;
+  keys.forEach(k=>{ tally[k]=(tally[k]||0)+1; if(tally[k]>n){ n=tally[k]; best=k; } });
+  return best;
+}
+window.shotRenderStyleKey = shotRenderStyleKey;
+function shotStyleIsPhotoreal(key){ return /^(photoreal|horror)/.test(String(key||"photoreal")); }
+function shotRenderStyleLine(key, subjects){
+  if(SHOT_RENDER_TEXT[key]) return SHOT_RENDER_TEXT[key];
+  if(key==="surprise"){
+    const c = (subjects||[]).find(x=>x && x.surpriseRender && x.surpriseRender.render && x.surpriseRender.render.rendering);
+    if(c) return "Cinematic still in the film's locked render style: "+String(c.surpriseRender.render.rendering).replace(/\bcharacter\b/gi,"scene");
+  }
+  const cs = (window.CHAR_RENDER_STYLES||{})[key];
+  if(cs && cs.rendering) return "Cinematic still in the film's locked render style: "+String(cs.rendering).replace(/\bcharacter\b/gi,"scene");
+  return SHOT_RENDER_TEXT.photoreal;
+}
+window.shotRenderStyleLine = shotRenderStyleLine;
+
 /* ---- THE COMPOSER: a shot → one final image prompt ---------------------------- */
 /* ctx = { scene, location, charById, propById, project, prevShot } */
 function buildShotPrompt(sh, ctx){
@@ -399,7 +764,11 @@ function buildShotPrompt(sh, ctx){
   // not the stored tags — so they're always accurate to what the frame actually shows.
   const _chars = Object.values(charById);
   const subjects = ((typeof inFrameCast==="function") ? inFrameCast(sh, scene, _chars) : (sh.subjects||[])).map(id=>charById[id]).filter(Boolean);
-  const props    = ((typeof inFrameProps==="function") ? inFrameProps(sh, scene, charById, propById) : (sh.props||[])).map(id=>propById[id]).filter(Boolean);
+  const propsAll = ((typeof inFrameProps==="function") ? inFrameProps(sh, scene, charById, propById) : (sh.props||[])).map(id=>propById[id]).filter(Boolean);
+  // ATTACHED prop sheets (the image-map entries): dressing sheets ride only on tight
+  // shots / when the object is the action's subject — wides trust the plate. The SCALE
+  // clauses below still see propsAll: an in-plate fixture stays scale-constrained.
+  const props    = propsAll.filter(p=>shotPropAttachable(p, sh));
   const size = sizeOf(sh.size), angle = angleOf(sh.angle), move = moveOf(sh.move), lens = lensOf(sh.lens);
   const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
 
@@ -414,8 +783,13 @@ function buildShotPrompt(sh, ctx){
   const _asp = (typeof aspectFor==="function") ? aspectFor(ctx.project) : "16:9";
 
   // ---- THE STYLE SPINE (constant; pasted into every shot) ----
+  // the opening line follows the CAST/LOCATION's picked render style — not hardcoded
+  // photoreal — so frames come out in the same language as the sheets they composite
+  const _styleKey = shotRenderStyleKey(subjects, loc);
+  const _styleLine = shotRenderStyleLine(_styleKey, subjects);
   const spine = [];
-  spine.push("Cinematic live-action photorealistic still" + ((preset && clean(preset.texture)) ? (", "+clean(preset.texture)) : ", subtle 35mm film grain"));
+  spine.push(_styleLine + ((preset && clean(preset.texture)) ? (", "+clean(preset.texture))
+    : (shotStyleIsPhotoreal(_styleKey) ? ", subtle 35mm film grain" : "")));
   if(preset){
     const gName = clean(preset.name), gTxt = clean(preset.grade);
     if(gName && gTxt) spine.push('"'+gName+'" grade: '+gTxt);
@@ -446,6 +820,8 @@ function buildShotPrompt(sh, ctx){
   const cap = (s)=> s ? (s.charAt(0).toUpperCase()+s.slice(1)) : s;
   const screenDir = shotScreenDirection(ctx.prevShot, subjects, sh.composition);
   const stage = [ camBits.join(", ") ];
+  const cameraSettings = (typeof shotCameraSettingsClause==="function") ? clean(shotCameraSettingsClause(sh)) : "";
+  if(cameraSettings) stage.push(cameraSettings);
   if(clean(sh.action))      stage.push(cap(clean(sh.action)));
   if(clean(screenDir.composition)) stage.push(cap(clean(screenDir.composition)));
   if(clean(screenDir.clause)) stage.push(clean(screenDir.clause));
@@ -454,8 +830,10 @@ function buildShotPrompt(sh, ctx){
   // SCALE / POV — when an in-frame subject isn't human-scale, recontextualize the world
   // from its perspective (gigantism / miniaturization), or render relative scale for a
   // mixed-scale frame. All-human frames add nothing (inert).
-  const _scale = (typeof shotScaleClause==="function") ? shotScaleClause(subjects) : "";
+  const _scale = (typeof shotScaleClause==="function") ? shotScaleClause(subjects, propsAll) : "";
   if(_scale) stage.push(_scale);
+  const _objectScale = (typeof shotObjectScaleClause==="function") ? shotObjectScaleClause(subjects, [...propsAll, ...((ctx.carriedForward)||[])], loc) : "";
+  if(_objectScale) stage.push(_objectScale);
   const _dlg = clean(sh.dialogue).replace(/^["“]|["”]$/g,"");
   if(_dlg) stage.push('Caught mid-line as the character speaks "'+_dlg+'"');
   const STAGING = stage.join(". ") + ".";
@@ -469,9 +847,18 @@ function buildShotPrompt(sh, ctx){
   if(ctx.prevFrameRole) imgs.push("the PREVIOUS approved frame — carry its colour grade, lighting and every established physical state (wardrobe wear, wetness, dirt, damage) forward exactly, but do NOT copy its framing");
   const _locLabel = loc ? ((loc.name||"the location")+" location plate — "
     + (locWeight==="ambient" ? "a background reference for the grade and surfaces only; the character fills this tight frame" : "reproduce its architecture, surfaces, fixtures and signage exactly")) : null;
-  const _castLabels = subjects.map(c=> c.name+"'s character sheet — match the face, build, hair and wardrobe exactly");
-  const _propLabels = props.map(p=> "the "+p.name+" (prop sheet"+(p.ownerName?(", "+((p.kind==="worn")?"worn by ":"carried by ")+p.ownerName):"")+") — match it exactly as designed");
-  const _carriedLabels = (ctx.carriedForward||[]).map(p=> "the "+p.name+" (prop sheet) — still in frame from an earlier beat; keep it present, matching its sheet");
+  const _castLabels = subjects.map(c=> {
+    const scale = (typeof canonicalScaleLabel==="function") ? canonicalScaleLabel(c) : (c.name||"character");
+    return c.name+"'s character sheet — match the face, build, hair and wardrobe exactly; canonical scale: "+scale;
+  });
+  const _propLabels = props.map(p=> {
+    const scale = (typeof propPhysicalScaleLabel==="function") ? propPhysicalScaleLabel(p) : (p.name||"prop");
+    return "the "+p.name+" (prop sheet"+(p.ownerName?(", "+((p.kind==="worn")?"worn by ":"carried by ")+p.ownerName):"")+") — match it exactly as designed; physical scale: "+scale;
+  });
+  const _carriedLabels = (ctx.carriedForward||[]).map(p=> {
+    const scale = (typeof propPhysicalScaleLabel==="function") ? propPhysicalScaleLabel(p) : (p.name||"prop");
+    return "the "+p.name+" (prop sheet) — still in frame from an earlier beat; keep it present, matching its sheet; physical scale: "+scale;
+  });
   if(locWeight==="ambient"){ _castLabels.forEach(l=>imgs.push(l)); if(_locLabel) imgs.push(_locLabel); }
   else { if(_locLabel) imgs.push(_locLabel); _castLabels.forEach(l=>imgs.push(l)); }
   _propLabels.forEach(l=>imgs.push(l));
@@ -482,15 +869,20 @@ function buildShotPrompt(sh, ctx){
 
   // ---- ASSEMBLE: image map, then the style spine, then the staging line, then constraints ----
   let out = MAP + "\n\n" + STYLE_SPINE + "\n\n— " + STAGING;
-  out += "\n\nConstraints: " + shotNegativePrompt(sh) + ".";
+  out += "\n\nConstraints: " + shotNegativePrompt(sh, _styleKey) + ".";
   return out;
 }
 window.buildShotPrompt = buildShotPrompt;
 
 /* the negative prompt for a shot frame */
-function shotNegativePrompt(sh){
-  return (sh && sh.negativePrompt) || "no text, no captions, no watermark, no logo, no split-screen, no grid, no collage, "
-    + "no contact sheet, not a cartoon, no extra fingers, no deformed anatomy, no duplicate people";
+function shotNegativePrompt(sh, styleKey){
+  if(sh && sh.negativePrompt) return sh.negativePrompt;
+  // "not a cartoon" only guards PHOTOREAL frames — on a stylized film (Pixar, anime,
+  // flat…) it would fight the very look the sheets were rendered in
+  return "no text, no captions, no watermark, no logo, no split-screen, no grid, no collage, "
+    + "no contact sheet, "
+    + (shotStyleIsPhotoreal(styleKey||"photoreal") ? "not a cartoon, " : "")
+    + "no extra fingers, no deformed anatomy, no duplicate people";
 }
 window.shotNegativePrompt = shotNegativePrompt;
 
@@ -573,7 +965,10 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   // build the sheet-reference specs, then ORDER by location weight
   const locSpec  = ctx.location ? [{ id:ctx.location.id, note:(ctx.location.name||"location")+" location coverage sheet (multiple views of ONE set)" }] : [];
   const castSpec = inCast.map(id=>{ const c=(ctx.charById||{})[id]; return c?{ id, note:c.name+" character sheet" }:null; }).filter(Boolean);
-  const propSpec = inPr.map(id=>{ const p=(ctx.propById||{})[id]; return p?{ id, note:p.name+" prop sheet" }:null; }).filter(Boolean);
+  // same dressing gate as buildShotPrompt/collectShotRefs — labels must match files
+  const propSpec = inPr.map(id=>{ const p=(ctx.propById||{})[id];
+    if(!p || !shotPropAttachable(p, sh)) return null;
+    return { id, note:p.name+" prop sheet" }; }).filter(Boolean);
   const carrySpec= carried.map(id=>{ const p=(ctx.propById||{})[id]; return p?{ id, note:p.name+" prop sheet (carried over from an earlier beat)" }:null; }).filter(Boolean);
   const orderedSpecs = (locWeight==="ambient")
     ? [...castSpec, ...locSpec, ...propSpec, ...carrySpec]   // tight: the cast leads, the set recedes
@@ -862,7 +1257,7 @@ function normalizeShot(raw, scene, idx, locations, props, characters, beats){
   // own action text (then the scene summary) when the model omitted it.
   const beatRow = (beats && beats[scene.id] && (beats[scene.id].rows||[]).find(r=>String(r.n)===String(raw.beat||idx+1)));
   const beatAction = beatRow ? ((beatRow.drive&&beatRow.drive.d)||(beatRow.react&&beatRow.react.d)||"") : "";
-  const action = ((raw.action||"").toString().slice(0,300)) || beatAction || (scene.summary||"");
+  const action = ((typeof clipWords==="function") ? clipWords((raw.action||"").toString(),300) : (raw.action||"").toString().slice(0,300)) || beatAction || (scene.summary||"");
   return {
     id: "shot-"+scene.id+"-"+(raw.beat||idx+1)+"-"+Date.now().toString(36)+idx,
     sceneId: scene.id, beatN: raw.beat || (idx+1), order: idx,
@@ -870,12 +1265,12 @@ function normalizeShot(raw, scene, idx, locations, props, characters, beats){
     angle: pick(raw.angle, angleIds, "eye"),
     move: pick(raw.move || raw.movement, moveIds, "static"),
     lens: pick(raw.lens, lensIds, "50"),
-    composition: (raw.composition||"").toString().slice(0,240),
+    composition: (typeof clipWords==="function") ? clipWords((raw.composition||"").toString(),240) : (raw.composition||"").toString().slice(0,240),
     subjects: resolveSubjects(raw, action),
     locationId: loc?loc.id:"",
     props: resolveProps(raw.props),
     action: action,
-    dialogue: (raw.dialogue||"").toString().slice(0,200),
+    dialogue: (typeof clipWords==="function") ? clipWords((raw.dialogue||"").toString(),200) : (raw.dialogue||"").toString().slice(0,200),
     // no dur: a drafted shot stays on AUTO — its length can't be predicted, only
     // budgeted (dialogue-anchored estimate via shotDur); the user pins by hand
     negativePrompt:""

@@ -1,4 +1,4 @@
-/* app.jsx — compose TURN: state, views, tweaks */
+/* app.jsx — compose Cinema Machine: state, views, tweaks */
 
 const { PROJECT, CHARACTERS, SCENES, BEATS, SCREENPLAY, CONTINUITY, FACTS } = window.TURN_DATA;
 
@@ -441,6 +441,64 @@ function App(){
   const isAdmin = (((typeof cloudUserEmail==="function" && cloudUserEmail(session))||"").toLowerCase()==="admin@infinitestudioai.com");
   // expose for leaf components that have no session prop (e.g. the Art Room key bar)
   React.useEffect(()=>{ window.turnIsAdmin = isAdmin; },[isAdmin]);
+  // expose the signed-in user's email so leaf components can scope per-user data
+  // (locked render styles live in localStorage keyed by this email). Empty in local/signed-out mode.
+  const userEmail = ((typeof cloudUserEmail==="function" && cloudUserEmail(session))||"").toLowerCase();
+  React.useEffect(()=>{ window.turnUserEmail = userEmail;
+    // the Supabase uid rides into Stripe as client_reference_id (see plans.jsx)
+    window.turnUserId = (session && session.user && session.user.id) || null;
+    if(typeof window.turnRefreshLockedStyles==="function") window.turnRefreshLockedStyles(); },[userEmail, session]);
+  const [creditBalance, setCreditBalance] = React.useState(null);
+  const refreshCreditBalance = React.useCallback(async ()=>{
+    if(typeof cloudGetCreditBalance!=="function"){ setCreditBalance(null); return null; }
+    try{
+      const b = await cloudGetCreditBalance();
+      setCreditBalance(b || null);
+      window.turnCreditBalance = b || null;
+      return b || null;
+    }catch(e){ setCreditBalance(null); window.turnCreditBalance = null; return null; }
+  },[]);
+  React.useEffect(()=>{ refreshCreditBalance(); },[userEmail, refreshCreditBalance]);
+  React.useEffect(()=>{
+    const h = ()=>refreshCreditBalance();
+    window.addEventListener("turn-credits-changed", h);
+    window.addEventListener("vid-done", h);
+    window.addEventListener("nb-gen-done", h);
+    window.addEventListener("vg-audio-done", h);
+    return ()=>{
+      window.removeEventListener("turn-credits-changed", h);
+      window.removeEventListener("vid-done", h);
+      window.removeEventListener("nb-gen-done", h);
+      window.removeEventListener("vg-audio-done", h);
+    };
+  },[refreshCreditBalance]);
+  // LIVE balance: refetch whenever the window regains focus, and STREAM the user's
+  // turn_credits row from Supabase realtime — a grant from the SQL editor (or a
+  // spend on another device) updates the readout with no reload. Realtime needs
+  // the table in the publication (see supabase/credits.sql); the focus refresh is
+  // the fallback when it isn't.
+  React.useEffect(()=>{
+    const onFocus = ()=>{ if(document.visibilityState!=="hidden") refreshCreditBalance(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    let channel = null, sbRef = null;
+    try{
+      const sb = (typeof window.sbClient==="function") ? window.sbClient() : null;
+      const uid = session && session.user && session.user.id;
+      if(sb && sb.channel && uid){
+        sbRef = sb;
+        channel = sb.channel("turn-credits-"+uid)
+          .on("postgres_changes", { event:"*", schema:"public", table:"turn_credits", filter:"owner=eq."+uid },
+            ()=>refreshCreditBalance())
+          .subscribe();
+      }
+    }catch(e){}
+    return ()=>{
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+      try{ if(channel && sbRef) sbRef.removeChannel(channel); }catch(e){}
+    };
+  },[session && session.user && session.user.id, refreshCreditBalance]);
   // expose the current project for format-aware helpers with no project param
   // (e.g. the scene drafter reads formatOf(window.turnProject).screenplayBrief)
   React.useEffect(()=>{ window.turnProject = project; },[project]);
@@ -563,6 +621,18 @@ function App(){
     let alive = true;
     (async()=>{
       let list = await cloudListProjects();
+      // list === null means the REQUEST failed (expired token after the tab slept →
+      // 401s), not an empty account. Without this retry the boot used to finish
+      // against the failure — bootRef stayed latched, no later auth event re-keys
+      // the effect, and the app sat on "Connecting" with an empty canvas until a
+      // manual reload. Poke the session refresh and retry with backoff instead.
+      for(let wait=3000; list===null && alive; wait=Math.min(wait*2,30000)){
+        try{ const sb=(typeof sbClient==="function")&&sbClient(); if(sb) await sb.auth.refreshSession(); }catch(e){}
+        await new Promise(r=>setTimeout(r,wait));
+        if(!alive) return;
+        list = await cloudListProjects();
+      }
+      if(!alive) return;
       // Read the session FRESH here — during sign-in the captured `isAdmin`
       // can lag a render behind the session this bootstrap is running for.
       const s = (typeof cloudGetSession==="function") ? await cloudGetSession() : null;
@@ -613,8 +683,23 @@ function App(){
      proxy as the rest of the studio (no key in the browser). */
   const generatePoster = async (proj)=>{
     if(!proj || !proj.id) return;
+    /* the poster follows the film's RENDER STYLE — but only the currently open project
+       has its cast loaded, so other films on the wall keep the neutral cinematic prompt.
+       Photoreal-family films also keep it (the base prompt already reads cinematic). */
+    const posterStyle = (()=>{
+      try{
+        if(proj.id!==currentProjectId || !(characters||[]).length) return "";
+        const tally = {};
+        characters.forEach(c=>{ const k=(typeof inferCharacterRenderStyleKey==="function") ? inferCharacterRenderStyleKey(c) : (c.renderStyleKey||"");
+          if(k && k!=="surprise") tally[k]=(tally[k]||0)+1; });
+        const top = Object.keys(tally).sort((a,b)=>tally[b]-tally[a])[0];
+        if(!top || /^(photoreal|horror)/.test(top)) return "";
+        const cs = (window.CHAR_RENDER_STYLES||{})[top];
+        return cs && cs.rendering ? String(cs.rendering).split(/[;,]/).slice(0,2).join(",").trim() : "";
+      }catch(e){ return ""; }
+    })();
     const prompt = (typeof window.posterPrompt==="function")
-      ? window.posterPrompt(proj)
+      ? window.posterPrompt(proj, posterStyle)
       : ("Cinematic movie poster key art for the film “"+(proj.title||"Untitled film")+"”. "+
          "A single striking hero image; bold cinematic composition. NO text anywhere.");
     let url = await window.nbGenerate(prompt, { aspectRatio:"9:16", quality:"medium" });
@@ -745,7 +830,7 @@ function App(){
   const requireStory = async (what)=>{
     if(scenes.length) return true;
     const ok = await window.appConfirm({ title:"Create a story first",
-      body:what+" works on your story — and there isn't one yet. Bring an idea and TURN builds the story with you, scene by scene.",
+      body:what+" works on your story — and there isn't one yet. Bring an idea and Cinema Machine builds the story with you, scene by scene.",
       confirmLabel:"+ New Story", cancelLabel:"Not now" });
     if(ok) setNewStoryOpen(true);
     return false;
@@ -762,20 +847,15 @@ function App(){
     setHistory({}); setContinuityMap(CONTINUITY||{}); setSelId("s4"); setSelChar(null); setPropsSeeded(false); setLocsSeeded(false); setVisualsSeeded(false);
   };
 
-  // "New Story" — NON-destructive. It never deletes the current film. In cloud mode it
-  // spins up a FRESH blank film (additive — the current one stays in the project switcher);
-  // for a single local project it just shows a clean canvas. Either way it lands the user in
-  // the Writers' Room on the empty "Start your film" canvas. Deleting a film is a deliberate,
-  // separate action — the project switcher's per-film Delete.
-  const startNewStory = async ()=>{
-    if(cloudMode && typeof createProject==="function"){
-      await createProject();          // new blank film; the current film is left untouched
-    } else {
-      applyDoc(emptyDoc());           // single local project → clean canvas
-      setArtView("lookbook");         // Art Room defaults to the Lookbook for a fresh film
-    }
-    setRoom("writers"); setView("spine");   // always land on the clean "Start your film" canvas
-  };
+  // "New Story" — NON-destructive and LAZY (2026-07-04). Clicking it only opens the
+  // intake modal over whatever the user is doing; NO film is created until the story
+  // actually LAUNCHES (logline → synopsis reviewed → build). It used to mint a blank
+  // film eagerly on click, so every aborted/closed intake stranded an untitled film
+  // on the wall — and every extra click stranded another. The blank film is now
+  // created inside onLaunch, and only when the CURRENT film already holds a story
+  // (an empty canvas is reused, never duplicated). Deleting a film remains the
+  // project switcher's deliberate per-film Delete.
+  const startNewStory = ()=>{ setNewStoryOpen(true); };
 
   // ---- character handlers ----
   const updateCharacter = (id,patch)=>setCharacters(cs=>cs.map(c=>c.id===id?{...c,...patch}:c));
@@ -1048,12 +1128,20 @@ function App(){
       return { ...c, ...(a!=null?{accessories:a}:{}), ...(pr!=null?{props:pr}:{}) };
     }));
   };
+  /* a DRAFT never overwrites a deliberately PICKED render style: when a card has an
+     explicit renderStyleKey (incl. a locked Surprise style), the drafted look-dev
+     text is dropped from the patch — otherwise re-drafting a Pixar prop would quietly
+     reset its style text to the drafter's photoreal-ish suggestion. */
+  const keepPickedStyle = (entity, patch)=>{
+    if(!patch || !entity || !entity.renderStyleKey) return patch;
+    const rest = { ...patch }; delete rest.renderStyle; return rest;
+  };
   const draftPropVisuals = async (pr)=>{
     if(draftingPropId || !(typeof aiPropVisuals==="function")) return;
     setDraftingPropId(pr.id);
     try{
       const res = await aiPropVisuals(pr, characters, lbProject("props"));
-      if(res) updateProp(pr.id, res);
+      if(res) updateProp(pr.id, keepPickedStyle(pr, res));
     }catch(e){}
     setDraftingPropId(null);
   };
@@ -1075,8 +1163,8 @@ function App(){
       // 2) draft specs
       if(typeof aiDesignPropBible==="function" && working.length){
         const map = await aiDesignPropBible(working, characters, lbProject("props"));
-        if(map){ working = working.map(p=> map[p.id] ? {...p, ...map[p.id]} : p);
-          setProps(ps=>ps.map(p=> map[p.id] ? {...p, ...map[p.id]} : p)); }
+        if(map){ working = working.map(p=> map[p.id] ? {...p, ...keepPickedStyle(p, map[p.id])} : p);
+          setProps(ps=>ps.map(p=> map[p.id] ? {...p, ...keepPickedStyle(p, map[p.id])} : p)); }
       }
       // 3) map scenes
       if(typeof aiPropScenes==="function" && working.length){
@@ -1171,7 +1259,7 @@ function App(){
     setDraftingLocId(l.id);
     try{
       const fields = await aiLocationVisuals(l, scenes, lbProject("locations"));
-      if(fields) setLocations(ls=>ls.map(x=>x.id===l.id?{...x, ...fields}:x));
+      if(fields) setLocations(ls=>ls.map(x=>x.id===l.id?{...x, ...keepPickedStyle(x, fields)}:x));
     }catch(e){}
     setDraftingLocId(null);
   };
@@ -1198,8 +1286,8 @@ function App(){
       if(!working.length){ setDraftingAllLocs(false); return; }
       // 2) draft specs
       const map = await aiDesignLocationBible(working, scenes, lbProject("locations"));
-      const merged = working.map(l=> (map && map[l.id]) ? {...l, ...map[l.id]} : l);
-      if(map) setLocations(ls=>ls.map(l=> map[l.id] ? {...l, ...map[l.id]} : l));
+      const merged = working.map(l=> (map && map[l.id]) ? {...l, ...keepPickedStyle(l, map[l.id])} : l);
+      if(map) setLocations(ls=>ls.map(l=> map[l.id] ? {...l, ...keepPickedStyle(l, map[l.id])} : l));
       // 3) depth-grid staging, using the just-designed architecture/materials/lighting
       if(typeof aiDraftStaging==="function"){
         const stages = await Promise.all(merged.map(async l=>{
@@ -1319,6 +1407,17 @@ function App(){
   const cancelVoiceAll = ()=>{ voicingCancel.current = true; };
   const resolveLineSpeaker = (shot)=>{
     const scene = scenes.find(s=>s.id===shot.sceneId);
+    /* the SCREENPLAY names the speaker (the character cue above the line) — trust it
+       before any in-frame heuristic, so a two-hander never renders A's line in B's
+       voice. Returned even without a voiceLock: the "lock a voice for X" error must
+       name the character who actually speaks. */
+    if(scene && typeof stageDialogueSpeaker==="function"){
+      try{
+        const charById = {}; characters.forEach(c=>{ charById[c.id]=c; });
+        const sp = stageDialogueSpeaker(scene, drafts, beatsMap, shot, { characters, charById });
+        if(sp && sp.id && charById[sp.id]) return charById[sp.id];
+      }catch(e){}
+    }
     const ids = (typeof inFrameCast==="function") ? inFrameCast(shot, scene, characters) : (shot.subjects||[]);
     const inFrame = (ids||[]).map(id=>characters.find(c=>c.id===id)).filter(Boolean);
     const hasVoice = (c)=> !!(c && c.voiceLock && c.voiceLock.voiceId);
@@ -1331,8 +1430,9 @@ function App(){
     if(!text) return { skipped:true };
     const spk = resolveLineSpeaker(shot);
     if(!spk || !spk.voiceLock || !spk.voiceLock.voiceId)
-      throw new Error("No locked voice for "+((spk&&spk.name)||"the speaker")+" — lock one on their character card (the Voice button, Characters tab).");
-    const r = await window.elGenerate(shot.id, text, { voiceId:spk.voiceLock.voiceId, settings:spk.voiceLock.defaults });
+      throw new Error("No locked voice for "+((spk&&spk.name)||"the speaker")+" — lock one on their character card: The Art Room → Characters tab → the Voice button.");
+    const r = await window.elGenerate(shot.id, text, { voiceId:spk.voiceLock.voiceId, settings:spk.voiceLock.defaults,
+      modelId:(typeof window.vgDeliveryModelOf==="function") ? window.vgDeliveryModelOf(spk.voiceLock) : (spk.voiceLock.modelId||window.VG_TTS_MODEL) });
     const durSec = Math.max(0.6, Math.round(((r.durationMs||0)/1000 + 0.4)*10)/10);   // measured + lead/tail pad
     updateShot(shot.id, { dur:durSec, lineAudio:{ durationMs:r.durationMs||0, voiceId:spk.voiceLock.voiceId,
       speakerId:spk.id, speaker:spk.name, text,
@@ -1658,6 +1758,16 @@ function App(){
     };
     return { model, sync, input, emit, propose, cancelled,
       project, facts:FACTS,
+      // read-only copies of the Art-Room bibles + gated patchers, for agents that
+      // cross-check the script against props/locations (Consistency Check). Patches
+      // apply immediately — call them only AFTER a propose() card is approved.
+      bible:{
+        props: props.map(p=>({...p})),
+        locations: locations.map(l=>({...l})),
+        shots: (shots||[]).map(s=>({...s})),
+        patchProp:(id,patch)=> setProps(ps=>ps.map(p=>p.id===id?{...p,...patch}:p)),
+        patchLocation:(id,patch)=> setLocations(ls=>ls.map(l=>l.id===id?{...l,...patch}:l)),
+      },
       ai:{ available: (typeof aiAvailable==="function" && aiAvailable()),
         suggestTurn:(s,p)=>window.aiSuggestTurn(s,p),
         plantLine:(s,f,m)=>window.aiPlantLine(s,f,m),
@@ -1885,8 +1995,11 @@ function App(){
         const locIdOf = (sid)=>{ const L=(typeof locationForScene==="function")?locationForScene(locations, sid):null; return L?L.id:""; };
         found.forEach((e,i)=>{
           const h = headOf(e.name); if(seen.has(h)) return; seen.add(h);
-          const kind = (typeof classifyPropKind==="function" && classifyPropKind(e.name)) || "carried";
           const locIds = Array.from(new Set((e.sceneIds||[]).map(locIdOf).filter(Boolean)));
+          // these come from the ACTION with no owner: fixture nouns (and anything pinned
+          // to one place) are SET DRESSING; only clearly handheld/mobile stays carried
+          const kind = (typeof classifyPropKind==="function" && classifyPropKind(e.name, { ownerless:true }))
+            || (locIds.length===1 ? "dressing" : "carried");
           cards.push({ id:"prop-set-"+slug(e.name)+"-"+i, name:e.name.replace(/^\w/, m=>m.toUpperCase()),
             kind, ownerId:"", ownerName:"", form:"", material:"", detail:"", renderStyle:"", negativePrompt:"",
             scenes:e.sceneIds||[], fromSet:true, locationId:(locIds.length===1?locIds[0]:"") });
@@ -1995,8 +2108,9 @@ function App(){
       generateVariant: async (l, v)=>{ if(typeof window.generateLocationVariant!=="function") throw new Error("variant generator unavailable"); return window.generateLocationVariant(l, v, project); },
     };
 
-    // ---- Visual Researcher surface (Lookbook tab agent): research → render frames ----
-    let _lbWork = (lookbook||[]).slice();
+    // ---- Visual Researcher surface (Lookbook tab agent): research-only.
+    // Frame rendering is the explicit "Generate all frames" button in the Lookbook.
+    let _lbWork = (typeof dedupeLookbookCards==="function") ? dedupeLookbookCards(lookbook||[]) : (lookbook||[]).slice();
     const lookbookSurface = {
       // write the visual statement + reference touchstones, then write them through to the
       // Colorist's references (project.styleBible.refs) so the look propagates downstream.
@@ -2008,26 +2122,61 @@ function App(){
         if(!r) return { statement:"", added:0 };
         // keep an existing statement — a gap-filling re-run shouldn't rewrite the north star
         if(r.statement && !(lookbookNote||"").trim()) setLookbookNote(r.statement);
-        const slug = (s)=> String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
-        const seen = new Set(_lbWork.map(c=>slug(c.source)));
-        const cards = (r.refs||[]).filter(e=>e.source && !seen.has(slug(e.source))).map((e,i)=>({
-          id:"look-"+slug(e.source).slice(0,24)+"-"+i, source:e.source, category:e.category||"Palette", note:e.note||"", negativePrompt:"" }));
-        if(cards.length){ _lbWork = [..._lbWork, ...cards]; setLookbook(ls=>[...ls, ...cards]); }
+        const slug = (s)=> String(s||"").toLowerCase().replace(/\([^)]*\)/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+        const keyOf = (e)=> (typeof lookbookSourceKey==="function") ? lookbookSourceKey(e) : slug(e&&e.source);
+        const seen = new Set(_lbWork.map(c=>keyOf(c)));
+        const cards = [];
+        (r.refs||[]).forEach((e,i)=>{
+          const key = keyOf(e);
+          if(!e.source || !key || seen.has(key)) return;
+          seen.add(key);
+          cards.push({ id:"look-"+slug(e.source).slice(0,24)+"-"+i, source:e.source, category:e.category||"Palette", note:e.note||"", negativePrompt:"" });
+        });
+        if(cards.length){
+          _lbWork = (typeof dedupeLookbookCards==="function") ? dedupeLookbookCards([..._lbWork, ...cards]) : [..._lbWork, ...cards];
+          setLookbook(ls=> (typeof dedupeLookbookCards==="function") ? dedupeLookbookCards([...ls, ...cards]) : [...ls, ...cards]);
+        } else if(typeof dedupeLookbookCards==="function" && _lbWork.length !== (lookbook||[]).length){
+          setLookbook(_lbWork);
+        }
         // No write-through: the Colorist reads the lookbook LIVE (see art.designStyles), so the
         // references propagate downstream without mutating the Styles tab's persisted data.
-        return { statement:r.statement||"", added:cards.length };
+        return { statement:r.statement||"", added:cards.length, renderStyle:r.renderStyle||null };
+      },
+      // the current dominant style label (for the proposal card's "before" line)
+      currentStyleLabel: ()=>{
+        const tally = {};
+        [...(characters||[]), ...(props||[]), ...(locations||[])].forEach(e=>{ const k=e&&e.renderStyleKey; if(k) tally[k]=(tally[k]||0)+1; });
+        const keys = Object.keys(tally);
+        if(!keys.length) return "defaults (photoreal)";
+        const top = keys.sort((a,b)=>tally[b]-tally[a]);
+        const lab = (k)=> String((window.RENDER_STYLE_LABELS||{})[k]||k).replace(/^[🔒🌐]\s*/,"");
+        return top.length===1 ? lab(top[0]) : ("mixed — mostly "+lab(top[0]));
+      },
+      // APPROVED render-style proposal → set the style dropdown on EVERY character,
+      // prop and location in one pass (the same write shapes the per-card pickers use);
+      // per-card dropdowns remain the override afterwards.
+      applyRenderStyle: (key)=>{
+        const locText = (typeof window.renderStyleText==="function") ? window.renderStyleText("loc", key) : "";
+        const propText = (typeof window.renderStyleText==="function") ? window.renderStyleText("prop", key) : "";
+        setCharacters(cs=>cs.map(c=>({ ...c, renderStyleKey:key })));
+        setProps(ps=>ps.map(p=>({ ...p, renderStyleKey:key, ...(propText?{renderStyle:propText}:{}) })));
+        setLocations(ls=>ls.map(l=>({ ...l, renderStyleKey:key, ...(locText?{renderStyle:locText}:{}) })));
+        return { characters:(characters||[]).length, props:(props||[]).length, locations:(locations||[]).length };
       },
       toGenerate: async ()=>{
         const out=[];
-        for(const c of _lbWork){ if(!lookbookCardDrafted(c)) continue; if(await _grabImg(c.id)) continue; out.push(c); }
+        const work = (typeof dedupeLookbookCards==="function") ? dedupeLookbookCards(_lbWork) : _lbWork;
+        for(const c of work){ if(!lookbookCardDrafted(c)) continue; if(await _grabImg(c.id)) continue; out.push(c); }
         return out;
       },
       generateFrame: async (c)=>{ if(typeof window.generateLookbookFrame!=="function") throw new Error("frame generator unavailable"); return window.generateLookbookFrame(c, project); },
     };
 
-    return { input, emit, propose, cancelled, project, force: !!force,
+    const draftOnly = force==="draft";
+    const forceImages = force===true;
+    return { input, emit, propose, cancelled, project, force: forceImages,
       // "Re-draft only": re-draft every spec from the Lookbook but leave generated images alone
-      draftOnly: force==="draft",
+      draftOnly,
       ai:{ available: (typeof aiAvailable==="function" && aiAvailable()) },
       art:{
         pages,
@@ -2130,7 +2279,7 @@ function App(){
   const emptyCanvas = ()=> React.createElement("div",{className:"empty-canvas"},
     React.createElement("div",{className:"empty-canvas-card"},
       React.createElement("div",{className:"empty-canvas-title"},"Start your film"),
-      React.createElement("div",{className:"empty-canvas-sub"},"Your canvas is clean. Describe an idea and TURN builds the value-charge spine, scene by scene — then characters, props, script and shots all follow from it."),
+      React.createElement("div",{className:"empty-canvas-sub"},"Your canvas is clean. Describe an idea and Cinema Machine builds the value-charge spine, scene by scene — then characters, props, script and shots all follow from it."),
       React.createElement("button",{className:"empty-canvas-btn",onClick:()=>setNewStoryOpen(true)},"+ New Story")));
   // ── Signed-out gate: show the commercial landing page instead of the app. The
   //    departments (spine, Writers' Room, Art Room, Agents) are never exposed until
@@ -2140,13 +2289,13 @@ function App(){
   // landing at a user who turns out to be signed in.
   if(authGate && !authReady){
     return React.createElement("div",{className:"lp-splash"},
-      React.createElement("span",{className:"lp-logo"},"TURN"),
+      React.createElement("span",{className:"lp-logo"},"Cinema Machine"),
       React.createElement("span",{className:"lp-splash-dot"}));
   }
   if(authGate && !session && typeof Landing!=="undefined"){
     return React.createElement(React.Fragment,null,
       window.ConfirmHost && React.createElement(window.ConfirmHost,null),
-      React.createElement(Landing,{ onStart:startWithPlan, onSignIn:()=>openAuth("signin") }),
+        React.createElement(Landing,{ onStart:startWithPlan, onSignIn:()=>openAuth("signin") }),
       authOpen && React.createElement(AuthModal,{ initialMode:authMode, plan:intendedPlan, light:true,
         onClose:()=>setAuthOpen(false), onAuthed:(s)=>{ if(s) setSession(s); } }),
       (typeof MuseDock!=="undefined") && React.createElement(MuseDock,{
@@ -2171,6 +2320,9 @@ function App(){
 
     // "Reset to sample story" is an ADMIN-ONLY tool (demo upkeep): only the admin
     // account ever sees it — every other user (and signed-out local mode) gets no reset.
+    // The Stage gets the same shared TopBar as every other room (brand, project switcher,
+    // room switcher, theme toggle, etc.) — only its own sub-view tabs (ViewNav) are skipped,
+    // since the Stage is a single full-width assembly view.
     React.createElement(TopBar,{view,setView,room,setRoom:guardedSetRoom,artView,setArtView,project,scenes,drafts,
       onReset: isAdmin ? resetStory : null,
       onToggleAI:toggleAI,
@@ -2178,6 +2330,7 @@ function App(){
       onHome: cloudMode ? (()=>setHomeOpen(true)) : null,
       // ADMIN ONLY: inspect the whole continuity JSON (the Film Bible) the studio reads from
       onViewBible: isAdmin ? (()=> buildFilmBible({ project, scenes, characters, props, locations, shots, drafts, beatsMap, lookbook, lookbookNote })) : null,
+      onManageStyles: (userEmail || null),   // every signed-in user manages their own styles (admin also gets the global tier inside)
       theme,onTheme:setTheme,
       authSlot: React.createElement(AccountChip,{ session, cloudActive: cloudMode,
         onSignIn:()=>setAuthOpen(true), onSignOut:signOut }),
@@ -2193,7 +2346,7 @@ function App(){
       onToggleInsp:toggleInsp}),
 
     // the room's view tabs, moved out of the top bar to a full-width bar beneath it
-    React.createElement(ViewNav,{room,view,setView,artView,setArtView,staleTabs,
+    room!=="stage" && React.createElement(ViewNav,{room,view,setView,artView,setArtView,staleTabs,
       hiddenTabs:(typeof tabHidden==="function") ? Object.fromEntries((window.ART_TABS||[]).map(t=>[t.id, tabHidden(project, t.id)])) : null,
       railOpen,inspOpen,onToggleRail:toggleRail,onToggleInsp:toggleInsp,
       onCoordinate:async ()=>{ if(await requireStory("Art Department Coordinator")) setCoordConfirm(true); },
@@ -2209,8 +2362,18 @@ function App(){
           ? React.createElement("div",{className:"canvas"}, emptyCanvas())
             : React.createElement(window.StageView,{key:(cloudMode?currentProjectId:"local"),
                 project,scenes,shots,characters,locations,props,beatsMap,drafts,
+                creditBalance,
                 onVoiceAll:voiceAllLines,voicingLines,onCancelVoiceAll:cancelVoiceAll,
-                onVoiceLine:voiceLine}))
+                onVoiceLine:voiceLine,
+                onUpdateShot:updateShot,
+                onStageNav:(tab)=>{
+                  if(tab==="timeline"){ setRoom("writers"); setView("script"); return; }
+                  if(tab==="shots"){ setRoom("art"); setArtView("shots"); return; }
+                  if(tab==="assets"){ setRoom("art"); setArtView("lookbook"); return; }
+                  if(tab==="audio"){ setRoom("stage"); return; }
+                  if(tab==="versions"){ setRoom("stage"); return; }
+                  setRoom("stage");
+                }}))
       : room==="art"
         ? (scenes.length===0
           // hard gate: the Art Room is downstream of the story, so with no scenes
@@ -2413,6 +2576,7 @@ function App(){
       issues:{}, undoCount:0,
       aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
 
+
     // Props Master — autonomous props agent (derive → draft → dedup → generate),
     // launched from the Props header; runs before the cast so the references exist.
     propsMasterOpen && React.createElement(AgentsPanel,{
@@ -2459,11 +2623,19 @@ function App(){
       issues:{}, undoCount:0,
       aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
 
+
     // New Story intake — many seed types in, one logline out, then launch Adaptation
     newStoryOpen && React.createElement(NewStoryIntake,{
       onClose:()=>setNewStoryOpen(false),
       aiOn: (typeof aiAvailable==="function" && aiAvailable()),
-      onLaunch:(logline, synopsis, formatId, frameworkId)=>{ setNewStoryOpen(false);
+      onLaunch:async (logline, synopsis, formatId, frameworkId)=>{ setNewStoryOpen(false);
+        // LAZY film creation: the blank film is minted only NOW that a story is really
+        // being built — and only when the current film already holds one (an empty
+        // canvas is reused instead of duplicated). Aborted intakes create nothing.
+        if(scenes.length){
+          if(cloudMode && typeof createProject==="function"){ await createProject(); }
+          else { applyDoc(emptyDoc()); setArtView("lookbook"); }
+        }
         // A new story always starts in the Writers' Room on the spine — the story is
         // built first; pre-production (the Art Room) comes after. Without this, launching
         // New Story from the Art Room would leave the user staring at empty art tabs.

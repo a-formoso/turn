@@ -15,27 +15,42 @@ const NB_AR_KEY = "turn-nb-aspect";
    billed generation. Default MEDIUM; the dock exposes the knob when GPT is active. */
 const OAI_Q_KEY = "turn-oai-quality";
 function nbGetOaiQuality(){ try{ const q=localStorage.getItem(OAI_Q_KEY)||"medium"; return ["low","medium","high"].indexOf(q)>=0?q:"medium"; }catch(e){ return "medium"; } }
-function nbSetOaiQuality(q){ try{ localStorage.setItem(OAI_Q_KEY,q); }catch(e){} }
+function nbSetOaiQuality(q){ try{ localStorage.setItem(OAI_Q_KEY,q); }catch(e){} _nbAnnounce("nb-settings-changed"); }
+/* every model/res/aspect/quality setter announces itself so cost chips (and any other
+   listener) update no matter WHERE the change came from — picker, dock, or a
+   "Try <model>" fallback after a failed generation. */
+function _nbAnnounce(name){ try{ window.dispatchEvent(new CustomEvent(name)); }catch(e){} }
 window.nbGetOaiQuality = nbGetOaiQuality; window.nbSetOaiQuality = nbSetOaiQuality;
 const NB_RES_KEY = "turn-nb-res";
 
-/* selectable models. provider:"google" → Nano Banana (Gemini), which runs directly
-   from the browser. provider:"openai" → GPT Image, which CANNOT run from the browser
-   (OpenAI blocks cross-origin calls); it is offered ONLY when the server-side proxy
-   is enabled (window.TURN_SUPABASE.imageProxy), in which case generation is routed
-   through the `image-proxy` Supabase Edge Function and the key lives server-side. */
+/* selectable models. provider:"google" → Nano Banana (Gemini), which can run directly
+   from the browser with the user's local key or through the server proxy. provider:"openai"
+   → GPT Image, which CANNOT run from the browser (OpenAI blocks cross-origin calls);
+   it is offered ONLY when the server-side proxy is enabled, using a user-saved key
+   when present or the proxy's server secret as a fallback. */
 const _imageProxyOn = !!(window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxy);
 const NB_MODELS = [
-  { id:"gemini-3.1-flash-image", label:"Nano Banana 2",   provider:"google", note:"fast \u00b7 high quality" },
-  { id:"gemini-3-pro-image",     label:"Nano Banana Pro", provider:"google", note:"highest fidelity" },
+  { id:"gemini-3.1-flash-image",      label:"Nano Banana 2",      provider:"google", note:"fast \u00b7 high quality" },
+  { id:"gemini-3.1-flash-lite-image", label:"Nano Banana 2 Lite", provider:"google", note:"fastest \u00b7 ~4s \u00b7 lowest cost" },
+  { id:"gemini-3-pro-image",          label:"Nano Banana Pro",    provider:"google", note:"highest fidelity" },
   ...(_imageProxyOn ? [{ id:"gpt-image-2", label:"GPT Image 2", provider:"openai", via:"proxy", note:"server-side \u00b7 in-image text" }] : []),
 ];
-const NB_ASPECTS = ["16:9","21:9","9:16"];
+const NB_ASPECTS = ["16:9","21:9","9:16","1:1","3:4","4:3"];
 const NB_RESOLUTIONS = ["1K","2K","4K"];
 window.NB_MODELS = NB_MODELS; window.NB_ASPECTS = NB_ASPECTS; window.NB_RESOLUTIONS = NB_RESOLUTIONS;
 
-function nbGetKey(){ try{ return localStorage.getItem(NB_KEY)||""; }catch(e){ return ""; } }
-function nbSetKey(k){ try{ k=(typeof sanitizeKey==="function"?sanitizeKey(k):k); k ? localStorage.setItem(NB_KEY,k) : localStorage.removeItem(NB_KEY); }catch(e){} }
+function nbGetKey(){ try{
+  const k = window.turnGetApiKey ? window.turnGetApiKey("google") : "";
+  if(k) return k;
+  const legacy = localStorage.getItem(NB_KEY)||"";
+  if(legacy && window.turnSetApiKey) window.turnSetApiKey("google", legacy);
+  return legacy;
+}catch(e){ return ""; } }
+function nbSetKey(k){ try{
+  k=(typeof sanitizeKey==="function"?sanitizeKey(k):k);
+  if(window.turnSetApiKey) window.turnSetApiKey("google", k);
+  k ? localStorage.setItem(NB_KEY,k) : localStorage.removeItem(NB_KEY);
+}catch(e){} }
 function nbHasKey(){ return !!nbGetKey(); }
 function nbGetModel(){ try{
   let s=localStorage.getItem(NB_MODEL_KEY);
@@ -49,11 +64,11 @@ function nbGetModel(){ try{
   if(s){ try{ localStorage.setItem(NB_MODEL_KEY, NB_MODELS[0].id); }catch(e){} }
   return NB_MODELS[0].id;
 }catch(e){ return NB_MODELS[0].id; } }
-function nbSetModel(m){ try{ localStorage.setItem(NB_MODEL_KEY,m); }catch(e){} }
+function nbSetModel(m){ try{ localStorage.setItem(NB_MODEL_KEY,m); }catch(e){} _nbAnnounce("nb-model-changed"); }
 function nbGetAspect(){ try{ const a=localStorage.getItem(NB_AR_KEY)||"16:9"; return (NB_ASPECTS.indexOf(a)>=0)?a:"16:9"; }catch(e){ return "16:9"; } }
-function nbSetAspect(a){ try{ localStorage.setItem(NB_AR_KEY,a); }catch(e){} }
+function nbSetAspect(a){ try{ localStorage.setItem(NB_AR_KEY,a); }catch(e){} _nbAnnounce("nb-settings-changed"); }
 function nbGetRes(){ try{ return localStorage.getItem(NB_RES_KEY)||"2K"; }catch(e){ return "2K"; } }
-function nbSetRes(r){ try{ localStorage.setItem(NB_RES_KEY,r); }catch(e){} }
+function nbSetRes(r){ try{ localStorage.setItem(NB_RES_KEY,r); }catch(e){} _nbAnnounce("nb-settings-changed"); }
 window.nbGetKey = nbGetKey; window.nbSetKey = nbSetKey; window.nbHasKey = nbHasKey;
 window.nbGetModel = nbGetModel; window.nbSetModel = nbSetModel;
 window.nbGetAspect = nbGetAspect; window.nbSetAspect = nbSetAspect;
@@ -73,13 +88,24 @@ function sanitizeKey(k){
     .trim();
 }
 window.sanitizeKey = sanitizeKey;
-function oaiGetKey(){ try{ return localStorage.getItem(OAI_KEY)||""; }catch(e){ return ""; } }
-function oaiSetKey(k){ try{ k=sanitizeKey(k); k ? localStorage.setItem(OAI_KEY,k) : localStorage.removeItem(OAI_KEY); }catch(e){} }
+function oaiGetKey(){ try{
+  const k = window.turnGetApiKey ? window.turnGetApiKey("openai") : "";
+  if(k) return k;
+  const legacy = localStorage.getItem(OAI_KEY)||"";
+  if(legacy && window.turnSetApiKey) window.turnSetApiKey("openai", legacy);
+  return legacy;
+}catch(e){ return ""; } }
+function oaiSetKey(k){ try{
+  k=sanitizeKey(k);
+  if(window.turnSetApiKey) window.turnSetApiKey("openai", k);
+  k ? localStorage.setItem(OAI_KEY,k) : localStorage.removeItem(OAI_KEY);
+}catch(e){} }
 function oaiHasKey(){ return !!oaiGetKey(); }
 window.oaiGetKey = oaiGetKey; window.oaiSetKey = oaiSetKey; window.oaiHasKey = oaiHasKey;
 
-/* is the server-side image proxy enabled? When on, ALL providers (Google + OpenAI)
-   run through the Edge Function and NO provider key lives in the browser. */
+/* is the server-side image proxy enabled? When on, providers run through the Edge
+   Function. A user-saved key may be sent for that request; otherwise the function
+   falls back to its server-side secret. */
 function imageProxyOn(){ return !!(window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxy); }
 window.imageProxyOn = imageProxyOn;
 
@@ -103,13 +129,78 @@ function providerOfModel(model){
 }
 function nbProviderLabel(provider){ return provider==="openai" ? "GPT Image" : "Nano Banana"; }
 /* key presence per provider — used by the key bar and the batch/generate gates.
-   OpenAI (GPT Image) goes through the server proxy, which holds the key server-side,
-   so the CLIENT needs no OpenAI key — the real gate there is being signed in, which
-   the Edge Function enforces and the call surfaces as a clear error if missing. */
+   OpenAI (GPT Image) must go through the server proxy; the proxy can use either the
+   user's saved OpenAI key or its own server secret. */
 function nbHasKeyForModel(model){ return (providerOfModel(model)==="openai" || imageProxyOn()) ? true : nbHasKey(); }
 function nbHasKeyForCurrent(){ return nbHasKeyForModel(nbGetModel()); }
 window.providerOfModel = providerOfModel; window.nbProviderLabel = nbProviderLabel;
 window.nbHasKeyForModel = nbHasKeyForModel; window.nbHasKeyForCurrent = nbHasKeyForCurrent;
+
+/* ---- per-image cost, in GENERATION CREDITS (the Stage's currency: 1 credit ≈ $0.30).
+   USD figures are the public API list prices (July 2026): Gemini image models bill
+   $30/M output tokens (1K=1120 · 2K=1680 · 4K=2520 tokens; Pro 1K/2K both 1120,
+   4K 2000 at its higher rate); GPT Image 2 estimates are for the 1536×1024 landscape
+   this app renders. Shown on Generate buttons so cost is visible BEFORE a render —
+   image generations don't deduct credits yet. */
+const NB_IMG_USD = {
+  "gemini-3.1-flash-lite-image": { "1K":0.034, "2K":0.050, "4K":0.076 },
+  "gemini-3.1-flash-image":      { "1K":0.067, "2K":0.101, "4K":0.151 },
+  "gemini-3-pro-image":          { "1K":0.134, "2K":0.134, "4K":0.240 },
+  "gpt-image-2":                 { low:0.009, medium:0.080, high:0.317 },
+};
+const NB_CREDIT_USD = 0.30;
+function nbImageCredits(opts){
+  opts = opts||{};
+  const model = opts.model || nbGetModel();
+  const t = NB_IMG_USD[model]; if(!t) return null;
+  let usd;
+  if(providerOfModel(model)==="openai"){
+    const q = opts.quality || nbGetOaiQuality();
+    usd = (t[q]!=null) ? t[q] : t.medium;
+  } else {
+    const r = opts.res || nbGetRes();
+    usd = (t[r]!=null) ? t[r] : t["2K"];
+  }
+  return usd / NB_CREDIT_USD;
+}
+function nbImageCostText(count, opts){
+  const per = nbImageCredits(opts);
+  if(per==null) return "";
+  const total = per * Math.max(1, Number(count)||1);
+  const r = Math.round(total*20)/20;                 // nearest 0.05 credit
+  return String(r>=10 ? Math.round(r) : r);
+}
+/* small cost chip for Generate/Re-generate buttons. A tiny COMPONENT (not a static
+   span) so it re-reads the current model/resolution/quality when the picker fires
+   nb-model-changed / nb-settings-changed — otherwise chips deep in sheet cards would
+   show the previous engine's price after a switch. */
+function NbCostChipInner({ count, opts }){
+  const R = window.React;
+  const force = R.useState(0)[1];
+  R.useEffect(()=>{
+    const h = ()=>force(x=>x+1);
+    window.addEventListener("nb-model-changed", h);
+    window.addEventListener("nb-settings-changed", h);
+    return ()=>{ window.removeEventListener("nb-model-changed", h); window.removeEventListener("nb-settings-changed", h); };
+  },[]);
+  const txt = nbImageCostText(count, opts);
+  if(!txt) return null;
+  const model = (opts&&opts.model) || nbGetModel();
+  const m = (window.NB_MODELS||NB_MODELS).find(x=>x.id===model);
+  const detail = providerOfModel(model)==="openai"
+    ? ((opts&&opts.quality)||nbGetOaiQuality())+" quality"
+    : ((opts&&opts.res)||nbGetRes());
+  const n = Math.max(1, Number(count)||1);
+  return window.React.createElement("span",{className:"nb-cost",
+    title:"≈ "+txt+" generation credit"+(txt==="1"?"":"s")+" — "+((m&&m.label)||model)+" at "+detail
+      +(n>1 ? " × "+n+" images" : " per image")},
+    txt);
+}
+function nbCostChip(count, opts){
+  if(!window.React) return null;
+  return window.React.createElement(NbCostChipInner, { count, opts });
+}
+window.nbImageCredits = nbImageCredits; window.nbImageCostText = nbImageCostText; window.nbCostChip = nbCostChip;
 
 /* grounding with Google Search — Nano Banana 2 (gemini-3.1-flash-image) only */
 const NB_GROUND_KEY = "turn-nb-ground";
@@ -121,25 +212,26 @@ window.nbGetGroundSearch = nbGetGroundSearch; window.nbSetGroundSearch = nbSetGr
 function buildSimpleCharPrompt(c){
   const body = ((c.coreBody||c.look)||"").replace(/\.$/,"").trim();
   const wardrobe = ((c.wardrobeMask||c.wardrobe)||"").replace(/\.$/,"").trim();
+  // the retry still speaks the character's PICKED render style (first clause of their
+  // style block) — a content-filter fallback must not go photoreal on a stylized film
+  const styleLine = (typeof window.charRenderBlock==="function")
+    ? String((window.charRenderBlock(c)||{}).rendering||"").split(/[;,]/)[0].trim() : "";
   const parts = [
     "Character reference \u2014 "+(c.name||"character"),
     body||"",
     wardrobe ? ("wearing "+wardrobe) : "",
-    "full-body front view, side profile, and back view",
-    "plain grey background, studio lighting, photoreal, sharp focus"
+    "4-panel casting reference sheet: large close-up face portrait, full-body front view, full-body three-quarter front view, full-body back view",
+    "plain grey background, studio lighting, "+(styleLine||"photoreal")+", sharp focus, no text or labels"
   ].filter(Boolean);
   return parts.join(". ")+".";
 }
 window.buildSimpleCharPrompt = buildSimpleCharPrompt;
 
-/* master reference prompt + negative prompt -> one final prompt the model receives */
+/* the final character prompt the model receives. The character's exclusions are now folded
+   INTO the spec's render.rules (one constraints list), so there's no separate negative prompt
+   appended here — rules and the old negative prompt were doing the same job. */
 function combinedImagePrompt(c, project, props){
-  const master = (typeof buildCharRefPrompt==="function") ? buildCharRefPrompt(c, project, props) : "";
-  const v = (typeof charVisualDefaults==="function") ? charVisualDefaults(c) : {};
-  const neg = (c.negativePrompt || v.negativePrompt || "").trim();
-  let s = master;
-  if(neg) s += "\n\nAvoid (negative prompt): "+neg.replace(/\.$/,"")+".";
-  return s.trim();
+  return ((typeof buildCharRefPrompt==="function") ? buildCharRefPrompt(c, project, props) : "").trim();
 }
 window.combinedImagePrompt = combinedImagePrompt;
 
@@ -296,7 +388,18 @@ async function nbLoadImage(id){
   }
   return localLoadImage(id);
 }
+/* Server-side render inputs need a real fetchable URL, not the browser's byte-cache
+   blob URL. Use this for Stage/video hand-offs; keep nbLoadImage for painting. */
+async function nbRemoteImageUrl(id){
+  if(_nbBackend!=="cloud" || !id || typeof window.cloudAssetLoad!=="function") return "";
+  const scope = _scopeFor(id);
+  let r = await window.cloudAssetLoad(scope, id);
+  if((!r || !r.path) && scope!==_nbProject){ r = await window.cloudAssetLoad(_nbProject, id); }
+  if(r && r.url){ _cloudMetaCache.set(id, r.meta||null); return r.url; }
+  return "";
+}
 window.nbLoadImage = nbLoadImage;
+window.nbRemoteImageUrl = nbRemoteImageUrl;
 
 /* warm the browser's image cache so it paints instantly when rendered */
 function nbPreloadBytes(urls){
@@ -417,6 +520,7 @@ async function nbGetHistory(id){
   return localGetHistory(id);
 }
 window.nbGetRefs = nbGetRefs;
+window.nbGetHistory = nbGetHistory;   // the fullscreen viewer's version strip reads this
 
 /* per-character generation metadata (model, aspect, size, date) */
 function nbMetaKey(id){ return "turn-charimg-meta-"+id; }
@@ -589,6 +693,24 @@ async function nbRevertAsset(id, index){
   try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, ids:[id], url:chosen.url } })); }catch(e){}
   return { url:chosen.url, meta:chosen.meta||null };
 }
+async function nbDeleteCurrentAndPromoteAsset(id){
+  if(_nbBackend==="cloud"){
+    if(typeof window.cloudDeleteCurrentAndPromote!=="function") return null;
+    const r = await window.cloudDeleteCurrentAndPromote(_scopeFor(id), _nbUid, id);
+    if(r){ _cloudUrlCache.set(id, r.url); _cloudMetaCache.set(id, r.meta||null); }
+    if(r){ try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, ids:[id], url:r.url } })); }catch(e){} }
+    return r;
+  }
+  const history = await localGetHistory(id);
+  if(!history.length) return null;
+  const chosen = history[0];
+  await localSetImage(id, chosen.url);
+  localSetMeta(id, chosen.meta||null);
+  await localSetRefs(id, chosen.refs||[]);
+  await localSetHistory(id, history.slice(1,13));
+  try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, ids:[id], url:chosen.url } })); }catch(e){}
+  return { url:chosen.url, meta:chosen.meta||null };
+}
 async function nbLoadDetailsAsset(id, currentUrl){
   if(_nbBackend==="cloud"){
     if(typeof window.cloudLoadDetails==="function") return await window.cloudLoadDetails(_scopeFor(id), id);
@@ -599,7 +721,8 @@ async function nbLoadDetailsAsset(id, currentUrl){
   return { id, url:currentUrl, meta:localGetMeta(id), refs, history };
 }
 window.nbCommit = nbCommit; window.nbClearAsset = nbClearAsset;
-window.nbRevertAsset = nbRevertAsset; window.nbLoadDetailsAsset = nbLoadDetailsAsset;
+window.nbRevertAsset = nbRevertAsset; window.nbDeleteCurrentAndPromoteAsset = nbDeleteCurrentAndPromoteAsset;
+window.nbLoadDetailsAsset = nbLoadDetailsAsset;
 
 /* delete ONE entry from a sheet's version history (local + cloud). */
 async function nbDeleteHistoryEntry(id, index){
@@ -717,7 +840,7 @@ async function downscaleRef(dataUrl, maxDim, quality){
 window.downscaleRef = downscaleRef;
 
 /* GPT Image's landscape/portrait Image API canvases are 3:2 / 2:3 even when
-   TURN requests a cinematic ratio. Crop the returned pixels to the exact chosen
+   Cinema Machine requests a cinematic ratio. Crop the returned pixels to the exact chosen
    ratio before committing the asset, so a frame labelled 16:9 really is 16:9.
    This is a crop only (no stretch, no invented pixels). */
 async function cropImageToAspect(src, aspect){
@@ -748,12 +871,11 @@ async function cropImageToAspect(src, aspect){
 }
 
 /* Generate through the SERVER-SIDE proxy (Supabase Edge Function), provider-agnostic.
-   The browser never holds a provider key and never calls the provider directly — it
-   calls our `image-proxy` function, which holds the key as a server secret and makes
-   the request server-side. Used for BOTH OpenAI GPT Image (which can't run in the
-   browser at all) and, when imageProxy is on, Google Nano Banana (which can, but is
-   routed here too so no key lives client-side). Requires the user to be signed in and
-   the function deployed (see supabase/functions/image-proxy/index.ts). Resolves to a
+   The browser calls our `image-proxy` function, which makes the provider request
+   server-side. If the user saved a key in API Keys, it is sent for this one provider;
+   otherwise the function uses its server secret. Used for BOTH OpenAI GPT Image
+   (which can't run in the browser at all) and, when imageProxy is on, Google Nano
+   Banana. Requires the user to be signed in and the function deployed. Resolves to a
    data URL; mirrors nbGenerate's signature and reports grounding via opts.metaOut. */
 async function proxyGenerate(prompt, opts, provider){
   opts = opts || {};
@@ -775,6 +897,7 @@ async function proxyGenerate(prompt, opts, provider){
   }
   const fnName = (window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxyFn) || "image-proxy";
   const body = { provider, model, prompt, aspect, quality, imageSize, images,
+                 userApiKeys: window.turnApiKeysForProxy ? window.turnApiKeysForProxy([provider]) : undefined,
                  groundSearch: !!opts.groundSearch, groundImageSearch: !!opts.groundImageSearch };
   // Only retry true NETWORK-level failures (DNS / "failed to send"): they fail FAST and no
   // server work was done, so a quick retry is safe and cheap. Do NOT retry 5xx/504 \u2014 a 504
@@ -797,13 +920,13 @@ async function proxyGenerate(prompt, opts, provider){
     const status = statusOf(error);
     if(status===401) throw new Error("Sign in to use server-side image generation \u2014 it runs on your server, not in the browser.");
     if(status===404) throw new Error("The image proxy isn't deployed yet. Deploy supabase/functions/image-proxy and set imageProxy:true in supabase-config.js.");
-    if(status===504) throw new Error("The image generation exceeded the server time limit. TURN preserved your selected quality and resolution; try again, or manually choose a faster setting if you prefer.");
+    if(status===504) throw new Error("The image generation exceeded the server time limit. Cinema Machine preserved your selected quality and resolution; try again, or manually choose a faster setting if you prefer.");
     if(status===502 || status===503) throw new Error("The image proxy is temporarily unavailable. Try again in a moment.");
     throw new Error("Couldn't reach the image proxy: "+((error && error.message) || "unknown error")+".");
   }
   if(data && data.error) throw new Error(data.error);          // provider error relayed by the proxy
   if(opts.metaOut && data && typeof data.grounded!=="undefined") opts.metaOut.grounded = !!data.grounded;
-  // Provider-native landscape/portrait canvases are not always TURN's selected
+  // Provider-native landscape/portrait canvases are not always Cinema Machine's selected
   // ratio (GPT Image landscape is 3:2). Normalize BEFORE returning, so callers
   // can only commit a frame whose pixels match its 16:9 / 9:16 / 21:9 label.
   if(data && data.b64) return await cropImageToAspect("data:"+(data.mime||"image/png")+";base64,"+data.b64, aspect);

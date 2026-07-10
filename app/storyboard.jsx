@@ -83,7 +83,7 @@ function sbCharLock(c){
   const extra = (c.accessories && !/^none$/i.test(c.accessories)) ? c.accessories
               : ((c.props && !/^none$/i.test(c.props)) ? c.props : "");
   let s = [idc, (p.hair||""), ward, extra].map(x=>(x||"").replace(/\s+/g," ").trim()).filter(Boolean).join("; ");
-  if(s.length>180) s = s.slice(0,178).replace(/[;,]\s*\S*$/,"");
+  if(s.length>180) s = (typeof clipWords==="function") ? clipWords(s,180) : s.slice(0,178).replace(/[;,]\s*\S*$/,"");
   return (c.name||"Character").toUpperCase()+": "+(s||"as in the attached reference sheet")+".";
 }
 
@@ -116,7 +116,7 @@ function sbStrip(sh, scene, row, full){
   if(!full) action = action.split(" ").slice(0,9).join(" ");
   const dlg = (sh.dialogue||"").trim().replace(/^["“]|["”]$/g,"").replace(/[.!?]+$/,"");
   const beh = ((row && ((row.drive&&row.drive.d)||(row.react&&row.react.d)))||"").replace(/\s+/g," ").trim();
-  const performance = dlg ? ('"'+dlg.slice(0, full?160:60)+'"')
+  const performance = dlg ? ('"'+((typeof clipWords==="function") ? clipWords(dlg, full?160:60) : dlg.slice(0, full?160:60))+'"')
     : (beh ? (full ? beh : beh.split(" ").slice(0,9).join(" ")) : sbMood(scene));
   return { camera, motion, action, performance };
 }
@@ -690,7 +690,7 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
           _sbEl("button",{className:"sheet-tools-item",disabled:gen.gening||composing||!ready.n,
             title: ready.n ? "Recompose the sheet from the shots' current frames" : "No shot frames to compose from",
             onClick:()=>{ doCompose(); setMenuOpen(false); }}, _sbEl(Icon.board,{s:13}),"Recompose from frames"),
-          _sbEl("button",{className:"sheet-tools-item",disabled:gen.gening||composing,onClick:()=>{ doGen(); setMenuOpen(false); }}, _sbEl(Icon.sparkles,{s:13}),"Regenerate (GPT Image 2)"),
+          _sbEl("button",{className:"sheet-tools-item",disabled:gen.gening||composing,onClick:()=>{ doGen(); setMenuOpen(false); }}, _sbEl(Icon.sparkles,{s:13}),"Regenerate (GPT Image 2)", typeof window.nbCostChip==="function" && window.nbCostChip(1,{model:GPT2&&GPT2.id,quality:"medium"})),
           _sbEl("button",{className:"sheet-tools-item",disabled:gen.gening||composing,onClick:()=>{ setMenuOpen(false); pickUpload(); }}, _sbEl(Icon.image,{s:13}),"Replace with upload"),
           _sbEl("button",{className:"sheet-tools-item"+((halvesDone||halvesCurrent)?" on":""),disabled:!gen.genUrl||halvesBusy||halvesCurrent,
             title: halvesCurrent
@@ -718,7 +718,7 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
                 _sbEl("span",{className:"sb-comp-empty-sub"}, ready.n+" of "+ready.total+" frames ready · instant · free")),
               _sbEl("button",{className:"sb-comp-choice",onClick:doGen,
                 title:"Paint the whole sheet as one image with GPT Image 2 (single pass)"},
-                _sbEl(Icon.sparkles,{s:16}),_sbEl("span",null,"Generate single sheet"),
+                _sbEl(Icon.sparkles,{s:16}),_sbEl("span",null,"Generate single sheet"), typeof window.nbCostChip==="function" && window.nbCostChip(1,{model:GPT2&&GPT2.id,quality:"medium"}),
                 _sbEl("span",{className:"sb-comp-empty-sub"}, page.shots.length+" panels · GPT Image 2 · 16:9")),
               _sbEl("button",{className:"sb-comp-choice",onClick:pickUpload,
                 title:"Import a finished storyboard sheet you made elsewhere (e.g. ChatGPT / GPT Image 2) at full resolution"},
@@ -930,18 +930,10 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
   const readySheets = allSheetIds.filter(id=>frames[id]).length;
 
   // per-scene fold state (persisted) — long boards collapse to their scene headers.
-  // DEFAULT: everything folded except the first scene.
+  // DEFAULT: every scene starts open; folding is manual and remembered per-scene.
   const [collapsed, setCollapsed] = React.useState(()=>{ try{ return JSON.parse(localStorage.getItem("turn_sb_collapsed")||"{}")||{}; }catch(e){ return {}; } });
   React.useEffect(()=>{ try{ localStorage.setItem("turn_sb_collapsed", JSON.stringify(collapsed)); }catch(e){} },[collapsed]);
   const toggleScene = (id)=> setCollapsed(c=>({ ...c, [id]: !c[id] }));
-  const foldSeeded = React.useRef(false);
-  React.useEffect(()=>{
-    if(foldSeeded.current || !ordered.length) return;
-    foldSeeded.current = true;
-    if(Object.keys(collapsed).length) return;   // a real fold state already exists
-    const m = {}; ordered.forEach((s,i)=>{ if(i>0) m[s.id]=true; });
-    setCollapsed(m);
-  },[ordered.length]);
 
   // "Generate all sheets" advances by watching MOUNTED sheet cards — expand all first
   const startAll = ()=>{ if(batchActiveId || !allSheetIds.length) return; setCollapsed({}); batch.begin(allSheetIds, 0); };
@@ -1022,7 +1014,7 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
             _sbEl(Icon.board,{s:14}), composingAll?("Composing "+composingAll.i+"/"+composingAll.total+"…"):"Compose all from frames"),
           _sbEl("button",{className:"art-draftall ghost",disabled:!!batchActiveId||!!composingAll||!totalSheets,onClick:startAll,
             title:"Generate (or regenerate) every scene's storyboard sheet, one at a time"},
-            _sbEl(Icon.sparkles,{s:14}), batchActiveId?"Generating…":"Generate all sheets"),
+            _sbEl(Icon.sparkles,{s:14}), batchActiveId?"Generating…":"Generate all sheets", typeof window.nbCostChip==="function" && window.nbCostChip(1,{model:(window.NB_MODELS||[]).filter(function(m){return /gpt-image/i.test(m.id)}).map(function(m){return m.id})[0],quality:"medium"})),
           _sbEl("button",{className:"art-draftall ghost",disabled:!readySheets,
             onClick:()=> exportStoryboard(pagesByScene, frames, project),
             title:"Preview the storyboard as a printable document (sheet images inlined for keeps), then print / save as PDF or download the HTML"},

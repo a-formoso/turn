@@ -1,8 +1,8 @@
 /* voicegen.jsx — the VOICE generation + persistence layer for the Stage (audio-first).
    Structural twin of imagegen.jsx's nb* layer, for ElevenLabs audio instead of images.
    Every call goes through the SAME server-side Supabase proxy (the `image-proxy`
-   Edge Function, task:"voice"), so the ElevenLabs key never touches the browser
-   (Voice & Lip-Sync plan §4 / §8A). Local-first persistence (IndexedDB); cloud is a
+   Edge Function, task:"voice"), using a user-saved ElevenLabs key when present or
+   the proxy's server secret as fallback. Local-first persistence (IndexedDB); cloud is a
    guarded extension hook (window.cloudCommitAudio) wired in a later turn.
 
    Public surface (mirrors the plan):
@@ -16,13 +16,29 @@
 */
 
 // ---- config -----------------------------------------------------------------
-const VG_TTS_MODEL = "eleven_multilingual_v2";      // consistent timbre across every line
+const VG_TTS_MODEL = "eleven_v3";      // DEFAULT delivery: the most expressive model
 const VG_OUTPUT_FORMAT = "mp3_44100_128";
 const VG_DEFAULTS = { stability:0.70, similarity:0.75, style:0.10, speed:1.0, speakerBoost:true };
-window.VG_DEFAULTS = VG_DEFAULTS; window.VG_TTS_MODEL = VG_TTS_MODEL;
+// selectable per-character DELIVERY models (stored on the voice lock, honoured on every
+// line render + test line). v3 is the app default; v2 stays available for a flatter,
+// maximally-consistent timbre.
+const VG_TTS_MODELS = [
+  { id:"eleven_v3", label:"Expressive (v3)", note:"The default — most expressive delivery; understands audio tags like [whispers] or [sighs] written into the line." },
+  { id:"eleven_multilingual_v2", label:"Classic (v2)", note:"Flatter but maximally consistent timbre — pick when a voice should never vary." },
+];
+/* which model actually renders a locked voice's lines: an EXPLICIT per-character pick
+   (lock.modelChosen) wins; otherwise the app default. Locks created before the
+   delivery selector stored the old default automatically — nobody chose it — so they
+   follow the current default (v3) instead of being pinned to v2 forever. */
+function vgDeliveryModelOf(lock){
+  return (lock && lock.modelChosen && lock.modelId) ? lock.modelId : VG_TTS_MODEL;
+}
+window.VG_DEFAULTS = VG_DEFAULTS; window.VG_TTS_MODEL = VG_TTS_MODEL; window.VG_TTS_MODELS = VG_TTS_MODELS;
+window.vgDeliveryModelOf = vgDeliveryModelOf;
 
-/* voice always runs server-side (the ElevenLabs key is a server secret) — so it needs
-   the proxy on, the Supabase client, and a signed-in user. There is no browser-direct path. */
+/* voice always runs server-side — so it needs the proxy on, the Supabase client,
+   and a signed-in user. The proxy uses a user-saved ElevenLabs key when present,
+   otherwise its server secret. There is no browser-direct path. */
 function voiceProxyReady(){
   return !!(window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxy
     && typeof window.sbClient==="function" && window.sbClient());
@@ -97,12 +113,13 @@ async function vgProxy(op, payload){
   const sb = window.sbClient();
   const fnName = (window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxyFn) || "image-proxy";
   let data, error;
-  try{ ({ data, error } = await sb.functions.invoke(fnName, { body:{ task:"voice", op, ...(payload||{}) } })); }
+  try{ ({ data, error } = await sb.functions.invoke(fnName, { body:{ task:"voice", op, ...(payload||{}),
+    userApiKeys: window.turnApiKeysForProxy ? window.turnApiKeysForProxy(["elevenlabs"]) : undefined } })); }
   catch(e){ error=e; }
   if(error){
     const status=(error&&error.context&&error.context.status)||error.status||0;
     if(status===401) throw new Error("Sign in to render voice — it runs on your server, not the browser.");
-    if(status===404) throw new Error("The media proxy isn't deployed yet. Deploy supabase/functions/image-proxy (the voice route) and set ELEVENLABS_API_KEY.");
+    if(status===404) throw new Error("The media proxy isn't deployed yet. Deploy supabase/functions/image-proxy (the voice route), then add an ElevenLabs key in API Keys or set ELEVENLABS_API_KEY.");
     throw new Error("Couldn't reach the voice proxy: "+((error&&error.message)||"unknown error")+".");
   }
   if(data && data.error) throw new Error(data.error);   // ElevenLabs error relayed by the proxy
@@ -113,7 +130,7 @@ async function vgProxy(op, payload){
 async function elGenerate(id, text, opts){
   opts = opts||{};
   const voiceId=opts.voiceId; const t=String(text||"").trim();
-  if(!voiceId) throw new Error("No locked voice for this character yet — lock one on their character card (the Voice button, Characters tab).");
+  if(!voiceId) throw new Error("No locked voice for this character yet — lock one on their character card: The Art Room → Characters tab → the Voice button.");
   if(!t) return { audioUrl:"", durationMs:0 };
   const settings = { ...VG_DEFAULTS, ...(opts.settings||{}) };
   const modelId = opts.modelId || VG_TTS_MODEL;
@@ -160,9 +177,12 @@ async function elTranscribe(audioB64, mime){
 window.elInterviewVoiceId=elInterviewVoiceId; window.elSpeak=elSpeak; window.elTranscribe=elTranscribe;
 
 // ---- Voice Design: previews to audition before locking ----------------------
+// The proxy defaults to the v3 design model (eleven_ttv_v3) for better accent and
+// character adherence; guidanceScale/loudness/quality/seed pass through when given.
 async function elDesignVoice(description, opts){
   opts=opts||{};
-  const d = await vgProxy("design", { description:String(description||""), text:opts.text, modelId:opts.modelId });
+  const d = await vgProxy("design", { description:String(description||""), text:opts.text, modelId:opts.modelId,
+    guidanceScale:opts.guidanceScale, loudness:opts.loudness, quality:opts.quality, seed:opts.seed });
   return (d.previews||[]).map(p=>({
     generatedVoiceId: p.generatedVoiceId,
     audioUrl: p.audioB64 ? ("data:"+(p.mime||"audio/mpeg")+";base64,"+p.audioB64) : "",

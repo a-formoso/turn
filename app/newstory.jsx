@@ -207,7 +207,7 @@ function NSInterview({ formatLabel, onComplete, onBack }){
       React.createElement(Icon.alert,{s:13}),
       React.createElement("span",null,
         React.createElement("b",null,"Voice answers need Chrome or Edge."),
-        " In this browser, just type your replies below — it's the same conversation. Open TURN in Chrome to talk it through out loud.")),
+        " In this browser, just type your replies below — it's the same conversation. Open Cinema Machine in Chrome to talk it through out loud.")),
 
     React.createElement("div",{className:"ns-talk-thread",ref:scrollRef},
       chat.map((m,i)=>React.createElement("div",{key:i,className:"ns-talk-msg "+m.role},
@@ -235,8 +235,17 @@ function NSInterview({ formatLabel, onComplete, onBack }){
 }
 
 function NewStoryIntake({ onClose, onLaunch, aiOn }){
+  // the writing model developing THIS story — synced with the global drafting picker,
+  // so loglines, research, synopsis and the spine build all run on the picked engine
+  const [mid, setMid] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId() : "");
+  const pickModel = (id)=>{ setMid(id); if(typeof window.setWritingModelId==="function") window.setWritingModelId(id); };
   const [format, setFormat] = React.useState("film");   // Step 0 — what are we making?
   const [framework, setFramework] = React.useState("threeact");   // Step 0 — how is it told?
+  // did the writer ACTIVELY pick these, or sail past the defaults? An explicit pick is
+  // never overridden; untouched knobs get the AI's recommended shape at develop time.
+  const [formatTouched, setFormatTouched] = React.useState(false);
+  const [frameworkTouched, setFrameworkTouched] = React.useState(false);
+  const [autoShape, setAutoShape] = React.useState(null);   // {formatLabel?, frameworkLabel?, why} — shown on the logline step
   const [seed, setSeed] = React.useState("logline");
   const [text, setText] = React.useState("");
   const [step, setStep] = React.useState("format");  // format | seed | interview | loglines | synopsis
@@ -262,7 +271,26 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
     setErr(""); setLoading(true);
     try{
       const outs = (typeof aiSeedToLoglines==="function") ? await aiSeedToLoglines(seed, text) : null;
-      if(outs && outs.length){ setCandidates(outs); setChosen(outs[0]); setStep("loglines"); }
+      if(outs && outs.length){
+        // the writer's own LOGLINE seed is candidate #1, verbatim and pre-selected \u2014
+        // the sharpened variants are optional, never the default (their words win)
+        const mine = seed==="logline" ? text.trim() : "";
+        const norm = (s)=>String(s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+        const cands = mine ? [mine, ...outs.filter(o=>norm(o)!==norm(mine))] : outs.slice();
+        setCandidates(cands); setChosen(cands[0]);
+        // AUTO-SHAPE: apply the recommended format/framework to any knob the writer
+        // didn't actively pick \u2014 an explicit Step-1 choice always wins
+        const sh = outs.shape;
+        if(sh){
+          const applied = {};
+          if(sh.format && !formatTouched && sh.format!==format){ setFormat(sh.format);
+            applied.formatLabel = (((window.FORMATS||[]).find(f=>f.id===sh.format))||{}).label || sh.format; }
+          if(sh.framework && !frameworkTouched && sh.framework!==framework){ setFramework(sh.framework);
+            applied.frameworkLabel = (((window.FRAMEWORKS||[]).find(f=>f.id===sh.framework))||{}).label || sh.framework; }
+          setAutoShape((applied.formatLabel || applied.frameworkLabel) ? { ...applied, why: sh.why||"" } : null);
+        } else setAutoShape(null);
+        setStep("loglines");
+      }
       else setErr("Couldn\u2019t shape that into a logline \u2014 try adding a detail or two.");
     }catch(e){ setErr(String((e&&e.message)||"Something went wrong. Try again.")); }
     setLoading(false);
@@ -321,8 +349,11 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
               :step==="interview"?"Talk it through \u00b7 I\u2019ll listen and shape loglines"
               :step==="loglines"?"Pick the logline to build from"
               :"Research \u2192 synopsis \u00b7 review before the spine builds"))),
-        React.createElement("span",{className:"ns-model-badge",title:"Story building runs on Claude"},
-          React.createElement(Icon.sparkles,{s:11}),"Claude 4.8"),
+        React.createElement("label",{className:"ns-model-badge",title:"The model that develops this story — loglines, research, synopsis and the spine build"},
+          React.createElement(Icon.sparkles,{s:11}),
+          React.createElement("select",{className:"ns-model-sel",value:mid,disabled:loading,
+            onChange:(e)=>pickModel(e.target.value)},
+            (window.WRITING_MODELS||[]).map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label)))),
         React.createElement("button",{className:"ag-x",onClick:onClose},React.createElement(Icon.x,{s:17}))),
 
       // progress stepper — which of the four intake screens we're on
@@ -343,7 +374,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
             React.createElement("div",{className:"ns-formats"},
               (window.FORMATS||[]).map(f=>
                 React.createElement("button",{key:f.id,className:"ns-format "+(format===f.id?"on":""),
-                  onClick:()=>setFormat(f.id)},
+                  onClick:()=>{ setFormat(f.id); setFormatTouched(true); }},
                   React.createElement(Icon[f.icon]||Icon.film,{s:16}),
                   React.createElement("span",{className:"ns-format-name"},f.label),
                   React.createElement("span",{className:"ns-format-blurb"},f.blurb)))),
@@ -351,7 +382,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
             React.createElement("div",{className:"ns-formats fw"},
               (window.FRAMEWORKS||[]).map(f=>
                 React.createElement("button",{key:f.id,className:"ns-format "+(framework===f.id?"on":""),
-                  onClick:()=>setFramework(f.id)},
+                  onClick:()=>{ setFramework(f.id); setFrameworkTouched(true); }},
                   React.createElement(Icon[f.icon]||Icon.graph,{s:16}),
                   React.createElement("span",{className:"ns-format-name"},f.label),
                   React.createElement("span",{className:"ns-format-blurb"},f.blurb)))),
@@ -397,13 +428,25 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
 
         : step==="loglines"
         ? React.createElement("div",{className:"ns-body"},
+            // the AI picked the story's SHAPE for any knob the writer left on defaults \u2014
+            // say so, say why, and offer the way back to change it
+            autoShape && React.createElement("div",{className:"ns-autoshape"},
+              React.createElement(Icon.sparkles,{s:12}),
+              React.createElement("span",null,
+                "Shaped for this story: ",
+                React.createElement("b",null,[autoShape.formatLabel, autoShape.frameworkLabel].filter(Boolean).join(" \u00b7 ")),
+                autoShape.why ? (" \u2014 "+autoShape.why) : ""),
+              React.createElement("button",{className:"ns-btn link",onClick:()=>setStep("format"),
+                title:"Back to the Format step \u2014 an explicit pick there always wins"},"Change")),
             React.createElement("div",{className:"ns-seclab"},"Choose a logline \u2014 edit it freely"),
             React.createElement("div",{className:"ns-cands"},
               candidates.map((c,i)=>
                 React.createElement("button",{key:i,className:"ns-cand "+(chosen===c?"on":""),
                   onClick:()=>setChosen(c)},
                   React.createElement("span",{className:"ns-cand-dot"}),
-                  React.createElement("span",{className:"ns-cand-tx"},c)))),
+                  React.createElement("span",{className:"ns-cand-tx"},c),
+                  (i===0 && seed==="logline" && c===text.trim()) &&
+                    React.createElement("span",{className:"ns-cand-mine"},"yours \u2014 untouched")))),
             React.createElement("div",{className:"ns-field"},
               React.createElement("div",{className:"ns-input-lab"},"Final logline"),
               React.createElement("textarea",{className:"ns-input",value:chosen,

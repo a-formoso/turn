@@ -10,10 +10,14 @@
 
    Exports: CameoModal (capture) + CameoManager (review/revoke across cast). */
 
+/* The preview is MIRRORED (like a mirror), so "your left" always reads as the LEFT
+   side of the frame \u2014 every direction cue states both to kill the ambiguity. */
 const CAMEO_ANGLES = [
-  { key:"front", label:"Front",   hint:"Look straight at the camera",   req:true  },
-  { key:"left",  label:"\u00be Left",  hint:"Turn about 30\u00b0 to your left",  req:false },
-  { key:"right", label:"\u00be Right", hint:"Turn about 30\u00b0 to your right", req:false },
+  { key:"front", label:"Front",   hint:"Look straight at the camera", say:"Look straight at the camera.", req:true  },
+  { key:"left",  label:"\u00be Left",  hint:"Turn toward your LEFT shoulder \u2014 face swings to the LEFT side of the frame",
+    say:"Turn toward your left shoulder \u2014 your face should swing to the left side of the frame.", req:false },
+  { key:"right", label:"\u00be Right", hint:"Turn toward your RIGHT shoulder \u2014 face swings to the RIGHT side of the frame",
+    say:"Turn toward your right shoulder \u2014 your face should swing to the right side of the frame.", req:false },
 ];
 
 /* shared: square centre-crop a video frame or image to <=1024 jpeg data URL */
@@ -113,7 +117,28 @@ function CameoModal({ character, onClose, onSaved }){
 
   /* auto-capture engine state */
   const [auto, setAuto] = React.useState(true);
-  const [det, setDet] = React.useState({ face:false, bright:true, still:false, prog:0, size:null, pose:null });
+  const [det, setDet] = React.useState({ face:false, bright:true, still:false, prog:0, size:null, pose:null, same:null, secs:null });
+
+  /* ── spoken feedback (Web Speech, local, no API) — the user is posing, not reading:
+     key moments are announced aloud: shot-is-good ("hold still"), each capture + the
+     next pose to strike, the same-pose warning, and all-angles-done. Toggleable. ── */
+  const [voiceOn, setVoiceOn] = React.useState(()=>{ try{ return localStorage.getItem("turn_cameo_voice")!=="0"; }catch(e){ return true; } });
+  const voiceOnRef = React.useRef(voiceOn); voiceOnRef.current = voiceOn;
+  const toggleVoice = ()=>setVoiceOn(v=>{ const n=!v; try{ localStorage.setItem("turn_cameo_voice", n?"1":"0"); }catch(e){} if(!n){ try{ window.speechSynthesis&&window.speechSynthesis.cancel(); }catch(e){} } return n; });
+  const lastSpeakRef = React.useRef({ msg:"", at:0 });
+  const speak = React.useCallback((msg, force)=>{
+    try{
+      if(!voiceOnRef.current || !window.speechSynthesis || !msg) return;
+      const now = Date.now(), last = lastSpeakRef.current;
+      if(!force && (msg===last.msg || now-last.at < 2200)) return;   // no chatter
+      lastSpeakRef.current = { msg, at:now };
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(msg);
+      u.rate = 1.05; u.volume = 0.9;
+      window.speechSynthesis.speak(u);
+    }catch(e){}
+  },[]);
+  React.useEffect(()=>()=>{ try{ window.speechSynthesis&&window.speechSynthesis.cancel(); }catch(e){} },[]);
   const { guides, loading:guidesLoading } = useCameoGuides(cameoInferGender(character));
   const [flash, setFlash] = React.useState(false);
   const activeIdxRef = React.useRef(activeIdx); activeIdxRef.current = activeIdx;
@@ -122,6 +147,8 @@ function CameoModal({ character, onClose, onSaved }){
   const analyRef = React.useRef(null);
   const faceAnalyRef = React.useRef(null);    // face-box-only sample canvas
   const prevLumaRef = React.useRef(null);
+  const sigRef = React.useRef({});            // key -> 64px luma signature at capture time —
+                                              // blocks auto-capturing the SAME pose into two angles
   const steadyRef = React.useRef(0);
   const busyRef = React.useRef(false);
   const faceDetRef = React.useRef(undefined);   // FaceDetector instance | null
@@ -149,8 +176,16 @@ function CameoModal({ character, onClose, onSaved }){
     const v = videoRef.current; if(!v || !v.videoWidth || busyRef.current) return;
     const { url, out } = cameoCropToDataUrl(v, v.videoWidth, v.videoHeight);
     const next = { ...shotsRef.current, [key]:url };
+    // remember what this angle LOOKED like (latest 64px luma sample) so another angle
+    // can't auto-capture the same pose
+    if(prevLumaRef.current) sigRef.current[key] = Float32Array.from(prevLumaRef.current);
     busyRef.current = true; steadyRef.current = 0; prevLumaRef.current = null;
     setFlash(true); setShots(next); setDims({w:out,h:out});
+    // announce the capture + the next pose to strike (or that the set is complete)
+    const nextAngle = CAMEO_ANGLES.find(a=>!next[a.key]);
+    speak(nextAngle
+      ? ("Captured. Next: "+nextAngle.label.replace("¾","three-quarter")+". "+(nextAngle.say||""))
+      : "Captured. All angles done — tick the consent box and lock the likeness.", true);
     setTimeout(()=>{ setFlash(false); busyRef.current = false; setActiveIdx(nextEmpty(next)); }, 280);
   };
   const captureNow = ()=> doCapture(CAMEO_ANGLES[activeIdxRef.current].key);
@@ -278,11 +313,29 @@ function CameoModal({ character, onClose, onSaved }){
       // the ¾ angles use a LONGER steady hold (~1.8s) so there's time to turn into the
       // pose the on-screen cue asks for; manual "Capture now" is always available too.
       const poseBlocks = (key==="front") && poseState==="front";
+      /* SAME-POSE GUARD (hard block) — a ¾ angle must actually LOOK different from the
+         other captured angles. Compares the live 64px luma against each captured angle's
+         signature: if the candidate is nearly identical to the OPPOSITE ¾ (or to Front),
+         the user hasn't turned — block auto-capture and say which way to turn. This is
+         what stops one head turn being captured as BOTH ¾ Left and ¾ Right. */
+      let sameAs = null;
+      if(key!=="front"){
+        const dist = (k)=>{ const s=sigRef.current[k];
+          if(!s || s.length!==luma.length) return Infinity;
+          let dd=0; for(let p=0;p<luma.length;p++) dd+=Math.abs(luma[p]-s[p]);
+          return dd/luma.length; };
+        const opp = key==="left" ? "right" : "left";
+        if(dist(opp) < 11) sameAs = opp;
+        else if(dist("front") < 9) sameAs = "front";
+      }
       const need = (key==="front") ? NEED : NEED*2;
-      const ready = bright && still && face && !sizeState_ && !poseBlocks;
+      const ready = bright && still && face && !sizeState_ && !poseBlocks && !sameAs;
       steadyRef.current = ready ? steadyRef.current+1 : 0;
       const prog = Math.min(1, steadyRef.current/need);
-      setDet({ face, bright, still, prog, size:sizeState, pose:poseState });
+      // countdown to the shutter — shown in the cue so the user KNOWS the shot is good
+      // and holds the pose instead of drifting out of it
+      const secs = ready ? Math.max(1, Math.ceil(((need - steadyRef.current) * SAMPLE) / 1000)) : null;
+      setDet({ face, bright, still, prog, size:sizeState, pose:poseState, same:sameAs, secs });
       if(steadyRef.current>=need) doCapture(key);
     };
     raf = requestAnimationFrame(loop);
@@ -305,6 +358,7 @@ function CameoModal({ character, onClose, onSaved }){
     e.target.value = "";
   };
   const clearShot = (key)=>{ const next={...shots}; delete next[key]; setShots(next);
+    delete sigRef.current[key];
     const idx=CAMEO_ANGLES.findIndex(a=>a.key===key); if(idx>=0) setActiveIdx(idx); };
 
   const save = async ()=>{
@@ -333,12 +387,20 @@ function CameoModal({ character, onClose, onSaved }){
   else if(det.size==="far")       cue = { k:"wait", t:"Move a little closer" };
   else if(det.size==="close")     cue = { k:"wait", t:"Move back a little" };
   else if(det.size==="offcenter") cue = { k:"wait", t:"Center your face in the ring" };
+  else if(det.same==="front")     cue = { k:"wait", t:"You're still facing forward \u2014 turn toward your "+(activeAngle.key==="left"?"LEFT":"RIGHT")+" shoulder ("+(activeAngle.key==="left"?"left":"right")+" side of the frame)" };
+  else if(det.same)               cue = { k:"wait", t:"Same pose as your \u00be "+(det.same==="left"?"Left":"Right")+" \u2014 turn toward the "+(activeAngle.key==="left"?"LEFT":"RIGHT")+" side of the frame" };
   else if(det.pose==="front")     cue = { k:"wait", t:"Face the camera straight on" };
-  else if(det.pose==="left")      cue = { k:"wait", t:"Turn your head slightly to your left" };
-  else if(det.pose==="right")     cue = { k:"wait", t:"Turn your head slightly to your right" };
+  else if(det.pose==="left")      cue = { k:"wait", t:"Turn toward your LEFT shoulder \u2014 face to the LEFT side of the frame" };
+  else if(det.pose==="right")     cue = { k:"wait", t:"Turn toward your RIGHT shoulder \u2014 face to the RIGHT side of the frame" };
   else if(!det.bright) cue = { k:"wait", t:"Find more even light" };
   else if(!det.still)  cue = { k:"wait", t:"Hold still\u2026" };
-  else cue = { k:"go", t:"Hold steady \u2014 capturing" };
+  else cue = { k:"go", t:"Shot looks good \u2014 hold still\u2026 capturing"+(det.secs?(" in "+det.secs+"s"):"") };
+  /* voice the two moments that matter while posing: "shot is good, hold still" and
+     the same-pose correction (captures announce themselves from doCapture) */
+  const spokenCue = cue.k==="go" ? "Shot looks good. Hold still."
+    : det.same ? ("That's the same pose. Turn toward the "+(activeAngle.key==="left"?"left":"right")+" side of the frame.")
+    : null;
+  React.useEffect(()=>{ if(liveOk && !targetFilled && spokenCue) speak(spokenCue); }, [spokenCue, liveOk, targetFilled, speak]);
 
   return React.createElement("div",{className:"cameo-overlay",onClick:onClose},
     React.createElement("div",{className:"cameo-modal",onClick:stop},
@@ -371,8 +433,13 @@ function CameoModal({ character, onClose, onSaved }){
           React.createElement(Icon.warn,{s:26}),
           React.createElement("div",{className:"cameo-msg-t"},"Camera access blocked"),
           React.createElement("div",{className:"cameo-msg-s"},"Allow camera in your browser's address bar, or upload photos instead."),
-          React.createElement("button",{className:"cameo-btn ghost",onClick:()=>fileRef.current&&fileRef.current.click()},
-            React.createElement(Icon.image,{s:14}),"Upload ",activeAngle.label)),
+          React.createElement("div",{className:"cameo-msg-acts"},
+            // retry WITHOUT reopening the modal — after the user flips the permission,
+            // this re-requests the stream and drops straight into live capture
+            React.createElement("button",{className:"cameo-btn ghost",onClick:startCam},
+              React.createElement(Icon.undo,{s:14}),"Try camera again"),
+            React.createElement("button",{className:"cameo-btn ghost",onClick:()=>fileRef.current&&fileRef.current.click()},
+              React.createElement(Icon.image,{s:14}),"Upload ",activeAngle.label))),
         phase==="nocam" && React.createElement("div",{className:"cameo-msg"},
           React.createElement(Icon.image,{s:26}),
           React.createElement("div",{className:"cameo-msg-t"},"No camera available"),
@@ -424,6 +491,10 @@ function CameoModal({ character, onClose, onSaved }){
           onClick:()=>setAuto(a=>!a),
           title:auto?"Auto-capture on \u2014 snaps when the shot looks good":"Auto-capture off \u2014 capture manually"},
           React.createElement(Icon.bolt,{s:13}),"Auto"),
+        liveOk && React.createElement("button",{className:"cameo-autopill"+(voiceOn?" on":""),
+          onClick:toggleVoice,
+          title:voiceOn?"Spoken directions on \u2014 announces when the shot is good, each capture, and the next pose":"Spoken directions off"},
+          React.createElement(Icon.mic,{s:13}),"Voice"),
         React.createElement("button",{className:"cameo-btn primary",onClick:save,disabled:!hasFront||!consent||saving,
           title:!hasFront?"Capture the Front angle first":(!consent?"Tick the consent box":"")},
           saving ? React.createElement(React.Fragment,null,React.createElement("span",{className:"ns-spin dark"}),"Saving\u2026")

@@ -195,6 +195,90 @@ function ThemeToggle({ theme, onTheme }){
 }
 window.ThemeToggle = ThemeToggle;
 
+/* User API keys — stored locally on this device. The server proxy will use these
+   per-request when present, falling back to its environment secrets otherwise. */
+const TURN_API_KEY_STORE = "turn.providerApiKeys.v1";
+const TURN_API_PROVIDERS = [
+  { id:"anthropic", label:"Anthropic", hint:"Writing, agents and MUSE when that text provider is selected", placeholder:"sk-ant-..." },
+  { id:"openai", label:"OpenAI", hint:"GPT Image and OpenAI text models through the server proxy", placeholder:"sk-..." },
+  { id:"google", label:"Google AI Studio", hint:"Nano Banana / Gemini image models and Google text models", placeholder:"AIza..." },
+  { id:"elevenlabs", label:"ElevenLabs", hint:"Voice design, text-to-speech and speech-to-text through the server proxy", placeholder:"sk_..." },
+  { id:"fal", label:"fal.ai", hint:"Stage video generation through the server proxy", placeholder:"fal..." },
+];
+function turnSanitizeApiKey(k){
+  return String(k||"")
+    .replace(/[\s\u00a0\u200b-\u200d\ufeff]/g, "")
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+    .trim();
+}
+function turnReadApiKeys(){
+  try{ const j=JSON.parse(localStorage.getItem(TURN_API_KEY_STORE)||"{}"); return (j&&typeof j==="object")?j:{}; }catch(e){ return {}; }
+}
+function turnWriteApiKeys(keys){
+  try{
+    const clean={};
+    Object.entries(keys||{}).forEach(([id,k])=>{ k=turnSanitizeApiKey(k); if(k) clean[id]=k; });
+    Object.keys(clean).length ? localStorage.setItem(TURN_API_KEY_STORE, JSON.stringify(clean)) : localStorage.removeItem(TURN_API_KEY_STORE);
+    window.dispatchEvent(new CustomEvent("turn-api-keys-changed"));
+  }catch(e){}
+}
+function turnGetApiKey(id){ return turnSanitizeApiKey(turnReadApiKeys()[id]||""); }
+function turnSetApiKey(id, key){ const keys=turnReadApiKeys(); key=turnSanitizeApiKey(key); if(key) keys[id]=key; else delete keys[id]; turnWriteApiKeys(keys); }
+function turnHasApiKey(id){ return !!turnGetApiKey(id); }
+function turnApiKeysForProxy(ids){
+  const keys = turnReadApiKeys(), out = {};
+  (ids||[]).forEach(id=>{ const k=turnSanitizeApiKey(keys[id]||""); if(k) out[id]=k; });
+  return Object.keys(out).length ? out : undefined;
+}
+window.turnApiProviders = TURN_API_PROVIDERS;
+window.turnSanitizeApiKey = window.turnSanitizeApiKey || turnSanitizeApiKey;
+window.turnReadApiKeys = turnReadApiKeys;
+window.turnGetApiKey = turnGetApiKey;
+window.turnSetApiKey = turnSetApiKey;
+window.turnHasApiKey = turnHasApiKey;
+window.turnApiKeysForProxy = turnApiKeysForProxy;
+
+function ApiKeysModal({ onClose }){
+  const [draft, setDraft] = React.useState({});
+  const [tick, setTick] = React.useState(0);
+  const saved = turnReadApiKeys();
+  React.useEffect(()=>{ const h=(e)=>{ if(e.key==="Escape") onClose(); }; document.addEventListener("keydown",h); return ()=>document.removeEventListener("keydown",h); },[]);
+  const setVal = (id,v)=>setDraft(d=>({ ...d, [id]:v }));
+  const save = (p)=>{ turnSetApiKey(p.id, draft[p.id]||""); setDraft(d=>({ ...d, [p.id]:"" })); setTick(t=>t+1); if(window.appToast) window.appToast(p.label+" API key saved locally.","success"); };
+  const remove = async (p)=>{
+    const ok = !window.appConfirm || await window.appConfirm({ title:"Remove API key?", body:"Removes the "+p.label+" key from this browser. Server-side keys, if configured, will still work." });
+    if(!ok) return;
+    turnSetApiKey(p.id,""); setDraft(d=>({ ...d, [p.id]:"" })); setTick(t=>t+1);
+  };
+  return React.createElement("div",{className:"bible-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
+    React.createElement("div",{className:"bible-modal api-keys-mgr",key:tick},
+      React.createElement("div",{className:"bible-head"},
+        React.createElement("div",{className:"bible-title"},
+          React.createElement((Icon.key||Icon.lock||Icon.layers),{s:15}),"API keys",
+          React.createElement("span",{className:"bible-sub"},"stored locally on this device")),
+        React.createElement("button",{className:"bible-x",onClick:onClose,title:"Close"},React.createElement(Icon.x,{s:16}))),
+      React.createElement("div",{className:"api-keys-body"},
+        React.createElement("div",{className:"api-keys-note"},
+          "Keys are saved in this browser only. When a generation uses your server proxy, Cinema Machine sends the relevant key with that request; if no user key is saved, the proxy falls back to its server secret. They are not synced across devices."),
+        TURN_API_PROVIDERS.map(p=>{
+          const has = !!saved[p.id];
+          const val = draft[p.id] || "";
+          return React.createElement("div",{className:"api-key-row",key:p.id},
+            React.createElement("div",{className:"api-key-meta"},
+              React.createElement("div",{className:"api-key-title"},p.label,
+                React.createElement("span",{className:"api-key-status "+(has?"on":"")},has?"saved":"not set")),
+              React.createElement("div",{className:"api-key-hint"},p.hint)),
+            React.createElement("div",{className:"api-key-edit"},
+              React.createElement("input",{className:"api-key-input",type:"password",autoComplete:"off",spellCheck:false,
+                value:val,onChange:e=>setVal(p.id,e.target.value),
+                placeholder:has?"Paste a new key to replace the saved one":p.placeholder}),
+              React.createElement("button",{className:"styles-mini",disabled:!turnSanitizeApiKey(val),onClick:()=>save(p)},"Save"),
+              React.createElement("button",{className:"styles-mini danger",disabled:!has,onClick:()=>remove(p),title:"Remove saved key"},
+                React.createElement(Icon.trash||Icon.x,{s:13}))));
+        }))));
+}
+window.ApiKeysModal = ApiKeysModal;
+
 /* ADMIN: the Film Bible viewer — the whole continuity JSON the studio reads from,
    shown read-only with a Copy button. getBible() builds it fresh on open. */
 function FilmBibleModal({ getBible, onClose }){
@@ -215,6 +299,96 @@ function FilmBibleModal({ getBible, onClose }){
       React.createElement("pre",{className:"bible-pre"}, json)));
 }
 window.FilmBibleModal = FilmBibleModal;
+
+/* Manage render styles. Every signed-in user manages their OWN personal locked styles
+   (private, capped at 10 — delete to make room). ADMIN additionally sees and manages the
+   GLOBAL platform list everyone sees: bundled presets and admin-published styles in one
+   curated order. Admin can publish, remove/hide, restore and reorder. The combined global
+   pool is capped at 40. Two tiers — see app/artroom.jsx engine + supabase/styles.sql. */
+function RenderStylesModal({ onClose }){
+  if(typeof window.useRenderStyleVersion==="function") window.useRenderStyleVersion();   // re-render on change
+  const isAdmin = !!(window.turnIsStyleAdmin && window.turnIsStyleAdmin());
+  const personalCap = window.turnPersonalStyleCap || 10;
+  const globalCap = window.turnGlobalStyleCap || 40;
+  const [busy, setBusy] = React.useState("");
+  const lists = (typeof window.turnListStyles==="function") ? window.turnListStyles() : { user:[], global:[] };
+  const userCount = (lists.user||[]).length, atCap = userCount >= personalCap;
+  const allGlobalCount = (typeof window.turnAllGlobalStyleCount==="function") ? window.turnAllGlobalStyleCount() : (lists.global||[]).length;
+  const globalFull = allGlobalCount >= globalCap;
+  const globalList = (lists.globalVisible || []).filter(Boolean);
+  const hiddenGlobalList = (lists.globalHidden || []).filter(Boolean);
+  const globalRenders = new Set((globalList||[]).map(g=>g.render?JSON.stringify(g.render):"").filter(Boolean));
+  React.useEffect(()=>{ const h=(e)=>{ if(e.key==="Escape") onClose(); }; document.addEventListener("keydown",h); return ()=>document.removeEventListener("keydown",h); },[]);
+  const publish = async (s)=>{ setBusy("p:"+s.key);
+    try{ const k = await window.turnPublishGlobalStyle(s.label, s.render);
+      if(!k && window.appToast) window.appToast("Couldn't publish — admin only, or the global render-style cap ("+globalCap+") has been reached."); }
+    finally{ setBusy(""); } };
+  const delGlobal = async (s)=>{
+    if(window.appConfirm && !(await window.appConfirm({ title:"Delete global style?", body:"Every signed-in user loses \""+s.label+"\"." }))) return;
+    setBusy("g:"+s.key); try{ await window.turnDeleteGlobalStyle(s.key); } finally{ setBusy(""); } };
+  const delUser = async (s)=>{
+    if(window.appConfirm && !(await window.appConfirm({ title:"Delete your saved style?", body:"Removes \""+s.label+"\" from your saved styles." }))) return;
+    setBusy("u:"+s.key); try{ await window.turnUnlockRenderStyle(s.key); } finally{ setBusy(""); } };
+  const moveGlobal = async (s,dir)=>{ setBusy("m:"+s.key);
+    try{ if(window.turnMoveGlobalStyle) await window.turnMoveGlobalStyle(s.key, dir); }
+    finally{ setBusy(""); } };
+  const restoreGlobal = async (s)=>{ setBusy("r:"+s.key);
+    try{ if(window.turnRestoreGlobalStyle) await window.turnRestoreGlobalStyle(s.key); }
+    finally{ setBusy(""); } };
+  // unified platform row — built-in presets and admin-published globals are curated together
+  const globalRow = (s,idx)=> React.createElement("div",{className:"styles-row"+(s.builtIn?" styles-row-builtin":""),key:s.key},
+    React.createElement("span",{className:"styles-row-name"},s.label),
+    React.createElement("span",{className:"styles-row-badge"+(!s.builtIn?" styles-row-badge-curated":"")},s.builtIn?"preset":"global"),
+    React.createElement("div",{className:"styles-row-acts"},
+      React.createElement("button",{className:"styles-mini styles-mini-square",disabled:!!busy||idx<=0,title:"Move up",
+        onClick:()=>moveGlobal(s,-1)},"↑"),
+      React.createElement("button",{className:"styles-mini styles-mini-square",disabled:!!busy||idx>=globalList.length-1,title:"Move down",
+        onClick:()=>moveGlobal(s,1)},"↓"),
+      React.createElement("button",{className:"styles-mini danger",disabled:!!busy,title:s.builtIn?"Hide this preset for all signed-in users":"Delete this global style for all signed-in users",
+        onClick:()=>delGlobal(s)}, React.createElement(Icon.trash||Icon.x,{s:13}))));
+  const hiddenRow = (s)=> React.createElement("div",{className:"styles-row styles-row-hidden",key:s.key},
+    React.createElement("span",{className:"styles-row-name"},s.label),
+    React.createElement("span",{className:"styles-row-badge"},"hidden preset"),
+    React.createElement("div",{className:"styles-row-acts"},
+      React.createElement("button",{className:"styles-mini",disabled:!!busy||globalFull,title:globalFull?"Global cap reached — remove another style before restoring":"Restore this preset for all users",
+        onClick:()=>restoreGlobal(s)},"Restore")));
+  // personal style row — every signed-in user; admin additionally gets “Publish to global” button
+  const userRow = (s)=> React.createElement("div",{className:"styles-row",key:s.key},
+    React.createElement("span",{className:"styles-row-name"},s.label),
+    React.createElement("div",{className:"styles-row-acts"},
+      isAdmin && React.createElement("button",{className:"styles-mini",disabled:!!busy||globalRenders.has(JSON.stringify(s.render))||globalFull,
+        title:globalRenders.has(JSON.stringify(s.render))?"Already a global style":(globalFull?("Global render-style cap ("+globalCap+") reached — delete a global style first"):"Make this style a global preset everyone sees"),
+        onClick:()=>publish(s)}, globalRenders.has(JSON.stringify(s.render))?"Global ✓":"→ Make global"),
+      React.createElement("button",{className:"styles-mini danger",disabled:!!busy,title:"Delete this saved style",
+        onClick:()=>delUser(s)}, React.createElement(Icon.trash||Icon.x,{s:13}))));
+  return React.createElement("div",{className:"bible-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
+    React.createElement("div",{className:"bible-modal styles-mgr"},
+      React.createElement("div",{className:"bible-head"},
+        React.createElement("div",{className:"bible-title"},
+          React.createElement((Icon.sparkles||Icon.layers),{s:15}), "Render styles",
+          React.createElement("span",{className:"bible-sub"}, isAdmin?"global + your personal styles":"your personal saved styles")),
+        React.createElement("button",{className:"bible-x",onClick:onClose,title:"Close"},React.createElement(Icon.x,{s:16}))),
+      React.createElement("div",{className:"styles-body"},
+        // GLOBAL tier — visible to admin only; shows built-ins + curated as one unified pool
+        isAdmin && React.createElement("div",{className:"styles-sec-h"},"Global render styles — everyone sees these",
+          React.createElement("span",{className:"styles-sec-sub"+(globalFull?" warn":"")},
+            allGlobalCount+" / "+globalCap+(globalFull?" · cap reached — delete a global style to add another":" · shared platform presets"))),
+        isAdmin && React.createElement("div",{className:"styles-global-list"},
+          (globalList||[]).map(globalRow),
+          !(globalList||[]).length && React.createElement("div",{className:"styles-empty styles-empty-sm"},
+            "No global render styles yet — promote one from your personal styles below or restore a hidden preset.")),
+        isAdmin && !!(hiddenGlobalList||[]).length && React.createElement("div",{className:"styles-sec-h styles-sec-h-sub"},"Hidden presets",
+          React.createElement("span",{className:"styles-sec-sub"},"restore any removed built-in")),
+        isAdmin && !!(hiddenGlobalList||[]).length && React.createElement("div",{className:"styles-global-list"},
+          (hiddenGlobalList||[]).map(hiddenRow)),
+        // PERSONAL tier — everyone signed in; capped at 10
+        React.createElement("div",{className:"styles-sec-h"},isAdmin?"Your personal styles":"Your saved styles",
+          React.createElement("span",{className:"styles-sec-sub"+(atCap?" warn":"")}, userCount+" / "+personalCap+(atCap?" · full — delete one to save more":" · private to you, reusable everywhere"))),
+        (lists.user||[]).length
+          ? (lists.user||[]).map(userRow)
+          : React.createElement("div",{className:"styles-empty"},"None yet — pick Surprise me ✨ on any card and click 🔒 Lock this style to save it here."))));
+}
+window.RenderStylesModal = RenderStylesModal;
 
 /* StoryBriefModal — shows the logline + synopsis (the composed brief) the story's spine,
    beats and cast were built from, so the user can review exactly what was generated and
@@ -244,20 +418,25 @@ function StoryBriefModal({ project, onClose }){
 }
 window.StoryBriefModal = StoryBriefModal;
 
-function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, theme, onTheme, authSlot, projectSlot, onHome }){
+function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, onManageStyles, theme, onTheme, authSlot, projectSlot, onHome }){
   const [bibleOpen, setBibleOpen] = React.useState(false);
   const [briefOpen, setBriefOpen] = React.useState(false);
+  const [stylesOpen, setStylesOpen] = React.useState(false);
+  const [apiKeysOpen, setApiKeysOpen] = React.useState(false);
+  React.useEffect(()=>{ const h=()=>setApiKeysOpen(true); window.addEventListener("turn-open-api-keys",h); return ()=>window.removeEventListener("turn-open-api-keys",h); },[]);
   return React.createElement("div",{className:"topbar"},
     bibleOpen && onViewBible && React.createElement(FilmBibleModal,{ getBible:onViewBible, onClose:()=>setBibleOpen(false) }),
     briefOpen && React.createElement(StoryBriefModal,{ project, onClose:()=>setBriefOpen(false) }),
+    stylesOpen && onManageStyles && React.createElement(RenderStylesModal,{ onClose:()=>setStylesOpen(false) }),
+    apiKeysOpen && React.createElement(ApiKeysModal,{ onClose:()=>setApiKeysOpen(false) }),
     React.createElement("div",{className:"tb-left"},
       onHome
         ? React.createElement("button",{className:"brand brand-btn",onClick:onHome,title:"Home — all your films"},
             React.createElement(BrandMark,null),
-            React.createElement("span",{className:"brand-name"},"T",React.createElement("b",null,"U"),"RN"))
+            React.createElement("span",{className:"brand-name"},"Cinema ",React.createElement("b",null,"Machine")))
         : React.createElement("div",{className:"brand"},
             React.createElement(BrandMark,null),
-            React.createElement("span",{className:"brand-name"},"T",React.createElement("b",null,"U"),"RN")),
+            React.createElement("span",{className:"brand-name"},"Cinema ",React.createElement("b",null,"Machine"))),
       React.createElement("div",{className:"topbar-divider"}),
       // the project title first, then the department (room) switcher to its right
       React.createElement("div",{className:"context-group"},
@@ -274,6 +453,13 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
       onViewBible && React.createElement("button",{className:"tb-btn",onClick:()=>setBibleOpen(true),
         title:"Film Bible — view the whole continuity JSON the studio reads from"},
         React.createElement(Icon.layers,{s:14}),"JSON"),
+      // Signed-in users manage their personal render styles; admin also manages global render styles.
+      onManageStyles && React.createElement("button",{className:"tb-btn",onClick:()=>setStylesOpen(true),
+        title:"Render styles — manage global render styles and your locked styles"},
+        React.createElement((Icon.sparkles||Icon.layers),{s:14}),"Styles"),
+      React.createElement("button",{className:"tb-btn",onClick:()=>setApiKeysOpen(true),
+        title:"API keys — add your own provider keys for image, text, voice and video generation"},
+        React.createElement((Icon.key||Icon.lock||Icon.layers),{s:14}),"API Keys"),
       React.createElement("button",{className:"tb-btn newstory",onClick:onNewStory,title:"Start a new story from an idea"},
         React.createElement(Icon.plus,{s:14}),"New Story"),
       // Export is a Writers' Room action (screenplay / story formats) — only there (not Art / Stage)

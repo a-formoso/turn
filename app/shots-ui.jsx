@@ -16,6 +16,35 @@ function GrammarSelect({ label, value, options, onChange }){
       options.map(o=>_el("option",{key:o.id,value:o.id,title:o.desc||""},o.label))));
 }
 
+function CameraSettingSelect({ label, value, options, onChange }){
+  return _el("label",{className:"shot-gsel"},
+    _el("span",{className:"shot-gsel-lab"},label),
+    _el("select",{className:"prop-select",value:value||"auto",onChange:e=>onChange(e.target.value)},
+      options.map(o=>_el("option",{key:o.id,value:o.id,title:o.desc||""},o.label))));
+}
+
+function AdvancedCameraSettings({ sh, onUpdate }){
+  const c = { camera:"auto", lensType:"auto", focalLength:"auto", aperture:"auto", shutter:"auto", iso:"auto", ...(sh.cameraSettings||{}) };
+  const patch = (key,val)=> onUpdate(sh.id,{ cameraSettings:{ ...c, [key]:val } });
+  const active = typeof shotHasCameraSettings==="function" && shotHasCameraSettings(sh);
+  const reset = ()=> onUpdate(sh.id,{ cameraSettings:{ camera:"auto", lensType:"auto", focalLength:"auto", aperture:"auto", shutter:"auto", iso:"auto" } });
+  return _el(CardFold,{label:"Advanced cinematography"+(active?" · custom camera":" · Auto"),defaultOpen:false},
+    _el("div",{className:"shot-camera-panel"},
+      _el("div",{className:"shot-camera-head"},
+        _el("div",{className:"shot-camera-note"},
+          _el(Icon.info,{s:12}),"Leave controls on Auto unless you want this shot to carry explicit camera language into the frame prompt."),
+        active && _el("button",{className:"shot-camera-reset",onClick:reset,title:"Reset all advanced camera settings to Auto"},"Reset to Auto")),
+      _el("div",{className:"shot-camera-grid"},
+        _el(CameraSettingSelect,{label:"Camera",value:c.camera,options:SHOT_CAMERA_BODIES,onChange:v=>patch("camera",v)}),
+        _el(CameraSettingSelect,{label:"Lens type",value:c.lensType,options:SHOT_LENS_TYPES,onChange:v=>patch("lensType",v)}),
+        _el(CameraSettingSelect,{label:"Focal length",value:c.focalLength,options:SHOT_FOCAL_LENGTHS,onChange:v=>patch("focalLength",v)}),
+        _el(CameraSettingSelect,{label:"Aperture",value:c.aperture,options:SHOT_APERTURES,onChange:v=>patch("aperture",v)}),
+        _el(CameraSettingSelect,{label:"Shutter",value:c.shutter,options:SHOT_SHUTTERS,onChange:v=>patch("shutter",v)}),
+        _el(CameraSettingSelect,{label:"ISO / grain",value:c.iso,options:SHOT_ISO_GRAIN,onChange:v=>patch("iso",v)})),
+      active && _el("div",{className:"shot-camera-preview"},
+        (typeof shotCameraSettingsClause==="function") ? shotCameraSettingsClause(sh) : "")));
+}
+
 /* a toggle chip row for choosing which cast / props are in frame */
 function FrameToggles({ label, items, selected, onToggle, emptyHint }){
   if(!items.length) return _el("div",{className:"shot-frame-empty"},emptyHint);
@@ -67,7 +96,7 @@ function ClipBar({ shots, onUpdate, clipMax }){
       title:"Clear the hand grouping and re-pack the clips automatically by duration"},"Auto-pack"));
 }
 
-function ShotCard({ sh, scene, ctx, characters, propsAvail, prevShot, isHead, isFirst, onToggleHead, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, onRegenDownstream, onStopChain, clipNo }){
+function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, isHead, isFirst, onToggleHead, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, onRegenDownstream, onStopChain, clipNo }){
   const loc = ctx.location;
   // who/what is in frame is DERIVED from the action text (single source of truth) — the
   // old manual tags are gone; this is what the prompt + references actually use.
@@ -75,7 +104,12 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, prevShot, isHead, is
   const inCastIds = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, _allChars) : (sh.subjects||[]);
   const subjects = inCastIds.map(id=>ctx.charById[id]).filter(Boolean);
   const inPropIds = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, ctx.charById, ctx.propById) : (sh.props||[]);
-  const inProps = inPropIds.map(id=>ctx.propById[id]).filter(Boolean);
+  // apply the SAME dressing filter the real attach path uses (collectShotRefs /
+  // buildShotPrompt) — set-dressing sheets only ride on tight shots or when the
+  // object leads the action; the plate delivers them in wides. Without this the
+  // thumbnail strip SHOWS sheets that never actually attach.
+  const inProps = inPropIds.map(id=>ctx.propById[id]).filter(Boolean)
+    .filter(p=> (typeof shotPropAttachable!=="function") || shotPropAttachable(p, sh));
   const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
   // the "Shot prompt" preview reflects what WILL generate: a non-head shot chains from the
   // previous frame (continuity_anchor present); the head renders fresh from the sheets.
@@ -110,10 +144,15 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, prevShot, isHead, is
     const inCast = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, _chars) : (sh.subjects||[]);
     const inPr   = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, ctx.charById, ctx.propById) : (sh.props||[]);
     const castSpec = inCast.map(id=>{ const c=ctx.charById[id]; return c?{ id, note:c.name+" character sheet" }:null; }).filter(Boolean);
-    const propSpec = inPr.map(id=>{ const p=ctx.propById[id]; return p?{ id, note:p.name+" prop sheet" }:null; }).filter(Boolean);
+    // dressing sheets attach only on tight shots / when the object is the action's
+    // subject (shotPropAttachable) — MUST mirror buildShotPrompt's filter exactly,
+    // or the prompt's image-map numbering mislabels the attached files
+    const propSpec = inPr.map(id=>{ const p=ctx.propById[id];
+      if(!p || (typeof shotPropAttachable==="function" && !shotPropAttachable(p, sh))) return null;
+      return { id, note:p.name+" prop sheet" }; }).filter(Boolean);
     const ordered = (locWeight==="ambient") ? [...castSpec, ...locSpec, ...propSpec] : [...locSpec, ...castSpec, ...propSpec];
     const out = [];
-    for(const s of ordered){ const u = await grab(s.id); if(u) out.push({ url:u, note:s.note }); }
+    for(const s of ordered){ const u = await grab(s.id); if(u) out.push({ url:u, note:s.note, refId:s.id }); }
     return out;
   };
 
@@ -204,11 +243,15 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, prevShot, isHead, is
 
   const beatLabel = "Beat "+(sh.beatN||"\u2014");
   const initials = (sizeOf(sh.size).label||"SH");
+  const waitingForShot = !!(batchActiveId && batchActiveId!==sh.id);
 
   return _el("div",{className:"sheet-card shot-card"+(batchActiveId===sh.id?" batch-on":""),"data-shot-card":sh.id},
     _el(SheetFrame,{ gen:genGuarded, slotId:"shot-"+sh.id, name:beatLabel, avatarColor:"linear-gradient(135deg,#7a6cae,#2a2440)",
       initials, drafted:true, drafting:false, onDraft:()=>{}, entity:sh, onView,
       slotPlaceholder:"Generate or drop a frame", noun:"frame", dropToImport:true, onStop:onStopChain,
+      generateDisabled:waitingForShot,
+      generateDisabledLabel:"Wait for current shot",
+      generateDisabledTitle:"Another shot is generating. Wait for it to finish before starting this frame.",
       menuExtra: [
         onRegenDownstream ? {
           label:"Regenerate downstream",
@@ -255,7 +298,15 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, prevShot, isHead, is
               ? "Approved — this frame is the locked seed the next shot builds on. Click to unlock."
               : "Approve this frame as the seed the next shot chains from.",
             onClick:()=>onUpdate(sh.id,{ locked: !sh.locked })},
-            _el(Icon.check,{s:11}), _el("span",null, sh.locked?"Approved":"Approve")))),
+            _el(Icon.check,{s:11}), _el("span",null, sh.locked?"Approved":"Approve")),
+          window.QaCheckButton && _el(window.QaCheckButton,{ gen, name:beatLabel, noun:"shot frame", className:"shot-lock-btn" }))),
+
+      // the SCRIPT BEAT this shot covers — straight from the scene's beat map, so the
+      // shot's source text is on the card (read-only; edit beats in the Writers' Room)
+      beatText && _el("div",{className:"shot-beat-script",
+        title:"The script beat this shot covers (drive — reaction), from this scene's beat map. Read-only here — edit beats in the Writers' Room inspector."},
+        _el("span",{className:"shot-beat-script-lab"},"Script beat"),
+        _el("span",{className:"shot-beat-script-body"},beatText)),
 
       // cinematographer grammar
       _el("div",{className:"shot-grammar-grid"},
@@ -264,6 +315,8 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, prevShot, isHead, is
         _el(GrammarSelect,{label:"Move",value:sh.move,options:SHOT_MOVES,onChange:v=>onUpdate(sh.id,{move:v})}),
         _el(GrammarSelect,{label:"Lens",value:sh.lens,options:SHOT_LENSES,onChange:v=>onUpdate(sh.id,{lens:v})})),
 
+      _el(AdvancedCameraSettings,{sh,onUpdate}),
+
       // the action — what we see in this frame
       _el(SheetField,{label:"Action \u2014 what we see in this frame",value:sh.action,multiline:true,
         placeholder:"One vivid present-tense beat of on-screen action\u2026",onCommit:v=>onUpdate(sh.id,{action:v})}),
@@ -271,7 +324,9 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, prevShot, isHead, is
       // composition (the depth-grid "vary" layer) + dialogue
       _el(SheetField,{label:"Composition \u2014 framing, blocking, depth, eyeline",value:sh.composition,multiline:true,
         placeholder:"Where subjects sit in frame, foreground/background, eyeline\u2026",onCommit:v=>onUpdate(sh.id,{composition:v})}),
-      _el(SheetField,{label:"Dialogue (optional)",value:sh.dialogue,multiline:false,
+      // multiline: dialogue lines routinely outgrow a single-line input, which clipped
+      // them visually (the full text was stored, just unreadable/uneditable)
+      _el(SheetField,{label:"Dialogue (optional)",value:sh.dialogue,multiline:true,
         placeholder:"A short line spoken in this beat\u2026",onCommit:v=>onUpdate(sh.id,{dialogue:v})}),
 
       _el(CardFold,{label:"In frame",defaultOpen:false},
@@ -307,6 +362,28 @@ function SceneCtxItem({ k, v }){
   return _el("div",{className:"ssx-item"}, _el("div",{className:"ssx-k"},k), _el("div",{className:"ssx-v"},v));
 }
 
+function SceneStyleChip({ project, sceneId }){
+  // Keep this live: Shots should never cache a scene's style on the shot card.
+  // The Styles tab owns the scene→preset map, so every Shots render resolves the
+  // current assignment from project.styleBible.
+  const preset = (typeof scenePreset==="function") ? scenePreset(project, sceneId) : null;
+  if(!preset) return _el("span",{className:"shot-style-chip empty",title:"No Style Bible preset assigned to this scene yet. Use the Styles tab / Light the film."},
+    _el(Icon.layers,{s:11}),"No style preset");
+  const pal = (preset.palette||[]).slice(0,3);
+  const title = [
+    preset.name || "Scene style",
+    preset.grade,
+    preset.lighting ? ("Lighting: "+preset.lighting) : "",
+    preset.lens ? ("Lens: "+preset.lens) : "",
+    preset.texture ? ("Texture: "+preset.texture) : "",
+  ].filter(Boolean).join("\n");
+  return _el("span",{className:"shot-style-chip",title},
+    _el(Icon.layers,{s:11}),
+    _el("span",{className:"shot-style-chip-text"},"Style: "+(preset.name||"Scene preset")),
+    !!pal.length && _el("span",{className:"shot-style-swatches"},
+      pal.map((c,i)=>_el("span",{key:i,className:"shot-style-swatch",style:{background:c}}))));
+}
+
 function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, onUpdate, onDelete, onView,
   onAddShot, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot, onRegenDownstream,
   onRenderScene, renderBusy, onStopChain }){
@@ -328,6 +405,34 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
   const clipMax = (typeof clipMaxFor==="function") ? clipMaxFor(ctx.project) : 15;
   const seqs = (typeof sceneSequences==="function") ? sceneSequences(shots, clipMax) : [];
   const clipOf = {}; seqs.forEach(g=> g.shots.forEach(s=>{ clipOf[s.id] = g.index+1; }));
+  // WHOLE-SCENE video prompt — the shared builder (shots.jsx sceneVideoPromptText):
+  // the same text the Stage's whole-scene packing mode auto-fills its prompt box with.
+  // Speaker attribution rides the Stage's resolver (no script drafts in this scope,
+  // so it leans on the beat map + action-order fallback).
+  const sceneVideoPrompt = ()=> (typeof window.sceneVideoPromptText==="function")
+    ? window.sceneVideoPromptText(scene, ordered, { location:loc, project:ctx.project,
+        speakerOf:(sh)=> (typeof stageDialogueSpeaker==="function")
+          ? ((stageDialogueSpeaker(scene, null, beatsMap, sh, { characters, charById:ctx.charById })||{}).name||"")
+          : "" })
+    : "";
+  const copyScenePrompt = async ()=>{
+    const t = sceneVideoPrompt();
+    if(!t){ if(window.appToast) window.appToast("No shot actions yet — draft this scene's shots first."); return; }
+    // belt & braces: async clipboard API first, execCommand fallback second (covers
+    // non-secure contexts), manual dialog last — and the toast only claims success
+    // when a copy REALLY landed.
+    let ok = false;
+    try{ if(navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(t); ok = true; } }catch(e){}
+    if(!ok){ try{
+      const ta = document.createElement("textarea"); ta.value = t;
+      ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+    }catch(e){} }
+    if(ok){ if(window.appToast) window.appToast("Scene "+String(scene.no).padStart(2,"0")+" video prompt copied — "+ordered.length+" shot"+(ordered.length===1?"":"s")+" combined"); }
+    else window.prompt("Copy the scene video prompt:", t);
+  };
   return _el("div",{className:"shot-scene-group"+(open?"":" collapsed")},
     _el("div",{className:"shot-scene-head"},
       _el("button",{className:"shot-scene-fold",onClick:onToggle,
@@ -336,6 +441,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
       _el("div",{className:"shot-scene-no"},String(scene.no).padStart(2,"0")),
       _el("div",{className:"shot-scene-meta",onClick:onToggle,style:{cursor:"pointer"}},
         _el("div",{className:"shot-scene-title"},scene.title||"Untitled scene"),
+        _el("div",{className:"shot-scene-style-row"},_el(SceneStyleChip,{project:ctx.project,sceneId:scene.id})),
         _el("div",{className:"shot-scene-sub"},
           (driver?("Driver: "+driver.name):"")+(driver&&loc?"  \u00b7  ":"")+(loc?("Location: "+loc.name):"")
           +"   \u00b7   "+shots.length+" shot"+(shots.length!==1?"s":"")
@@ -344,6 +450,9 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
         onRenderScene && _el("button",{className:"char-draft-btn primary",disabled:!!renderBusy,onClick:()=>onRenderScene(scene),
           title:"Render this scene in order, each shot seeded by the previous frame, auto-approving each. Approved frames are retained as seeds."},
           _el(Icon.sparkles,{s:12}), renderBusy?"Rendering\u2026":("Render Scene "+String(scene.no).padStart(2,"0")+" in order")),
+        _el("button",{className:"char-draft-btn ghost",onClick:copyScenePrompt,
+          title:"Copy the WHOLE-SCENE video prompt — every shot's action and dialogue in order, plus the camera arc and the scene's grade. Paste it into an external video tool or a Stage clip's prompt box. (The Stage still renders per clip — one Seedance render can't exceed the format's clip ceiling.)"},
+          _el(Icon.copy,{s:12}),"Copy video prompt"),
         _el("button",{className:"char-draft-btn ghost"+(draftingScene?" busy":""),disabled:!!draftingScene,onClick:()=>onDraftScene(scene),
           title:"Re-derive this scene's shot list from its beats (replaces the current shots)"},
           _el(Icon.layers,{s:12}), draftingScene?"Drafting\u2026":"Re-draft shots"),
@@ -367,7 +476,12 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
     open && _el(ClipBar,{shots,onUpdate,clipMax}),
     open && _el("div",{className:"sheet-grid"},
       shots.map(sh=>{ const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
-        return _el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,
+        // the SCRIPT BEAT this shot covers — drive + reaction from the scene's beat map
+        const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(sh.beatN));
+        const beatText = beatRow
+          ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" — ")
+          : "";
+        return _el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,beatText,
           prevShot, isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
           onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,clipNo:clipOf[sh.id]}); })));
 }
@@ -565,11 +679,12 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
         if(!u) missing.push(s);
       }
       if(missing.length){
-        const beatLab=(s)=> s.beatN ? ("Beat "+s.beatN) : "the earlier shot";
+        const shotNo = (s)=> Math.max(1, orderedShots.findIndex(x=>x.id===s.id)+1);
+        const shotLab = (s)=> "Shot "+shotNo(s)+(s.beatN ? " (Beat "+s.beatN+")" : "");
         const near=missing[missing.length-1];   // the immediate anchor this shot builds on
         setNotice(missing.length===1
-          ? "Generate "+beatLab(near)+" first \u2014 this shot builds on its frame as the anchor."
-          : "Generate the earlier shots first, starting with "+beatLab(missing[0])+" \u2014 each shot chains off the previous frame.");
+          ? shotLab(target)+" depends on "+shotLab(near)+". Generate "+shotLab(near)+" first so it can become the continuity anchor."
+          : shotLab(target)+" depends on the previous frame, but earlier anchors are missing. Generate the chain in order starting with "+shotLab(missing[0])+".");
         return;
       }
       setCollapsed(c=>({ ...c, [target.sceneId]:false }));
@@ -617,7 +732,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
             _el(window.InfoTip,{label:"About the Shot List",
               text:"One shot per beat, grouped by scene. Every frame generation follows a rolling chain in scene order: the first shot renders from the locked sheets, and every later shot is seeded by the immediately previous generated frame. Generate the shots in order — if you click Generate on a later shot before an earlier one is rendered, TURN asks you to generate the earlier shot first (it's the anchor this frame builds on). 'Generate all shots' and 'Render Scene X in order' render the whole chain straight through, auto-approving each frame as the next shot's seed. The CLIPS strip groups the resulting shots into Stage video clips."}))),
         _el("div",{className:"art-intro-actions"},
-          _el("button",{className:"art-draftall ghost",onClick:()=>exportShotList(scenesWithShots, shotsByScene, ctxFor, project),
+          _el("button",{className:"art-draftall ghost",onClick:()=>exportShotList(scenesWithShots, shotsByScene, ctxFor, project, beatsMap),
             title:"Preview the shot list as a printable table, then print / save as PDF or download the HTML"},
             _el(Icon.download,{s:14}),"Export shot list"),
           _el("button",{className:"art-draftall ghost",disabled:draftingAllShots||!ordered.length,onClick:handleDesignAll,
@@ -625,7 +740,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
             _el(Icon.sparkles,{s:14}), draftingAllShots?"Designing\u2026":"Design all shots"),
           _el("button",{className:"art-draftall",disabled:!!batchActiveId||!!chain||!shots.length,onClick:startAll,
             title:"Render every shot in chain order, each seeded by the previous frame. Locked (approved) frames are kept and used as seeds; the rest render."},
-            _el(Icon.sparkles,{s:14}), (batchActiveId||chain)?"Rendering\u2026":"Generate all shots")))),
+            _el(Icon.sparkles,{s:14}), (batchActiveId||chain)?"Rendering\u2026":"Generate all shots", typeof window.nbCostChip==="function" && window.nbCostChip(1))))),
     // A chain already has its own progress + Stop bar below. Hiding the generic
     // batch bar here avoids duplicate Cancel/Stop controls for the same request.
     !chain && BatchBar && _el(BatchBar,{batch,noun:"shot"}),
@@ -665,24 +780,30 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
 window.ShotList = ShotList;
 
 /* ---- export: a printable shot-list table (open in a new tab → Save as PDF) ---- */
-function exportShotList(scenesWithShots, shotsByScene, ctxFor, project){
+function exportShotList(scenesWithShots, shotsByScene, ctxFor, project, beatsMap){
   const esc = (s)=> String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   const title = (project && project.title) || "Shot List";
   let rows = "";
   scenesWithShots.forEach(scene=>{
     const ctx = ctxFor(scene);
     const loc = ctx.location ? ctx.location.name : "";
+    const beatRows = ((beatsMap||{})[scene.id]||{}).rows || [];
     rows += '<tr class="scenehdr"><td colspan="7"><b>SC '+esc(String(scene.no).padStart(2,"0"))+'</b> &nbsp; '
       + esc(scene.title||"")+(loc?(' &nbsp;&middot;&nbsp; '+esc(loc)):"")+'</td></tr>';
     (shotsByScene[scene.id]||[]).forEach((sh,i)=>{
       const subs = (sh.subjects||[]).map(id=>ctx.charById[id]).filter(Boolean).map(c=>c.name).join(", ");
+      // the SCRIPT BEAT this shot covers (drive — reaction) rides under the action,
+      // so the printed list carries the source text the coverage answers to
+      const br = beatRows.find(r=>String(r.n)===String(sh.beatN));
+      const beatText = br ? [ (br.drive&&br.drive.d||"").trim(), (br.react&&br.react.d||"").trim() ].filter(Boolean).join(" — ") : "";
       rows += '<tr>'
-        + '<td class="num">'+esc(scene.no)+'.'+esc(i+1)+'</td>'
+        + '<td class="num">'+esc(scene.no)+'.'+esc(i+1)+(sh.beatN?('<span class="bn">b'+esc(sh.beatN)+'</span>'):'')+'</td>'
         + '<td>'+esc(shotSizeOf(sh.size).label)+'</td>'
         + '<td>'+esc(shotAngleOf(sh.angle).label)+'</td>'
         + '<td>'+esc(shotMoveOf(sh.move).label)+' &middot; '+esc(shotLensOf(sh.lens).label)+'</td>'
         + '<td>'+esc(subs)+'</td>'
-        + '<td class="act">'+esc(sh.action||"")+(sh.dialogue?(' <span class="dlg">&ldquo;'+esc(sh.dialogue)+'&rdquo;</span>'):"")+'</td>'
+        + '<td class="act">'+esc(sh.action||"")+(sh.dialogue?(' <span class="dlg">&ldquo;'+esc(sh.dialogue)+'&rdquo;</span>'):"")
+        + (beatText?('<div class="beat"><span class="beatlab">Beat '+esc(sh.beatN||"")+'</span> '+esc(beatText)+'</div>'):"")+'</td>'
         + '<td class="comp">'+esc(sh.composition||"")+'</td>'
         + '</tr>';
     });
@@ -696,10 +817,14 @@ function exportShotList(scenesWithShots, shotsByScene, ctxFor, project){
     + 'th{background:#f3f4f6;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#555;}'
     + 'tr.scenehdr td{background:#1b1e26;color:#fff;font-size:12px;padding:7px 8px;}'
     + 'td.num{font-variant-numeric:tabular-nums;white-space:nowrap;color:#666;} td.act{width:30%;} td.comp{width:24%;color:#444;}'
-    + '.dlg{color:#7a5; font-style:italic;} @media print{body{margin:14mm;}}'
+    + '.dlg{color:#7a5; font-style:italic;}'
+    + '.beat{margin-top:5px;padding:4px 7px;background:#f6f6f3;border-left:2px solid #c9ccd3;color:#555;font-style:italic;font-size:10.5px;line-height:1.4;}'
+    + '.beatlab{font-style:normal;font-size:8.5px;letter-spacing:.07em;text-transform:uppercase;color:#999;margin-right:4px;}'
+    + '.bn{margin-left:5px;font-size:8.5px;color:#aaa;}'
+    + '@media print{body{margin:14mm;}}'
     + '</style></head><body>'
     + '<h1>'+esc(title)+' &mdash; Shot List</h1>'
-    + '<div class="sub">'+(project&&project.format?esc(project.format)+' &middot; ':'')+'Generated by TURN</div>'
+    + '<div class="sub">'+(project&&project.format?esc(project.format)+' &middot; ':'')+'Generated by Cinema Machine</div>'
     + '<table><thead><tr><th>Shot</th><th>Size</th><th>Angle</th><th>Move / Lens</th><th>In frame</th><th>Action</th><th>Composition</th></tr></thead>'
     + '<tbody>'+rows+'</tbody></table>'
     + '</body></html>';

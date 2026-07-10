@@ -18,6 +18,14 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
 
   // render style — same dropdown + "Surprise me" behaviour as the character cards
   const [styling, setStyling] = React.useState(false);
+  // transient "saved · unlock" chip — visible ~4s after landing on the user's own locked style
+  const [unlockVisible, setUnlockVisible] = React.useState(false);
+  React.useEffect(()=>{
+    if(window.turnIsUserStyle && window.turnIsUserStyle(l.renderStyleKey)){
+      setUnlockVisible(true); const t=setTimeout(()=>setUnlockVisible(false),4000); return ()=>clearTimeout(t);
+    }
+    setUnlockVisible(false);
+  },[l.renderStyleKey]);
   const locBible = ()=> [l.name&&("Name: "+l.name), l.architecture&&("Architecture: "+l.architecture),
     l.materials&&("Materials: "+l.materials), l.lighting&&("Lighting: "+l.lighting), l.significance&&("Significance: "+l.significance),
     (project&&project.genre)&&("Genre: "+project.genre)].filter(Boolean).join("\n");
@@ -30,10 +38,26 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
     setStyling(false);
   };
   const pickLocStyle = async (key)=>{
-    if(key!=="surprise"){ onUpdate(l.id, { renderStyleKey:key, renderStyle:(LOC_TEXT[key]||LOC_TEXT.photoreal) }); return; }
+    if(key!=="surprise"){ onUpdate(l.id, { renderStyleKey:key, renderStyle:(typeof window.renderStyleText==="function" ? window.renderStyleText("loc", key) : (LOC_TEXT[key]||LOC_TEXT.photoreal)) }); return; }
     onUpdate(l.id, { renderStyleKey:"surprise" });
     if(l.surpriseRender && l.surpriseRender.style){ onUpdate(l.id, { renderStyle:l.surpriseRender.style }); return; }
     await rollSurprise();
+  };
+  // LOCK a surprise style → a reusable named style. Location surprise is a STRING, wrapped into
+  // a minimal render block the shared registry resolves on every tab.
+  const lockSurprise = async ()=>{
+    if(!(l.surpriseRender && l.surpriseRender.style) || typeof window.turnLockRenderStyle!=="function") return;
+    const block = { rendering:String(l.surpriseRender.style), rules:["no text, labels, watermarks, annotations, typography or captions"] };
+    const key = await window.turnLockRenderStyle(l.surpriseRender.label, block);
+    if(key){ onUpdate(l.id, { renderStyleKey:key, renderStyle:(typeof window.renderStyleText==="function"?window.renderStyleText("loc",key):l.surpriseRender.style) });
+      if(typeof window.appToast==="function") window.appToast("Style locked — now reusable across Characters, Props & Locations"); }
+  };
+  const unlockCurrent = async ()=>{
+    if(!(window.turnIsUserStyle && window.turnIsUserStyle(l.renderStyleKey))) return;
+    const ok = window.appConfirm ? await window.appConfirm({ title:"Unlock this saved style?",
+      body:"It's removed from your saved styles. Cards still using it fall back to Photoreal." }) : true;
+    if(!ok) return; const k=l.renderStyleKey; window.turnUnlockRenderStyle(k);
+    onUpdate(l.id,{ renderStyleKey:"photoreal", renderStyle:(typeof window.renderStyleText==="function"?window.renderStyleText("loc","photoreal"):"") });
   };
 
   // time-of-day is script-derived (no manual control): keep it in sync with the
@@ -50,12 +74,15 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
 
   const gen = useImageGen({
     id: l.id, slotId: "locref-"+l.id,
+    entity: l,
     /* Clear cascades to this location's time-of-day variant plates so they aren't
        orphaned in storage. */
     relatedClearIds: ()=> (l.variants||[]).map(v=> l.id+"-"+v.id),
     buildFinal: ()=> finalPrompt,
     buildFromPhoto: ()=> buildLocationFromPhotoPrompt(l, project),
     buildSimple: ()=> buildSimpleLocationPrompt(l),
+    /* NO set-dressing refs at generation — the clean plate anchors the look;
+       fixtures are painted in afterwards via the Edit panel's Set-dressing buttons */
     buildEdit: (instr)=>
       "Edit this location reference plate for "+(l.name||"the place")+". "
       +"Apply ONLY this change: "+instr+". "
@@ -63,6 +90,19 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
       +"across all panels. Keep the same multi-angle grid of the same empty space. "
       +"Do not redesign or re-imagine the location.",
   });
+
+  // this location's set-dressing props — offered as one-click edit instructions in
+  // the plate's Edit panel. The SHELL prop (the object this location is the interior
+  // of) is excluded from the add-fixture chips — you can't place a thing inside its
+  // own inside — and gets its own "Match shell" chip instead.
+  const shellProp = (typeof locShellProp==="function") ? locShellProp(l) : null;
+  const dressProps = ((typeof locDressingProps==="function") ? locDressingProps(l) : [])
+    .filter(p=> !shellProp || p.id!==shellProp.id);
+  const sheetRefOf = (p)=> async ()=>{ let u = (typeof nbGetImage==="function") ? nbGetImage(p.id) : "";
+    if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(p.id); }catch(e){} }
+    return u||""; };
+  // every set-dressing object — candidates for the "Interior of" shell link
+  const dressAll = (((window.turnContinuity||{}).props)||[]).filter(p=>p && p.kind==="dressing");
 
   // batch generation: parent activates this card by id; generate then report done
   const batchStarted = React.useRef(false);
@@ -115,6 +155,20 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
       // The empty plate is also the finished-image importer, so the separate
       // "Upload a finished location plate" button is intentionally omitted.
       dropToImport:true,
+      // one-click edit instructions: place each set-dressing fixture INTO the plate.
+      // Chip label = prompt-only (built from the prop's spec); the clip button ALSO
+      // attaches the fixture's generated sheet (if any) as an edit reference image.
+      // The shell prop leads with a "Match shell" correction chip instead.
+      editSuggestions: [
+        ...(shellProp ? [{ raw:true, label:"Match shell · "+(shellProp.name||"object"),
+          text:(typeof locShellMatchEditText==="function") ? locShellMatchEditText(shellProp) : "",
+          title:"This location is the hollow INTERIOR of "+(shellProp.name||"the object")+" — insert a correction instruction so the plate reads as the inside of that exact shell (materials, bore, openings). Use the clip beside it to also attach the shell's exterior sheet as a reference.",
+          getRef: sheetRefOf(shellProp) }] : []),
+        ...dressProps.map(p=>({ label:p.name||"fixture",
+          text:(typeof locDressingEditText==="function") ? locDressingEditText(p) : ("Add "+(p.name||"the fixture")+" into the space."),
+          title:"Insert the ready edit instruction for this fixture — built from its prop card's spec (form, material, size). Apply edit paints it into the plate, matching the plate's look. Use the clip button beside it to also attach the fixture's sheet as a reference.",
+          getRef: sheetRefOf(p) })),
+      ],
       specGate:{ ready:(drafted || !l.manual), hint:"Draft the design spec first \u2014 architecture, materials & light are what the plate is built from." },
       // edit ONE view of the plate (works on generated or uploaded plates)
       menuExtra: gen.genUrl ? [{ label: panelEdit?"Close panel edit":"Edit a panel\u2026",
@@ -144,30 +198,41 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
           React.createElement("div",{className:"sheet-name loc-name-row",title:l.name||""},
             React.createElement("span",{className:"loc-intext-badge "+(/EXT/.test(l.intExt||"")?"ext":"int")},l.intExt||"INT"),
             React.createElement(EditText,{value:l.name,placeholder:"Location name\u2026",onCommit:val=>onUpdate(l.id,{name:val})})),
-          React.createElement("div",{className:"sheet-role"},
-            scenePresets.length ? React.createElement("span",{className:"loc-style-chip lead",
-              title:"Presets the scenes here use \u2014 the grade is applied per shot, not baked into this reference plate"},
-              ...scenePresets.map(p=>React.createElement("span",{key:p.id,className:"loc-style-dot",style:{background:(p.palette&&p.palette[0])||"#888"}})),
-              scenePresets.map(p=>p.name).join(", ")) : null),
           React.createElement("div",{className:"prop-scenes"},
-            locScenes.length
-              ? [ React.createElement("span",{key:"lab",className:"prop-scenes-lab"},"Scenes"),
-                  ...locScenes.map(s=>React.createElement("button",{key:s.id,className:"prop-scene-chip",
-                    title:s.title||("Scene "+s.no),onClick:()=>onChipClick&&onChipClick(s.id)},
-                    String(s.no).padStart(2,"0"))) ]
-              : React.createElement("span",{className:"prop-scenes-none"},"No scenes reference this place"))),
-        React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(l)},
-          React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft details")),
+            React.createElement("span",{className:"prop-scenes-lab"},"Scenes"),
+            React.createElement(SceneChipPager,{ none:"No scenes reference this place",
+              items: locScenes.map(s=>({ key:s.id, label:String(s.no).padStart(2,"0"), className:"prop-scene-chip",
+                title:s.title||("Scene "+s.no), onClick:()=>onChipClick&&onChipClick(s.id) })) })),
+          // SHELL LINK — this location is the hollow INSIDE of a designed object
+          // (hollow log, hive, seed pod: the building/apartment relationship)
+          dressAll.length>0 && React.createElement("div",{className:"loc-shell-row"},
+            React.createElement("span",{className:"prop-scenes-lab",
+              title:"Is this location the hollow INSIDE of one of your set-dressing objects? Linking it makes the shell's materials binding in the plate prompt, adds a 'Match shell' chip to the plate's Edit panel, and keeps the shell's exterior sheet out of shots filmed inside it."},
+              "Interior of"),
+            React.createElement("select",{className:"prop-select loc-shell-select",value:l.interiorOfPropId||"",
+              onChange:e=>onUpdate(l.id,{ interiorOfPropId: e.target.value||undefined })},
+              React.createElement("option",{value:""},"— not inside an object"),
+              dressAll.map(p=>React.createElement("option",{key:p.id,value:p.id},p.name||"Prop"))))),
+        // one flex row (like Props' head actions) \u2014 otherwise .sheet-head's column
+        // layout stacks each button on its own full-width line
+        React.createElement("div",{className:"sheet-head-actions"},
+          React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(l)},
+            React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft details"),
+          window.QaCheckButton && React.createElement(window.QaCheckButton,{ gen, name:l.name, noun:"location plate" }))),
 
       React.createElement("div",{className:"char-style-row"},
         React.createElement("span",{className:"char-style-lab"},"Render style"),
-        React.createElement("select",{className:"char-style-select",value:l.renderStyleKey||"photoreal",
-          disabled:styling,onChange:e=>pickLocStyle(e.target.value)},
-          (window.CHAR_RENDER_STYLE_OPTIONS||[]).map(o=>React.createElement("option",{key:o.key,value:o.key},o.label))),
+        React.createElement("div",{className:"char-style-pick"},
+          React.createElement(window.RenderStylePicker,{value:l.renderStyleKey||(window.turnDefaultRenderStyleKey?window.turnDefaultRenderStyleKey():"photoreal"),disabled:styling,onPick:pickLocStyle}),
+          (window.turnCanLockStyles && window.turnCanLockStyles()) && React.createElement("span",{className:"char-style-count"+(((window.turnAllGlobalStyleCount?window.turnAllGlobalStyleCount():0)>=(window.turnGlobalStyleCap||40))?" full":""),title:"Global render styles ("+(window.turnGlobalStyleCap||40)+" max, admin-managed). You can save up to "+(window.turnPersonalStyleCap||10)+" personal render styles. Manage via Styles in the top bar."}, (window.turnAllGlobalStyleCount?window.turnAllGlobalStyleCount():0)+"/"+(window.turnGlobalStyleCap||40))),
         styling && React.createElement("span",{className:"char-style-busy"},React.createElement("span",{className:"ns-spin"}),"Inventing\u2026"),
         (!styling && l.renderStyleKey==="surprise" && l.surpriseRender && l.surpriseRender.label) &&
           React.createElement("span",{className:"char-style-name",title:"Re-roll a new surprise style",onClick:rollSurprise},
-            l.surpriseRender.label," \u21bb")),
+            l.surpriseRender.label," \u21bb"),
+        (!styling && l.renderStyleKey==="surprise" && l.surpriseRender && l.surpriseRender.style && window.turnCanLockStyles && window.turnCanLockStyles()) &&
+          React.createElement("button",{className:"char-style-lock",title:"Lock this style \u2014 keep it and reuse it across Characters, Props & Locations",onClick:lockSurprise},"\ud83d\udd12 Lock this style"),
+        (!styling && unlockVisible && window.turnIsUserStyle && window.turnIsUserStyle(l.renderStyleKey)) &&
+          React.createElement("span",{className:"char-style-name char-style-locked",title:"Your saved style \u2014 reusable everywhere. Click to unlock.",onClick:unlockCurrent},"\ud83d\udd12 saved \u00b7 unlock")),
 
       !drafted && !gen.genUrl && React.createElement("div",{className:"sheet-undrafted"},
         React.createElement(Icon.alert,{s:13}),
@@ -286,6 +351,7 @@ function StagingGrid({ l, onUpdate, onDraftStaging, draftingStage }){
 function LocationVariant({ l, v, project, onTime, onRemove, onView }){
   const gen = useImageGen({
     id: l.id+"-"+v.id, slotId: "locvar-"+l.id+"-"+v.id,
+    entity: l,
     buildFinal: ()=> buildLocationVariantPrompt(l, project, { time:v.time }),
     buildSimple: ()=> buildSimpleLocationPrompt(l),
     buildEdit: (instr)=> "Edit this establishing frame of "+(l.name||"the place")+" ("+v.time+"). Apply ONLY: "+instr+". Keep the same space and architecture.",
@@ -301,8 +367,11 @@ function LocationVariant({ l, v, project, onTime, onRemove, onView }){
 
 function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, onSetWorldScale }){
   const [view, setView] = React.useState(null);
+  if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   const [sceneFilter, setSceneFilter] = React.useState("");
   const [query, setQuery] = React.useState("");               // free-text name search
+  const [searchOpen, setSearchOpen] = React.useState(false);  // collapsible search: icon-only until clicked
+  const searchRef = React.useRef(null);
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
   const list = locations || [];
@@ -310,14 +379,15 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
   // cast's 'Style · all cast'); each location can still be overridden on its own card.
   const [allStyling, setAllStyling] = React.useState(null);   // null | {i,total} (surprise progress)
   const LOC_TEXT = window.LOC_RENDER_TEXT || {};
-  const allStyleKey = (list.length && list.every(l=>(l.renderStyleKey||"photoreal")===(list[0].renderStyleKey||"photoreal")))
-    ? (list[0].renderStyleKey||"photoreal") : "";
+  const defaultStyleKey = window.turnDefaultRenderStyleKey ? window.turnDefaultRenderStyleKey() : "photoreal";
+  const allStyleKey = (list.length && list.every(l=>(l.renderStyleKey||defaultStyleKey)===(list[0].renderStyleKey||defaultStyleKey)))
+    ? (list[0].renderStyleKey||defaultStyleKey) : "";
   const locBibleOf = (l)=> [l.name&&("Name: "+l.name), l.architecture&&("Architecture: "+l.architecture),
     l.materials&&("Materials: "+l.materials), l.lighting&&("Lighting: "+l.lighting), l.significance&&("Significance: "+l.significance),
     (project&&project.genre)&&("Genre: "+project.genre)].filter(Boolean).join("\n");
   const applyStyleAll = async (key)=>{
     if(!key || allStyling) return;
-    if(key!=="surprise"){ list.forEach(l=> onUpdate(l.id, { renderStyleKey:key, renderStyle:(LOC_TEXT[key]||LOC_TEXT.photoreal) })); return; }
+    if(key!=="surprise"){ const t=(typeof window.renderStyleText==="function" ? window.renderStyleText("loc", key) : (LOC_TEXT[key]||LOC_TEXT.photoreal)); list.forEach(l=> onUpdate(l.id, { renderStyleKey:key, renderStyle:t })); return; }
     list.forEach(l=> onUpdate(l.id, { renderStyleKey:"surprise" }));
     if(!(typeof aiSurpriseStyleText==="function" && typeof aiAvailable==="function" && aiAvailable())) return;
     const need = list.filter(l=>!(l.surpriseRender && l.surpriseRender.style));
@@ -372,25 +442,6 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
             React.createElement(window.InfoTip,{label:"About Locations",
               text:"Every place the film visits, pulled straight from the script's sluglines. Each gets a multi-angle coverage plate \u2014 the same space from several views \u2014 so any shot set there matches its geometry, materials and light. 'Design all locations' builds every place in one pass \u2014 pulls them from the sluglines, drafts each spec, and stages its depth grid; 'Generate all locations' then renders the plates."}))),
         React.createElement("div",{className:"art-intro-actions"},
-          list.length>0 && React.createElement("label",{className:"char-style-all",
-            title:"Apply one render style to ALL locations at once. Each location can still be overridden on its own card."},
-            React.createElement("span",{className:"char-style-all-lab"},
-              allStyling ? ("Inventing… "+allStyling.i+"/"+allStyling.total) : "Style · all locations"),
-            React.createElement("select",{className:"char-style-select",value:allStyleKey,disabled:!!allStyling,
-              onChange:e=>applyStyleAll(e.target.value)},
-              allStyleKey==="" && React.createElement("option",{value:""},"Mixed — per location"),
-              (window.CHAR_RENDER_STYLE_OPTIONS||[]).map(o=>React.createElement("option",{key:o.key,value:o.key},o.label)))),
-          // WORLD SCALE — renders every location's plate at the chosen scale; "Auto" derives
-          // each place's scale from the characters who drive its scenes (critter cast → critter world).
-          list.length>0 && onSetWorldScale && React.createElement("label",{className:"char-style-all",
-            title:"Render every location's plate at this scale. 'Auto' derives each place's scale from the characters who drive its scenes — so a critter-cast film's worlds come out critter-scale automatically."},
-            React.createElement("span",{className:"char-style-all-lab"},"World scale"),
-            React.createElement("select",{className:"char-style-select",value:(project&&project.worldScale)||"",
-              onChange:e=>onSetWorldScale(e.target.value)},
-              React.createElement("option",{value:""},"Auto (by occupant)"),
-              React.createElement("option",{value:"A"},"Human scale"),
-              React.createElement("option",{value:"B"},"Critter scale"),
-              React.createElement("option",{value:"C"},"Giant scale"))),
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add location"),
           React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!scriptHasLocs),onClick:onDraftAll,
@@ -398,18 +449,39 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all locations"),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the coverage plate for every drafted location \u2014 you choose whether to redo ones that already have a plate"},
-            React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all locations"))),),
+            React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all locations", typeof window.nbCostChip==="function" && window.nbCostChip(1)))),),
     window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,onDraftOnly:onApplyLookbookDraftOnly,label:"these locations",dept:"locations"}),
     BatchBar && React.createElement(BatchBar,{batch,noun:"location"}),
     window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{items:trashItems,kind:"location",onRestore,onPurge}),
     list.length>0 && React.createElement("div",{className:"prop-toolbar"},
-      React.createElement("div",{className:"prop-searchbar"},
+      React.createElement("div",{className:"prop-searchbar collapsible"+((searchOpen||q)?" open":""),
+        title:(searchOpen||q)?"":"Search locations",
+        onClick:()=>{ if(!searchOpen && !q){ setSearchOpen(true); setTimeout(()=>{ if(searchRef.current) searchRef.current.focus(); },0); } }},
         React.createElement(Icon.search,{s:14}),
-        React.createElement("input",{className:"prop-search-input",type:"text",value:query,
-          placeholder:"Search locations by name…",
-          onChange:e=>setQuery(e.target.value), onKeyDown:e=>{ if(e.key==="Escape") setQuery(""); }}),
+        React.createElement("input",{className:"prop-search-input",type:"text",value:query,ref:searchRef,
+          placeholder:"Search locations by name…",tabIndex:(searchOpen||q)?0:-1,
+          onChange:e=>setQuery(e.target.value),
+          onBlur:()=>{ if(!query) setSearchOpen(false); },
+          onKeyDown:e=>{ if(e.key==="Escape"){ setQuery(""); setSearchOpen(false); if(searchRef.current) searchRef.current.blur(); } }}),
         q && React.createElement("span",{className:"prop-search-count"}, shown.length+" of "+list.length),
-        q && React.createElement("button",{className:"prop-search-clear",title:"Clear search",onClick:()=>setQuery("")},React.createElement(Icon.x,{s:13}))),
+        q && React.createElement("button",{className:"prop-search-clear",title:"Clear search",onClick:(e)=>{ e.stopPropagation(); setQuery(""); setSearchOpen(false); }},React.createElement(Icon.x,{s:13}))),
+      // render-style + world-scale controls live beside the search bar (moved out of the header)
+      React.createElement("div",{className:"char-style-all",
+        title:"Apply one render style to ALL locations at once. Each location can still be overridden on its own card."},
+        React.createElement("span",{className:"char-style-all-lab"},
+          allStyling ? ("Inventing… "+allStyling.i+"/"+allStyling.total) : "Style · all locations"),
+        React.createElement(window.RenderStylePicker,{value:allStyleKey,disabled:!!allStyling,
+          placeholderLabel:"Mixed — per location",onPick:applyStyleAll})),
+      onSetWorldScale && React.createElement("label",{className:"char-style-all",
+        title:"Render every location's plate at this scale. 'Auto' derives each place's scale from the characters who drive its scenes — so critter or microscopic casts make the world render at their scale automatically."},
+        React.createElement("span",{className:"char-style-all-lab"},"World scale"),
+        React.createElement("select",{className:"char-style-select",value:(project&&project.worldScale)||"",
+          onChange:e=>onSetWorldScale(e.target.value)},
+          React.createElement("option",{value:""},"Auto (by occupant)"),
+          React.createElement("option",{value:"A"},"Human scale (Class A)"),
+          React.createElement("option",{value:"B"},"Critter scale (Class B)"),
+          React.createElement("option",{value:"C"},"Giant scale (Class C)"),
+          React.createElement("option",{value:"D"},"Microscopic scale (Class D)"))),
       sceneList.length>0 && React.createElement("div",{className:"prop-scenebar"},
         React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Focus a scene"),
         React.createElement("select",{className:"prop-select prop-scenebar-select",value:sceneFilter,
@@ -423,7 +495,7 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
         sceneFilter && React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId,onClick:startSceneBatch,
           title:"Generate coverage plates for the locations in this scene"},
           React.createElement(Icon.sparkles,{s:14}),
-          batchActiveId?"Generating\u2026":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0"))))),
+          batchActiveId?"Generating\u2026":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")), typeof window.nbCostChip==="function" && window.nbCostChip(1)))),
     list.length
       ? (shown.length
           ? React.createElement(React.Fragment,null,

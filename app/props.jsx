@@ -13,24 +13,53 @@
    matching is no longer carried in the prompt text \u2014 a worn/owned prop's OWNER character
    sheet rides in as a REFERENCE IMAGE (see generatePropSheet / the card's attachments)
    plus propOwnerNote, which matches the prop to the character far better than a text tag. */
+/* the style KEY a prop inherits when its card has NO explicit pick: its OWNER's style
+   (a worn/carried object lives in the owner's world — the owner-sheet reference image
+   already says "match this character", so the TEXT must agree), else — for ownerless
+   set dressing — the style of the location it's a fixture of (explicit locationId, or
+   every mapped scene resolving to one place), else "" (the shared default applies).
+   Explicit picks (p.renderStyleKey) and hand-edited text (p.renderStyle) always win. */
+function propInheritedStyleKey(p){
+  try{
+    const C = window.turnContinuity || {};
+    if(p && p.ownerId){
+      const c = (C.characters||[]).find(x=>x && x.id===p.ownerId);
+      if(c){
+        const k = (typeof inferCharacterRenderStyleKey==="function") ? inferCharacterRenderStyleKey(c) : (c.renderStyleKey||"");
+        if(k && k!=="surprise") return k;
+      }
+      return "";
+    }
+    const loc = propHomeLocation(p);
+    if(loc && loc.renderStyleKey && loc.renderStyleKey!=="surprise") return loc.renderStyleKey;
+  }catch(e){}
+  return "";
+}
+window.propInheritedStyleKey = propInheritedStyleKey;
+
 function buildPropRefPrompt(p, project){
   const clean = (x)=>String(x||"").replace(/\.$/,"").trim();
   const name = p.name || "Object";
   const form = clean(p.form);
   const material = clean(p.material);
   const detail = clean(p.detail);
-  const scale = p.kind==="worn" ? "wearable, true-to-body scale"
-              : p.kind==="carried" ? "handheld scale"
-              : "true real-world scale as described";
-  // render style from the card dropdown / Surprise me (photoreal default, or anime/3d/flat)
+  const _size = clean(p.size);
+  const scale = p.kind==="worn" ? ("wearable, true-to-body scale"+(_size?(", "+_size):""))
+              : p.kind==="carried" ? ("handheld scale"+(_size?(", "+_size):""))
+              : p.kind==="dressing" ? ("environment fixture at true physical scale"+(_size?(": "+_size):" as described"))
+              : (_size ? ("true physical size: "+_size) : "true real-world scale as described");
+  // render style: card dropdown / Surprise me → hand-edited text → INHERITED from the
+  // owner (or fixture location) when the card was never touched → shared default
+  const _styleKey = p.renderStyleKey || propInheritedStyleKey(p);
   const styleText = (p.renderStyleKey==="surprise" && p.surpriseRender && p.surpriseRender.style)
     ? p.surpriseRender.style
-    : (clean(p.renderStyle) || (window.PROP_RENDER_TEXT||{})[p.renderStyleKey||"photoreal"] || (window.PROP_RENDER_TEXT||{}).photoreal
-       || "hyper realistic photography, photorealistic 8k");
+    : (clean(p.renderStyle)
+       || (typeof window.renderStyleText==="function" ? window.renderStyleText("prop", _styleKey) : (window.PROP_RENDER_TEXT||{})[_styleKey||(window.turnDefaultRenderStyleKey?window.turnDefaultRenderStyleKey():"photoreal")])
+       || (window.PROP_RENDER_TEXT||{}).photoreal || "hyper realistic photography, photorealistic 8k");
   // off-white / light-neutral background with a soft contact shadow (matches the cast sheets)
   const bg = "flat off-white / very light neutral panel background, even and clean, with a simple soft contact shadow beneath the object";
-  const d1 = detail   ? ("its signature feature \u2014 "+detail.slice(0,90))   : "its most story-relevant feature";
-  const d2 = material ? ("the material & finish in macro \u2014 "+material.slice(0,90)) : "the material & finish in macro";
+  const d1 = detail   ? ("its signature feature \u2014 "+((typeof clipWords==="function")?clipWords(detail,90):detail.slice(0,90)))   : "its most story-relevant feature";
+  const d2 = material ? ("the material & finish in macro \u2014 "+((typeof clipWords==="function")?clipWords(material,90):material.slice(0,90))) : "the material & finish in macro";
   const d3 = "its construction \u2014 fastenings, joins, edges and wear marks";
   let s = "Prop concept art sheet, "+name+(form?(", "+form):"")
     +", full 360-degree turnaround, front view center, side view middle, back view right, "+bg
@@ -114,14 +143,48 @@ function _propWordHit(name, words){
   const n = " "+String(name||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ")+" ";
   return words.some(w=> n.indexOf(" "+w+" ")>=0);
 }
-function classifyPropKind(name){
+/* SET DRESSING nouns — furniture and fixtures that live in a place rather than on a
+   body: a hollow log, a bench, an apartment's wardrobe. Deliberately unambiguous words
+   only (no "lamp"/"mirror"/"clock", which are as often handheld). Only consulted for
+   OWNERLESS objects — an owned item is by definition worn or carried. */
+const PROP_DRESSING_WORDS = ["log","stump","trunk","branch","bough","root","bloom","blossom","flower","plant","tree",
+  "bush","shrub","reed","reeds","moss","mushroom","toadstool","rock","boulder","stone","pebble","bench","table","chair",
+  "armchair","sofa","couch","settee","bed","cot","bunk","desk","shelf","shelves","bookcase","cabinet","cupboard",
+  "wardrobe","dresser","nightstand","stool","door","doorway","gate","fence","picket","railing","sign","signpost",
+  "signage","statue","sculpture","fountain","altar","throne","fireplace","hearth","stove","oven","counter","countertop",
+  "workbench","booth","curtain","curtains","drapes","rug","carpet","tapestry","chandelier","web","cobweb","nest","hive",
+  "pillar","column","arch","archway","bridge","well","anvil","forge","loom","barrel","cauldron","trough","manger",
+  "pew","podium","lectern","monument","obelisk","totem","scaffold","awning","canopy","trellis","planter","pond","pool"];
+function classifyPropKind(name, opts){
+  // FIXTURE PHRASING beats the noun: "a lantern STRUNG on a thread" is installed at a
+  // place, not carried — the mounting words say more than the object word does
+  if(/\b(strung|hung|hanging|mounted|nailed|bolted|anchored|staked|planted|fixed to|built into|embedded)\b/i.test(String(name||""))
+     && !!(opts && opts.ownerless)) return "dressing";
   const carried = _propWordHit(name, PROP_CARRIED_WORDS);
   const worn = _propWordHit(name, PROP_WORN_WORDS);
-  if(carried && !worn) return "carried";
-  if(worn && !carried) return "worn";
-  return "";   // unknown or conflicting -> defer to the source
+  // dressing only competes for OWNERLESS objects (opts.ownerless) — existing callers
+  // that classify a character's own items keep the original worn/carried behaviour
+  const dressing = !!(opts && opts.ownerless) && _propWordHit(name, PROP_DRESSING_WORDS);
+  const hits = [carried&&"carried", worn&&"worn", dressing&&"dressing"].filter(Boolean);
+  return hits.length===1 ? hits[0] : "";   // unknown or conflicting -> defer to the source
 }
 window.classifyPropKind = classifyPropKind;
+
+/* the location an ownerless object is a FIXTURE OF: the explicit link, else the one
+   location every mapped scene resolves to (mobile objects spanning places get none). */
+function propHomeLocation(p){
+  try{
+    const C = window.turnContinuity || {};
+    const locs = C.locations||[];
+    if(p && p.locationId) return locs.find(l=>l && l.id===p.locationId) || null;
+    if(p && !p.ownerId && (p.scenes||[]).length && typeof locationForScene==="function"){
+      const homes = [...new Set(p.scenes.map(sid=>{ const l=locationForScene(locs, sid); return l&&l.id; }).filter(Boolean))];
+      if(homes.length===1) return locs.find(l=>l && l.id===homes[0]) || null;
+    }
+  }catch(e){}
+  return null;
+}
+window.propHomeLocation = propHomeLocation;
 
 /* the PRIMARY object noun of a prop name, with synonyms folded together, so two
    descriptions of the same object collapse to one head ("Mobile phone" and "Phone
@@ -231,7 +294,11 @@ window.castHasProps = castHasProps;
 function propDefaults(p){
   return {
     negativePrompt: p.negativePrompt || "text, watermark, label, branding, blurry, low resolution, distorted, extra objects, people, hands",
-    renderStyle: p.renderStyle || "photoreal product reference, 85mm, soft even studio lighting, sharp focus",
+    // empty style text falls back through the card's PICKED renderStyleKey, then the
+    // INHERITED owner/location style — never straight to photoreal over a stylized world
+    renderStyle: p.renderStyle || ((typeof window.renderStyleText==="function")
+      ? window.renderStyleText("prop", p.renderStyleKey || propInheritedStyleKey(p))
+      : "photoreal product reference, 85mm, soft even studio lighting, sharp focus"),
   };
 }
 
@@ -241,6 +308,12 @@ function propDefaults(p){
    the sheet's render.style. "surprise" is AI-invented per prop (aiSurpriseStyleText). */
 const PROP_RENDER_TEXT = {
   photoreal: "photoreal product reference, 85mm macro, soft even studio lighting, sharp focus, true-to-life materials",
+  graphicNovelNoir: "black-and-white graphic-novel object illustration, bold ink contours, heavy spot blacks and screentone shading, hard noir side light, strictly monochrome",
+  ukiyoe: "ukiyo-e woodblock print of the object, flat mineral-pigment colour, calligraphic keyblock outline, washi paper texture, Edo-period palette, no Western shading",
+  paperCutout: "paper cut-out object, flat scissor-cut paper shapes in shallow stacked layers, real drop shadows between layers, visible construction-paper grain, handmade collage feel",
+  photorealNatural: "natural-history macro photoreal reference, real-world biological materials, believable anatomy-adjacent texture, skin/fur/scales/chitin/wing micro-detail, moisture, soft specimen-studio light, minimal stylization",
+  photorealCreature: "cinematic photoreal creature-shop prop/object reference, practical effects and VFX maquette realism, tactile prosthetic materials, controlled studio light, physically plausible screen design",
+  photorealOrnamental: "photoreal ornamental object reference, couture/ceremonial/jewelry-like or armor-like detailing, iridescent surfaces, polished metal/glass/crystal accents, premium studio light",
   render3d:  "stylized 3D product render, clean studio HDRI lighting, physically-based materials, soft ambient occlusion, subtle bevels",
   anime:     "anime cel-shaded product illustration, clean confident linework, flat shading with soft gradients, no photoreal texture",
   flat:      "flat vector graphic, bold clean shapes, minimal flat shading, limited palette, no gradients, no photoreal texture",
@@ -248,12 +321,34 @@ const PROP_RENDER_TEXT = {
   ghibli:    "soft hand-painted Studio Ghibli-style 2D object, fine warm hand-drawn linework, gentle painterly cel shading, warm earthy naturalistic palette",
   animated3d:"polished animated-feature 3D product render, soft warm flattering light, appealing clean PBR materials, idealized finish, no noise",
   pixar:     "Pixar-style animated-feature 3D object, soft warm flattering light, appealing rounded stylized form, clean tactile PBR materials, idealized charming finish, no noise",
+  storyboardconcept:"clean storyboard / production concept object reference, expressive linework, clear silhouette, restrained color wash, readable production-board detail",
+  texturedcomic:"textured contemporary comic-art object reference, bold ink contours, etched hatching, limited palette, dramatic graphic light, visible grain",
+  whimsicalwatercolor:"whimsical watercolor and fine-ink object reference, transparent washes, paper grain, delicate hand-drawn line, soft storybook charm",
   stopmotion:"photograph of a real handmade stop-motion prop, sculpted silicone/felt/wood at miniature scale, soft practical macro light, shallow depth of field",
   claymation:"photograph of a real plasticine claymation prop, rounded clay forms with thumbprints and tool marks, soft practical macro light, shallow depth of field",
   adv1960s:  "1960s painted commercial illustration of the object, smooth airbrushed gouache, vintage halftone print texture, mid-century mustard/avocado/teal palette",
   gaganime:  "1990s gag-anime 2D cel cartoon object, thick bold black outlines, flat high-saturation colors, simple graphic shadows, sticker-poster finish",
   pixelart:  "retro 16/32-bit pixel-art object, hard square pixels, no anti-aliasing, limited indexed palette, dithered shading, crisp pixel outlines",
 };
+Object.assign(PROP_RENDER_TEXT, {
+  modernAnime:"modern cinematic anime object reference, clean sharp linework, polished cel shadows, vibrant contemporary colour",
+  digitalAnime:"polished digital anime object illustration, smooth refined rendering, clean line art, luminous colour, glossy highlights",
+  roughSketchAnime:"rough sketch anime object concept, visible pencil/ink strokes, flat colour, light hatching, production-design energy",
+  painterlyAnime:"painterly anime object reference, delicate line, soft blended brushwork, dreamy atmospheric colour wash",
+  cartoon3d:"stylized 3D cartoon object render, bold simplified forms, clean animated-feature lighting, rounded appeal",
+  textured3dCartoon:"textured 3D cartoon object render, felt/clay/fabric/fuzzy tactile surfaces, soft studio light",
+  stylizedCartoon:"stylized cartoon object illustration, bold outlines, flat colour areas, theatrical graphic shape design",
+  grittyDigital:"gritty digital illustration object reference, expressive linework, harsh light, textured shadows, high contrast",
+  softPainterly:"soft painterly object illustration, visible brushstrokes, blended colour, warm handmade texture",
+  realisticDigitalDrawing:"realistic digital drawing object reference, believable light, detailed material texture, illustrated not photographic",
+  flatDesign:"flat design object illustration, simplified geometric shapes, bold colour, minimal shading",
+  minimalistLine:"minimalist line-art object reference, sparse elegant contour, warm paper, one small accent colour",
+  vintageChildrensBook:"vintage children’s book object illustration, loose ink outline, limited spot colour, aged paper print texture",
+  tactileMixedMedia:"tactile mixed-media object reference, handmade fabric/felt/paper/paint/sculpted materials, miniature photographed craft",
+  texturedPaperSculpture:"textured paper sculpture object reference, folded layered paper, visible fibres, photographed tabletop craft",
+  texturedPaperIllustration:"textured paper illustration object reference, collage layers, stippled print grain, cut-paper edges",
+  tropicalArtNouveau:"tropical Art Nouveau object illustration, flowing organic lines, botanical motifs, flat ornamental colour",
+});
 window.PROP_RENDER_TEXT = PROP_RENDER_TEXT;
 
 function combinedPropPrompt(p, project){
@@ -272,7 +367,9 @@ function buildSimplePropPrompt(p){
     form||"",
     material ? (material) : "",
     "front view, side view, and close-up detail",
-    "plain light grey background, studio product lighting, photoreal, sharp focus, no people"
+    "plain light grey background, studio product lighting, "
+      +((String(p.renderStyle||((typeof window.renderStyleText==="function")?window.renderStyleText("prop",p.renderStyleKey||propInheritedStyleKey(p)):"")).split(/[;,]/)[0].trim())||"photoreal")
+      +", sharp focus, no people"
   ].filter(Boolean);
   return parts.join(". ")+".";
 }
@@ -344,7 +441,9 @@ window.generatePropSheet = generatePropSheet;
 
 /* image-to-image from a dropped reference photo of the real object */
 function buildPropFromPhotoPrompt(p, project){
-  const style = p.renderStyle || "photoreal product reference, 85mm, soft even studio lighting";
+  const style = p.renderStyle || ((typeof window.renderStyleText==="function")
+    ? window.renderStyleText("prop", p.renderStyleKey || propInheritedStyleKey(p))
+    : "photoreal product reference, 85mm, soft even studio lighting");
   let s = "Master prop reference sheet \u2014 "+(p.name||"Object")+". ";
   s += "BASE OBJECT: reproduce EXACTLY the object shown in the reference photo \u2014 its shape, ";
   s += "proportions, colour, material and finish. Do not redesign or stylise it. ";
@@ -376,6 +475,14 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
 
   // render style — same dropdown + "Surprise me" behaviour as the character cards
   const [styling, setStyling] = React.useState(false);
+  // transient "saved · unlock" chip — visible ~4s after landing on the user's own locked style
+  const [unlockVisible, setUnlockVisible] = React.useState(false);
+  React.useEffect(()=>{
+    if(window.turnIsUserStyle && window.turnIsUserStyle(p.renderStyleKey)){
+      setUnlockVisible(true); const t=setTimeout(()=>setUnlockVisible(false),4000); return ()=>clearTimeout(t);
+    }
+    setUnlockVisible(false);
+  },[p.renderStyleKey]);
   const propBible = ()=> [p.name&&("Name: "+p.name), p.ownerName&&("Owner: "+p.ownerName),
     p.form&&("Form: "+p.form), p.material&&("Material: "+p.material), p.detail&&("Significance: "+p.detail),
     (project&&project.genre)&&("Genre: "+project.genre)].filter(Boolean).join("\n");
@@ -387,15 +494,32 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
     setStyling(false);
   };
   const pickPropStyle = async (key)=>{
-    if(key!=="surprise"){ onUpdate(p.id, { renderStyleKey:key, renderStyle:(PROP_RENDER_TEXT[key]||PROP_RENDER_TEXT.photoreal) }); return; }
+    if(key!=="surprise"){ onUpdate(p.id, { renderStyleKey:key, renderStyle:(typeof window.renderStyleText==="function" ? window.renderStyleText("prop", key) : (PROP_RENDER_TEXT[key]||PROP_RENDER_TEXT.photoreal)) }); return; }
     onUpdate(p.id, { renderStyleKey:"surprise" });
     if(p.surpriseRender && p.surpriseRender.style){ onUpdate(p.id, { renderStyle:p.surpriseRender.style }); return; }
     await rollSurprise();
+  };
+  // LOCK a surprise style → a reusable named style. The prop surprise is a STRING, so wrap it
+  // into a minimal render block ({rendering, rules}) the shared registry can resolve everywhere.
+  const lockSurprise = async ()=>{
+    if(!(p.surpriseRender && p.surpriseRender.style) || typeof window.turnLockRenderStyle!=="function") return;
+    const block = { rendering:String(p.surpriseRender.style), rules:["no text, labels, watermarks, annotations, typography or captions"] };
+    const key = await window.turnLockRenderStyle(p.surpriseRender.label, block);
+    if(key){ onUpdate(p.id, { renderStyleKey:key, renderStyle:(typeof window.renderStyleText==="function"?window.renderStyleText("prop",key):p.surpriseRender.style) });
+      if(typeof window.appToast==="function") window.appToast("Style locked — now reusable across Characters, Props & Locations"); }
+  };
+  const unlockCurrent = async ()=>{
+    if(!(window.turnIsUserStyle && window.turnIsUserStyle(p.renderStyleKey))) return;
+    const ok = window.appConfirm ? await window.appConfirm({ title:"Unlock this saved style?",
+      body:"It's removed from your saved styles. Cards still using it fall back to Photoreal." }) : true;
+    if(!ok) return; const k=p.renderStyleKey; window.turnUnlockRenderStyle(k);
+    onUpdate(p.id,{ renderStyleKey:"photoreal", renderStyle:(typeof window.renderStyleText==="function"?window.renderStyleText("prop","photoreal"):"") });
   };
   const initials = (p.name||"?").replace(/^the\s+/i,"").split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
 
   const gen = useImageGen({
     id: p.id, slotId: "propref-"+p.id,
+    entity: p,
     buildFinal: ()=> finalPrompt,
     buildFromPhoto: ()=> buildPropFromPhotoPrompt(p, project),
     buildSimple: ()=> buildSimplePropPrompt(p),
@@ -457,6 +581,11 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
       // plate), so the separate "Upload a finished sheet" button is intentionally omitted.
       dropToImport:true,
       specGate:{ ready:(drafted || !p.manual), hint:"Draft the design spec first \u2014 form & material are what the sheet is built from." },
+      // WORN items: the character sheet is their canon \u2014 no separate sheet generation
+      // (a standalone render would just create a second, conflicting design)
+      generateDisabled: p.kind==="worn",
+      generateDisabledLabel: "Rendered on "+(p.ownerName||"the owner")+"'s sheet",
+      generateDisabledTitle: "Worn items render ON the character's sheet \u2014 that image is their canon. A separate prop sheet would re-imagine the item and conflict with it. To adjust the design, edit the spec here (it feeds the character prompt) and regenerate "+(p.ownerName||"the owner")+"'s sheet.",
       onDelete:()=>onDelete(p.id), deleteLabel:"Delete prop" }),
     React.createElement("div",{className:"sheet-body"},
       React.createElement("div",{className:"sheet-head"},
@@ -464,37 +593,47 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
           React.createElement("div",{className:"sheet-name",title:p.name||""},
             React.createElement(EditText,{value:p.name,placeholder:"Prop name\u2026",onCommit:val=>onUpdate(p.id,{name:val})})),
           React.createElement("div",{className:"sheet-role"},
-            React.createElement("span",{className:"prop-kind-badge "+(p.kind==="worn"?"worn":"carried")},p.kind||"carried"),
-            p.ownerName ? (" \u00b7 "+p.ownerName) : " \u00b7 unassigned"),
+            React.createElement("span",{className:"prop-kind-badge "+(p.kind==="worn"?"worn":p.kind==="dressing"?"dressing":"carried")},
+              p.kind==="dressing" ? "set dressing" : (p.kind||"carried")),
+            p.kind==="dressing"
+              ? (" \u00b7 "+(((typeof propHomeLocation==="function") && (propHomeLocation(p)||{}).name) || "no location yet"))
+              : (p.ownerName ? (" \u00b7 "+p.ownerName) : " \u00b7 unassigned")),
           p.kind==="worn" && React.createElement("div",{className:"prop-worn-note",
             title:"Worn items are baked into "+(p.ownerName||"the owner")+"'s character-sheet prompt (with this card's form & material) and rendered there \u2014 they don't need a separate sheet. Only carried props get their own. Keep this spec accurate; it feeds the character prompt."},
             React.createElement(Icon.sparkles,{s:11}),
             React.createElement("span",null,"Rendered on ",React.createElement("b",null,p.ownerName||"the character"),"'s sheet \u2014 no separate sheet needed")),
+          p.kind==="dressing" && React.createElement("div",{className:"prop-worn-note",
+            title:"Two ways to place this fixture into its location's plate: open the plate's Edit panel and click this fixture's Set-dressing chip (inserts an edit instruction built from this card's spec), or \u2014 once this sheet is generated \u2014 use the chip's attach button to ALSO ride this sheet along as a reference image, locking the exact design."},
+            React.createElement(Icon.sparkles,{s:11}),
+            React.createElement("span",null,"Placed into ",React.createElement("b",null,((typeof propHomeLocation==="function") && (propHomeLocation(p)||{}).name) || "its location"),"'s plate via the plate's Edit panel \u2014 by prompt, or prompt + this sheet as reference")),
           (sceneIds!==undefined) && React.createElement("div",{className:"prop-scenes"},
-            propScenes.length
-              ? [ React.createElement("span",{key:"lab",className:"prop-scenes-lab",
-                    title: scenesDerived ? "Auto-derived from "+(p.ownerName||"the owner")+"'s scene presence — click “Re-map scenes” to pin the exact appearances" : undefined},
-                    "Scenes"+(scenesDerived?" (auto)":"")),
-                  ...propScenes.map(s=>React.createElement("button",{key:s.id,className:"prop-scene-chip",
-                    title:s.title||("Scene "+s.no),onClick:()=>onChipClick&&onChipClick(s.id)},
-                    String(s.no).padStart(2,"0"))) ]
-              : React.createElement("span",{className:"prop-scenes-none"},"No scene appearances found"))),
+            React.createElement("span",{className:"prop-scenes-lab",
+                title: scenesDerived ? "Auto-derived from "+(p.ownerName||"the owner")+"'s scene presence \u2014 click \u201cRe-map scenes\u201d to pin the exact appearances" : undefined},
+                "Scenes"+(scenesDerived?" (auto)":"")),
+            React.createElement(SceneChipPager,{ none:"No scene appearances found",
+              items: propScenes.map(s=>({ key:s.id, label:String(s.no).padStart(2,"0"), className:"prop-scene-chip",
+                title:s.title||("Scene "+s.no), onClick:()=>onChipClick&&onChipClick(s.id) })) }))),
         React.createElement("div",{className:"sheet-head-actions"},
           React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(p)},
             React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft details"),
+          window.QaCheckButton && React.createElement(window.QaCheckButton,{ gen:genForFrame, name:p.name, noun:"prop sheet" }),
           onTagOne && React.createElement("button",{className:"char-draft-btn ghost"+(taggingScene?" busy":""),disabled:!!taggingScene,onClick:()=>onTagOne(p),
             title:"Re-map which scenes this prop appears in \u2014 without re-drafting its spec. Use after the script changes."},
             React.createElement(Icon.layers,{s:12}), taggingScene?"Mapping\u2026":"Re-map scenes"))),
 
       React.createElement("div",{className:"char-style-row"},
         React.createElement("span",{className:"char-style-lab"},"Render style"),
-        React.createElement("select",{className:"char-style-select",value:p.renderStyleKey||"photoreal",
-          disabled:styling,onChange:e=>pickPropStyle(e.target.value)},
-          (window.CHAR_RENDER_STYLE_OPTIONS||[]).map(o=>React.createElement("option",{key:o.key,value:o.key},o.label))),
+        React.createElement("div",{className:"char-style-pick"},
+          React.createElement(window.RenderStylePicker,{value:p.renderStyleKey||propInheritedStyleKey(p)||(window.turnDefaultRenderStyleKey?window.turnDefaultRenderStyleKey():"photoreal"),disabled:styling,onPick:pickPropStyle}),
+          (window.turnCanLockStyles && window.turnCanLockStyles()) && React.createElement("span",{className:"char-style-count"+(((window.turnAllGlobalStyleCount?window.turnAllGlobalStyleCount():0)>=(window.turnGlobalStyleCap||40))?" full":""),title:"Global render styles ("+(window.turnGlobalStyleCap||40)+" max, admin-managed). You can save up to "+(window.turnPersonalStyleCap||10)+" personal render styles. Manage via Styles in the top bar."}, (window.turnAllGlobalStyleCount?window.turnAllGlobalStyleCount():0)+"/"+(window.turnGlobalStyleCap||40))),
         styling && React.createElement("span",{className:"char-style-busy"},React.createElement("span",{className:"ns-spin"}),"Inventing\u2026"),
         (!styling && p.renderStyleKey==="surprise" && p.surpriseRender && p.surpriseRender.label) &&
           React.createElement("span",{className:"char-style-name",title:"Re-roll a new surprise style",onClick:rollSurprise},
-            p.surpriseRender.label," \u21bb")),
+            p.surpriseRender.label," \u21bb"),
+        (!styling && p.renderStyleKey==="surprise" && p.surpriseRender && p.surpriseRender.style && window.turnCanLockStyles && window.turnCanLockStyles()) &&
+          React.createElement("button",{className:"char-style-lock",title:"Lock this style \u2014 keep it and reuse it across Characters, Props & Locations",onClick:lockSurprise},"\ud83d\udd12 Lock this style"),
+        (!styling && unlockVisible && window.turnIsUserStyle && window.turnIsUserStyle(p.renderStyleKey)) &&
+          React.createElement("span",{className:"char-style-name char-style-locked",title:"Your saved style \u2014 reusable everywhere. Click to unlock.",onClick:unlockCurrent},"\ud83d\udd12 saved \u00b7 unlock")),
 
       !drafted && !gen.genUrl && React.createElement("div",{className:"sheet-undrafted"},
         React.createElement(Icon.alert,{s:13}),
@@ -535,11 +674,26 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
             React.createElement("select",{className:"prop-select",value:p.kind||"carried",
               onChange:e=>onUpdate(p.id,{kind:e.target.value, kindSet:true})},
               React.createElement("option",{value:"carried"},"Carried"),
-              React.createElement("option",{value:"worn"},"Worn")))),
+              React.createElement("option",{value:"worn"},"Worn"),
+              React.createElement("option",{value:"dressing"},"Set dressing")))),
+        // FIXTURE OF — a set-dressing object belongs to a PLACE (it bakes into that
+        // location's plate and inherits its render style). Auto = the one location
+        // every mapped scene resolves to; pick explicitly for e.g. apartment furniture.
+        p.kind==="dressing" && React.createElement("div",{className:"sheet-field"},
+          React.createElement("div",{className:"obj-lab"},"Fixture of"),
+          React.createElement("select",{className:"prop-select",value:p.locationId||"",
+            onChange:e=>onUpdate(p.id,{locationId:e.target.value})},
+            React.createElement("option",{value:""},
+              "Auto — "+(((typeof propHomeLocation==="function") && (propHomeLocation({...p, locationId:""})||{}).name) || "no single location from scenes")),
+            (((window.turnContinuity||{}).locations)||[]).map(l=>React.createElement("option",{key:l.id,value:l.id},l.name||"Location")))),
         React.createElement(SheetField,{label:"Form \u2014 shape & silhouette",value:p.form,multiline:true,
           placeholder:"What it is and what it looks like \u2014 shape, size, silhouette\u2026",onCommit:val=>onUpdate(p.id,{form:val})}),
         React.createElement(SheetField,{label:"Material & finish",value:p.material,multiline:true,
-          placeholder:"What it's made of \u2014 metal, plastic, fabric; sheen, wear, texture\u2026",onCommit:val=>onUpdate(p.id,{material:val})})),
+          placeholder:"What it's made of \u2014 metal, plastic, fabric; sheen, wear, texture\u2026",onCommit:val=>onUpdate(p.id,{material:val})}),
+        // real-world measurement \u2014 the scale system sizes the object against the cast
+        // in every shot from this ('Design all props' drafts it; edit to correct)
+        React.createElement(SheetField,{label:"Physical size \u2014 full real-world dimensions",value:p.size,
+          placeholder:"~1.2 m tall \u00d7 ~60 cm wide \u00d7 ~45 cm deep \u00b7 or ~18 cm long \u00d7 ~7 cm diameter\u2026",onCommit:val=>onUpdate(p.id,{size:val})})),
 
       React.createElement(CardFold,{label:"Significance",defaultOpen:false},
         React.createElement(SheetField,{label:"What it means in the story",value:p.detail,multiline:true,
@@ -558,8 +712,11 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
 
 function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId, onMergeProps, onPropsMaster, trashItems, onRestore, onPurge, onEnsureOwner, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
   const [view, setView] = React.useState(null);   // {url, character/prop}
+  if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   const [sceneFilter, setSceneFilter] = React.useState("");   // "" = all
   const [query, setQuery] = React.useState("");               // free-text name/owner search
+  const [searchOpen, setSearchOpen] = React.useState(false);  // collapsible search: icon-only until clicked
+  const searchRef = React.useRef(null);
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
   const list = props || [];
@@ -567,14 +724,15 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   // 'Style · all cast'); each prop can still be overridden on its own card.
   const [allStyling, setAllStyling] = React.useState(null);   // null | {i,total} (surprise progress)
   const PROP_TEXT = window.PROP_RENDER_TEXT || {};
-  const allStyleKey = (list.length && list.every(p=>(p.renderStyleKey||"photoreal")===(list[0].renderStyleKey||"photoreal")))
-    ? (list[0].renderStyleKey||"photoreal") : "";
+  const defaultStyleKey = window.turnDefaultRenderStyleKey ? window.turnDefaultRenderStyleKey() : "photoreal";
+  const allStyleKey = (list.length && list.every(p=>(p.renderStyleKey||defaultStyleKey)===(list[0].renderStyleKey||defaultStyleKey)))
+    ? (list[0].renderStyleKey||defaultStyleKey) : "";
   const propBibleOf = (p)=> [p.name&&("Name: "+p.name), p.ownerName&&("Owner: "+p.ownerName),
     p.form&&("Form: "+p.form), p.material&&("Material: "+p.material), p.detail&&("Significance: "+p.detail),
     (project&&project.genre)&&("Genre: "+project.genre)].filter(Boolean).join("\n");
   const applyStyleAll = async (key)=>{
     if(!key || allStyling) return;
-    if(key!=="surprise"){ list.forEach(p=> onUpdate(p.id, { renderStyleKey:key, renderStyle:(PROP_TEXT[key]||PROP_TEXT.photoreal) })); return; }
+    if(key!=="surprise"){ const t=(typeof window.renderStyleText==="function" ? window.renderStyleText("prop", key) : (PROP_TEXT[key]||PROP_TEXT.photoreal)); list.forEach(p=> onUpdate(p.id, { renderStyleKey:key, renderStyle:t })); return; }
     list.forEach(p=> onUpdate(p.id, { renderStyleKey:"surprise" }));
     if(!(typeof aiSurpriseStyleText==="function" && typeof aiAvailable==="function" && aiAvailable())) return;
     const need = list.filter(p=>!(p.surpriseRender && p.surpriseRender.style));
@@ -635,7 +793,9 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
     kindFixed.current = true;
     list.forEach(p=>{
       if(p.kindSet) return;
-      const k = classifyPropKind(p.name);
+      // ownerless objects may also classify as SET DRESSING (a hollow log, a bench) —
+      // heals cards created before the dressing kind existed
+      const k = classifyPropKind(p.name, { ownerless: !p.ownerId && !p.ownerName });
       if(k && k!==(p.kind||"carried")) onUpdate(p.id, { kind:k });
     });
   },[list.length]);
@@ -679,8 +839,8 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   // eligible = drafted props (so a hand-added, undrafted/gated card never makes a
   // generic image). Cards that already have a sheet are caught by the begin() partition.
   // WORN props are rendered ON their owner's character sheet (their spec is baked into the
-  // character prompt), so ONLY CARRIED props are generated as separate sheets. The batch
-  // skips worn items; their cards stay for spec editing (which feeds the character prompt).
+  // character prompt), so ONLY CARRIED and DRESSING props are generated as separate sheets
+  // (a dressing sheet is optional — it can ride plate edits as a reference image).
   const draftedIds = (subset)=> subset.filter(p=>propVisualsDrafted(p) && p.kind!=="worn").map(p=>p.id);
   const startSceneBatch = ()=>{
     if(!sceneFilter || batchActiveId) return;
@@ -709,16 +869,8 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
             ((typeof roomCopy==="function" && roomCopy(project,"props").title) || "Props Master"),
             React.createElement(window.InfoTip,{label:"About Props",
               text:((typeof roomCopy==="function" && roomCopy(project,"props").tip) ||
-                "Continuity objects \u2014 the things characters wear and carry, plus the set dressing the camera sees. Each gets its own multi-view reference sheet so the object stays identical in every shot. 'Design all props' builds every prop from the story in one pass \u2014 pulls missing items from the cast, drafts each spec, and maps every prop to its scenes; 'Generate all props' then renders the sheets.")}))),
+                "Continuity objects \u2014 the things characters wear and carry, plus the set dressing the camera sees. Carried and set-dressing props get their own multi-view reference sheet (worn items render on their owner's character sheet instead); a set-dressing sheet can then ride the location plate's Edit panel as a reference image so the fixture lands exactly as designed. 'Design all props' builds every prop from the story in one pass \u2014 pulls missing items from the cast, drafts each spec, and maps every prop to its scenes; 'Generate all props' then renders the sheets.")}))),
         React.createElement("div",{className:"art-intro-actions"},
-          list.length>0 && React.createElement("label",{className:"char-style-all",
-            title:"Apply one render style to ALL props at once. Each prop can still be overridden on its own card."},
-            React.createElement("span",{className:"char-style-all-lab"},
-              allStyling ? ("Inventing… "+allStyling.i+"/"+allStyling.total) : "Style · all props"),
-            React.createElement("select",{className:"char-style-select",value:allStyleKey,disabled:!!allStyling,
-              onChange:e=>applyStyleAll(e.target.value)},
-              allStyleKey==="" && React.createElement("option",{value:""},"Mixed — per prop"),
-              (window.CHAR_RENDER_STYLE_OPTIONS||[]).map(o=>React.createElement("option",{key:o.key,value:o.key},o.label)))),
           React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
             React.createElement(Icon.plus,{s:14}),"Add prop"),
           React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!castHasProps),onClick:onDraftAll,
@@ -726,22 +878,31 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all props"),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the reference sheet for every drafted prop \u2014 you choose whether to redo ones that already have a sheet"},
-            React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all props")))),
+            React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all props", typeof window.nbCostChip==="function" && window.nbCostChip(1))))),
     window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,onDraftOnly:onApplyLookbookDraftOnly,label:"these props",dept:"props"}),
     BatchBar && React.createElement(BatchBar,{batch,noun:"prop"}),
     window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{items:trashItems,kind:"prop",onRestore,onPurge}),
     // free-text search — filter prop cards by name or owner as you type
     (list.length>0 || (tagged && sceneList.length>0)) && React.createElement("div",{className:"prop-toolbar"},
-      list.length>0 && React.createElement("div",{className:"prop-searchbar"},
+      list.length>0 && React.createElement("div",{className:"prop-searchbar collapsible"+((searchOpen||q)?" open":""),
+        title:(searchOpen||q)?"":"Search props",
+        onClick:()=>{ if(!searchOpen && !q){ setSearchOpen(true); setTimeout(()=>{ if(searchRef.current) searchRef.current.focus(); },0); } }},
       React.createElement(Icon.search,{s:14}),
-      React.createElement("input",{className:"prop-search-input",type:"text",value:query,
-        placeholder:"Search props by name or owner…",
+      React.createElement("input",{className:"prop-search-input",type:"text",value:query,ref:searchRef,
+        placeholder:"Search props by name or owner…",tabIndex:(searchOpen||q)?0:-1,
         onChange:e=>setQuery(e.target.value),
-        onKeyDown:e=>{ if(e.key==="Escape") setQuery(""); }}),
+        onBlur:()=>{ if(!query) setSearchOpen(false); },
+        onKeyDown:e=>{ if(e.key==="Escape"){ setQuery(""); setSearchOpen(false); if(searchRef.current) searchRef.current.blur(); } }}),
       q && React.createElement("span",{className:"prop-search-count"},
         shown.length+" of "+list.length),
       q && React.createElement("button",{className:"prop-search-clear",title:"Clear search",
-        onClick:()=>setQuery("")},React.createElement(Icon.x,{s:13}))),
+        onClick:(e)=>{ e.stopPropagation(); setQuery(""); setSearchOpen(false); }},React.createElement(Icon.x,{s:13}))),
+      list.length>0 && React.createElement("div",{className:"char-style-all",
+        title:"Apply one render style to ALL props at once. Each prop can still be overridden on its own card."},
+        React.createElement("span",{className:"char-style-all-lab"},
+          allStyling ? ("Inventing… "+allStyling.i+"/"+allStyling.total) : "Style · all props"),
+        React.createElement(window.RenderStylePicker,{value:allStyleKey,disabled:!!allStyling,
+          placeholderLabel:"Mixed — per prop",onPick:applyStyleAll})),
     // scene filter + per-scene batch generate
     tagged && sceneList.length>0 && React.createElement("div",{className:"prop-scenebar"},
       React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Focus a scene"),
@@ -756,7 +917,7 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
       sceneFilter && React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId,onClick:startSceneBatch,
         title:"Generate reference sheets for the props in this scene \u2014 you choose whether to redo ones that already have a sheet"},
         React.createElement(Icon.sparkles,{s:14}),
-        batchActiveId?"Generating\u2026":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0"))))),
+        batchActiveId?"Generating\u2026":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")), typeof window.nbCostChip==="function" && window.nbCostChip(1)))),
     list.length
       ? (shown.length
           ? React.createElement(React.Fragment,null,
