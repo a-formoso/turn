@@ -18,19 +18,60 @@ function FilmTimecode(){
     "TC 00:"+p(m)+":"+p(s)+":"+p(fr));
 }
 
-/* hero media — a 21:9 video placeholder for the AI short film, dressed as a
-   viewfinder (corner brackets, running timecode, ratio badge). Swap the inner
-   placeholder for a <video> (same 21:9 frame) when the film is ready. */
-function HeroFilm(){
-  return React.createElement("div",{className:"lp-video","aria-label":"AI short film — coming soon"},
+/* hero media — the Value-Charge Spine, the product's visual signature, drawn as
+   an animated SVG inside the film frame (corner brackets, running timecode,
+   ratio badge kept). A deliberate ABSTRACTION, not a screenshot: it sells the
+   one idea — scenes plotted by emotional charge, turning end to end — without
+   exposing the real workspace. The 13-scene arc is invented for the graphic. */
+function HeroSpine(){
+  const W=1260, H=540, MID=H/2, AMP=72, X0=76, X1=W-52;
+  // an archetypal feature arc: up on the inciting incident, low act climax,
+  // rising action, mid-act low, reversal, the low point, climax up.
+  const SCENES=[
+    {c:-1.0},{c:1.6,m:"Inciting Incident",up:true},{c:-0.6},{c:-2.2,m:"Act Climax"},
+    {c:1.2},{c:2.4,m:"Rising Action",up:true},{c:-0.8},{c:-2.6,m:"Mid-Act Climax"},
+    {c:1.8,m:"Reversal",up:true},{c:-1.2},{c:-2.9,m:"Low Point"},{c:0.8},
+    {c:2.3,m:"Climax",up:true},
+  ];
+  const pts=SCENES.map((s,i)=>({ ...s, x:X0+(X1-X0)*i/(SCENES.length-1), y:MID-s.c*AMP }));
+  // catmull-rom → cubic beziers for the smooth wave
+  let d="M"+pts[0].x.toFixed(1)+" "+pts[0].y.toFixed(1);
+  for(let i=0;i<pts.length-1;i++){
+    const p0=pts[Math.max(0,i-1)], p1=pts[i], p2=pts[i+1], p3=pts[Math.min(pts.length-1,i+2)];
+    d+=" C"+[p1.x+(p2.x-p0.x)/6, p1.y+(p2.y-p0.y)/6,
+             p2.x-(p3.x-p1.x)/6, p2.y-(p3.y-p1.y)/6, p2.x, p2.y]
+             .map(n=>n.toFixed(1)).join(" ");
+  }
+  const actX=[(pts[3].x+pts[4].x)/2, (pts[10].x+pts[11].x)/2];
+  const mono={fontFamily:"var(--f-mono)",letterSpacing:".14em"};
+  return React.createElement("div",{className:"lp-video","aria-label":"The value-charge spine — every scene plotted by its emotional charge"},
     React.createElement("div",{className:"lp-video-corners","aria-hidden":"true"}),
     React.createElement("div",{className:"lp-video-corners b","aria-hidden":"true"}),
     React.createElement(FilmTimecode,null),
-    React.createElement("button",{className:"lp-video-play","aria-label":"Play the short film"},
-      React.createElement("svg",{width:22,height:22,viewBox:"0 0 24 24",fill:"currentColor","aria-hidden":"true"},
-        React.createElement("path",{d:"M8 5.5v13l11-6.5z"}))),
+    React.createElement("svg",{className:"lp-spine",viewBox:"0 0 "+W+" "+H,preserveAspectRatio:"xMidYMid meet","aria-hidden":"true"},
+      // axis: the neutral midline + polarity labels
+      React.createElement("line",{x1:X0-26,y1:MID,x2:X1+26,y2:MID,stroke:"rgba(255,255,255,.16)",strokeWidth:1}),
+      React.createElement("text",{x:X0-26,y:84,fill:"rgba(255,255,255,.38)",fontSize:12,style:mono},"POSITIVE +"),
+      React.createElement("text",{x:X0-26,y:H-64,fill:"rgba(255,255,255,.38)",fontSize:12,style:mono},"NEGATIVE −"),
+      // act bands
+      actX.map((x,i)=>React.createElement("line",{key:"ax"+i,x1:x,y1:64,x2:x,y2:H-48,
+        stroke:"rgba(255,255,255,.12)",strokeWidth:1,strokeDasharray:"3 6"})),
+      React.createElement("text",{x:X0+150,y:46,fill:"rgba(255,255,255,.34)",fontSize:11,textAnchor:"middle",style:mono},"ACT I · SETUP"),
+      React.createElement("text",{x:(actX[0]+actX[1])/2,y:46,fill:"rgba(255,255,255,.34)",fontSize:11,textAnchor:"middle",style:mono},"ACT II · COMPLICATION"),
+      React.createElement("text",{x:X1+26,y:46,fill:"rgba(255,255,255,.34)",fontSize:11,textAnchor:"end",style:mono},"ACT III · RESOLUTION"),
+      // the spine itself, drawn on
+      React.createElement("path",{className:"lp-spine-path",d,pathLength:1,vectorEffect:"non-scaling-stroke"}),
+      // scene nodes, colored by where the scene CLOSES; staggered pop-in
+      pts.map((p,i)=>React.createElement("circle",{key:"n"+i,className:"lp-spine-node",cx:p.x,cy:p.y,r:6,
+        fill:p.c>=0?"var(--pos-bright)":"var(--neg-bright)",stroke:"var(--lpw-black)",strokeWidth:2.5,
+        style:{animationDelay:(0.35+i*0.16)+"s"}})),
+      // milestone captions, fading in after the draw
+      pts.filter(p=>p.m).map((p,i)=>React.createElement("text",{key:"m"+i,className:"lp-spine-lab",
+        x:p.x,y:p.up?p.y-20:p.y+30,textAnchor:"middle",fill:"rgba(255,255,255,.5)",fontSize:11,
+        style:{...mono,animationDelay:(1.4+i*0.12)+"s"}},p.m.toUpperCase()))),
     React.createElement("span",{className:"lp-video-badge"},"21:9"));
 }
+const HeroFilm = HeroSpine;   // hero slot keeps its name; the film frame now shows the spine
 
 const LP_FEATURES = [
   { no:"01", icon:"script", title:"Development",

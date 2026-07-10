@@ -37,6 +37,7 @@ reuse in brand assets (decks, social cards, ads, future pages).
 | `--pos` | `#13955E` | Rise | Checkmarks (and the in-app story graph's up-turns) |
 | `--pos-bright` | `#5AD398` | Rise, lit | Green on Carbon (checks inside the black pricing card) |
 | `--neg` | `#D2493E` | Fall | Reserved (carries the in-app story graph's down-turns) |
+| `--neg-bright` | `#E2685C` | Fall, lit | Red on Carbon (the hero spine's down-closing scene nodes) |
 | `--lpw-accent` | `#E0742B` | Reel | Warm cinematic orange — the hero's rotating word; the page's one warm accent |
 | `--pos-line` | `rgba(19,149,94,.35)` | Rise, faint | Subtle green borders/rings |
 

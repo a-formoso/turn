@@ -3937,6 +3937,7 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   --pos:#13955E;               /* Rise — the story turning up */
   --pos-bright:#5AD398;        /* Rise, lit — green on Carbon */
   --neg:#D2493E;               /* Fall — the story turning down */
+  --neg-bright:#E2685C;        /* Fall, lit — red on Carbon (hero spine nodes) */
   --pos-line:rgba(19,149,94,.35);
   --lpw-accent:#E0742B;        /* Reel — warm cinematic orange, the hero accent */
   background:var(--lpw-bg);color:var(--lpw-ink);font-family:var(--f-ui)}
@@ -5660,3 +5661,21 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .dt-preview-x,.stage2-lightbox-x{
   border:none;border-radius:10px;background:rgba(15,15,18,.55);color:#fff;transition:.1s}
 .dt-preview-x:hover,.stage2-lightbox-x:hover{background:rgba(15,15,18,.82);color:#fff}
+
+/* ---- Hero spine — the value-charge wave inside the hero film frame. ---------
+   The line draws itself on load (pathLength=1 trick), nodes pop in staggered,
+   milestone captions fade in last. Reduced-motion users get it fully drawn. */
+.lp-spine{position:absolute;inset:0;width:100%;height:100%;display:block}
+.lp-spine-path{fill:none;stroke:rgba(255,255,255,.8);stroke-width:2;stroke-linecap:round;
+  stroke-dasharray:1;stroke-dashoffset:1;animation:lpSpineDraw 2.2s cubic-bezier(.55,0,.25,1) .25s forwards}
+@keyframes lpSpineDraw{to{stroke-dashoffset:0}}
+.lp-spine-node{opacity:0;animation:lpSpinePop .45s ease-out forwards}
+@keyframes lpSpinePop{from{opacity:0}to{opacity:1}}
+.lp-spine-lab{opacity:0;animation:lpSpineFade .9s ease-out forwards}
+@keyframes lpSpineFade{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){
+  .lp-spine-path{animation:none;stroke-dasharray:none;stroke-dashoffset:0}
+  .lp-spine-node,.lp-spine-lab{animation:none;opacity:1}
+}
+/* small screens: the wave and nodes stay; microtype would be unreadable */
+@media (max-width:640px){ .lp-spine-lab, .lp-spine text{display:none} }
