@@ -5,28 +5,15 @@
    DESIGN: light editorial look — white page, near-black ink, hairline-framed content
    column, pill buttons (black primary) — independent of the app's dark theme. */
 
-/* a live 24fps timecode for the film frame — quiet motion that says "camera" */
-function FilmTimecode(){
-  const [f, setF] = React.useState(0);
-  React.useEffect(()=>{
-    const t = setInterval(()=> setF(x=>x+1), 1000/24);
-    return ()=> clearInterval(t);
-  },[]);
-  const p = n => String(n).padStart(2,"0");
-  const fr = f%24, s = Math.floor(f/24)%60, m = Math.floor(f/1440)%60;
-  return React.createElement("span",{className:"lp-video-tc","aria-hidden":"true"},
-    "TC 00:"+p(m)+":"+p(s)+":"+p(fr));
-}
-
 /* hero media — the Value-Charge Spine, the product's visual signature, drawn as
-   an animated SVG inside the film frame (corner brackets, running timecode,
-   ratio badge kept). A deliberate ABSTRACTION, not a screenshot: it sells the
-   one idea — scenes plotted by emotional charge, turning end to end — without
-   exposing the real workspace. The 13-scene arc is invented for the graphic. */
+   an animated SVG inside the film frame (corner brackets kept). A deliberate
+   ABSTRACTION, not a screenshot: it sells the one idea — scenes plotted by
+   emotional charge, turning end to end. The line wears a charge gradient
+   (green above the midline, red below) with a soft glow, scenes land as
+   halo'd nodes, and after the draw a playhead of light travels the spine on
+   a slow loop — the story being read. The 13-scene arc is invented. */
 function HeroSpine(){
   const W=1260, H=540, MID=H/2, AMP=72, X0=76, X1=W-52;
-  // an archetypal feature arc: up on the inciting incident, low act climax,
-  // rising action, mid-act low, reversal, the low point, climax up.
   const SCENES=[
     {c:-1.0},{c:1.6,m:"Inciting Incident",up:true},{c:-0.6},{c:-2.2,m:"Act Climax"},
     {c:1.2},{c:2.4,m:"Rising Action",up:true},{c:-0.8},{c:-2.6,m:"Mid-Act Climax"},
@@ -34,7 +21,6 @@ function HeroSpine(){
     {c:2.3,m:"Climax",up:true},
   ];
   const pts=SCENES.map((s,i)=>({ ...s, x:X0+(X1-X0)*i/(SCENES.length-1), y:MID-s.c*AMP }));
-  // catmull-rom → cubic beziers for the smooth wave
   let d="M"+pts[0].x.toFixed(1)+" "+pts[0].y.toFixed(1);
   for(let i=0;i<pts.length-1;i++){
     const p0=pts[Math.max(0,i-1)], p1=pts[i], p2=pts[i+1], p3=pts[Math.min(pts.length-1,i+2)];
@@ -42,15 +28,29 @@ function HeroSpine(){
              p2.x-(p3.x-p1.x)/6, p2.y-(p3.y-p1.y)/6, p2.x, p2.y]
              .map(n=>n.toFixed(1)).join(" ");
   }
+  const area = d+" L"+X1+" "+MID+" L"+X0+" "+MID+" Z";
   const actX=[(pts[3].x+pts[4].x)/2, (pts[10].x+pts[11].x)/2];
   const mono={fontFamily:"var(--f-mono)",letterSpacing:".14em"};
+  const runStyle={offsetPath:'path("'+d+'")'};
   return React.createElement("div",{className:"lp-video","aria-label":"The value-charge spine — every scene plotted by its emotional charge"},
     React.createElement("div",{className:"lp-video-corners","aria-hidden":"true"}),
     React.createElement("div",{className:"lp-video-corners b","aria-hidden":"true"}),
-    React.createElement(FilmTimecode,null),
     React.createElement("svg",{className:"lp-spine",viewBox:"0 0 "+W+" "+H,preserveAspectRatio:"xMidYMid meet","aria-hidden":"true"},
-      // axis: the neutral midline + polarity labels
-      React.createElement("line",{x1:X0-26,y1:MID,x2:X1+26,y2:MID,stroke:"rgba(255,255,255,.16)",strokeWidth:1}),
+      React.createElement("defs",null,
+        React.createElement("linearGradient",{id:"lpgLine",gradientUnits:"userSpaceOnUse",x1:0,y1:MID-3*AMP,x2:0,y2:MID+3*AMP},
+          React.createElement("stop",{offset:"0",stopColor:"var(--pos-bright)"}),
+          React.createElement("stop",{offset:".5",stopColor:"rgba(255,255,255,.95)"}),
+          React.createElement("stop",{offset:"1",stopColor:"var(--neg-bright)"})),
+        React.createElement("linearGradient",{id:"lpgFill",gradientUnits:"userSpaceOnUse",x1:0,y1:MID-3*AMP,x2:0,y2:MID+3*AMP},
+          React.createElement("stop",{offset:"0",stopColor:"rgba(90,211,152,.22)"}),
+          React.createElement("stop",{offset:".5",stopColor:"rgba(255,255,255,0)"}),
+          React.createElement("stop",{offset:"1",stopColor:"rgba(226,104,92,.22)"})),
+        React.createElement("filter",{id:"lpgBlur",x:"-40%",y:"-40%",width:"180%",height:"180%"},
+          React.createElement("feGaussianBlur",{stdDeviation:6}))),
+      // charge gridlines + the neutral midline
+      [-2,-1,1,2].map(c=>React.createElement("line",{key:"g"+c,x1:X0-26,y1:MID-c*AMP,x2:X1+26,y2:MID-c*AMP,
+        stroke:"rgba(255,255,255,.05)",strokeWidth:1})),
+      React.createElement("line",{x1:X0-26,y1:MID,x2:X1+26,y2:MID,stroke:"rgba(255,255,255,.18)",strokeWidth:1}),
       React.createElement("text",{x:X0-26,y:84,fill:"rgba(255,255,255,.38)",fontSize:12,style:mono},"POSITIVE +"),
       React.createElement("text",{x:X0-26,y:H-64,fill:"rgba(255,255,255,.38)",fontSize:12,style:mono},"NEGATIVE −"),
       // act bands
@@ -59,19 +59,27 @@ function HeroSpine(){
       React.createElement("text",{x:X0+150,y:46,fill:"rgba(255,255,255,.34)",fontSize:11,textAnchor:"middle",style:mono},"ACT I · SETUP"),
       React.createElement("text",{x:(actX[0]+actX[1])/2,y:46,fill:"rgba(255,255,255,.34)",fontSize:11,textAnchor:"middle",style:mono},"ACT II · COMPLICATION"),
       React.createElement("text",{x:X1+26,y:46,fill:"rgba(255,255,255,.34)",fontSize:11,textAnchor:"end",style:mono},"ACT III · RESOLUTION"),
-      // the spine itself, drawn on
-      React.createElement("path",{className:"lp-spine-path",d,pathLength:1,vectorEffect:"non-scaling-stroke"}),
-      // scene nodes, colored by where the scene CLOSES; staggered pop-in
-      pts.map((p,i)=>React.createElement("circle",{key:"n"+i,className:"lp-spine-node",cx:p.x,cy:p.y,r:6,
+      // charge-tinted area under the wave, then the glow pass, then the line
+      React.createElement("path",{className:"lp-spine-area",d:area,fill:"url(#lpgFill)"}),
+      React.createElement("path",{className:"lp-spine-path glow",d,pathLength:1,stroke:"url(#lpgLine)",
+        strokeWidth:7,opacity:.3,filter:"url(#lpgBlur)"}),
+      React.createElement("path",{className:"lp-spine-path",d,pathLength:1,stroke:"url(#lpgLine)",strokeWidth:2.5}),
+      // scene nodes: soft halo + core, colored by where the scene CLOSES
+      pts.map((p,i)=>React.createElement("circle",{key:"h"+i,className:"lp-spine-halo",cx:p.x,cy:p.y,r:12,
+        fill:p.c>=0?"var(--pos-bright)":"var(--neg-bright)",opacity:.14,
+        style:{animationDelay:(0.35+i*0.16)+"s"}})),
+      pts.map((p,i)=>React.createElement("circle",{key:"n"+i,className:"lp-spine-node",cx:p.x,cy:p.y,r:5.5,
         fill:p.c>=0?"var(--pos-bright)":"var(--neg-bright)",stroke:"var(--lpw-black)",strokeWidth:2.5,
         style:{animationDelay:(0.35+i*0.16)+"s"}})),
-      // milestone captions, fading in after the draw
+      // milestone captions
       pts.filter(p=>p.m).map((p,i)=>React.createElement("text",{key:"m"+i,className:"lp-spine-lab",
-        x:p.x,y:p.up?p.y-20:p.y+30,textAnchor:"middle",fill:"rgba(255,255,255,.5)",fontSize:11,
-        style:{...mono,animationDelay:(1.4+i*0.12)+"s"}},p.m.toUpperCase()))),
-    React.createElement("span",{className:"lp-video-badge"},"21:9"));
+        x:p.x,y:p.up?p.y-24:p.y+34,textAnchor:"middle",fill:"rgba(255,255,255,.5)",fontSize:11,
+        style:{...mono,animationDelay:(1.4+i*0.12)+"s"}},p.m.toUpperCase())),
+      // the playhead — a dot of light reading the story on a loop
+      React.createElement("circle",{className:"lp-spine-run halo",r:10,fill:"rgba(255,255,255,.35)",
+        filter:"url(#lpgBlur)",style:runStyle}),
+      React.createElement("circle",{className:"lp-spine-run",r:3.5,fill:"#fff",style:runStyle})));
 }
-const HeroFilm = HeroSpine;   // hero slot keeps its name; the film frame now shows the spine
 
 const LP_FEATURES = [
   { no:"01", icon:"script", title:"Development",
@@ -152,7 +160,7 @@ function Landing({ onStart, onSignIn }){
 
     // hero media — the 21:9 short-film placeholder, still outside the frame
     React.createElement("section",{className:"lp-hero-media"},
-      React.createElement(HeroFilm,null)),
+      React.createElement(HeroSpine,null)),
 
     // the hairline-framed column starts BELOW the hero (features onward)
     React.createElement("div",{className:"lp-frame"},
