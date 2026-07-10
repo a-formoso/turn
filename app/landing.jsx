@@ -21,11 +21,15 @@ function HeroSpine(){
     {c:2.3,m:"Climax",up:true},
   ];
   const pts=SCENES.map((s,i)=>({ ...s, x:X0+(X1-X0)*i/(SCENES.length-1), y:MID-s.c*AMP }));
+  // Catmull-rom → cubic beziers. TENSION sets curve handle length: smaller =
+  // rounder, fuller crests/troughs (standard is 6; ~4.4 gives softer, more
+  // organic peaks without overshooting into loops).
+  const TENSION = 4.4;
   let d="M"+pts[0].x.toFixed(1)+" "+pts[0].y.toFixed(1);
   for(let i=0;i<pts.length-1;i++){
     const p0=pts[Math.max(0,i-1)], p1=pts[i], p2=pts[i+1], p3=pts[Math.min(pts.length-1,i+2)];
-    d+=" C"+[p1.x+(p2.x-p0.x)/6, p1.y+(p2.y-p0.y)/6,
-             p2.x-(p3.x-p1.x)/6, p2.y-(p3.y-p1.y)/6, p2.x, p2.y]
+    d+=" C"+[p1.x+(p2.x-p0.x)/TENSION, p1.y+(p2.y-p0.y)/TENSION,
+             p2.x-(p3.x-p1.x)/TENSION, p2.y-(p3.y-p1.y)/TENSION, p2.x, p2.y]
              .map(n=>n.toFixed(1)).join(" ");
   }
   const area = d+" L"+X1+" "+MID+" L"+X0+" "+MID+" Z";
