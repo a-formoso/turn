@@ -1,24 +1,49 @@
 /* plans.jsx — Cinema Machine subscription plans + paywall modal.
    The three tiers open their Stripe Payment Link, tagged with the user's Supabase
    id (client_reference_id) so the webhook credits the right account. Credits are
-   granted server-side by supabase/functions/stripe-webhook. TEST links for now —
-   swap PLANS[].link to the Live payment links at launch. */
+   granted server-side by supabase/functions/stripe-webhook.
+
+   TEST vs LIVE links auto-switch by hostname (see LIVE_HOSTS / planLink below):
+   production domains use `live`, everything else (localhost, *.replit.dev preview)
+   uses `test` — so local/preview testing can never hit a real card. At launch you
+   only fill in the three `live:` URLs; no code path changes. Until a `live` URL is
+   set it safely falls back to `test`. */
+
+/* Production hostnames that should use the LIVE payment links. Add the custom
+   domain here once cinema.infinitestudioai.com is verified. */
+const LIVE_HOSTS = ["cinema-machine.replit.app", "cinema.infinitestudioai.com", "cinemamachine.ai"];
 
 const PLANS = [
   { tier:"writer",   name:"Writer",   price:"$19", credits:80,
     blurb:"Write, design, and shoot short scenes.",
     features:["80 credits / month","Story, cast, props & locations","Video on Kling & 720p"],
-    link:"https://buy.stripe.com/test_8x24gB63afmHgtS3eXc7u00" },
+    test:"https://buy.stripe.com/test_8x24gB63afmHgtS3eXc7u00",
+    live:"https://buy.stripe.com/8x24gB63afmHgtS3eXc7u00" },
   { tier:"director", name:"Director", price:"$49", credits:240, popular:true,
     blurb:"Produce a whole short each month.",
     features:["240 credits / month","Every model unlocked","Up to 1080p","Priority render queue"],
-    link:"https://buy.stripe.com/test_00waEZ77eeiD6Ti4j1c7u01" },
+    test:"https://buy.stripe.com/test_00waEZ77eeiD6Ti4j1c7u01",
+    live:"https://buy.stripe.com/00waEZ77eeiD6Ti4j1c7u01" },
   { tier:"studio",   name:"Studio",   price:"$149", credits:900,
     blurb:"Full films, back to back.",
     features:["900 credits / month","4K output","Batch rendering","Front of the queue"],
-    link:"https://buy.stripe.com/test_bJe9AVbnu6QbdhG2aTc7u02" },
+    test:"https://buy.stripe.com/test_bJe9AVbnu6QbdhG2aTc7u02",
+    live:"https://buy.stripe.com/bJe9AVbnu6QbdhG2aTc7u02" },
 ];
 window.CINEMA_PLANS = PLANS;
+
+/* Pick the right Payment Link for the current origin.
+   - Production host: the LIVE link, or "" if not set yet (NEVER fall back to a
+     test checkout on a real domain — a "" makes startCheckout show a soft notice).
+   - Anywhere else (localhost, *.replit.dev preview): the TEST link, so dev/preview
+     testing can never touch a real card. */
+function planLink(plan){
+  let host = "";
+  try{ host = (window.location && window.location.hostname || "").toLowerCase(); }catch(e){}
+  const isLiveHost = LIVE_HOSTS.indexOf(host) >= 0;
+  return isLiveHost ? (plan.live || "") : plan.test;
+}
+window.turnPlanLink = planLink;
 
 /* ---- PER-TIER ENTITLEMENTS — the checkout copy, made true in the app. ----------
    Enforced in the Stage (model picker, resolution ladder, takes-per-Generate):
@@ -64,8 +89,13 @@ function startCheckout(plan){
     try{ window.dispatchEvent(new CustomEvent("turn-need-signin")); }catch(e){}
     return;
   }
-  const url = plan.link
-    + (plan.link.indexOf("?")>=0 ? "&" : "?")
+  const base = planLink(plan);
+  if(!base){
+    if(window.appToast) window.appToast("Checkout isn't available yet — please try again shortly.","info");
+    return;
+  }
+  const url = base
+    + (base.indexOf("?")>=0 ? "&" : "?")
     + "client_reference_id=" + encodeURIComponent(uid)
     + (email ? ("&prefilled_email=" + encodeURIComponent(email)) : "");
   window.open(url, "_blank", "noopener");
