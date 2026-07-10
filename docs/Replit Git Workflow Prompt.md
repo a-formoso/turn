@@ -80,3 +80,21 @@ git push origin main
 
 One writer at a time on `main`: as long as changes flow one direction at a time
 (Replit → GitHub → primary, or primary → GitHub → Replit), the copies never fork.
+
+## Known Replit behavior: Publish auto-commits to `main`
+
+Every click of Replit's **Publish/Republish** button creates a local commit on `main`
+("Published your App", author `Replit Agent <agent@replit.com>`, trailer
+`Replit-Commit-Author: Deployment`). This is platform bookkeeping — not your agent,
+not configurable off — and it makes `git pull --ff-only` fail with "diverging
+branches" after every publish.
+
+These commits are disposable: the deployed app lives in Replit's infrastructure and
+the real source of truth is GitHub. The standing sync ritual on Replit is therefore:
+
+```bash
+git fetch origin && git reset --hard origin/main   # discard publish bookkeeping, match GitHub
+```
+
+then Republish. Never try to merge or push the "Published your App" commits — reset
+them away each time.
