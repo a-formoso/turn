@@ -992,7 +992,7 @@ async function nbGenerate(prompt, opts){
     try{ const j = await res.json(); if(j && j.error && j.error.message) msg = j.error.message; }catch(e){}
     if(res.status===400 && /api key/i.test(msg)) msg = "That API key was rejected. Check it in Google AI Studio.";
     if(res.status===404) msg = "This model isn't available on your key yet \u2014 try the other model.";
-    throw new Error(msg);
+    throw new Error((window.turnSafeError||(x=>x))(msg));   // mask provider billing/key detail from users
   }
   const data = await res.json();
   const cand = (data.candidates||[])[0] || {};

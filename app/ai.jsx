@@ -36,7 +36,7 @@ window.WRITING_MODELS = WRITING_MODELS; window.getWritingModelId = getWritingMod
    through unchanged. Codes are intentionally opaque (CM-1x) so the surface text
    reveals nothing; the mapping lives here for the admin. */
 const ERR_CODES = [
-  { code:"CM-11", re:/credit balance|too low|billing|quota|insufficient|payment|purchase credits/i }, // provider account funds
+  { code:"CM-11", re:/credit balance|too low|billing|quota|insufficient|payment|purchase credits|deplet|prepay|out of credit|balance is/i }, // provider account funds
   { code:"CM-12", re:/api[- ]?key|unauthor|invalid.*key|x-api-key|missing key|forbidden/i },          // provider key / auth
   { code:"CM-13", re:/rate.?limit|overloaded|429|capacity|too many requests/i },                       // provider throttle
   { code:"CM-14", re:/edge function|proxy|failed to send|couldn.t reach|reach |network|timeout|fetch|50[234]|gateway|not deployed/i }, // transport / infra
