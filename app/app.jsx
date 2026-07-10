@@ -358,18 +358,23 @@ function App(){
   const [propsMasterForce, setPropsMasterForce] = React.useState(false);
   const [locScoutForce, setLocScoutForce] = React.useState(false);
   // ---- Lookbook staleness: which Art Room tabs are out of date vs the current Lookbook ----
-  const lbContentFlags = {
-    characters: (characters||[]).some(c=> (typeof charVisualsDrafted==="function") ? charVisualsDrafted(c) : !!(c&&c.id)),
-    props: (props||[]).some(p=> (typeof propVisualsDrafted==="function") ? propVisualsDrafted(p) : false),
-    locations: (locations||[]).some(l=> (typeof locVisualsDrafted==="function") ? locVisualsDrafted(l) : false),
-    colorist: !!(project && project.styleBible && project.styleBible.sceneStyles && Object.keys(project.styleBible.sceneStyles).length),
-  };
-  const staleDepts = (typeof lookbookStaleDepts==="function") ? lookbookStaleDepts(lookbook, lookbookNote, lookbookApplied, lbContentFlags) : {};
-  const staleTabs = {};
-  if(staleDepts.characters) staleTabs.characters = true;
-  if(staleDepts.props) staleTabs.props = true;
-  if(staleDepts.locations) staleTabs.locations = true;
-  if(staleDepts.colorist) staleTabs.stylebible = true;
+  // Memoized so it only recomputes when a real input changes — the App re-renders on
+  // every keystroke/autosave across the studio, and this needn't recompute each time.
+  const staleTabs = React.useMemo(()=>{
+    const lbContentFlags = {
+      characters: (characters||[]).some(c=> (typeof charVisualsDrafted==="function") ? charVisualsDrafted(c) : !!(c&&c.id)),
+      props: (props||[]).some(p=> (typeof propVisualsDrafted==="function") ? propVisualsDrafted(p) : false),
+      locations: (locations||[]).some(l=> (typeof locVisualsDrafted==="function") ? locVisualsDrafted(l) : false),
+      colorist: !!(project && project.styleBible && project.styleBible.sceneStyles && Object.keys(project.styleBible.sceneStyles).length),
+    };
+    const staleDepts = (typeof lookbookStaleDepts==="function") ? lookbookStaleDepts(lookbook, lookbookNote, lookbookApplied, lbContentFlags) : {};
+    const t = {};
+    if(staleDepts.characters) t.characters = true;
+    if(staleDepts.props) t.props = true;
+    if(staleDepts.locations) t.locations = true;
+    if(staleDepts.colorist) t.stylebible = true;
+    return t;
+  },[lookbook, lookbookNote, lookbookApplied, characters, props, locations, project]);
   // re-draft one department from the updated Lookbook (confirm first; agent runs in force
   // mode). mode "full" (default) also regenerates the sheets; mode "draft" re-drafts the
   // specs only and leaves every generated image untouched — regenerate later, when ready.
