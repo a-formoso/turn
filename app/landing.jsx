@@ -16,7 +16,7 @@ function HeroSpine(){
   const W=1260, H=540, MID=H/2, AMP=72, X0=76, X1=W-52;
   const SCENES=[
     {c:-1.0},{c:1.6,m:"Inciting Incident",up:true},{c:-0.6},{c:-2.2,m:"Act Climax"},
-    {c:1.2},{c:2.4,m:"Rising Action",up:true},{c:-0.8},{c:-2.6,m:"Mid-Act Climax"},
+    {c:1.2},{c:2.4,m:"False Victory",up:true},{c:-0.8},{c:-2.6,m:"Mid-Act Climax"},
     {c:1.8,m:"Reversal",up:true},{c:-1.2},{c:-2.9,m:"Low Point"},{c:0.8},
     {c:2.3,m:"Climax",up:true},
   ];
