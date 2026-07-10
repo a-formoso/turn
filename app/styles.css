@@ -5643,3 +5643,20 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .qa-foot-note{font-family:var(--f-mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;
   color:var(--txt-2);margin-right:auto}
 .qa-foot .ns-btn{display:inline-flex;align-items:center;gap:6px}
+
+/* ---- Unified popup/window close button — MUSE-dock ghost style. -------------
+   One visual language for every modal/lightbox close: borderless, transparent,
+   quiet text color, soft rounded hover fill (exactly .muse-dock-x). Positioning
+   and size rules from each class's original block still apply — this only
+   unifies the LOOK. (.plans-x/.voice-modal-x ride on .ag-x.) */
+.ag-x,.bible-x,.cameo-x,.ai-x,.agent-undo .au-x,.sp-prev-x{
+  background:none;border:none;color:var(--txt-2);border-radius:8px;
+  display:grid;place-items:center;cursor:pointer;transition:.1s}
+.ag-x:hover,.bible-x:hover,.cameo-x:hover,.ai-x:hover,.agent-undo .au-x:hover,.sp-prev-x:hover{
+  color:var(--txt-0);background:var(--bg-4)}
+/* Floating closes that sit ON TOP of fullscreen imagery keep a soft dark scrim
+   (a fully transparent ghost disappears over a bright photo) but adopt the
+   family's rounded-square shape and hover behavior. */
+.dt-preview-x,.stage2-lightbox-x{
+  border:none;border-radius:10px;background:rgba(15,15,18,.55);color:#fff;transition:.1s}
+.dt-preview-x:hover,.stage2-lightbox-x:hover{background:rgba(15,15,18,.82);color:#fff}
