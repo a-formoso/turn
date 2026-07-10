@@ -12,8 +12,10 @@ const TYPES = {
   ".woff2": "font/woff2", ".ico": "image/x-icon",
 };
 
-// Block dotfiles, .git, and directories that shouldn't be served
-const BLOCKED = /(?:^|\/)(?:\.|\.git|\.claude|\.local|\.cache|\.agents|node_modules|docs)(\/|$)/;
+// Block any path segment beginning with a dot (.git, .env, .replit, ., .., hidden files at any depth)
+const DOTSEG = /(?:^|\/)\./;
+// Block sensitive non-dot directories that shouldn't be served
+const BLOCKED = /(?:^|\/)(?:node_modules|docs)(?:\/|$)/;
 
 http.createServer((req, res) => {
   let urlPath;
@@ -26,8 +28,8 @@ http.createServer((req, res) => {
   if (urlPath.includes("\0")) { res.writeHead(400); return res.end("bad request"); }
   if (urlPath === "/") urlPath = "/TURN.html";
 
-  // Block obviously sensitive paths before resolving
-  if (BLOCKED.test(urlPath)) { res.writeHead(403); return res.end("forbidden"); }
+  // Block dotfiles/dirs and other sensitive paths before resolving
+  if (DOTSEG.test(urlPath) || BLOCKED.test(urlPath)) { res.writeHead(403); return res.end("forbidden"); }
 
   // Resolve first, then enforce the boundary with a trailing separator so a
   // sibling dir sharing the prefix (e.g. workspace-backup) can't be served.
