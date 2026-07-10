@@ -179,8 +179,8 @@ function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, on
         React.createElement("button",{className:"proj-row-act",title:"Rename",
           onClick:()=>{ setRenaming(p.id); setDraft(p.title); }},
           React.createElement(Icon.wand,{s:12})),
-        (projects.length>1) && React.createElement("button",{className:"proj-row-act danger",title:p.showId?"Delete episode":"Delete film",
-          onClick:async ()=>{ const ok=await window.appConfirm({title:"Delete \u201c"+p.title+"\u201d?",body:p.showId?"This removes the episode (the show's bible and other episodes stay).":"This removes the film and its sheets.",confirmLabel:"Delete",danger:true}); if(ok) onDelete(p.id); }},
+        React.createElement("button",{className:"proj-row-act danger",title:p.showId?"Delete episode":"Delete film",
+          onClick:async ()=>{ const ok=await window.appConfirm({title:"Delete \u201c"+p.title+"\u201d?",body:p.showId?"This removes the episode (the show's bible and other episodes stay).":"This removes the film and its sheets. If it's your only film, a fresh blank one opens in its place.",confirmLabel:"Delete",danger:true}); if(ok) onDelete(p.id); }},
           React.createElement(Icon.trash,{s:12})));
 
   return React.createElement("div",{className:"proj-wrap",ref:ref},

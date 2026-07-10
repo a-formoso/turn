@@ -179,13 +179,15 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
   const _MODELS = window.WRITING_MODELS || [];
   const [artMid, setArtMid] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId() : "");
   const pickArtModel = (id)=>{ setArtMid(id); if(typeof window.setWritingModelId==="function") window.setWritingModelId(id); };
-  const _mid = isArt ? artMid : "claude-opus-4-8";
+  // Writers' Room agents run on the user's SELECTED writing model (not a hardcoded
+  // one) — so picking Fable 5 in New Story actually runs Fable 5, not Opus 4.8.
+  const _mid = isArt ? artMid : ((window.getWritingModelId && window.getWritingModelId()) || "claude-fable-5");
   const modelLabel = (_MODELS.find(m=>m.id===_mid)||{}).label || _mid || "model";
   const start = async ()=>{
     cancelled.current = false;
     setTrace([]); setPending(null); setStatus("running");
     const prevForce = window.__forceWritingModel;
-    if(!isArt) window.__forceWritingModel = "claude-opus-4-8";   // pin Writers' Room agents to Claude
+    if(!isArt) window.__forceWritingModel = _mid;   // pin the run to the user's chosen writing model
     const ctx = ctxFactory({
       input: inputRef.current,
       agentName: agent.name,

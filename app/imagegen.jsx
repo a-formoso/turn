@@ -919,12 +919,13 @@ async function proxyGenerate(prompt, opts, provider){
   if(error){
     const status = statusOf(error);
     if(status===401) throw new Error("Sign in to use server-side image generation \u2014 it runs on your server, not in the browser.");
-    if(status===404) throw new Error("The image proxy isn't deployed yet. Deploy supabase/functions/image-proxy and set imageProxy:true in supabase-config.js.");
+    const _safe = window.turnSafeError || (x=>x);
+    if(status===404) throw new Error(_safe("The image proxy isn't deployed yet. Deploy supabase/functions/image-proxy and set imageProxy:true in supabase-config.js."));
     if(status===504) throw new Error("The image generation exceeded the server time limit. Cinema Machine preserved your selected quality and resolution; try again, or manually choose a faster setting if you prefer.");
     if(status===502 || status===503) throw new Error("The image proxy is temporarily unavailable. Try again in a moment.");
-    throw new Error("Couldn't reach the image proxy: "+((error && error.message) || "unknown error")+".");
+    throw new Error(_safe("Couldn't reach the image proxy: "+((error && error.message) || "unknown error")+"."));
   }
-  if(data && data.error) throw new Error(data.error);          // provider error relayed by the proxy
+  if(data && data.error) throw new Error((window.turnSafeError||(x=>x))(data.error));          // provider error relayed by the proxy
   if(opts.metaOut && data && typeof data.grounded!=="undefined") opts.metaOut.grounded = !!data.grounded;
   // Provider-native landscape/portrait canvases are not always Cinema Machine's selected
   // ratio (GPT Image landscape is 3:2). Normalize BEFORE returning, so callers

@@ -2331,6 +2331,15 @@ function App(){
       // ADMIN ONLY: inspect the whole continuity JSON (the Film Bible) the studio reads from
       onViewBible: isAdmin ? (()=> buildFilmBible({ project, scenes, characters, props, locations, shots, drafts, beatsMap, lookbook, lookbookNote })) : null,
       onManageStyles: (userEmail || null),   // every signed-in user manages their own styles (admin also gets the global tier inside)
+      // a film "has a render style" once the look is established — a colorist style bible,
+      // or any character/prop/location carrying a picked renderStyleKey. Gates the Styles
+      // button in the Writers' Room (nothing to manage before a style exists).
+      hasFilmStyle: !!(
+        (project && project.styleBible && project.styleBible.sceneStyles && Object.keys(project.styleBible.sceneStyles).length) ||
+        (characters||[]).some(c=>c && c.renderStyleKey) ||
+        (props||[]).some(p=>p && p.renderStyleKey) ||
+        (locations||[]).some(l=>l && l.renderStyleKey)
+      ),
       theme,onTheme:setTheme,
       authSlot: React.createElement(AccountChip,{ session, cloudActive: cloudMode,
         onSignIn:()=>setAuthOpen(true), onSignOut:signOut }),

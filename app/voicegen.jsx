@@ -118,11 +118,12 @@ async function vgProxy(op, payload){
   catch(e){ error=e; }
   if(error){
     const status=(error&&error.context&&error.context.status)||error.status||0;
+    const _safe = window.turnSafeError || (x=>x);
     if(status===401) throw new Error("Sign in to render voice — it runs on your server, not the browser.");
-    if(status===404) throw new Error("The media proxy isn't deployed yet. Deploy supabase/functions/image-proxy (the voice route), then add an ElevenLabs key in API Keys or set ELEVENLABS_API_KEY.");
-    throw new Error("Couldn't reach the voice proxy: "+((error&&error.message)||"unknown error")+".");
+    if(status===404) throw new Error(_safe("The media proxy isn't deployed yet. Deploy supabase/functions/image-proxy (the voice route), then add an ElevenLabs key in API Keys or set ELEVENLABS_API_KEY."));
+    throw new Error(_safe("Couldn't reach the voice proxy: "+((error&&error.message)||"unknown error")+"."));
   }
-  if(data && data.error) throw new Error(data.error);   // ElevenLabs error relayed by the proxy
+  if(data && data.error) throw new Error((window.turnSafeError||(x=>x))(data.error));   // ElevenLabs error relayed by the proxy
   return data||{};
 }
 

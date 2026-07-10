@@ -65,7 +65,7 @@ function OverflowMenu({ onNewStory, project, scenes, drafts, onReset, room }){
     ["outline", Icon.layers, "Story outline (.txt)"],
     ["csv", Icon.grid, "Spine data (.csv)"],
   ];
-  const inWriters = room!=="art";   // export is a Writers' Room (screenplay/story) action
+  const inWriters = room!=="art" && (scenes||[]).length>0;   // export: Writers'/Stage action, only once a story exists
   return React.createElement("div",{className:"overflow-wrap",ref:ref},
     React.createElement("button",{className:`tb-icon ${open?"on":""}`,onClick:()=>setOpen(o=>!o),"aria-label":"More actions",title:"More"},
       React.createElement(Icon.moreV,{s:18})),
@@ -418,7 +418,7 @@ function StoryBriefModal({ project, onClose }){
 }
 window.StoryBriefModal = StoryBriefModal;
 
-function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, onManageStyles, theme, onTheme, authSlot, projectSlot, onHome }){
+function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, onManageStyles, hasFilmStyle, theme, onTheme, authSlot, projectSlot, onHome }){
   const [bibleOpen, setBibleOpen] = React.useState(false);
   const [briefOpen, setBriefOpen] = React.useState(false);
   const [stylesOpen, setStylesOpen] = React.useState(false);
@@ -454,16 +454,21 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
         title:"Film Bible — view the whole continuity JSON the studio reads from"},
         React.createElement(Icon.layers,{s:14}),"JSON"),
       // Signed-in users manage their personal render styles; admin also manages global render styles.
-      onManageStyles && React.createElement("button",{className:"tb-btn",onClick:()=>setStylesOpen(true),
+      // Hidden in the Writers' Room until the film actually HAS a render style established
+      // (nothing to manage during the writing phase); always available in Art/Stage.
+      onManageStyles && (room!=="writers" || hasFilmStyle) && React.createElement("button",{className:"tb-btn",onClick:()=>setStylesOpen(true),
         title:"Render styles — manage global render styles and your locked styles"},
         React.createElement((Icon.sparkles||Icon.layers),{s:14}),"Styles"),
-      React.createElement("button",{className:"tb-btn",onClick:()=>setApiKeysOpen(true),
-        title:"API keys — add your own provider keys for image, text, voice and video generation"},
+      // API keys: ADMIN ONLY. Subscribers never enter provider keys — all generation
+      // runs on the platform's server-side keys through the proxy (no key in the browser).
+      window.turnIsAdmin && React.createElement("button",{className:"tb-btn",onClick:()=>setApiKeysOpen(true),
+        title:"API keys — platform provider keys (admin only)"},
         React.createElement((Icon.key||Icon.lock||Icon.layers),{s:14}),"API Keys"),
       React.createElement("button",{className:"tb-btn newstory",onClick:onNewStory,title:"Start a new story from an idea"},
         React.createElement(Icon.plus,{s:14}),"New Story"),
-      // Export is a Writers' Room action (screenplay / story formats) — only there (not Art / Stage)
-      room==="writers" && React.createElement(ExportMenu,{project,scenes,drafts,onReset}),
+      // Export is a Writers' Room action (screenplay / story formats) — only there,
+      // and only once a story exists (nothing to export from an empty canvas).
+      room==="writers" && (scenes||[]).length>0 && React.createElement(ExportMenu,{project,scenes,drafts,onReset}),
       React.createElement(OverflowMenu,{onNewStory,project,scenes,drafts,onReset,room}),
       // 'Agents' moved to the ViewNav's right zone (Writers' Room), mirroring the Art Room's
       // 'Run pre-production' — both sit to the right of their centered tab strip.

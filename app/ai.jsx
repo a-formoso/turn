@@ -26,6 +26,29 @@ function getWritingModelId(){ try{ const s=localStorage.getItem(WRITING_MODEL_KE
 function setWritingModelId(id){ try{ localStorage.setItem(WRITING_MODEL_KEY, id); window.dispatchEvent(new CustomEvent("turn-writing-model-changed")); }catch(e){} }
 window.WRITING_MODELS = WRITING_MODELS; window.getWritingModelId = getWritingModelId; window.setWritingModelId = setWritingModelId;
 
+/* ---- User-facing error masking ------------------------------------------------
+   Providers and the proxy sometimes return internal detail (billing/credits,
+   provider keys, gateway/network). Users should never see the company's internal
+   affairs — a raw "your Anthropic credit balance is too low" reads as broken and
+   hurts trust. So: ADMINS see the real error; everyone else gets a neutral message
+   plus an opaque ref code they can quote to support, which the admin decodes with
+   ERR_CODES below. Non-sensitive, already-user-safe errors (e.g. "sign in") pass
+   through unchanged. Codes are intentionally opaque (CM-1x) so the surface text
+   reveals nothing; the mapping lives here for the admin. */
+const ERR_CODES = [
+  { code:"CM-11", re:/credit balance|too low|billing|quota|insufficient|payment|purchase credits/i }, // provider account funds
+  { code:"CM-12", re:/api[- ]?key|unauthor|invalid.*key|x-api-key|missing key|forbidden/i },          // provider key / auth
+  { code:"CM-13", re:/rate.?limit|overloaded|429|capacity|too many requests/i },                       // provider throttle
+  { code:"CM-14", re:/edge function|proxy|failed to send|couldn.t reach|reach |network|timeout|fetch|50[234]|gateway|not deployed/i }, // transport / infra
+];
+function safeError(raw){
+  const s = String(raw==null ? "" : (raw.message || raw));
+  if(window.turnIsAdmin) return s;                       // admins get the truth
+  for(const r of ERR_CODES){ if(r.re.test(s)) return "The studio's engine is briefly unavailable — please try again in a moment. (ref "+r.code+")"; }
+  return s;                                              // non-sensitive / already user-safe
+}
+window.turnSafeError = safeError;
+
 /* Lightweight global toast so AI/provider failures (depleted credits, missing key,
    transport errors) are SURFACED to the user instead of dying silently in a catch.
    Vanilla DOM (no React dep) so it's callable from anywhere, incl. this early module.
@@ -67,7 +90,7 @@ if(!window.claude || typeof window.claude.complete !== "function"){
       const m = (forcedId && WRITING_MODELS.find(x=>x.id===forcedId))
         || WRITING_MODELS.find(x=>x.id===getWritingModelId()) || WRITING_MODELS[0];
       const sb = (typeof window.sbClient==="function") ? window.sbClient() : null;
-      const fail = (msg)=>{ if(typeof window.appToast==="function") window.appToast(msg,"error"); throw new Error(msg); };
+      const fail = (msg)=>{ const m = safeError(msg); if(typeof window.appToast==="function") window.appToast(m,"error"); throw new Error(m); };
       if(!sb || !sb.functions) return fail("The writing AI runs on your server — sign in to use it.");
       const fnName = (window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxyFn) || "image-proxy";
       let data, error;
@@ -142,10 +165,10 @@ async function museComplete(messages){
   if(error){
     const status = (error && error.context && error.context.status) || error.status;
     if(status===401) throw new Error("Sign in to chat with MUSE.");
-    if(status===404) throw new Error("MUSE's text task isn't deployed yet — redeploy image-proxy.");
-    throw new Error("Couldn't reach MUSE: "+((error && error.message) || "unknown error")+".");
+    if(status===404) throw new Error(safeError("MUSE's text task isn't deployed yet — redeploy image-proxy."));
+    throw new Error(safeError("Couldn't reach MUSE: "+((error && error.message) || "unknown error")+"."));
   }
-  if(data && data.error) throw new Error(data.error);   // provider error relayed by the proxy
+  if(data && data.error) throw new Error(safeError(data.error));   // provider error relayed by the proxy
   textSpendAdd(MUSE_MODEL.id, "muse");   // meter the successful call
   return (data && typeof data.text==="string") ? data.text : "";
 }
@@ -695,7 +718,7 @@ if(_imageFeature) _imageFeature.what = _imageFeature.what
   .replace("If the proxy isn't enabled, GPT Image simply isn't offered and Nano Banana uses your local Google key.",
     "If the proxy isn't enabled, GPT Image simply isn't offered and Nano Banana uses your locally saved Google key.");
 if(_imageFeature) _imageFeature.what += " The image-engine controls stay in a compact floating right-edge dock at every viewport; clicking it opens the model, quality, aspect and resolution controls without inserting a large panel into the Art Room layout.";
-APP_FEATURES.push({ name:"User API keys", what:"The top bar has an API Keys modal where a user can save their own provider keys locally on this device for text, image, voice and video generation. These keys are not synced across devices. For proxy-routed providers, TURN sends only the relevant saved key with that request; if no user key is saved, the server proxy falls back to its configured server secret. Google image generation can still run directly from the browser with the saved Google key when the proxy is off; OpenAI image, voice and video remain server-proxy-only because they cannot safely or reliably run direct from the browser." });
+APP_FEATURES.push({ name:"Provider keys (no key needed)", what:"Subscribers never enter any API key. All generation — text, image, voice and video — runs on Cinema Machine's own keys held as server secrets and reached through the server-side proxy, so no provider key ever lives in your browser and there is nothing for you to configure. Your plan's credits cover the provider costs. (An API Keys panel exists for platform administrators only, to manage those server keys; regular accounts don't see it.)" });
 const _charSheetsFeature = APP_FEATURES.find(f=>f.name==="Character Sheets (Art Room)");
 if(_charSheetsFeature) _charSheetsFeature.what = _charSheetsFeature.what
   .replace(/The character sheet's render block specifies a 16:9 aspect with a 10-PANEL 5×2 GRID layout[\s\S]*?not just a neutral portrait\./,
@@ -1128,8 +1151,8 @@ async function aiVisionComplete(messages, images){
   try{ ({ data, error } = await sb.functions.invoke(fnName, { body:{ task:"text", provider:m.provider, model:m.id, messages, images,
     userApiKeys: window.turnApiKeysForProxy ? window.turnApiKeysForProxy([m.provider]) : undefined } })); }
   catch(e){ error = e; }
-  if(error) throw new Error("Couldn't reach the vision model: "+((error&&error.message)||"unknown error"));
-  if(data && data.error) throw new Error(data.error);
+  if(error) throw new Error(safeError("Couldn't reach the vision model: "+((error&&error.message)||"unknown error")));
+  if(data && data.error) throw new Error(safeError(data.error));
   textSpendAdd(m.id, "vision");   // meter the successful call (images attached → higher rate)
   return { text:(data && typeof data.text==="string") ? data.text : "", vision: !!(data && data.vision) };
 }
