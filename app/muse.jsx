@@ -23,21 +23,29 @@ const VISITOR_CHIPS = [
 ];
 const TEASER_LIMIT = 3;   // free messages before the sign-up gate
 const TEASER_QA = [
-  { k:["what is turn","whats turn","what's turn","what is this","what's this","whats this","about turn","what do you do","what does turn","tell me about"],
-    a:"Cinema Machine is a story-architecture studio for AI filmmakers. You build your film as a value-charge spine — every scene plotted by its emotional charge, so you can see at a glance which scenes truly turn and which fall flat. Sign up free and I’ll architect yours with you." },
+  { k:["cinema machine","what is turn","whats turn","what's turn","what is this","what's this","whats this","about turn","what do you do","what does turn","tell me about"],
+    a:"Cinema Machine is a story-architecture studio for AI filmmakers. You build your film as a value-charge spine — every scene plotted by its emotional charge, so you can see at a glance which scenes truly turn and which fall flat — then design its cast and world, and shoot it, all in one place. Sign up and I’ll architect yours with you." },
   { k:["infinite studio method","method","the craft","how does it work","philosophy","approach","theory","what makes"],
     a:"The Infinite Studio method is the craft Cinema Machine runs on: every scene should turn a value — swinging from positive to negative or back — driven by what your characters want against what stands in their way. Get that right and the whole film holds together. Sign up and I’ll pressure-test your scenes against it." },
   { k:["what can i make","what can i build","what can i do","make here","build here","capabilities","features","what's included","whats included","get out of"],
-    a:"A complete film blueprint: the value-charge spine, scene beats, a generated screenplay, and a full Art Room for characters, props, locations, style and shots. Sign up free to start your first story." },
-  { k:["why sign up","is it free","it free","for free","sign up","signup","create account","cost","price","pricing","worth it","why should i"],
-    a:"Signing up is free and unlocks the whole studio — I’ll help you turn an idea into a logline, architect the spine, and refine it scene by scene. Create an account and let’s build your film." },
+    a:"A complete film: the value-charge spine, scene beats, a generated screenplay, a full Art Room for characters, props, locations, style and shots — and the Stage, where it all becomes footage. Sign up to start your first story." },
+  { k:["why sign up","is it free","it free","for free","sign up","signup","create account","cost","costs","price","prices","pricing","how much","plans","subscription","worth it","why should i"],
+    a:"Creating an account is free — the studio runs on monthly plans: Writer at $19, Director at $49, Studio at $149, each with a monthly allowance of credits that power every render. Sign up, then pick the plan that fits when you’re ready to build." },
   { k:["who are you","what are you","your name","are you muse","hello","hi","hey"],
     a:"I’m MUSE, your story guide inside Cinema Machine. Once you’re signed in I read your spine and help you shape scenes, fix the ones that don’t turn, and answer anything about your film. Sign up and put me to work." },
 ];
-const TEASER_GATE = "That’s part of the full studio — sign up free and I’ll walk you through it with your own story open.";
+const TEASER_GATE = "That’s part of the full studio — sign up and I’ll walk you through it with your own story open.";
 function teaserAnswer(q){
-  const l = " "+q.toLowerCase()+" ";
-  for(const item of TEASER_QA){ if(item.k.some(k=>l.includes(k))) return item.a; }
+  // Normalize curly apostrophes, then match each key on WORD BOUNDARIES — plain
+  // substring matching false-fired (e.g. the greeting key "hi" inside "macHIne",
+  // which made "What is Cinema Machine?" answer with MUSE's self-intro).
+  const l = q.toLowerCase().replace(/[‘’]/g,"'");
+  for(const item of TEASER_QA){
+    if(item.k.some(k=>{
+      const rx = new RegExp("\\b"+k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b");
+      return rx.test(l);
+    })) return item.a;
+  }
   return null;   // unknown / too deep → gentle gate
 }
 
