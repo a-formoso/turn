@@ -16,7 +16,14 @@ const TYPES = {
 const BLOCKED = /(?:^|\/)(?:\.|\.git|\.claude|\.local|\.cache|\.agents|node_modules|docs)(\/|$)/;
 
 http.createServer((req, res) => {
-  let urlPath = decodeURIComponent(req.url.split("?")[0]);
+  let urlPath;
+  try {
+    urlPath = decodeURIComponent(req.url.split("?")[0]);
+  } catch {
+    res.writeHead(400); return res.end("bad request"); // malformed %-encoding must not crash the process
+  }
+  // Reject NUL bytes: fs.readFile throws synchronously on them, which would crash the process.
+  if (urlPath.includes("\0")) { res.writeHead(400); return res.end("bad request"); }
   if (urlPath === "/") urlPath = "/TURN.html";
 
   // Block obviously sensitive paths before resolving
