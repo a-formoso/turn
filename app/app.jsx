@@ -2427,8 +2427,9 @@ function App(){
       onNewStory: ()=>{ setWelcomeOpen(false); startNewStory(); },
       onClose: ()=>setWelcomeOpen(false) }),
     homeOpen && cloudMode && (
-      homeView==="projects"
-        // "View all" / "Projects" → the existing poster wall; its back button returns to the dashboard
+      // The dashboard only appears once the user has >=2 films; below that (or when
+      // "View all" is chosen) we fall back to the classic poster wall.
+      (homeView==="projects" || (projects||[]).filter(p=>String(p.isShow)!=="true").length < 2)
         ? (typeof window.HomeScreen!=="undefined" && React.createElement(window.HomeScreen,{
             projects, currentId:currentProjectId,
             onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },

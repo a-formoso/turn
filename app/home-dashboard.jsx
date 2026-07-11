@@ -1,15 +1,19 @@
 /* home-dashboard.jsx — the Home / landing dashboard.
 
-   A richer front door than the poster wall (home.jsx): a persistent left rail,
-   a hero that pitches the studio and drops you straight into the production
-   pipeline, a "Recent Projects" strip built from the user's real films, and a
-   feature strip.
+   A richer front door than the poster wall (home.jsx): a top bar (brand +
+   project selector + actions + account), a hero that pitches the studio and
+   drops you straight into the production pipeline, a "Recent Projects" strip
+   built from the user's real films, and a feature strip.
 
    Everything here is wired to REAL app state — projects come from the live list,
-   the pipeline steps open the actual rooms, "New Project" creates a film, project
-   cards open that film, and "View all" hands off to the poster wall (HomeScreen).
-   Chrome that has no backing feature yet (Docs, Discord, and the secondary rail
-   items) degrades to an explicit "coming soon" toast rather than a dead link. */
+   the pipeline steps open the actual rooms (through the app's guarded room
+   switch), "New Project" creates a film, project cards open that film, and
+   "View all" hands off to the poster wall (HomeScreen). Chrome that has no
+   backing feature yet (Docs, Discord) degrades to an explicit "coming soon"
+   toast rather than a dead link.
+
+   Gating (in app.jsx): this dashboard only shows once the user has >=2 films;
+   below that the classic poster wall is shown instead. */
 
 (function(){
   const h = React.createElement;
@@ -40,17 +44,6 @@
 
   const soon = (name)=>{ if(window.appToast) window.appToast(name+" — coming soon","info"); };
 
-  // Left-rail entries. `to` decides behaviour; unwired ones fall back to a toast.
-  const NAV = [
-    { id:"home",      label:"Home",      icon:"grid" },
-    { id:"projects",  label:"Projects",  icon:"film" },
-    { id:"templates", label:"Templates", icon:"layers" },
-    { id:"models",    label:"Models",    icon:"box" },
-    { id:"people",    label:"People",    icon:"user" },
-    { id:"assets",    label:"Assets",    icon:"image" },
-    { id:"updates",   label:"Updates",   icon:"history" },
-  ];
-
   // Pipeline steps mirror window.ROOMS but with the landing-page phrasing.
   const STEPS = [
     { id:"writers", no:"01", phase:"Development",    name:"Writers Room",   live:true },
@@ -79,36 +72,22 @@
     const hero = current || films.find(p=> p.cover) || films[0] || null;
     const activeRoom = room || "writers";
 
-    // ----- left rail --------------------------------------------------------
-    const nav = h("nav",{className:"hd-nav"},
-      NAV.map(n=> h("button",{ key:n.id,
-        className:"hd-nav-item"+(n.id==="home"?" on":""),
-        onClick:()=>{
-          if(n.id==="home") return;                         // already here
-          if(n.id==="projects") return onAllProjects && onAllProjects();
-          soon(n.label);
-        }},
-        h("span",{className:"hd-nav-ic"}, Ic(n.icon,17)),
-        h("span",{className:"hd-nav-lab"}, n.label))));
-
-    const sidebar = h("aside",{className:"hd-sidebar"},
-      h("button",{className:"hd-brand", onClick:onClose, title:"Back to your film"},
-        (typeof BrandMark!=="undefined") && h(BrandMark,null),
-        h("span",{className:"hd-brand-name"},"TURN")),
-      nav,
-      h("div",{className:"hd-sidebar-foot"}, accountSlot || null));
-
     // ----- top bar ----------------------------------------------------------
     const topbar = h("header",{className:"hd-topbar"},
-      h("button",{className:"hd-proj", onClick:onAllProjects, title:"Switch project"},
-        h("span",{className:"hd-proj-ic"}, Ic("clapper",15)),
-        h("span",{className:"hd-proj-name"}, (current && current.title) || "No project open"),
-        current && h("span",{className:"hd-proj-badge"}, displayType(current)),
-        Ic("chevD",14)),
+      h("div",{className:"hd-topbar-l"},
+        h("button",{className:"hd-brand", onClick:onClose, title:"Back to your film"},
+          (typeof BrandMark!=="undefined") && h(BrandMark,null),
+          h("span",{className:"hd-brand-name"},"TURN")),
+        h("button",{className:"hd-proj", onClick:onAllProjects, title:"Switch project"},
+          h("span",{className:"hd-proj-ic"}, Ic("clapper",15)),
+          h("span",{className:"hd-proj-name"}, (current && current.title) || "No project open"),
+          current && h("span",{className:"hd-proj-badge"}, displayType(current)),
+          Ic("chevD",14))),
       h("div",{className:"hd-top-actions"},
         h("button",{className:"hd-tbtn", onClick:()=>soon("Docs")}, Ic("script",15), "Docs"),
         h("button",{className:"hd-tbtn", onClick:()=>soon("Discord")}, Ic("globe",15), "Discord"),
-        h("button",{className:"hd-tbtn hd-accent", onClick:onCreate}, Ic("plus",15), "New Project")));
+        h("button",{className:"hd-tbtn hd-accent", onClick:onCreate}, Ic("plus",15), "New Project"),
+        accountSlot ? h("div",{className:"hd-acct"}, accountSlot) : null));
 
     // ----- hero -------------------------------------------------------------
     const stepper = h("div",{className:"hd-steps"},
@@ -169,7 +148,6 @@
           h("div",{className:"hd-feat-body"}, f.body)))));
 
     return h("div",{className:"hd-root"},
-      sidebar,
       h("div",{className:"hd-main"},
         topbar,
         h("div",{className:"hd-scroll"},
