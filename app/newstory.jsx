@@ -11,9 +11,13 @@ const SEED_TYPES = [
 ];
 
 // the four intake screens, in order — drives the header progress stepper
+/* Step order (reordered 2026-07-11, owner-approved): the SEED comes first — a
+   creator arrives with an idea, not a container. Developing the seed recommends
+   the format + framework, and the SHAPE step then shows that recommendation
+   pre-selected (an explicit pick there still always wins). */
 const NS_STEPS = [
-  { id:"format",   label:"Format" },
   { id:"seed",     label:"Seed" },
+  { id:"format",   label:"Shape" },
   { id:"loglines", label:"Logline" },
   { id:"synopsis", label:"Synopsis" },
 ];
@@ -248,7 +252,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
   const [autoShape, setAutoShape] = React.useState(null);   // {formatLabel?, frameworkLabel?, why} — shown on the logline step
   const [seed, setSeed] = React.useState("logline");
   const [text, setText] = React.useState("");
-  const [step, setStep] = React.useState("format");  // format | seed | interview | loglines | synopsis
+  const [step, setStep] = React.useState("seed");  // seed | interview | format(=shape) | loglines | synopsis
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState([]);
   const [chosen, setChosen] = React.useState("");
@@ -265,7 +269,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
   const needsText = seed !== "talk";
   const formatLabel = (((window.FORMATS||[]).find(f=>f.id===format)||{}).label || "film").toLowerCase();
 
-  const develop = async ()=>{
+  const develop = async (dest)=>{
     if(loading) return;
     if(needsText && !text.trim()){ setErr("Add a little more to work from."); return; }
     setErr(""); setLoading(true);
@@ -289,7 +293,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
             applied.frameworkLabel = (((window.FRAMEWORKS||[]).find(f=>f.id===sh.framework))||{}).label || sh.framework; }
           setAutoShape((applied.formatLabel || applied.frameworkLabel) ? { ...applied, why: sh.why||"" } : null);
         } else setAutoShape(null);
-        setStep("loglines");
+        setStep(dest==="loglines" ? "loglines" : "format");   // first pass confirms the SHAPE; regenerate stays put
       }
       else setErr("Couldn\u2019t shape that into a logline \u2014 try adding a detail or two.");
     }catch(e){ setErr(String((e&&e.message)||"Something went wrong. Try again.")); }
@@ -344,7 +348,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
           React.createElement("div",null,
             React.createElement("div",{className:"ns-title"},"New Story"),
             React.createElement("div",{className:"ns-sub"},
-              step==="format"?"What are we making?"
+              step==="format"?"Confirm the shape \u2014 format & structure"
               :step==="seed"?"Bring your idea in whatever shape it\u2019s in"
               :step==="interview"?"Talk it through \u00b7 I\u2019ll listen and shape loglines"
               :step==="loglines"?"Pick the logline to build from"
@@ -370,6 +374,15 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
 
       step==="format"
         ? React.createElement("div",{className:"ns-body"},
+            // the seed's recommendation, pre-applied to any knob the writer hasn't
+            // touched — this screen CONFIRMS the shape rather than cold-asking for it
+            autoShape && React.createElement("div",{className:"ns-autoshape"},
+              React.createElement(Icon.sparkles,{s:12}),
+              React.createElement("span",null,
+                "Recommended for this story: ",
+                React.createElement("b",null,[autoShape.formatLabel, autoShape.frameworkLabel].filter(Boolean).join(" · ")),
+                autoShape.why ? (" — "+autoShape.why) : "",
+                " Pick anything below to override — your choice always wins.")),
             React.createElement("div",{className:"ns-seclab"},"Pick a format — it sets the size, not the method"),
             React.createElement("div",{className:"ns-formats"},
               (window.FORMATS||[]).map(f=>
@@ -387,8 +400,8 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
                   React.createElement("span",{className:"ns-format-name"},f.label),
                   React.createElement("span",{className:"ns-format-blurb"},f.blurb)))),
             React.createElement("div",{className:"ns-foot"},
-              React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Cancel"),
-              React.createElement("button",{className:"ns-btn primary",onClick:()=>setStep("seed")},
+              React.createElement("button",{className:"ns-btn ghost",onClick:()=>setStep("seed")},"← Back"),
+              React.createElement("button",{className:"ns-btn primary",onClick:()=>setStep(candidates.length?"loglines":"seed")},
                 "Continue →")))
 
         : step==="seed"
@@ -411,7 +424,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
                 : "I’ll ask a few friendly questions and shape loglines from your answers. (Voice input isn’t available in this browser, so you’ll type your answers — same conversation.)"),
             err && React.createElement("div",{className:"ns-err"},err),
             React.createElement("div",{className:"ns-foot"},
-              React.createElement("button",{className:"ns-btn ghost",onClick:()=>setStep("format")},"← Back"),
+              React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Cancel"),
               seed==="talk"
                 ? React.createElement("button",{className:"ns-btn primary",onClick:()=>{ setErr(""); setStep("interview"); },disabled:!aiOn},
                     React.createElement(Icon.mic,{s:15}),"Start the conversation")
@@ -423,7 +436,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
 
         : step==="interview"
         ? React.createElement(NSInterview,{ formatLabel,
-            onComplete:(lls)=>{ setCandidates(lls); setChosen(lls[0]||""); setErr(""); setStep("loglines"); },
+            onComplete:(lls)=>{ setCandidates(lls); setChosen(lls[0]||""); setErr(""); setStep("format"); },
             onBack:()=>setStep("seed") })
 
         : step==="loglines"
@@ -437,7 +450,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
                 React.createElement("b",null,[autoShape.formatLabel, autoShape.frameworkLabel].filter(Boolean).join(" \u00b7 ")),
                 autoShape.why ? (" \u2014 "+autoShape.why) : ""),
               React.createElement("button",{className:"ns-btn link",onClick:()=>setStep("format"),
-                title:"Back to the Format step \u2014 an explicit pick there always wins"},"Change")),
+                title:"Back to the Shape step \u2014 an explicit pick there always wins"},"Change")),
             React.createElement("div",{className:"ns-seclab"},"Choose a logline \u2014 edit it freely"),
             React.createElement("div",{className:"ns-cands"},
               candidates.map((c,i)=>
@@ -453,8 +466,8 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
                 onChange:e=>setChosen(e.target.value),onKeyDown:onCmdEnter(researchSynopsis),rows:3})),
             err && React.createElement("div",{className:"ns-err"},err),
             React.createElement("div",{className:"ns-foot"},
-              React.createElement("button",{className:"ns-btn ghost",onClick:()=>setStep("seed")},"\u2190 Back"),
-              React.createElement("button",{className:"ns-btn link",onClick:develop,disabled:loading||synLoading},
+              React.createElement("button",{className:"ns-btn ghost",onClick:()=>setStep("format")},"\u2190 Back"),
+              React.createElement("button",{className:"ns-btn link",onClick:()=>develop("loglines"),disabled:loading||synLoading},
                 loading?"Re-developing\u2026":"Regenerate"),
               React.createElement("button",{className:"ns-btn primary",onClick:researchSynopsis,disabled:synLoading||loading||!chosen.trim()||!aiOn},
                 synLoading?React.createElement(React.Fragment,null,

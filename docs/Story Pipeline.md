@@ -20,27 +20,29 @@ real authoring should always begin at Step 1.)
 
 ## The pipeline
 
-### 0. Format & Framework  *(format added 2026-06-11; framework added 2026-06-11 by owner-delegated decision; Hero's Journey + Story Circle added 2026-06-12 by owner approval)*
-The user first chooses **what we are making** — film · short · commercial · micro-drama ·
-series · documentary (the registry in `app/formats.jsx`; default **Film**, so one click
-preserves the classic flow) — and, on the same screen, **how it should be told**: the
-narrative FRAMEWORK (the registry in `app/frameworks.jsx`; default **Three-Act Turns**,
-the classic method; alternatives: **Kishōtenketsu**, four movements where the *ten*
-recontextualizes rather than clashes; **Hero's Journey**, the twelve-stage mythic round
-across Departure/Initiation/Return; **Story Circle**, eight steps — you · need · go ·
-search · find · take · return · change — over four act bands. Hero's Journey and Story
-Circle added 2026-06-12 with owner approval). The format sets the spine's **target scene count
-and runtime**, the screenplay emphasis, and downstream room/Stage defaults; the framework
-sets the **act bands, the audit question, and the build/doctor criteria**. Both change
-the *size and telling* of what's built — never the steps below.
-
-### 1. Seed
+### 0. Seed  *(reordered before Format 2026-07-11 by owner approval — a creator arrives with an idea, not a container; the studio listens first, then recommends the shape)*
 The user provides a seed: a logline, a premise, or a rough idea. Nothing is assumed beyond it.
-- *(approved 2026-07-04)* Developing the seed also **recommends the format + framework** for the
-  story — applied only to knobs the writer didn't explicitly pick at the Format step, shown with a
-  one-line rationale on the logline step, and reversible via a Change button.
+- *(approved 2026-07-04; repositioned 2026-07-11)* Developing the seed **recommends the format +
+  framework** for the story — the recommendation arrives **pre-selected on the Shape step that
+  follows**, with a one-line rationale; it applies only to knobs the writer hasn't explicitly
+  picked, and an explicit pick on the Shape step always wins. The "Shaped for this story" banner
+  on the logline step remains as the receipt, with a Change link back to Shape.
 - *(approved 2026-07-04)* A **logline seed is always offered verbatim** as the first, pre-selected
   candidate ("yours — untouched"); the sharpened variants are optional, never the default.
+
+### 1. Shape — Format & Framework  *(was Step 0; reordered after Seed 2026-07-11 by owner approval. Format added 2026-06-11; framework added 2026-06-11 by owner-delegated decision; Hero's Journey + Story Circle added 2026-06-12 by owner approval)*
+Now a **confirmation step**: the seed's recommendation arrives pre-selected with its rationale,
+and the user confirms or overrides. The choices themselves are unchanged — **what we are making**:
+film · short · commercial · micro-drama · series · documentary (the registry in `app/formats.jsx`;
+default **Film**) — and **how it should be told**: the narrative FRAMEWORK (the registry in
+`app/frameworks.jsx`; default **Three-Act Turns**, the classic method; alternatives:
+**Kishōtenketsu**, four movements where the *ten* recontextualizes rather than clashes;
+**Hero's Journey**, the twelve-stage mythic round across Departure/Initiation/Return;
+**Story Circle**, eight steps — you · need · go · search · find · take · return · change — over
+four act bands. Hero's Journey and Story Circle added 2026-06-12 with owner approval). The format
+sets the spine's **target scene count and runtime**, the screenplay emphasis, and downstream
+room/Stage defaults; the framework sets the **act bands, the audit question, and the build/doctor
+criteria**. Both change the *size and telling* of what's built — never the steps below.
 
 ### 2. Research → Synopsis  *(the new, defining step; amended 2026-06-12 by owner approval: framework-shaped synopsis, seed pass-through, format-aware research)*
 Before any structure is built, expand the seed into a synopsis using the
