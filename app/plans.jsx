@@ -118,8 +118,12 @@ window.turnGateAllowsRes = function(g, r){
 window.turnPlanForRes = function(r){ return (RES_RANK[r]>=3) ? "Studio" : (RES_RANK[r]>=2) ? "Director" : null; };
 
 /* open a plan's checkout tagged with the user's id (+ prefilled email). Needs a
-   signed-in user — without a uid the webhook can't know whose balance to credit. */
-function startCheckout(plan){
+   signed-in user — without a uid the webhook can't know whose balance to credit.
+   opts.sameTab: navigate THIS tab to Stripe instead of window.open — required when
+   checkout is triggered programmatically (post-signup auto-open): window.open
+   outside a user gesture gets popup-blocked, silently stranding the buyer. Stripe's
+   after-payment redirect brings them back to the app. */
+function startCheckout(plan, opts){
   const uid = window.turnUserId || null;
   const email = window.turnUserEmail || "";
   if(!uid){
@@ -136,6 +140,7 @@ function startCheckout(plan){
     + (base.indexOf("?")>=0 ? "&" : "?")
     + "client_reference_id=" + encodeURIComponent(uid)
     + (email ? ("&prefilled_email=" + encodeURIComponent(email)) : "");
+  if(opts && opts.sameTab){ try{ window.location.assign(url); return; }catch(e){} }
   window.open(url, "_blank", "noopener");
 }
 window.turnStartCheckout = startCheckout;

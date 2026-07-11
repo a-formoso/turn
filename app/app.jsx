@@ -474,7 +474,10 @@ function App(){
     const planObj = (window.CINEMA_PLANS||[]).find(p=>String(p.tier).toLowerCase()===plan);
     try{ localStorage.removeItem("turn-intended-plan"); }catch(e){}
     setIntendedPlan(null);
-    if(planObj && typeof window.turnStartCheckout==="function") setTimeout(()=>window.turnStartCheckout(planObj), 350);
+    // sameTab: this fires from an effect (no user gesture) — window.open would be
+    // popup-blocked; navigating this tab to Stripe is never blocked, and the
+    // after-payment redirect brings the buyer straight back into the app.
+    if(planObj && typeof window.turnStartCheckout==="function") setTimeout(()=>window.turnStartCheckout(planObj, { sameTab:true }), 350);
   },[session, intendedPlan]);
   const [creditBalance, setCreditBalance] = React.useState(null);
   const refreshCreditBalance = React.useCallback(async ()=>{

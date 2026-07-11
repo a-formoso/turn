@@ -6,7 +6,10 @@
    without it the modal keeps the app's dark theme. */
 function AuthModal({ onClose, onAuthed, initialMode, plan, light }){
   const [mode, setMode] = React.useState(initialMode==="signup"?"signup":"signin");   // signin | signup
-  const planName = plan==="pro" ? "Pro plan" : plan==="studio" ? "Studio plan" : null;
+  // the tier carried from the landing pricing (writer/director/studio) — shown as a
+  // chip so the visitor sees their choice followed them into signup
+  const planObj = (window.CINEMA_PLANS||[]).find(p=>String(p.tier).toLowerCase()===String(plan||"").toLowerCase());
+  const planName = planObj ? (planObj.name+" plan · "+planObj.price+"/mo") : null;
   const [email, setEmail] = React.useState("");
   const [pw, setPw] = React.useState("");
   const [showPw, setShowPw] = React.useState(false);
@@ -55,7 +58,7 @@ function AuthModal({ onClose, onAuthed, initialMode, plan, light }){
         light && React.createElement("div",{className:"auth-act"}, mode==="signup"?"Prologue":"Welcome back"),
         React.createElement("div",{className:"auth-title"}, mode==="signup"?"Create your account":"Sign in"),
         (mode==="signup" && planName) && React.createElement("div",{className:"auth-plan"},
-          React.createElement(Icon.sparkles,{s:11}), planName, React.createElement("span",{className:"auth-plan-note"},"· start free, upgrade after"))),
+          React.createElement(Icon.sparkles,{s:11}), planName, React.createElement("span",{className:"auth-plan-note"},"· checkout opens after signup"))),
       React.createElement("div",{className:"auth-body"},
         notice && React.createElement("div",{className:"auth-notice"}, notice),
         React.createElement("label",{className:"auth-field"},
