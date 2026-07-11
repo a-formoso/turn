@@ -13,12 +13,16 @@
    halo'd nodes, and after the draw a playhead of light travels the spine on
    a slow loop — the story being read. The 13-scene arc is invented. */
 function HeroSpine(){
-  const W=1260, H=540, MID=H/2, AMP=72, X0=76, X1=W-52;
+  const W=1260, H=540, MID=H/2, AMP=64, X0=76, X1=W-52;
+  // Charges STRICTLY ALTERNATE (every node is a crest or a trough — never a dot
+  // stranded mid-slope), matching how the in-app spine reads: an even, rolling
+  // wave with horizontal tangents at every scene. Crest/trough depths still vary
+  // so the film has its own topography.
   const SCENES=[
-    {c:-1.0},{c:1.6,m:"Inciting Incident",up:true},{c:-0.6},{c:-2.2,m:"Act Climax"},
-    {c:1.2},{c:2.4,m:"False Victory",up:true},{c:-0.8},{c:-2.6,m:"Mid-Act Climax"},
-    {c:1.8,m:"Reversal",up:true},{c:-1.2},{c:-2.9,m:"Low Point"},{c:0.8},
-    {c:2.3,m:"Climax",up:true},
+    {c:0.4},{c:-1.0},{c:1.8,m:"Inciting Incident",up:true},{c:-2.3,m:"Act Climax"},
+    {c:1.0},{c:-1.5},{c:2.5,m:"False Victory",up:true},{c:-2.6,m:"Mid-Act Climax"},
+    {c:1.9,m:"Reversal",up:true},{c:-2.9,m:"Low Point"},{c:0.8},{c:-1.4},
+    {c:2.4,m:"Climax",up:true},
   ];
   const pts=SCENES.map((s,i)=>({ ...s, x:X0+(X1-X0)*i/(SCENES.length-1), y:MID-s.c*AMP }));
   // Catmull-rom → cubic beziers. TENSION sets curve handle length: smaller =
@@ -33,7 +37,9 @@ function HeroSpine(){
              .map(n=>n.toFixed(1)).join(" ");
   }
   const area = d+" L"+X1+" "+MID+" L"+X0+" "+MID+" Z";
-  const actX=[(pts[3].x+pts[4].x)/2, (pts[10].x+pts[11].x)/2];
+  // act breaks land right AFTER their closing milestone: Act I ends on the Act
+  // Climax (idx 3), Act II ends on the Low Point (idx 9) — Act III is the recovery.
+  const actX=[(pts[3].x+pts[4].x)/2, (pts[9].x+pts[10].x)/2];
   const mono={fontFamily:"var(--f-mono)",letterSpacing:".14em"};
   const runStyle={offsetPath:'path("'+d+'")'};
   return React.createElement("div",{className:"lp-video","aria-label":"The value-charge spine — every scene plotted by its emotional charge"},
@@ -75,9 +81,12 @@ function HeroSpine(){
       pts.map((p,i)=>React.createElement("circle",{key:"n"+i,className:"lp-spine-node",cx:p.x,cy:p.y,r:5.5,
         fill:p.c>=0?"var(--pos-bright)":"var(--neg-bright)",stroke:"var(--lpw-black)",strokeWidth:2.5,
         style:{animationDelay:(0.35+i*0.16)+"s"}})),
-      // milestone captions
+      // milestone captions with a short leader tick to their node (like the in-app spine)
+      pts.filter(p=>p.m).map((p,i)=>React.createElement("line",{key:"mt"+i,className:"lp-spine-lab",
+        x1:p.x,y1:p.up?p.y-12:p.y+12,x2:p.x,y2:p.up?p.y-20:p.y+20,
+        stroke:"rgba(255,255,255,.28)",strokeWidth:1,style:{animationDelay:(1.4+i*0.12)+"s"}})),
       pts.filter(p=>p.m).map((p,i)=>React.createElement("text",{key:"m"+i,className:"lp-spine-lab",
-        x:p.x,y:p.up?p.y-24:p.y+34,textAnchor:"middle",fill:"rgba(255,255,255,.5)",fontSize:11,
+        x:p.x,y:p.up?p.y-28:p.y+36,textAnchor:"middle",fill:"rgba(255,255,255,.5)",fontSize:11,
         style:{...mono,animationDelay:(1.4+i*0.12)+"s"}},p.m.toUpperCase())),
       // the playhead — a dot of light reading the story on a loop
       React.createElement("circle",{className:"lp-spine-run halo",r:10,fill:"rgba(255,255,255,.35)",
