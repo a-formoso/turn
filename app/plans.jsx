@@ -13,20 +13,28 @@
    domain here once cinema.infinitestudioai.com is verified. */
 const LIVE_HOSTS = ["cinema-machine.replit.app", "cinema.infinitestudioai.com", "cinemamachine.ai"];
 
+/* Credit DENOMINATION. Credits are counted in a fine unit so plan allowances read
+   generously (800, not 80) — this is cosmetic scale, NOT extra value: render/text/
+   image COSTS scale by the same factor (stageRenderCost, nbImageCredits, textSpend),
+   so 800 new credits buys exactly what 80 old credits did. The `credits` shown on each
+   plan below is already in this denomination; the Stripe product's `plan_credits`
+   metadata MUST match these numbers (that's what the webhook actually grants). */
+window.CREDIT_SCALE = 10;
+
 const PLANS = [
-  { tier:"writer",   name:"Writer",   price:"$19", credits:80,
+  { tier:"writer",   name:"Writer",   price:"$19", credits:800,
     blurb:"Write, design, and shoot short scenes.",
-    features:["80 credits / month","Story, cast, props & locations","Video on Kling & 720p"],
+    features:["800 credits / month","Story, cast, props & locations","Video on Kling & 720p"],
     test:"https://buy.stripe.com/test_8x24gB63afmHgtS3eXc7u00",
     live:"https://buy.stripe.com/8x24gB63afmHgtS3eXc7u00" },
-  { tier:"director", name:"Director", price:"$49", credits:240, popular:true,
+  { tier:"director", name:"Director", price:"$49", credits:2400, popular:true,
     blurb:"Produce a whole short each month.",
-    features:["240 credits / month","Every model unlocked","Up to 1080p","Priority render queue"],
+    features:["2,400 credits / month","Every model unlocked","Up to 1080p","Priority render queue"],
     test:"https://buy.stripe.com/test_00waEZ77eeiD6Ti4j1c7u01",
     live:"https://buy.stripe.com/00waEZ77eeiD6Ti4j1c7u01" },
-  { tier:"studio",   name:"Studio",   price:"$149", credits:900,
+  { tier:"studio",   name:"Studio",   price:"$149", credits:9000,
     blurb:"Full films, back to back.",
-    features:["900 credits / month","4K output","Batch rendering","Front of the queue"],
+    features:["9,000 credits / month","4K output","Batch rendering","Front of the queue"],
     test:"https://buy.stripe.com/test_bJe9AVbnu6QbdhG2aTc7u02",
     live:"https://buy.stripe.com/bJe9AVbnu6QbdhG2aTc7u02" },
 ];

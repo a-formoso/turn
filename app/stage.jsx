@@ -433,7 +433,11 @@ function stageRenderCost(tierObj, resolution, durationSec){
   const rate = Number(tierObj && tierObj.creditRate && tierObj.creditRate[resolution]);
   const r = rate>0 ? rate : 1;
   const s = Math.max(1, Number(durationSec)||5);
-  return Math.max(1, Math.ceil(s*r));
+  // credits are denominated ×CREDIT_SCALE so plan allowances read generously (800 not
+  // 80) — grant AND cost scale together, so real value is unchanged. Plan grants come
+  // from Stripe (plan_credits metadata) and must use the same scale.
+  const scale = Number(window.CREDIT_SCALE)||1;
+  return Math.max(1, Math.ceil(s*r)*scale);
 }
 window.SEEDANCE_MODELS = SEEDANCE_MODELS;
 /* per-shot seconds interval grid for the Multi-shot composer (bounded per model) */

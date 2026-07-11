@@ -139,7 +139,7 @@ function textSpendAdd(modelId, kind){
     let s; try{ s = JSON.parse(localStorage.getItem(_textSpendKey())||"null"); }catch(e){ s=null; }
     if(!s || typeof s.calls!=="number") s = { calls:0, credits:0, since:new Date().toISOString() };
     s.calls += 1;
-    s.credits = Math.round((s.credits + rate)*100)/100;
+    s.credits = Math.round((s.credits + rate*(Number(window.CREDIT_SCALE)||1))*100)/100;
     localStorage.setItem(_textSpendKey(), JSON.stringify(s));
     try{ window.dispatchEvent(new CustomEvent("text-spend",{ detail:s })); }catch(e){}
   }catch(e){}

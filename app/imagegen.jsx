@@ -161,7 +161,9 @@ function nbImageCredits(opts){
     const r = opts.res || nbGetRes();
     usd = (t[r]!=null) ? t[r] : t["2K"];
   }
-  return usd / NB_CREDIT_USD;
+  // ×CREDIT_SCALE so image costs read in the same generous denomination as plan
+  // allowances (grant + cost scale together — real value unchanged).
+  return (usd / NB_CREDIT_USD) * (Number(window.CREDIT_SCALE)||1);
 }
 function nbImageCostText(count, opts){
   const per = nbImageCredits(opts);
