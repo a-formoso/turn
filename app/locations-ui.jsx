@@ -104,13 +104,17 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
   // every set-dressing object — candidates for the "Interior of" shell link
   const dressAll = (((window.turnContinuity||{}).props)||[]).filter(p=>p && p.kind==="dressing");
 
-  // batch generation: parent activates this card by id; generate then report done
-  const batchStarted = React.useRef(false);
+  // batch generation: parent activates this card by id; generate then report done.
+  // REMOUNT-SAFE (see CharacterSheet): seed batchStarted from the in-flight registry so
+  // a card remounting mid-generation doesn't fire a second generate on completion.
+  const _lslot = "locref-"+l.id;
+  const batchStarted = React.useRef(!!(window.__nbGenInflight && window.__nbGenInflight[_lslot]));
   const wasGening = React.useRef(false);
   React.useEffect(()=>{
     const mine = batchActiveId===l.id;
-    if(!mine){ batchStarted.current=false; wasGening.current=gen.gening; return; }
-    if(!batchStarted.current && !gen.gening){ batchStarted.current=true; wasGening.current=false; gen.generate(); return; }
+    const inflight = !!(window.__nbGenInflight && window.__nbGenInflight[_lslot]);
+    if(!mine){ batchStarted.current=inflight; wasGening.current=gen.gening; return; }
+    if(!batchStarted.current && !gen.gening && !inflight){ batchStarted.current=true; wasGening.current=false; gen.generate(); return; }
     if(batchStarted.current && wasGening.current && !gen.gening){ batchStarted.current=false; onBatchDone && onBatchDone(l.id); }
     wasGening.current = gen.gening;
   },[batchActiveId, gen.gening, l.id]);

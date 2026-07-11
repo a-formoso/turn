@@ -548,12 +548,16 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
   /* ---- batch generation: when the parent activates this card (its id == the
      batch's current id), kick off a generation and report completion so the
      queue advances. Watches gen.gening for the true->false transition. ---- */
-  const batchStarted = React.useRef(false);
+  // REMOUNT-SAFE (see CharacterSheet): seed batchStarted from the in-flight registry so a
+  // card remounting mid-generation doesn't fire a second generate on completion.
+  const _pslot = "propref-"+p.id;
+  const batchStarted = React.useRef(!!(window.__nbGenInflight && window.__nbGenInflight[_pslot]));
   const wasGening = React.useRef(false);
   React.useEffect(()=>{
     const mine = batchActiveId===p.id;
-    if(!mine){ batchStarted.current=false; wasGening.current=gen.gening; return; }
-    if(!batchStarted.current && !gen.gening){
+    const inflight = !!(window.__nbGenInflight && window.__nbGenInflight[_pslot]);
+    if(!mine){ batchStarted.current=inflight; wasGening.current=gen.gening; return; }
+    if(!batchStarted.current && !gen.gening && !inflight){
       batchStarted.current = true; wasGening.current = false;
       genWithOwner();                       // owner sheet first, then this prop's master
       return;

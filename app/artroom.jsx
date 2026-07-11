@@ -2786,12 +2786,20 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
 
   // batch generation: when this card is the active queue member, fire one generate
   // and report back when it settles (mirrors the Props/Locations cards).
-  const batchStarted = React.useRef(false);
+  // REMOUNT-SAFE: a card can remount WHILE it is the active member and its generation
+  // is already in flight (each commit re-renders the cast). A fresh instance's
+  // batchStarted ref would start false, skip the fire-branch during gening, then wrongly
+  // fire a SECOND generate on completion — two versions from one click. So seed the ref
+  // from the module in-flight registry: if a generation is already running for this
+  // slot, this instance treats itself as already-started and only reports completion.
+  const _slot = "charref-"+c.id;
+  const batchStarted = React.useRef(!!(window.__nbGenInflight && window.__nbGenInflight[_slot]));
   const wasGening = React.useRef(false);
   React.useEffect(()=>{
     const mine = batchActiveId===c.id;
-    if(!mine){ batchStarted.current=false; wasGening.current=gen.gening; return; }
-    if(!batchStarted.current && !gen.gening){ batchStarted.current=true; wasGening.current=false; gen.generate({ batch:true }); return; }
+    const inflight = !!(window.__nbGenInflight && window.__nbGenInflight[_slot]);
+    if(!mine){ batchStarted.current = inflight; wasGening.current=gen.gening; return; }
+    if(!batchStarted.current && !gen.gening && !inflight){ batchStarted.current=true; wasGening.current=false; gen.generate({ batch:true }); return; }
     if(batchStarted.current && wasGening.current && !gen.gening){ batchStarted.current=false; onBatchDone && onBatchDone(c.id); }
     wasGening.current = gen.gening;
   },[batchActiveId, gen.gening, c.id]);
