@@ -1441,6 +1441,32 @@ async function agentConsistency(ctx){
   if(!drafted.length){ ctx.emit({k:"done", t:"No drafted scenes to audit yet — write or draft a scene first."}); return; }
   let cards = 0, flags = 0, fixes = 0;
 
+  /* 0.4 — TIME-OF-DAY CONTINUITY: consecutive scenes whose sluglines hard-flip the
+     clock (DAY→NIGHT or back) with no time-passage cue in either scene read as a
+     continuity error on screen — professional scripts either signal the jump
+     ("LATER", "the next morning") or keep the clock. Conservative: only DAY-class ↔
+     NIGHT-class flips are flagged, and any passage cue in either scene's slugline,
+     summary or script clears it. Flag-only (a judgement call, never auto-fixed). */
+  (function(){
+    const cls = (loc)=>{ const m=String(loc||"").toUpperCase();
+      if(/\b(NIGHT|EVENING|DUSK|MIDNIGHT)\b/.test(m)) return "NIGHT";
+      if(/\b(DAY|MORNING|DAWN|NOON|AFTERNOON)\b/.test(m)) return "DAY";
+      return null; };
+    const cue = /\b(later|earlier|next (morning|day|night|evening)|that (night|evening|morning|afternoon)|hours?|dawn|sunset|sunrise|nightfall|midnight|the following|by (night|day|morning|evening)|after dark|days? (pass|later)|weeks? (pass|later)|months? (pass|later)|meanwhile|same time|continuous)\b/i;
+    let n=0;
+    for(let i=1; i<drafted.length && n<5; i++){
+      const a=drafted[i-1], b=drafted[i];
+      const ca=cls(a.loc), cb=cls(b.loc);
+      if(!ca || !cb || ca===cb) continue;
+      const textA=((ctx.model.drafts[a.id]||{}).blocks||[]).map(x=>x.text).join(" ").slice(-400);
+      const textB=((ctx.model.drafts[b.id]||{}).blocks||[]).map(x=>x.text).join(" ").slice(0,600);
+      const hay=[a.loc,b.loc,a.summary||"",b.summary||"",textA,textB].join(" · ");
+      if(cue.test(hay)) continue;
+      n++; flags++;
+      ctx.emit({k:"flag", t:"Sc "+a.no+" ("+ca+") → Sc "+b.no+" ("+cb+"): the clock hard-flips with no time-passage cue in either scene. Signal the jump (“LATER”, “the next morning” in the slugline or action) or align the sluglines’ time of day."});
+    }
+  })();
+
   for(const scene of drafted){
     if(ctx.cancelled()) return;
     const draft = ctx.model.drafts[scene.id];

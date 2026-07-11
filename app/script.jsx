@@ -347,6 +347,9 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
   if(screenplay){
     const groupByBeat = (blocks)=>{ const m={}, order=[]; blocks.forEach(b=>{ if(!m[b.beat]){m[b.beat]=[];order.push(b.beat);} m[b.beat].push(b); }); return {m,order}; };
     const { m:fg } = groupByBeat(screenplay.blocks);
+    // shooting-script numbering: only the scene's OPENING slugline carries the number —
+    // secondary (mid-scene) sluglines render as plain headings
+    const firstSlugBlock = screenplay.blocks.find(b=>b.type==="scene");
     const order = screenplayBeatNumbers(screenplay, beats);
     // mark a character cue as (CONT'D) when the same speaker returns after intervening action
     const contdSet = buildContdSet(screenplay.blocks);
@@ -439,7 +442,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
                 (fg[n]||[]).length
                   ? (fg[n]||[]).map((b,i)=> editing
                   ? React.createElement(EditableBlock,{key:i,b,onCommit:(t)=>commitEdit(b,t),flash:!!(verFlash&&verFlash.has(b))})
-                  : React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:scene.no,flash:!!(verFlash&&verFlash.has(b))}))
+                  : React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:(b===firstSlugBlock?scene.no:null),flash:!!(verFlash&&verFlash.has(b))}))
                   : React.createElement("div",{className:"spb-action spb-missing"},"No screenplay text assigned to this beat."))));
         })),
       transOut && React.createElement(TransitionBar,{trans:transOut,out:true,

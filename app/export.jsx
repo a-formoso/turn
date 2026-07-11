@@ -24,9 +24,12 @@ function buildFountain(project, scenes, drafts){
   L.push(""); L.push("===" ); L.push("");   // title-page break
   scenes.forEach(s=>{
     const blocks = sceneBlocks(s, drafts);
+    let slugged = false;   // shooting-script numbering: the scene's OPENING slug gets #N#
     blocks.forEach(b=>{
       const t = esc(b.text).trim(); if(!t) return;
-      if(b.type==="scene"){ L.push(""); L.push("."+t.replace(/^\.*/,"").toUpperCase()); L.push(""); }
+      if(b.type==="scene"){ L.push("");
+        const num = (!slugged && s.no!=null) ? (" #"+s.no+"#") : ""; slugged = true;
+        L.push("."+t.replace(/^\.*/,"").toUpperCase()+num); L.push(""); }
       else if(b.type==="char"){ L.push(""); L.push("@"+t.toUpperCase()); }
       else if(b.type==="paren"){ L.push(t.startsWith("(")?t:("("+t+")")); }
       else if(b.type==="dia"){ L.push(t); }

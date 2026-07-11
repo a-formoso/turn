@@ -1347,8 +1347,8 @@ function App(){
       // 1) pull missing + refresh scene lists on existing
       let working = locations;
       if(typeof deriveLocations==="function"){
-        const derived = deriveLocations(scenes, locations);   // places not yet present
-        const fresh = deriveLocations(scenes, []);            // all, to refresh scene chips
+        const derived = deriveLocations(scenes, locations, drafts);   // places not yet present (incl. mid-scene slugs)
+        const fresh = deriveLocations(scenes, [], drafts);            // all, to refresh scene chips
         working = locations.map(l=>{ const m=fresh.find(f=>f.key===l.key);
           return m?{...l, scenes:m.scenes, times:[...new Set([...(l.times||[]),...m.times])], areas:[...new Set([...(l.areas||[]),...m.areas])]}:l; });
         if(derived.length) working = [...working, ...derived];
@@ -1390,15 +1390,15 @@ function App(){
   // derive locations from the script's sluglines; dedups against existing
   const pullLocationsFromScript = React.useCallback(()=>{
     if(typeof deriveLocations!=="function") return;
-    const derived = deriveLocations(scenes, locations);
+    const derived = deriveLocations(scenes, locations, drafts);
     setLocsSeeded(true);
     if(derived.length) setLocations(ls=>[...ls, ...derived]);
     // also refresh the scene lists on existing locations as the script grows
     else if(locations.length){
-      const fresh = deriveLocations(scenes, []);
+      const fresh = deriveLocations(scenes, [], drafts);
       setLocations(ls=>ls.map(l=>{ const m=fresh.find(f=>f.key===l.key); return m?{...l, scenes:m.scenes, times:[...new Set([...(l.times||[]),...m.times])], areas:[...new Set([...(l.areas||[]),...m.areas])]}:l; }));
     }
-  },[scenes, locations]);
+  },[scenes, locations, drafts]);
   // auto-seed once per story: first time the Locations tab opens empty, derive them
   React.useEffect(()=>{
     if(locsSeeded || hydratingRef.current) return;
@@ -2121,8 +2121,8 @@ function App(){
       // pull places from the sluglines (new cards), and refresh scene lists / times on existing
       pull: ()=>{
         if(typeof deriveLocations!=="function") return 0;
-        const derived = deriveLocations(scenes, _locWork);          // new only
-        const fresh = deriveLocations(scenes, []);                  // all, to refresh scene lists/times/areas
+        const derived = deriveLocations(scenes, _locWork, drafts);          // new only
+        const fresh = deriveLocations(scenes, [], drafts);                  // all, to refresh scene lists/times/areas
         let next = _locWork.map(l=>{ const m=fresh.find(f=>f.key===l.key);
           return m ? {...l, scenes:m.scenes, times:[...new Set([...(l.times||[]),...m.times])], areas:[...new Set([...(l.areas||[]),...m.areas])]} : l; });
         if(derived.length) next = [...next, ...derived];

@@ -117,12 +117,23 @@ function splitCompoundPlace(place){
    Groups scenes by a normalised key on the PRIMARY place so "NEBUCHADNEZZAR · CORE"
    and "NEBUCHADNEZZAR · TRAINING" land under one "Nebuchadnezzar" (areas recorded).
    Returns new location objects only (deduped against `existing`). */
-function deriveLocations(scenes, existing){
+function deriveLocations(scenes, existing, drafts){
   const have = existing || [];
   const seen = new Set(have.map(l=>l.key || locSlug(l.name)));
   const order = []; const byKey = {};
   (scenes||[]).forEach(sc=>{
-    const parsed = parseSlugline(sc.loc);
+    // the scene's own slugline, PLUS any secondary (mid-scene) sluglines the draft
+    // carries — a chase that cuts INT. HALL → EXT. ROOF names real places that need
+    // location cards too. INTERCUT lines are skipped (they reference already-slugged
+    // places, they don't introduce one).
+    const slugTexts = [sc.loc];
+    const dBlocks = drafts && drafts[sc.id] && drafts[sc.id].blocks;
+    if(Array.isArray(dBlocks)) dBlocks.forEach(b=>{
+      if(b && b.type==="scene" && b.text && !/^\s*INTERCUT\b/i.test(b.text) && String(b.text).trim().toUpperCase()!==String(sc.loc||"").trim().toUpperCase())
+        slugTexts.push(b.text);
+    });
+    slugTexts.forEach(slugText=>{
+    const parsed = parseSlugline(slugText);
     if(!parsed) return;
     const places = splitCompoundPlace(parsed.place);
     const primary = tidyPlace(places[0]);
@@ -139,6 +150,7 @@ function deriveLocations(scenes, existing){
     places.slice(1).forEach(p=> L.areas.add(tidyPlace(p)));
     if(sc.id && L.scenes.indexOf(sc.id)<0) L.scenes.push(sc.id);
     if(parsed.intExt && L.intExt && parsed.intExt!==L.intExt) L.intExt = "INT/EXT";
+    });
   });
   const out = [];
   order.forEach(key=>{
