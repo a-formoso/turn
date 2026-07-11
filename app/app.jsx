@@ -1293,9 +1293,12 @@ function App(){
       const map = await aiDesignLocationBible(working, scenes, lbProject("locations"));
       const merged = working.map(l=> (map && map[l.id]) ? {...l, ...keepPickedStyle(l, map[l.id])} : l);
       if(map) setLocations(ls=>ls.map(l=> map[l.id] ? {...l, ...keepPickedStyle(l, map[l.id])} : l));
-      // 3) depth-grid staging, using the just-designed architecture/materials/lighting
+      // 3) depth-grid staging — only for places the film revisits (2+ scenes), where
+      // cross-scene geometric continuity pays off; single-scene locations skip it and
+      // render fine from prose (a card's "Draft staging" button stages one on demand).
       if(typeof aiDraftStaging==="function"){
-        const stages = await Promise.all(merged.map(async l=>{
+        const stageTargets = merged.filter(l=>(l.scenes||[]).length>=2);
+        const stages = await Promise.all(stageTargets.map(async l=>{
           try{ return { id:l.id, staging: await aiDraftStaging(l, scenes, project) }; }
           catch(e){ return { id:l.id, staging:null }; }
         }));
@@ -2072,7 +2075,11 @@ function App(){
       },
       draftStaging: async ()=>{
         if(typeof aiDraftStaging!=="function") return 0;
-        const todo = _locWork.filter(l=>_locDrafted(l) && !l.staging);
+        // Depth grids earn their model call on locations the film REVISITS (2+ scenes),
+        // where cross-scene geometric continuity matters. Single-scene places generate
+        // fine from their prose spec; skip them here (the card's "Draft staging" button
+        // still stages any one location on demand).
+        const todo = _locWork.filter(l=>_locDrafted(l) && !l.staging && (l.scenes||[]).length>=2);
         if(!todo.length) return 0;
         const res = await Promise.all(todo.map(async l=>{ try{ return {id:l.id, staging: await aiDraftStaging(l, scenes, project)}; }catch(e){ return {id:l.id, staging:null}; } }));
         const sMap={}; res.forEach(x=>{ if(x.staging) sMap[x.id]=x.staging; });
