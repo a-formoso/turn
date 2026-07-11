@@ -165,7 +165,7 @@ function LookbookStaleNotice({ stale, onApply, onDraftOnly, label, dept }){
   return React.createElement("div",{className:"lb-stale-notice"},
     React.createElement(Icon.alert,{s:14}),
     React.createElement("span",null,
-      "The ",React.createElement("b",null,"Lookbook")," changed since "+(label||"this tab")+" "+((label&&/s$/.test(label))?"were":"was")+" last drafted — re-draft to apply it.",
+      "The ",React.createElement("b",null,"Lookbook")," changed — re-draft "+(label||"this tab")+" to apply its references.",
       affect && React.createElement("span",{className:"lb-stale-affect"}, affect)),
     onDraftOnly && React.createElement("button",{className:"lb-stale-btn ghost",onClick:onDraftOnly,
       title:"Re-draft this tab's specs from the updated Lookbook — images stay as they are; regenerate them when you're ready"},

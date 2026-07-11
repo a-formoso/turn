@@ -362,10 +362,18 @@ function App(){
   // Memoized so it only recomputes when a real input changes — the App re-renders on
   // every keystroke/autosave across the studio, and this needn't recompute each time.
   const staleTabs = React.useMemo(()=>{
+    // LOCATIONS gate on cards EXISTING (not fully drafted): location cards are pulled
+    // from the script's sluglines long before they're drafted, so requiring a full draft
+    // meant the "Lookbook changed" banner couldn't appear until the first Draft & Generate.
+    // Counting present cards lets it appear the moment the Lookbook diverges from what was
+    // last applied — there's something to apply it to. (Characters/props stay on the
+    // drafted gate: the cast AUTO-drafts on Art Room open, and gating on mere existence
+    // would pop a false banner right after that silent draft; both are usually drafted
+    // via their batch anyway, so the strict gate rarely bites there.)
     const lbContentFlags = {
       characters: (characters||[]).some(c=> (typeof charVisualsDrafted==="function") ? charVisualsDrafted(c) : !!(c&&c.id)),
       props: (props||[]).some(p=> (typeof propVisualsDrafted==="function") ? propVisualsDrafted(p) : false),
-      locations: (locations||[]).some(l=> (typeof locVisualsDrafted==="function") ? locVisualsDrafted(l) : false),
+      locations: (locations||[]).some(l=> l && l.id),
       colorist: !!(project && project.styleBible && project.styleBible.sceneStyles && Object.keys(project.styleBible.sceneStyles).length),
     };
     const staleDepts = (typeof lookbookStaleDepts==="function") ? lookbookStaleDepts(lookbook, lookbookNote, lookbookApplied, lbContentFlags) : {};
