@@ -494,6 +494,7 @@ function App(){
   // ---- cloud projects + doc sync ----
   const [projects, setProjects] = React.useState([]);
   const [homeOpen, setHomeOpen] = React.useState(false);   // Home / Dashboard (film wall)
+  const [homeView, setHomeView] = React.useState("dash");  // Home overlay tab: "dash" (dashboard) | "projects" (poster wall)
   const [currentProjectId, setCurrentProjectId] = React.useState(null);
   const cloudMode = !!(session && currentProjectId);
   // ADMIN — demo upkeep account. The Matrix sample story (and "Reset to sample story")
@@ -2425,16 +2426,30 @@ function App(){
       activating: !(creditBalance && window.turnIsPaidPlan(creditBalance.plan)),
       onNewStory: ()=>{ setWelcomeOpen(false); startNewStory(); },
       onClose: ()=>setWelcomeOpen(false) }),
-    homeOpen && cloudMode && typeof window.HomeScreen!=="undefined" && React.createElement(window.HomeScreen,{
-      projects, currentId:currentProjectId,
-      onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
-      onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
-      onDelete: deleteProject,
-      onGeneratePoster: generatePoster,
-      onReorder: reorderProjects,
-      onClose: ()=>setHomeOpen(false),
-      accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
-        onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }),
+    homeOpen && cloudMode && (
+      homeView==="projects"
+        // "View all" / "Projects" → the existing poster wall; its back button returns to the dashboard
+        ? (typeof window.HomeScreen!=="undefined" && React.createElement(window.HomeScreen,{
+            projects, currentId:currentProjectId,
+            onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
+            onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
+            onDelete: deleteProject,
+            onGeneratePoster: generatePoster,
+            onReorder: reorderProjects,
+            onClose: ()=>setHomeOpen(false),
+            accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
+              onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }))
+        // default Home = the dashboard
+        : (typeof window.HomeDashboard!=="undefined" && React.createElement(window.HomeDashboard,{
+            projects, currentId:currentProjectId, room,
+            onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
+            onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
+            onAllProjects: ()=>setHomeView("projects"),
+            onGoRoom: async (rid)=>{ if(!currentProjectId){ await createProject(); } setHomeOpen(false); if(rid==="writers") setView("spine"); guardedSetRoom(rid); },
+            onClose: ()=>setHomeOpen(false),
+            accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
+              onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }))
+    ),
     t.grain && React.createElement("div",{style:{position:"fixed",inset:0,pointerEvents:"none",zIndex:50,
       opacity:.025,mixBlendMode:"overlay",
       backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")"}}),
@@ -2448,7 +2463,7 @@ function App(){
       onReset: isAdmin ? resetStory : null,
       onToggleAI:toggleAI,
       onNewStory:startNewStory,
-      onHome: cloudMode ? (()=>setHomeOpen(true)) : null,
+      onHome: cloudMode ? (()=>{ setHomeView("dash"); setHomeOpen(true); }) : null,
       // ADMIN ONLY: inspect the whole continuity JSON (the Film Bible) the studio reads from
       onViewBible: isAdmin ? (()=> buildFilmBible({ project, scenes, characters, props, locations, shots, drafts, beatsMap, lookbook, lookbookNote })) : null,
       onManageStyles: (userEmail || null),   // every signed-in user manages their own styles (admin also gets the global tier inside)
