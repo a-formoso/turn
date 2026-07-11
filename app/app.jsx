@@ -927,7 +927,8 @@ function App(){
     return window.turnIsPaidPlan(b.plan) || (Number(b.credits)||0) > 0 || (Number(b.remaining)||0) > 0;
   };
   const requirePlan = (what)=>{
-    if(typeof window.appToast==="function") window.appToast("Choose a plan to "+what+" — every render runs on your plan's credits.","info");
+    // The plans modal itself carries the "choose a plan" message, so no toast —
+    // the bottom popup was redundant noise on top of the modal.
     if(typeof window.turnOpenPlans==="function") window.turnOpenPlans();
   };
   const guardedSetRoom = (id)=>{
