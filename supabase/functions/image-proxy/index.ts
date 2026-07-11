@@ -104,6 +104,41 @@ Deno.serve(async (req) => {
     return json({ error: "Could not verify your session." }, 401);
   }
 
+  // ── ENTITLEMENT GATE (server-side — the REAL paywall) ───────────────────────
+  //   Cinema Machine has NO free tier. A signed-in account may generate ONLY if
+  //   it is on a paid plan (writer/director/studio) OR still holds credits (e.g.
+  //   a cancelled subscriber's leftover balance). A brand-new account (plan
+  //   'none'/'free', 0 credits) is refused HERE. The browser gate is only UX —
+  //   this is what actually stops free text/image/video generation, since every
+  //   task below runs on the platform's own provider keys.
+  const ADMIN_EMAILS = ["admin@infinitestudioai.com"];
+  const isAdmin = ADMIN_EMAILS.includes(String(authUser.email || "").toLowerCase());
+  if (!isAdmin) {
+    let plan = "none";
+    let remaining = 0;
+    try {
+      // RLS policy turn_credits_select_own lets a user read their OWN row via the
+      // user-scoped client. No row yet (never funded) → unentitled → refuse.
+      const { data: rows } = await sbAuth
+        .from("turn_credits")
+        .select("plan, remaining")
+        .eq("owner", authUser.id)
+        .limit(1);
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      if (row) {
+        plan = String(row.plan || "none").toLowerCase().trim();
+        remaining = Number(row.remaining) || 0;
+      }
+    } catch (_e) { /* read failure → treat as unentitled, fail closed */ }
+    const paid = plan === "writer" || plan === "director" || plan === "studio";
+    if (!paid && remaining <= 0) {
+      return json({
+        error: "no_plan",
+        message: "Choose a plan to start creating — every generation runs on your plan's credits.",
+      }, 402);
+    }
+  }
+
   // ── parse request ───────────────────────────────────────────────────────────
   let body: any;
   try { body = await req.json(); } catch (_e) { return json({ error: "Bad request body." }, 400); }

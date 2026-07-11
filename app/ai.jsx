@@ -100,6 +100,10 @@ if(!window.claude || typeof window.claude.complete !== "function"){
       if(error){
         const status = (error && error.context && error.context.status) || error.status;
         if(status===401) return fail("Sign in to use the writing AI — it runs on your server.");
+        if(status===402){   // server entitlement gate — no active plan: route to plans
+          if(typeof window.turnOpenPlans==="function") window.turnOpenPlans();
+          return fail("Choose a plan to start creating — every generation runs on your plan's credits.");
+        }
         if(status===404) return fail("The proxy's text task isn't deployed yet — redeploy image-proxy.");
         return fail("Couldn't reach the writing model: "+((error && error.message) || "unknown error")+".");
       }
