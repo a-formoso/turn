@@ -1616,17 +1616,35 @@ async function aiResearchSynopsis(logline, seedText, frameworkId, formatId){
     'Return ONLY JSON: {"synopsis":{'+shape.paras.map(pg=>'"'+pg.key+'":"..."').join(",")+'}}';
   // the call THROWS on transport/provider errors (billing, missing key) so the UI
   // shows the real reason; only an unusable reply returns null
-  const resB = await window.claude.complete({ messages:[{ role:"user", content:synopsisPrompt }] });
-  try{
-    const b = extractJSON(resB);
-    const syn = (b && (b.synopsis || b)) || {};
-    const paras = shape.paras.map(pg=>({ key:pg.key, label:pg.label, text: cl(syn[pg.key],900) }));
-    if(!paras.some(pg=>pg.text)) return null;
-    const out = { title, logline: L, research, synopsis:{ paras } };
-    // legacy keys ride along so anything reading setup/confrontation/resolution keeps working
-    paras.forEach(pg=>{ out.synopsis[pg.key] = pg.text; });
-    return out;
-  }catch(e){ return null; }
+  const parseSyn = (res)=>{ try{ const b = extractJSON(res); return (b && (b.synopsis || b)) || {}; }catch(e){ return {}; } };
+  const syn = parseSyn(await window.claude.complete({ messages:[{ role:"user", content:synopsisPrompt }] }));
+  let paras = shape.paras.map(pg=>({ key:pg.key, label:pg.label, text: cl(syn[pg.key],900) }));
+  // MISSING-PARAGRAPH REPAIR: the model sometimes returns only the first movement
+  // (lazy/truncated JSON) — we must NEVER ship a synopsis with an empty paragraph.
+  // While there is a MIX of written and blank movements, ask again for ONLY the
+  // blanks (up to twice) and merge them in, continuous with what's already written.
+  for(let attempt=0; attempt<2 && paras.some(pg=>!pg.text) && paras.some(pg=>pg.text); attempt++){
+    const missing = paras.filter(pg=>!pg.text);
+    const haveBrief = paras.filter(pg=>pg.text).map(pg=>pg.label+": "+pg.text).join("\n\n");
+    const fillPrompt =
+      "You are a story architect working in the Infinite Studio method. Below is a SYNOPSIS in "+shape.shapeName+
+      " with some paragraphs already written and others still MISSING. Write ONLY the missing paragraphs, "+
+      "continuous with what is already there — same story, characters, names and tone. Do NOT repeat or rewrite the existing ones.\n\n"+
+      "LOGLINE:\n"+L+"\n"+seedBlock+"\n"+
+      (haveBrief?("ALREADY WRITTEN:\n"+haveBrief+"\n\n"):"")+
+      "MISSING paragraphs to write now:\n"+
+      missing.map(pg=>"   • "+pg.key+": "+pg.guide).join("\n")+"\n"+
+      "Each paragraph 3-5 sentences, vivid and concrete.\n\n"+
+      'Return ONLY JSON: {"synopsis":{'+missing.map(pg=>'"'+pg.key+'":"..."').join(",")+'}}';
+    let more = {};
+    try{ more = parseSyn(await window.claude.complete({ messages:[{ role:"user", content:fillPrompt }] })); }catch(e){ /* keep what we have */ }
+    paras = paras.map(pg=> pg.text ? pg : ({ ...pg, text: cl(more[pg.key],900) }));
+  }
+  if(!paras.some(pg=>pg.text)) return null;
+  const out = { title, logline: L, research, synopsis:{ paras } };
+  // legacy keys ride along so anything reading setup/confrontation/resolution keeps working
+  paras.forEach(pg=>{ out.synopsis[pg.key] = pg.text; });
+  return out;
 }
 window.aiResearchSynopsis = aiResearchSynopsis;
 

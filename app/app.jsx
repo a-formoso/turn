@@ -907,9 +907,16 @@ function App(){
   const planActive = ()=>{
     if(window.turnIsAdmin) return true;
     const b = window.turnCreditBalance;
-    if(!b) return true;                       // balance not loaded — don't hard-lock
+    if(!b){
+      // Ledger not loaded yet. A SIGNED-IN cloud user must NOT slip through the gate
+      // (a fresh no-plan account showed the ledger a beat late and was let straight in
+      // to generate) — kick a refresh and treat them as gated until it lands. Only a
+      // truly anonymous / offline dev session gets the friendly bypass.
+      if(session && session.user){ try{ refreshCreditBalance && refreshCreditBalance(); }catch(e){} return false; }
+      return true;
+    }
     const plan = String(b.plan||"none").toLowerCase();
-    return (!!plan && plan!=="none") || (Number(b.credits)||0) > 0;
+    return (!!plan && plan!=="none") || (Number(b.credits)||0) > 0 || (Number(b.remaining)||0) > 0;
   };
   const requirePlan = (what)=>{
     if(typeof window.appToast==="function") window.appToast("Choose a plan to "+what+" — every render runs on your plan's credits.","info");

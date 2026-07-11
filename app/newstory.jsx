@@ -265,6 +265,11 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
   // 4 for kishōtenketsu/circle) — editable [{key,label,text}]
   const [paras, setParas] = React.useState([]);
   const [showResearch, setShowResearch] = React.useState(true);
+  // The auto-shape's setFramework/setFormat land a render AFTER develop() runs; mirror
+  // them into refs so researchSynopsis always reads the APPLIED shape (never a stale
+  // closure that would silently fall back to the default three-act synopsis).
+  const frameworkRef = React.useRef(framework); frameworkRef.current = framework;
+  const formatRef = React.useRef(format); formatRef.current = format;
   const cfg = SEED_TYPES.find(s=>s.id===seed) || SEED_TYPES[0];
   const needsText = seed !== "talk";
   const formatLabel = (((window.FORMATS||[]).find(f=>f.id===format)||{}).label || "film").toLowerCase();
@@ -306,7 +311,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
     if(!l){ setErr("Choose a logline first."); return; }
     setErr(""); setSynLoading(true);
     try{
-      const s = (typeof aiResearchSynopsis==="function") ? await aiResearchSynopsis(l, text, framework, format) : null;
+      const s = (typeof aiResearchSynopsis==="function") ? await aiResearchSynopsis(l, text, frameworkRef.current, formatRef.current) : null;
       if(s && s.synopsis){
         setSyn(s);
         setTitle(s.title||"");
@@ -463,7 +468,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
             React.createElement("div",{className:"ns-field"},
               React.createElement("div",{className:"ns-input-lab"},"Final logline"),
               React.createElement("textarea",{className:"ns-input",value:chosen,
-                onChange:e=>setChosen(e.target.value),onKeyDown:onCmdEnter(researchSynopsis),rows:3})),
+                onChange:e=>setChosen(e.target.value),rows:3})),
             err && React.createElement("div",{className:"ns-err"},err),
             React.createElement("div",{className:"ns-foot"},
               React.createElement("button",{className:"ns-btn ghost",onClick:()=>setStep("format")},"\u2190 Back"),
