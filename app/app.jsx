@@ -897,7 +897,7 @@ function App(){
     const ok = await window.appConfirm({ title:"Create a story first",
       body:what+" works on your story — and there isn't one yet. Bring an idea and Cinema Machine builds the story with you, scene by scene.",
       confirmLabel:"+ New Story", cancelLabel:"Not now" });
-    if(ok) setNewStoryOpen(true);
+    if(ok) startNewStory();
     return false;
   };
   // PLAN GATE — no free tier: a signed-in user needs an active plan (or purchased
@@ -2385,7 +2385,7 @@ function App(){
     React.createElement("div",{className:"empty-canvas-card"},
       React.createElement("div",{className:"empty-canvas-title"},"Start your film"),
       React.createElement("div",{className:"empty-canvas-sub"},"Your canvas is clean. Describe an idea and Cinema Machine builds the value-charge spine, scene by scene — then characters, props, script and shots all follow from it."),
-      React.createElement("button",{className:"empty-canvas-btn",onClick:()=>setNewStoryOpen(true)},"+ New Story")));
+      React.createElement("button",{className:"empty-canvas-btn",onClick:startNewStory},"+ New Story")));
   // ── Signed-out gate: show the commercial landing page instead of the app. The
   //    departments (spine, Writers' Room, Art Room, Agents) are never exposed until
   //    sign-in. Only when cloud auth is configured; local-only mode runs the app as before.
@@ -2750,7 +2750,13 @@ function App(){
     newStoryOpen && React.createElement(NewStoryIntake,{
       onClose:()=>setNewStoryOpen(false),
       aiOn: (typeof aiAvailable==="function" && aiAvailable()),
-      onLaunch:async (logline, synopsis, formatId, frameworkId)=>{ setNewStoryOpen(false);
+      onLaunch:async (logline, synopsis, formatId, frameworkId)=>{
+        // HARD GATE: building a story runs the paid engine. Every intake path funnels
+        // through onLaunch, so this is the real enforcement point — a no-plan account is
+        // stopped here and sent to the plans modal, instead of consuming a build and
+        // hitting a cryptic provider-funds error (CM-11) part-way through.
+        if(!planActive()){ setNewStoryOpen(false); requirePlan("build a story"); return; }
+        setNewStoryOpen(false);
         // LAZY film creation: the blank film is minted only NOW that a story is really
         // being built — and only when the current film already holds one (an empty
         // canvas is reused instead of duplicated). Aborted intakes create nothing.
