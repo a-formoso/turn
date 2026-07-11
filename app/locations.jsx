@@ -678,6 +678,9 @@ function _nbLocMeta(prompt){
   const now = new Date();
   const mEntry = (window.NB_MODELS||[]).find(m=>m.id===model) || {};
   return { modelLabel:mEntry.label||"Nano Banana", modelId:model, aspect, size,
+    // match the per-card sheet caption: GPT Image carries its quality (low/medium/high)
+    quality: (typeof window.providerOfModel==="function" && window.providerOfModel(model)==="openai")
+      ? ((typeof window.nbGetOaiQuality==="function") ? window.nbGetOaiQuality() : "medium") : undefined,
     date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
     time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
     iso: now.toISOString(), prompt, mode:"final", version:1 };
