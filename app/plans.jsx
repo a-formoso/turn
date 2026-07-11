@@ -145,6 +145,28 @@ function startCheckout(plan, opts){
 }
 window.turnStartCheckout = startCheckout;
 
+/* WELCOME MOMENT — shown once when Stripe's after-payment redirect returns the buyer
+   to the app (/?welcome=1). Celebrates the plan going live and hands them straight to
+   New Story. `activating` covers the few seconds before the webhook's grant streams
+   into the balance — the card updates live and unlocks its CTA when credits land. */
+function WelcomePlanCard({ plan, credits, activating, onNewStory, onClose }){
+  const p = PLANS.find(x=>x.tier===String(plan||"").toLowerCase()) || null;
+  const planLabel = p ? p.name : (plan ? String(plan).replace(/^./,c=>c.toUpperCase()) : "");
+  return React.createElement("div",{className:"ns-overlay"},
+    React.createElement("div",{className:"welcome-card"},
+      React.createElement("div",{className:"welcome-eyebrow"},"Cinema Machine"),
+      React.createElement("div",{className:"welcome-title"},
+        activating ? "Setting up your plan…" : ("Your "+planLabel+" plan is live")),
+      React.createElement("div",{className:"welcome-sub"},
+        activating
+          ? "Payment received — your credits are being added. This only takes a few seconds."
+          : ((Number(credits)||0).toLocaleString()+" credits, refilled monthly. Every render — images, voices, video — runs on them.")),
+      React.createElement("button",{className:"welcome-cta",disabled:!!activating,onClick:onNewStory},
+        activating ? "Activating…" : "+ New Story"),
+      React.createElement("button",{className:"welcome-later",onClick:onClose},"I’ll look around first")));
+}
+window.WelcomePlanCard = WelcomePlanCard;
+
 /* ADMIN copy editor — edits only the marketing text (name/blurb/features/popular),
    persisted globally via cloudSaveAppConfig. Price & credits stay Stripe-owned. */
 function PlanCopyEditor({ onDone }){

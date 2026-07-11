@@ -427,6 +427,31 @@ function App(){
     window.turnIntendedPlan = ()=>{ try{ return localStorage.getItem("turn-intended-plan")||null; }catch(e){ return null; } };
     window.turnClearIntendedPlan = ()=>{ try{ localStorage.removeItem("turn-intended-plan"); }catch(e){} setIntendedPlan(null); };
   },[]);
+  // WELCOME MOMENT — Stripe's after-payment redirect returns the buyer to
+  // /?welcome=1 (set on each payment link's after-payment URL). Show the
+  // "your plan is live" card once, and strip the param so a refresh doesn't re-show.
+  const [welcomeOpen, setWelcomeOpen] = React.useState(()=>{
+    try{ return new URLSearchParams(window.location.search).has("welcome"); }catch(e){ return false; }
+  });
+  React.useEffect(()=>{
+    if(!welcomeOpen) return;
+    try{ const u = new URL(window.location.href); u.searchParams.delete("welcome");
+      window.history.replaceState({}, "", u.pathname + (u.searchParams.toString()?("?"+u.searchParams.toString()):"") + u.hash); }catch(e){}
+  },[]);
+  // PLAN-LESS SIGNUP — a "Get started" signup carried no tier: once the ledger loads
+  // and shows no plan and no credits, open the plans modal proactively ONE time —
+  // "pick your plan to start creating" — instead of waiting for them to hit a wall.
+  React.useEffect(()=>{
+    if(!(session && session.user)) return;
+    if(intendedPlan!=="free") return;
+    if(!creditBalance) return;                         // wait for the ledger to load
+    try{ localStorage.removeItem("turn-intended-plan"); }catch(e){}
+    setIntendedPlan(null);                             // fires once, then never again
+    const plan = String(creditBalance.plan||"none").toLowerCase();
+    if(plan!=="none" || (Number(creditBalance.remaining)||0) > 0) return;   // already covered
+    if(typeof window.appToast==="function") window.appToast("Pick your plan to start creating — every render runs on your plan's credits.","info");
+    if(typeof window.turnOpenPlans==="function") setTimeout(()=>window.turnOpenPlans(), 400);
+  },[session, intendedPlan, creditBalance]);
   // load the admin's plan-card copy overrides (global, public-read) so the plan cards
   // and landing pricing show the edited copy for everyone, including signed-out visitors.
   React.useEffect(()=>{
@@ -2358,6 +2383,14 @@ function App(){
 
   return React.createElement("div",{className:`app vp-${vp} ${densClass} ${premiumClass}`},
     window.ConfirmHost && React.createElement(window.ConfirmHost,null),
+    // the post-checkout welcome card (/?welcome=1): live-updates as the webhook's
+    // grant streams into the balance; its CTA goes straight to New Story
+    welcomeOpen && session && window.WelcomePlanCard && React.createElement(window.WelcomePlanCard,{
+      plan: creditBalance && creditBalance.plan,
+      credits: creditBalance && creditBalance.remaining,
+      activating: !(creditBalance && creditBalance.plan && String(creditBalance.plan).toLowerCase()!=="none"),
+      onNewStory: ()=>{ setWelcomeOpen(false); startNewStory(); },
+      onClose: ()=>setWelcomeOpen(false) }),
     homeOpen && cloudMode && typeof window.HomeScreen!=="undefined" && React.createElement(window.HomeScreen,{
       projects, currentId:currentProjectId,
       onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
