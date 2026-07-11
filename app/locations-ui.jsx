@@ -369,7 +369,7 @@ function LocationVariant({ l, v, project, onTime, onRemove, onView }){
       entity:l, onView, slotPlaceholder:"Drop a photo", noun:"variant", compact:true }));
 }
 
-function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, onSetWorldScale }){
+function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingIds, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, onSetWorldScale }){
   const [view, setView] = React.useState(null);
   if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   const [sceneFilter, setSceneFilter] = React.useState("");
@@ -505,7 +505,7 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
           ? React.createElement(React.Fragment,null,
               React.createElement("div",{className:"sheet-grid"},
                 pager.slice(shown).map(l=>React.createElement(LocationSheet,{key:l.id,l,project,scenes,onUpdate,onDelete,onDraft,
-                  drafting:draftingId===l.id||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
+                  drafting:draftingId===l.id||(draftingIds||[]).indexOf(l.id)>=0||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
                   batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
                   onDraftStaging,draftingStage:draftingStageId===l.id}))),
               React.createElement(PagerBar,{pager,noun:"location"}))

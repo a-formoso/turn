@@ -312,6 +312,7 @@ function App(){
   const _emptyTrash = ()=>({ characters:[], props:[], locations:[] });
   const [trash, setTrash] = React.useState(()=> (saved && saved.trash) || _emptyTrash());
   const [draftingVisualIds, setDraftingVisualIds] = React.useState([]);
+  const draftingVisualIdsRef = React.useRef([]); draftingVisualIdsRef.current = draftingVisualIds;
   const [draftingVisualId, setDraftingVisualId] = React.useState(null);
   const [view, setView] = React.useState(()=> nav.view || (saved && saved.view) || "spine");
   const vp = useViewport();
@@ -978,15 +979,17 @@ function App(){
   };
 
   // Art Room: draft a character's visual layer (look/wardrobe/props) from the script
+  // per-card character drafts run CONCURRENTLY (reuse the drafting-ids set the cards
+  // already reflect), so several "Draft details" / "Draft & Generate" can run at once.
   const draftCharacterVisuals = async (ch)=>{
-    if(draftingVisualId) return;
-    setDraftingVisualId(ch.id);
+    if(draftingVisualIdsRef.current.indexOf(ch.id)>=0) return;   // this character already drafting
+    setDraftingVisualIds(ids=> ids.indexOf(ch.id)>=0 ? ids : [...ids, ch.id]);
     const driven = scenes.filter(s=>s.driver===ch.id);
     try{
       const res = (typeof aiCharacterVisuals==="function") ? await aiCharacterVisuals(ch, driven, lbProject("characters")) : null;
       if(res) updateCharacter(ch.id, res);
     }catch(e){}
-    setDraftingVisualId(null);
+    setDraftingVisualIds(ids=> ids.filter(x=>x!==ch.id));
   };
   // Generate a character's MASTER sheet headlessly (used to guarantee a prop's owner has a
   // sheet BEFORE the prop is generated, so the prop matches the character — mirrors the
@@ -1116,6 +1119,9 @@ function App(){
     setProps(ps=>ps.map(p=>p.id===id?{...p,...patch}:p));
   };
   const [draftingPropId, setDraftingPropId] = React.useState(null);
+  // per-card prop drafts run CONCURRENTLY (mirrors characters/locations)
+  const [draftingPropIds, setDraftingPropIds] = React.useState([]);
+  const draftingPropIdsRef = React.useRef([]); draftingPropIdsRef.current = draftingPropIds;
   const [draftingAllProps, setDraftingAllProps] = React.useState(false);
   const addProp = ()=>{
     const id = "prop-"+Date.now().toString(36);
@@ -1209,13 +1215,14 @@ function App(){
     const rest = { ...patch }; delete rest.renderStyle; return rest;
   };
   const draftPropVisuals = async (pr)=>{
-    if(draftingPropId || !(typeof aiPropVisuals==="function")) return;
-    setDraftingPropId(pr.id);
+    if(!(typeof aiPropVisuals==="function")) return;
+    if(draftingPropIdsRef.current.indexOf(pr.id)>=0) return;   // this prop already drafting
+    setDraftingPropIds(ids=> ids.indexOf(pr.id)>=0 ? ids : [...ids, pr.id]);
     try{
       const res = await aiPropVisuals(pr, characters, lbProject("props"));
       if(res) updateProp(pr.id, keepPickedStyle(pr, res));
     }catch(e){}
-    setDraftingPropId(null);
+    setDraftingPropIds(ids=> ids.filter(x=>x!==pr.id));
   };
   // "Draft all props" — the full props pipeline in one click:
   //   1) SYNC any missing cards from the cast (worn/carried, dedup by owner+name)
@@ -1302,7 +1309,10 @@ function App(){
 
   // ---- Art Room: LOCATIONS ----
   const updateLocation = (id,patch)=>setLocations(ls=>ls.map(l=>l.id===id?{...l,...patch}:l));
-  const [draftingLocId, setDraftingLocId] = React.useState(null);
+  // per-card location drafts run CONCURRENTLY — a set of ids currently drafting, so you
+  // can fire "Draft & Generate" on several locations at once (not one-at-a-time).
+  const [draftingLocIds, setDraftingLocIds] = React.useState([]);
+  const draftingLocIdsRef = React.useRef([]); draftingLocIdsRef.current = draftingLocIds;
   const [draftingAllLocs, setDraftingAllLocs] = React.useState(false);
   const [assigningStyles, setAssigningStyles] = React.useState(false);
   const addLocation = ()=>{
@@ -1327,13 +1337,14 @@ function App(){
     try{ if(typeof nbClearAsset==="function"){ nbClearAsset(id); (item&&item.variants||[]).forEach(v=>nbClearAsset(id+"-"+v.id)); } }catch(e){}
   };
   const draftLocationVisuals = async (l)=>{
-    if(draftingLocId || !(typeof aiLocationVisuals==="function")) return;
-    setDraftingLocId(l.id);
+    if(!(typeof aiLocationVisuals==="function")) return;
+    if(draftingLocIdsRef.current.indexOf(l.id)>=0) return;   // this location already drafting
+    setDraftingLocIds(ids=> ids.indexOf(l.id)>=0 ? ids : [...ids, l.id]);
     try{
       const fields = await aiLocationVisuals(l, scenes, lbProject("locations"));
       if(fields) setLocations(ls=>ls.map(x=>x.id===l.id?{...x, ...keepPickedStyle(x, fields)}:x));
     }catch(e){}
-    setDraftingLocId(null);
+    setDraftingLocIds(ids=> ids.filter(x=>x!==l.id));
   };
   // "Draft all locations" — the full locations pipeline in one click:
   //   1) PULL any missing places from the script's sluglines (+ refresh scene lists)
@@ -2493,11 +2504,11 @@ function App(){
             draftingVisualId,draftingAllVisuals,draftingVisualIds,onAddCharacter:addCharacter,onDeleteCharacter:deleteCharacter,
             onSuggestStates:suggestCharacterStates,suggestingStatesId,onRemoveOwnedItem:removeOwnedProp,onRenameOwnedItem:renameOwnedProp,
             onUpdateProp:updateProp,onDraftProp:draftPropVisuals,onDraftAllProps:draftAllProps,
-            onAddProp:addProp,onDeleteProp:deleteProp,draftingPropId,draftingAllProps,onMergeProps:mergeProps,
+            onAddProp:addProp,onDeleteProp:deleteProp,draftingPropId,draftingPropIds,draftingAllProps,onMergeProps:mergeProps,
             onSeedFromCast:seedPropsFromCast,castHasProps:(typeof castHasProps==="function" && castHasProps(characters)),
             scenes,onTagScenes:tagPropScenes,taggingScenes,onTagOne:tagOnePropScenes,taggingSceneId,
             locations,onUpdateLocation:updateLocation,onDraftLocation:draftLocationVisuals,onDraftAllLocs:draftAllLocations,
-            onAddLocation:addLocation,onDeleteLocation:deleteLocation,draftingLocId,draftingAllLocs,
+            onAddLocation:addLocation,onDeleteLocation:deleteLocation,draftingLocIds,draftingAllLocs,
             onPullFromScript:pullLocationsFromScript,scriptHasLocs:(typeof scriptHasLocations==="function" && scriptHasLocations(scenes)),
             onAssignStyles:assignSceneStyles,assigningStyles,onSetStyleRefs:setStyleRefs,onSetScenePreset:setScenePreset,
             onSetWorldScale:setWorldScale,

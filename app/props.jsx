@@ -714,7 +714,7 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
         React.createElement(CopyBox,{label:"Final prompt \u2014 master + negative (sent to Nano Banana)",text:finalPrompt}))));
 }
 
-function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingAll, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId, onMergeProps, onPropsMaster, trashItems, onRestore, onPurge, onEnsureOwner, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
+function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingIds, draftingAll, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId, onMergeProps, onPropsMaster, trashItems, onRestore, onPurge, onEnsureOwner, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
   const [view, setView] = React.useState(null);   // {url, character/prop}
   if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   const [sceneFilter, setSceneFilter] = React.useState("");   // "" = all
@@ -927,7 +927,7 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
           ? React.createElement(React.Fragment,null,
               React.createElement("div",{className:"sheet-grid"},
                 pager.slice(shown).map(p=>React.createElement(PropSheet,{key:p.id,p,project,characters,scenes,onUpdate,onDelete,onDraft,onEnsureOwner,
-                  drafting:draftingId===p.id||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
+                  drafting:draftingId===p.id||(draftingIds||[]).indexOf(p.id)>=0||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
                   batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
                   onTagOne,taggingScene:taggingSceneId===p.id,derivedScenes:effMap[p.id],
                   dupIds:dupForId[p.id],dupProps:(dupForId[p.id]||[]).filter(id=>id!==p.id).map(id=>byId[id]).filter(Boolean),onMerge:onMergeProps}))),
