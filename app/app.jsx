@@ -2,6 +2,16 @@
 
 const { PROJECT, CHARACTERS, SCENES, BEATS, SCREENPLAY, CONTINUITY, FACTS } = window.TURN_DATA;
 
+/* Is this ledger's plan a REAL, paid subscription? Cinema Machine has NO free tier,
+   so "", "none" (cancelled) AND "free" (the generic Get-started signup default) are
+   all NOT active plans — only Writer/Director/Studio count. Every plan-gate check
+   funnels through here so the app can't disagree with itself about what "on a plan"
+   means (a new account's ledger comes back plan:"free", which must still be gated). */
+window.turnIsPaidPlan = function(plan){
+  const p = String(plan||"").toLowerCase().trim();
+  return !!p && p!=="none" && p!=="free";
+};
+
 /* ---- persistence: keep the user's edited story across refreshes ---- */
 const STORY_KEY = "turn-story-v1";
 function loadStory(){
@@ -456,8 +466,7 @@ function App(){
     if(!creditBalance) return;                         // wait for the ledger to load
     try{ localStorage.removeItem("turn-intended-plan"); }catch(e){}
     setIntendedPlan(null);                             // fires once, then never again
-    const plan = String(creditBalance.plan||"none").toLowerCase();
-    if(plan!=="none" || (Number(creditBalance.remaining)||0) > 0) return;   // already covered
+    if(window.turnIsPaidPlan(creditBalance.plan) || (Number(creditBalance.remaining)||0) > 0) return;   // already covered
     if(typeof window.appToast==="function") window.appToast("Pick your plan to start creating — every render runs on your plan's credits.","info");
     if(typeof window.turnOpenPlans==="function") setTimeout(()=>window.turnOpenPlans(), 400);
   },[session, intendedPlan, creditBalance]);
@@ -915,8 +924,7 @@ function App(){
       if(session && session.user){ try{ refreshCreditBalance && refreshCreditBalance(); }catch(e){} return false; }
       return true;
     }
-    const plan = String(b.plan||"none").toLowerCase();
-    return (!!plan && plan!=="none") || (Number(b.credits)||0) > 0 || (Number(b.remaining)||0) > 0;
+    return window.turnIsPaidPlan(b.plan) || (Number(b.credits)||0) > 0 || (Number(b.remaining)||0) > 0;
   };
   const requirePlan = (what)=>{
     if(typeof window.appToast==="function") window.appToast("Choose a plan to "+what+" — every render runs on your plan's credits.","info");
@@ -2414,7 +2422,7 @@ function App(){
     welcomeOpen && session && window.WelcomePlanCard && React.createElement(window.WelcomePlanCard,{
       plan: creditBalance && creditBalance.plan,
       credits: creditBalance && creditBalance.remaining,
-      activating: !(creditBalance && creditBalance.plan && String(creditBalance.plan).toLowerCase()!=="none"),
+      activating: !(creditBalance && window.turnIsPaidPlan(creditBalance.plan)),
       onNewStory: ()=>{ setWelcomeOpen(false); startNewStory(); },
       onClose: ()=>setWelcomeOpen(false) }),
     homeOpen && cloudMode && typeof window.HomeScreen!=="undefined" && React.createElement(window.HomeScreen,{

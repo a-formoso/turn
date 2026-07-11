@@ -129,12 +129,12 @@ function AccountChip({ session, cloudActive, onSignIn, onSignOut }){
         const since = ts && ts.since ? new Date(ts.since) : null;
         return React.createElement(React.Fragment,null,
           bal && React.createElement("div",{className:"acct-status",title:"Generation credits \u2014 spent by video renders (see the Stage footer for per-render costs)"},
-            "Credits: "+bal.remaining+" remaining"+(bal.plan&&bal.plan!=="none"?(" \u00b7 "+bal.plan+" plan"):"")),
+            "Credits: "+bal.remaining+" remaining"+(window.turnIsPaidPlan&&window.turnIsPaidPlan(bal.plan)?(" \u00b7 "+bal.plan+" plan"):"")),
           // upgrade / manage plan \u2014 opens the Cinema Machine plans modal
           window.turnOpenPlans && React.createElement("button",{className:"acct-upgrade",
             onClick:()=>{ setOpen(false); window.turnOpenPlans(); }},
             React.createElement(Icon.sparkles,{s:12}),
-            (bal && bal.plan && bal.plan!=="none") ? "Change plan" : "Get credits \u00b7 Choose a plan"),
+            (bal && window.turnIsPaidPlan && window.turnIsPaidPlan(bal.plan)) ? "Change plan" : "Get credits \u00b7 Choose a plan"),
           ts && React.createElement("div",{className:"acct-status",
             title:"Writing model (Claude) use \u2014 every drafting, agent, MUSE and vision-QC call is counted here with a per-model estimate. Display-only: not deducted from your generation credits."},
             "Writing model: "+ts.calls+" call"+(ts.calls===1?"":"s")+" \u00b7 \u2248"+(ts.credits||0)+" credits"
