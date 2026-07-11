@@ -427,6 +427,15 @@ function App(){
     window.turnIntendedPlan = ()=>{ try{ return localStorage.getItem("turn-intended-plan")||null; }catch(e){ return null; } };
     window.turnClearIntendedPlan = ()=>{ try{ localStorage.removeItem("turn-intended-plan"); }catch(e){} setIntendedPlan(null); };
   },[]);
+  // load the admin's plan-card copy overrides (global, public-read) so the plan cards
+  // and landing pricing show the edited copy for everyone, including signed-out visitors.
+  React.useEffect(()=>{
+    (async()=>{ try{
+      if(typeof window.cloudGetAppConfig!=="function") return;
+      const ov = await window.cloudGetAppConfig("plans-copy");
+      if(ov && typeof window.turnApplyPlanCopy==="function") window.turnApplyPlanCopy(ov);
+    }catch(e){} })();
+  },[]);
   React.useEffect(()=>{
     if(!(typeof cloudConfigured==="function" && cloudConfigured())){ setAuthReady(true); return; }
     let unsub = ()=>{};

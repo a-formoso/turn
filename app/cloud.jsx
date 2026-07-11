@@ -581,3 +581,21 @@ window.cloudDeleteUserStyle = cloudDeleteUserStyle;
 window.cloudListGlobalStyles = cloudListGlobalStyles;
 window.cloudSaveGlobalStyle = cloudSaveGlobalStyle;
 window.cloudDeleteGlobalStyle = cloudDeleteGlobalStyle;
+
+/* ---- app config (admin-editable global settings, e.g. plan-card copy) ----------
+   Public READ (the landing shows plan cards to signed-out visitors); admin-only
+   WRITE, enforced by RLS (supabase/app-config.sql). */
+async function cloudGetAppConfig(key){
+  const sb = sbClient(); if(!sb || !key) return null;
+  try{ const { data, error } = await sb.from("turn_app_config").select("value").eq("key", key).maybeSingle();
+    if(error) return null; return data ? data.value : null;
+  }catch(e){ return null; }
+}
+async function cloudSaveAppConfig(key, value){
+  const sb = sbClient(); if(!sb || !key) return false;
+  try{ const { error } = await sb.from("turn_app_config").upsert({ key, value }, { onConflict:"key" });
+    return !error;     // RLS rejects non-admins → error truthy → false
+  }catch(e){ return false; }
+}
+window.cloudGetAppConfig = cloudGetAppConfig;
+window.cloudSaveAppConfig = cloudSaveAppConfig;

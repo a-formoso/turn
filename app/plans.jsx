@@ -40,6 +40,36 @@ const PLANS = [
 ];
 window.CINEMA_PLANS = PLANS;
 
+/* ---- admin-editable plan-card COPY (name / blurb / features / most-popular) -------
+   Price & credits are NOT editable here — Stripe owns them (product price +
+   plan_credits metadata), so the card can never misrepresent the real charge/grant.
+   Copy overrides persist globally via cloudSaveAppConfig("plans-copy", …) and every
+   visitor reads them; a version bump re-renders any mounted plan surface + landing. */
+let _plansVersion = 0;
+const _plansListeners = new Set();
+function _bumpPlans(){ _plansVersion++; _plansListeners.forEach(fn=>{ try{ fn(); }catch(e){} }); }
+window.usePlansVersion = function(){
+  const [, force] = React.useState(0);
+  React.useEffect(()=>{ const fn=()=>force(v=>v+1); _plansListeners.add(fn); return ()=>_plansListeners.delete(fn); },[]);
+  return _plansVersion;
+};
+/* apply { writer:{name,blurb,features[],popular}, … } onto the live PLANS copy */
+window.turnApplyPlanCopy = function(ov){
+  if(!ov || typeof ov!=="object") return;
+  let popularTier = null;
+  PLANS.forEach(p=>{
+    const o = ov[p.tier]; if(!o) return;
+    if(typeof o.name==="string" && o.name.trim()) p.name = o.name.trim();
+    if(typeof o.blurb==="string") p.blurb = o.blurb;
+    if(Array.isArray(o.features)) p.features = o.features.map(x=>String(x)).filter(x=>x.trim());
+    if(o.popular) popularTier = p.tier;
+  });
+  if(popularTier!=null) PLANS.forEach(p=>{ p.popular = (p.tier===popularTier); });  // exactly one "most popular"
+  _bumpPlans();
+};
+/* snapshot the current editable copy (for the editor's working state) */
+window.turnPlanCopy = function(){ const o={}; PLANS.forEach(p=>{ o[p.tier]={ name:p.name, blurb:p.blurb, features:(p.features||[]).slice(), popular:!!p.popular }; }); return o; };
+
 /* Pick the right Payment Link for the current origin.
    - Production host: the LIVE link, or "" if not set yet (NEVER fall back to a
      test checkout on a real domain — a "" makes startCheckout show a soft notice).
@@ -110,29 +140,84 @@ function startCheckout(plan){
 }
 window.turnStartCheckout = startCheckout;
 
+/* ADMIN copy editor — edits only the marketing text (name/blurb/features/popular),
+   persisted globally via cloudSaveAppConfig. Price & credits stay Stripe-owned. */
+function PlanCopyEditor({ onDone }){
+  const [draft, setDraft] = React.useState(()=> window.turnPlanCopy());
+  const [busy, setBusy] = React.useState(false);
+  const set = (tier, patch)=> setDraft(d=> ({ ...d, [tier]:{ ...d[tier], ...patch } }));
+  const setFeat = (tier, i, val)=> setDraft(d=>{ const f=d[tier].features.slice(); f[i]=val; return { ...d, [tier]:{ ...d[tier], features:f } }; });
+  const addFeat = (tier)=> setDraft(d=> ({ ...d, [tier]:{ ...d[tier], features:[...d[tier].features, ""] } }));
+  const delFeat = (tier, i)=> setDraft(d=>{ const f=d[tier].features.slice(); f.splice(i,1); return { ...d, [tier]:{ ...d[tier], features:f } }; });
+  const save = async ()=>{
+    setBusy(true);
+    // clean empty feature rows, enforce single "most popular"
+    const clean = {};
+    Object.keys(draft).forEach(t=>{ clean[t] = { name:draft[t].name, blurb:draft[t].blurb,
+      features:draft[t].features.map(x=>String(x)).filter(x=>x.trim()), popular:!!draft[t].popular }; });
+    window.turnApplyPlanCopy(clean);
+    let ok = false;
+    if(typeof window.cloudSaveAppConfig==="function"){ try{ ok = await window.cloudSaveAppConfig("plans-copy", clean); }catch(e){} }
+    setBusy(false);
+    if(window.appToast) window.appToast(ok ? "Plan copy saved for everyone." : "Applied locally, but couldn't save globally — run supabase/app-config.sql and check you're the admin.", ok?"success":"error");
+    onDone();
+  };
+  return React.createElement("div",{className:"plans-grid"},
+    PLANS.map(p=>{
+      const d = draft[p.tier] || { name:p.name, blurb:p.blurb, features:[], popular:false };
+      return React.createElement("div",{key:p.tier,className:"plan-card editing"+(d.popular?" popular":"")},
+        React.createElement("label",{className:"plan-edit-pop"},
+          React.createElement("input",{type:"radio",name:"plan-popular",checked:!!d.popular,
+            onChange:()=> setDraft(dr=>{ const n={...dr}; Object.keys(n).forEach(t=>n[t]={...n[t],popular:t===p.tier}); return n; })}),
+          " Most popular"),
+        React.createElement("input",{className:"plan-edit-name",value:d.name,onChange:e=>set(p.tier,{name:e.target.value}),placeholder:"Plan name"}),
+        React.createElement("div",{className:"plan-price plan-edit-locked"},p.price,React.createElement("span",{className:"plan-per"},"/mo · Stripe")),
+        React.createElement("div",{className:"plan-edit-locked-note"},p.credits.toLocaleString()+" credits · set in Stripe"),
+        React.createElement("textarea",{className:"plan-edit-blurb",rows:2,value:d.blurb,onChange:e=>set(p.tier,{blurb:e.target.value}),placeholder:"One-line blurb"}),
+        React.createElement("div",{className:"plan-edit-feats"},
+          d.features.map((f,i)=>React.createElement("div",{key:i,className:"plan-edit-feat"},
+            React.createElement("input",{value:f,onChange:e=>setFeat(p.tier,i,e.target.value),placeholder:"Feature line"}),
+            React.createElement("button",{type:"button",className:"plan-edit-featx",title:"Remove",onClick:()=>delFeat(p.tier,i)},"×"))),
+          React.createElement("button",{type:"button",className:"plan-edit-featadd",onClick:()=>addFeat(p.tier)},"+ Add feature")));
+    }),
+    React.createElement("div",{className:"plan-edit-bar"},
+      React.createElement("button",{className:"plan-cta",disabled:busy,onClick:onDone},"Cancel"),
+      React.createElement("button",{className:"plan-cta primary",disabled:busy,onClick:save}, busy?"Saving…":"Save for everyone")));
+}
+
 function PlansModal({ onClose, currentPlan }){
-  return React.createElement("div",{className:"ns-overlay",onMouseDown:e=>{ if(e.target===e.currentTarget) onClose(); }},
+  if(typeof window.usePlansVersion==="function") window.usePlansVersion();   // re-render on copy edits
+  const [editing, setEditing] = React.useState(false);
+  const isAdmin = !!window.turnIsAdmin;
+  return React.createElement("div",{className:"ns-overlay",onMouseDown:e=>{ if(e.target===e.currentTarget && !editing) onClose(); }},
     React.createElement("div",{className:"plans-modal"},
       React.createElement("button",{className:"ag-x plans-x",onClick:onClose},React.createElement(Icon.x,{s:16})),
       React.createElement("div",{className:"plans-head"},
-        React.createElement("div",{className:"plans-title"},"Choose your plan"),
-        React.createElement("div",{className:"plans-sub"},"Credits power every render — images, voices, and video. Cancel anytime.")),
-      React.createElement("div",{className:"plans-grid"},
-        PLANS.map(p=>{
-          const active = currentPlan && String(currentPlan).toLowerCase()===p.tier;
-          return React.createElement("div",{key:p.tier,className:"plan-card"+(p.popular?" popular":"")+(active?" active":"")},
-            p.popular && React.createElement("div",{className:"plan-flag"},"Most popular"),
-            React.createElement("div",{className:"plan-name"},p.name),
-            React.createElement("div",{className:"plan-price"},p.price,React.createElement("span",{className:"plan-per"},"/mo")),
-            React.createElement("div",{className:"plan-blurb"},p.blurb),
-            React.createElement("ul",{className:"plan-feats"},
-              p.features.map((f,i)=>React.createElement("li",{key:i},
-                React.createElement(Icon.check,{s:12}),f))),
-            React.createElement("button",{className:"plan-cta"+(p.popular?" primary":"")+(active?" is-active":""),
-              disabled:active,
-              onClick:()=>{ if(!active) startCheckout(p); }},
-              active ? "Current plan" : ("Choose "+p.name)));
-        })),
+        React.createElement("div",{className:"plans-title"}, editing ? "Edit plan copy" : "Choose your plan"),
+        React.createElement("div",{className:"plans-sub"}, editing
+          ? "Marketing copy only — price and credits are set in Stripe. Saved changes show for everyone."
+          : "Credits power every render — images, voices, and video. Cancel anytime."),
+        isAdmin && !editing && React.createElement("button",{className:"plans-edit-btn",onClick:()=>setEditing(true),
+          title:"Admin — edit the plan cards' copy (name, blurb, features, most-popular)"},
+          React.createElement((Icon.wand||Icon.sparkles),{s:13})," Edit copy")),
+      editing
+        ? React.createElement(PlanCopyEditor,{ onDone:()=>setEditing(false) })
+        : React.createElement("div",{className:"plans-grid"},
+            PLANS.map(p=>{
+              const active = currentPlan && String(currentPlan).toLowerCase()===p.tier;
+              return React.createElement("div",{key:p.tier,className:"plan-card"+(p.popular?" popular":"")+(active?" active":"")},
+                p.popular && React.createElement("div",{className:"plan-flag"},"Most popular"),
+                React.createElement("div",{className:"plan-name"},p.name),
+                React.createElement("div",{className:"plan-price"},p.price,React.createElement("span",{className:"plan-per"},"/mo")),
+                React.createElement("div",{className:"plan-blurb"},p.blurb),
+                React.createElement("ul",{className:"plan-feats"},
+                  p.features.map((f,i)=>React.createElement("li",{key:i},
+                    React.createElement(Icon.check,{s:12}),f))),
+                React.createElement("button",{className:"plan-cta"+(p.popular?" primary":"")+(active?" is-active":""),
+                  disabled:active,
+                  onClick:()=>{ if(!active) startCheckout(p); }},
+                  active ? "Current plan" : ("Choose "+p.name)));
+            })),
       React.createElement("div",{className:"plans-foot"},
         "Secure checkout by Stripe · Cinema Machine, by Infinite Studio AI")));
 }

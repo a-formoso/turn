@@ -124,6 +124,7 @@ function lpTiers(){
 }
 
 function Landing({ onStart, onSignIn }){
+  if(typeof window.usePlansVersion==="function") window.usePlansVersion();   // reflect admin plan-copy edits
   const Icn = (name, s)=> React.createElement(Icon[name] || Icon.sparkles, {s:s||18});
   const [menuOpen, setMenuOpen] = React.useState(false);   // mobile hamburger menu
   return React.createElement("div",{className:"landing"},
