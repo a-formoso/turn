@@ -453,11 +453,12 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
       onViewBible && React.createElement("button",{className:"tb-btn",onClick:()=>setBibleOpen(true),
         title:"Film Bible — view the whole continuity JSON the studio reads from"},
         React.createElement(Icon.layers,{s:14}),"JSON"),
-      // Signed-in users manage their personal render styles; admin also manages global render styles.
-      // Hidden in the Writers' Room until the film actually HAS a render style established
-      // (nothing to manage during the writing phase); always available in Art/Stage.
-      onManageStyles && (room!=="writers" || hasFilmStyle) && React.createElement("button",{className:"tb-btn",onClick:()=>setStylesOpen(true),
-        title:"Render styles — manage global render styles and your locked styles"},
+      // Styles manager: ADMIN ONLY. Its real job is curating the GLOBAL style tier
+      // (publish/hide/reorder what every user sees). Regular users manage their own
+      // locked styles where they live — on the Art Room cards (lock 🔒 / unlock chip)
+      // — so for them this button was an empty modal and top-bar clutter.
+      window.turnIsAdmin && onManageStyles && React.createElement("button",{className:"tb-btn",onClick:()=>setStylesOpen(true),
+        title:"Render styles — curate the global style list (admin) and your locked styles"},
         React.createElement((Icon.sparkles||Icon.layers),{s:14}),"Styles"),
       // API keys: ADMIN ONLY. Subscribers never enter provider keys — all generation
       // runs on the platform's server-side keys through the proxy (no key in the browser).

@@ -744,7 +744,9 @@ window.turnLockRenderStyle = async function(label, render){
   const same = _userStyles.find(s=> JSON.stringify(s.render)===JSON.stringify(render));   // de-dupe by block (doesn't count against the cap)
   if(same){ _applyAll(); return same.key; }
   if(_userStyles.length >= MAX_PERSONAL_STYLES){   // personal cap reached
-    if(window.appToast) window.appToast("You've saved the maximum of "+MAX_PERSONAL_STYLES+" personal styles. Open “Styles” in the top bar and delete one to make room.");
+    if(window.appToast) window.appToast(window.turnIsAdmin
+      ? "You've saved the maximum of "+MAX_PERSONAL_STYLES+" personal styles. Open “Styles” in the top bar and delete one to make room."
+      : "You've saved the maximum of "+MAX_PERSONAL_STYLES+" personal styles. Select a saved style on any card and tap “unlock” to make room.");
     return "";
   }
   const key = _freshKey(LOCKED_KEY_PREFIX, label);
