@@ -416,7 +416,10 @@ function App(){
   //   window.turnClearIntendedPlan()  (call once checkout has consumed it)
   const [intendedPlan, setIntendedPlan] = React.useState(()=>{ try{ return localStorage.getItem("turn-intended-plan")||null; }catch(e){ return null; } });
   const startWithPlan = (plan)=>{
-    const p = (plan==="pro"||plan==="studio") ? plan : "free";
+    // carry the tier the visitor chose on the landing pricing cards through signup:
+    // writer/director/studio (a real plan) or "free" for the generic Get-started CTA.
+    const valid = (window.CINEMA_PLANS||[]).some(p=>String(p.tier).toLowerCase()===String(plan).toLowerCase());
+    const p = valid ? String(plan).toLowerCase() : "free";
     try{ localStorage.setItem("turn-intended-plan", p); }catch(e){}
     setIntendedPlan(p); openAuth("signup");
   };
@@ -453,6 +456,17 @@ function App(){
     // the Supabase uid rides into Stripe as client_reference_id (see plans.jsx)
     window.turnUserId = (session && session.user && session.user.id) || null;
     if(typeof window.turnRefreshLockedStyles==="function") window.turnRefreshLockedStyles(); },[userEmail, session]);
+  // CONTINUITY from the landing pricing → checkout: if the visitor picked a paid plan
+  // before signing up, open that plan's Stripe checkout automatically once they're in.
+  React.useEffect(()=>{
+    if(!(session && session.user && session.user.id)) return;
+    const plan = intendedPlan;
+    if(!plan || plan==="free") return;
+    const planObj = (window.CINEMA_PLANS||[]).find(p=>String(p.tier).toLowerCase()===plan);
+    try{ localStorage.removeItem("turn-intended-plan"); }catch(e){}
+    setIntendedPlan(null);
+    if(planObj && typeof window.turnStartCheckout==="function") setTimeout(()=>window.turnStartCheckout(planObj), 350);
+  },[session, intendedPlan]);
   const [creditBalance, setCreditBalance] = React.useState(null);
   const refreshCreditBalance = React.useCallback(async ()=>{
     if(typeof cloudGetCreditBalance!=="function"){ setCreditBalance(null); return null; }
@@ -840,7 +854,23 @@ function App(){
     if(ok) setNewStoryOpen(true);
     return false;
   };
+  // PLAN GATE — no free tier: a signed-in user needs an active plan (or purchased
+  // credits) before creating a story or leaving the Writers' Room. Admin and local/
+  // dev (balance not loaded yet) bypass; the server-side credit check is the real
+  // enforcement, this is the friendly nudge to the plans modal.
+  const planActive = ()=>{
+    if(window.turnIsAdmin) return true;
+    const b = window.turnCreditBalance;
+    if(!b) return true;                       // balance not loaded — don't hard-lock
+    const plan = String(b.plan||"none").toLowerCase();
+    return (!!plan && plan!=="none") || (Number(b.credits)||0) > 0;
+  };
+  const requirePlan = (what)=>{
+    if(typeof window.appToast==="function") window.appToast("Choose a plan to "+what+" — every render runs on your plan's credits.","info");
+    if(typeof window.turnOpenPlans==="function") window.turnOpenPlans();
+  };
   const guardedSetRoom = (id)=>{
+    if(id!=="writers" && !planActive()){ requirePlan("open "+(id==="art"?"the Art Room":id==="stage"?"the Stage":"this room")); return; }
     if(id!=="writers" && !scenes.length){ requireStory("The Art Room"); return; }
     setRoom(id);
   };
@@ -860,7 +890,7 @@ function App(){
   // created inside onLaunch, and only when the CURRENT film already holds a story
   // (an empty canvas is reused, never duplicated). Deleting a film remains the
   // project switcher's deliberate per-film Delete.
-  const startNewStory = ()=>{ setNewStoryOpen(true); };
+  const startNewStory = ()=>{ if(!planActive()){ requirePlan("start a story"); return; } setNewStoryOpen(true); };
 
   // ---- character handlers ----
   const updateCharacter = (id,patch)=>setCharacters(cs=>cs.map(c=>c.id===id?{...c,...patch}:c));

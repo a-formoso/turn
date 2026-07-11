@@ -341,9 +341,12 @@ function stageClipSourcePlan(clip, imgs){
    time-coded windows otherwise — both carry per-line speaker + @AudioN tags now,
    so dialogue attribution survives either way); a single silent frame reads best
    as prose. */
-function stageSmartRecipe(clip, sourceMode){
+function stageSmartRecipe(clip, sourceMode, modelId){
   const d = (clip&&clip.data)||{};
   const shotsN = ((d.shots||[]).length);
+  // Kling 3.0 renders each Multi-shot row natively on its own prompt — for any
+  // multi-beat clip on Kling, Multi-shot IS the model's native language.
+  if(modelId==="kling-3.0" && shotsN>=2) return "multishot";
   if((d.lineShots||[]).length && shotsN<=1) return "lipsync";
   if(sourceMode==="halves" || sourceMode==="sheet") return "panels";
   if(shotsN>=2) return "timeline";
@@ -433,6 +436,8 @@ function stageRenderCost(tierObj, resolution, durationSec){
   return Math.max(1, Math.ceil(s*r));
 }
 window.SEEDANCE_MODELS = SEEDANCE_MODELS;
+/* per-shot seconds interval grid for the Multi-shot composer (bounded per model) */
+window.STAGE_MS_STEPS = [4, 8, 12, 15];
 
 /* ---- camera vocabulary Seedance 2.0 is tuned to recognise (fal.ai prompting guide:
    "Subject + Action + Camera + Scene/Lighting + Style", named cinematographer terms). ---- */
@@ -874,16 +879,16 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   // (per clip) and stops the auto-follow until the next clip is selected.
   // whole-scene packing defaults to its dedicated "Whole scene" tab (the combined
   // scene prompt); per-clip packing keeps the smart per-clip recipe pick
-  const defaultRecipe = ()=> packMode==="scene" ? "scene" : stageSmartRecipe(clip, sourceMode);
+  const defaultRecipe = ()=> packMode==="scene" ? "scene" : stageSmartRecipe(clip, sourceMode, modelId);
   const [recipe, setRecipe] = React.useState(defaultRecipe);
   const [recipeTouched, setRecipeTouched] = React.useState(false);
   const pickRecipe = (id)=>{ setRecipeTouched(true); setRecipe(id); };
   React.useEffect(()=>{ setRecipeTouched(false); setRecipe(defaultRecipe()); }, [clip.id]);
-  React.useEffect(()=>{ if(!recipeTouched) setRecipe(defaultRecipe()); }, [sourceMode]);
+  React.useEffect(()=>{ if(!recipeTouched) setRecipe(defaultRecipe()); }, [sourceMode, modelId]);
   // leaving whole-scene mode retires the "scene" tab — fall back to the smart pick
   React.useEffect(()=>{
     if(packMode==="scene" && !recipeTouched) setRecipe("scene");
-    if(packMode!=="scene" && recipe==="scene"){ setRecipeTouched(false); setRecipe(stageSmartRecipe(clip, sourceMode)); }
+    if(packMode!=="scene" && recipe==="scene"){ setRecipeTouched(false); setRecipe(stageSmartRecipe(clip, sourceMode, modelId)); }
   }, [packMode]);
   // the render-settings panel docks on the RIGHT like the Writers' Room inspector —
   // open by default, collapsible to a slim strip, remembered across sessions.
@@ -917,6 +922,21 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     const ok = SEEDANCE_MODELS.find(m=>m.status==="active" && planAllowsModel(m.id));
     if(ok){ setModelId(ok.id); const t0=seedanceTierOf(ok, tier); if(t0) setTier(t0.id); }
   }, [modelId, planGate && planGate.tier]);
+  // AUTO MODEL — pick the most appropriate engine for the clip until the user picks
+  // one by hand (then their choice rules): a clip whose lines are already VOICED
+  // (locked ElevenLabs audio) wants Seedance's voice-locked lip-sync; anything else
+  // multi-beat wants Kling's native multi-shot. Tier gates always respected.
+  const modelTouchedRef = React.useRef(false);
+  React.useEffect(()=>{
+    if(modelTouchedRef.current) return;
+    const shots = ((clip.data&&clip.data.shots)||[]);
+    const hasVoiced = shots.some(sh=> sh && sh.lineAudio && sh.lineAudio.durationMs);
+    const want = hasVoiced ? "seedance-2.0" : (shots.length>=2 ? "kling-3.0" : null);
+    if(!want || want===modelId) return;
+    const m = seedanceModelOf(want);
+    if(m.id!==want || m.status!=="active" || !planAllowsModel(want)) return;
+    setModelId(want); const t0=seedanceTierOf(m, tier); if(t0) setTier(t0.id);
+  }, [clip.id]);
   React.useEffect(()=>{ if(batchN>planMaxBatch) setBatchN(planMaxBatch); }, [planMaxBatch]);
   // dialogue/duration are now CLIP-wide — a clip can bundle several merged shots, so the
   // voice lock and measured duration must account for every dialogue line in the clip,
@@ -948,7 +968,9 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   // also excluded, in the render). Excluding a shot auto-collapses it; the chevron
   // overrides either way. Both reset per clip.
   const [msFolded, setMsFolded] = React.useState(()=>new Set());
-  React.useEffect(()=>{ setMsOff(new Set()); setMsFolded(new Set()); }, [clip.id]);
+  const msTouchedRef = React.useRef(false);         // user drove the rows — auto-fit stands down
+  const msAutoFitRef = React.useRef(null);          // last clip auto-fitted (once per visit)
+  React.useEffect(()=>{ setMsOff(new Set()); setMsFolded(new Set()); msTouchedRef.current=false; }, [clip.id]);
   // MULTI-SHOT is a WHOLE-SCENE composer: it lists EVERY beat of the scene (not just
   // this clip's packed subset — Seedance caps clips at 3 shots, so beats 4+ live in
   // later clips). Sourced from all the scene's clips, with panelLines / cast gathered
@@ -968,6 +990,33 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     : clip;
   const msShots = msAllShots.filter(sh=>!msOff.has(sh.id));
   const msTotal = msShots.reduce((a,sh)=> a + (Number(sh.dur) || (typeof shotDur==="function" ? shotDur(sh) : 3)), 0);
+  // AUTO-FIT — the first time a clip is shown in Multi-shot (and until the user touches
+  // the rows), tick as many leading shots as fit under the model ceiling and give each
+  // a grid duration (4/8/12/15) so the total never spills over. Voiced lines keep their
+  // measured minimum. Runs once per clip visit; hand-editing a row/check stops it.
+  React.useEffect(()=>{
+    if(recipe!=="multishot" || msTouchedRef.current || !onUpdateShot) return;
+    if(msAutoFitRef.current===clip.id) return;
+    msAutoFitRef.current = clip.id;
+    const cap = model.maxClipSec || 15;
+    const grid = (window.STAGE_MS_STEPS || [4,8,12,15]).slice().sort((a,b)=>a-b);
+    const minOf = (sh)=> (sh.lineAudio && sh.lineAudio.durationMs) ? Math.max(1, Math.round(((sh.lineAudio.durationMs/1000)+0.4)*10)/10) : grid[0];
+    const off = new Set(), durs = {};
+    let used = 0;
+    msAllShots.forEach(sh=>{
+      const floor = minOf(sh);
+      const room = cap - used;
+      if(floor > room + 0.001){ off.add(sh.id); return; }     // no room left → leave this shot out
+      // biggest grid step that fits the remaining budget (but at least the voiced floor)
+      const fit = grid.filter(g=> g>=floor-0.001 && g<=room+0.001).pop();
+      const secs = fit!=null ? fit : Math.min(room, Math.max(floor, grid[0]));
+      durs[sh.id] = Math.round(secs*10)/10;
+      used += durs[sh.id];
+    });
+    if(!Object.keys(durs).length && msAllShots[0]){ durs[msAllShots[0].id] = Math.min(cap, grid[0]); off.delete(msAllShots[0].id); }
+    msAllShots.forEach(sh=>{ const want = durs[sh.id]; if(want!=null && Math.abs((Number(sh.dur)||0)-want)>0.001) onUpdateShot(sh.id,{ dur:want }); });
+    setMsOff(off);
+  }, [clip.id, recipe, modelId]);
   const duration = (voiceLocked && measuredSec)
     ? Math.max(measuredSec, durationOverride||0)
     : (durationOverride
@@ -1255,6 +1304,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
       }),
       onPick:(id)=>{ const m=seedanceModelOf(id); if(m.status!=="active") return;
         if(!planAllowsModel(id)){ openPlansUpsell(); return; }
+        modelTouchedRef.current = true;   // a hand-picked model rules — auto-pick stands down
         setModelId(id); const t0=seedanceTierOf(m,tier); if(t0) setTier(t0.id); } },
     { key:"aspect", icon:Icon.monitor, label:effAspect, title:"Aspect ratio — the project format's default is "+(aspect||"16:9"), heading:"Aspect ratio",
       options:["auto","21:9","16:9","4:3","1:1","3:4","9:16"].map(v=>({ value:v,
@@ -1424,6 +1474,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         const voicedMin = (sh.lineAudio && sh.lineAudio.durationMs) ? Math.max(1, Math.round(((sh.lineAudio.durationMs/1000)+0.4)*10)/10) : 1;
         const curDur = Math.max(1, Math.round((Number(sh.dur) || (typeof shotDur==="function" ? shotDur(sh) : 3))*10)/10);
         const setDur = (nv)=>{ if(!onUpdateShot) return;
+          msTouchedRef.current = true;   // hand-set seconds — auto-fit stands down
           const v = Math.min(model.maxClipSec||15, Math.max(voicedMin, Math.round(nv*10)/10));
           onUpdateShot(sh.id, { dur:v }); };
         // an EMPTY override means "derived" (clearing the box restores the derived
@@ -1432,6 +1483,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         const included = !msOff.has(sh.id);
         const folded = msFolded.has(sh.id);
         const toggleInclude = ()=>{
+          msTouchedRef.current = true;   // hand-picked rows — auto-fit stands down
           setMsOff(s=>{
             const n = new Set(s);
             if(n.has(sh.id)) n.delete(sh.id);
@@ -1463,22 +1515,30 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
               title:"Restore this shot's derived text (your edit is video-only and will be discarded)",
               onClick:()=> onUpdateShot && onUpdateShot(sh.id,{ vidText: undefined })},"↺ derived"),
             !included && _stEl("span",{className:"stage2-ms-offlab"},"not in this render"),
-            _stEl("span",{className:"stage2-ms-dur"},
-              _stEl("button",{type:"button",disabled:!onUpdateShot||curDur<=voicedMin,
-                title: curDur<=voicedMin && voicedMin>1 ? ("Minimum "+_fmtSecs(voicedMin)+" — locked to the voiced line") : "Shorter",
-                onClick:()=>setDur(curDur-1)},"−"),
-              // the value is a PICKER — choose the shot's seconds directly, bounded by
-              // the model's per-shot range and the voiced line's measured minimum
-              _stEl("select",{className:"stage2-ms-durpick",value:String(curDur),disabled:!onUpdateShot,
-                title:"Seconds for this shot — minimum "+(voicedMin>1?(_fmtSecs(voicedMin)+" (the voiced line's measured audio)"):"1s")
-                  +", maximum "+(model.maxClipSec||15)+"s per render on "+(model.label||"this model"),
-                onChange:(e)=>{ const v=Number(e.target.value); if(v>0) setDur(v); }},
-                Array.from(new Set([curDur, Math.round(voicedMin*10)/10,
-                    ...Array.from({length:(model.maxClipSec||15)},(_,k)=>k+1)]))
-                  .filter(v=> v>=voicedMin-0.001 && v<=(model.maxClipSec||15))
-                  .sort((a,b)=>a-b)
-                  .map(v=>_stEl("option",{key:v,value:String(v)},_fmtSecs(Math.round(v*10)/10)))),
-              _stEl("button",{type:"button",disabled:!onUpdateShot,title:"Longer",onClick:()=>setDur(curDur+1)},"+"))),
+            _stEl("span",{className:"stage2-ms-dur"},(()=>{
+              // per-shot seconds live on the INTERVAL GRID 4/8/12/15 (bounded by the
+              // voiced line's measured minimum and the model's per-render cap) — the
+              // current value and voiced minimum are always offered so nothing snaps
+              // out from under the user; − / + step through the grid.
+              const cap = model.maxClipSec||15;
+              const opts = Array.from(new Set(
+                  [ ...(window.STAGE_MS_STEPS||[4,8,12,15]), cap, curDur, Math.round(voicedMin*10)/10 ]))
+                .filter(v=> v>=Math.max(1,voicedMin)-0.001 && v<=cap)
+                .sort((a,b)=>a-b);
+              const idx = opts.findIndex(v=>Math.abs(v-curDur)<0.001);
+              const stepTo = (di)=>{ const v=opts[Math.max(0,Math.min(opts.length-1,(idx<0?0:idx)+di))]; if(v>0) setDur(v); };
+              return [
+                _stEl("button",{key:"m",type:"button",disabled:!onUpdateShot||idx<=0,
+                  title: idx<=0 && voicedMin>1 ? ("Minimum "+_fmtSecs(voicedMin)+" — locked to the voiced line") : "Shorter",
+                  onClick:()=>stepTo(-1)},"−"),
+                _stEl("select",{key:"s",className:"stage2-ms-durpick",value:String(curDur),disabled:!onUpdateShot,
+                  title:"Seconds for this shot — 4 / 8 / 12 / "+cap+"s"+(voicedMin>1?(", minimum "+_fmtSecs(voicedMin)+" (the voiced line's measured audio)"):"")
+                    +", on "+(model.label||"this model"),
+                  onChange:(e)=>{ const v=Number(e.target.value); if(v>0) setDur(v); }},
+                  opts.map(v=>_stEl("option",{key:v,value:String(v)},_fmtSecs(Math.round(v*10)/10)))),
+                _stEl("button",{key:"p",type:"button",disabled:!onUpdateShot||idx>=opts.length-1,title:"Longer",
+                  onClick:()=>stepTo(1)},"+")];
+            })())),
           // the shot's text sits IN the box (editable) — editing saves a video-only
           // override on the shot; ↺ derived brings the live derived line back.
           // A COLLAPSED row hides only its text box; the shot stays fully in the list.
