@@ -1406,6 +1406,10 @@ function useImageGen(opts){
         renderStyleLabel,
         aspect: genOpts.aspectRatio || ((typeof nbGetAspect==="function") ? nbGetAspect() : "16:9"),
         size: genOpts.imageSize || ((typeof nbGetRes==="function") ? nbGetRes() : "2K"),
+        // quality is a GPT Image (OpenAI) setting only — low/medium/high; Nano Banana
+        // has no such control (its "quality" IS its resolution tier), so leave it unset there.
+        quality: (typeof providerOfModel==="function" && providerOfModel(actualModel)==="openai")
+          ? (genOpts.quality || ((typeof nbGetOaiQuality==="function") ? nbGetOaiQuality() : "medium")) : undefined,
         date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
         time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
         iso: now.toISOString(),
@@ -1754,6 +1758,7 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
           field("Render style", (typeof renderStyleLabelFromMeta==="function" ? renderStyleLabelFromMeta(meta) : "") || null),
           field("Resolution", meta.size),
           field("Aspect ratio", meta.aspect),
+          field("Quality", meta.quality ? String(meta.quality).replace(/^./,c=>c.toUpperCase()) : null),
           field("Generated", (meta.date||"")+(meta.time?(" \u00b7 "+meta.time):"")),
           ...((extraMeta||[]).filter(m=>m&&m.v).map((m,i)=>React.createElement("div",{key:"em"+i,className:"dt-field"},
             React.createElement("div",{className:"dt-flab"},m.k),
@@ -1944,6 +1949,19 @@ window.QaCheckButton = QaCheckButton;
 function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate, extraMeta, menuExtra, dropToImport, hideUploadButton, onStop, generateDisabled, generateDisabledLabel, generateDisabledTitle, editPropRefs, editSuggestions }){
   const { genUrl, genMeta, genTier, gening, genErr, retrying, slotHasRef,
     editMode, setEditMode, editText, setEditText, generate, cancelGen, clearGen, importSheet, relatedClearCount, revertPrevious, layers, allModels } = gen;
+  // Resolution ALWAYS shows on the caption. Prefer the stored size; if it's missing
+  // (legacy meta, or any path that didn't record it) measure the actual image's pixels
+  // so a real resolution still appears — for generations AND uploads alike.
+  const [measRes, setMeasRes] = React.useState("");
+  React.useEffect(()=>{
+    if(!genUrl || (genMeta && genMeta.size)){ setMeasRes(""); return; }
+    let alive=true; const im=new Image();
+    im.onload=()=>{ if(alive && im.naturalWidth) setMeasRes(nbResLabel(im.naturalWidth, im.naturalHeight)); };
+    im.onerror=()=>{ if(alive) setMeasRes(""); };
+    im.src=genUrl;
+    return ()=>{ alive=false; };
+  },[genUrl, genMeta && genMeta.size]);
+  const resLabel = (genMeta && genMeta.size) || measRes || "—";
   // EDIT ATTACHMENTS — image inputs the user pins to the NEXT "Apply edit": uploaded
   // photos/designs and/or this entity's prop sheets (incl. CARRIED props). They ride
   // as editRefImages on the edit generation; cleared on apply, cancel or close.
@@ -2018,12 +2036,6 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
   // spec-first gate (opt-in via specGate; Props/Characters pass nothing → ungated):
   // block plate generation until the written design spec exists, so it's reviewed first
   const specBlocked = !!(specGate && !specGate.ready && !genUrl && !slotHasRef);
-  const generatedDateLabel = (()=>{
-    if(!genMeta) return "";
-    if(genMeta.date) return genMeta.date;
-    if(genMeta.iso){ try{ return new Date(genMeta.iso).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); }catch(e){} }
-    return "";
-  })();
 
   return React.createElement("div",{className:"sheet-frame"},
     genUrl
@@ -2266,9 +2278,11 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
             React.createElement("span",{className:"sheet-meta-item",title:"Aspect ratio"},
               React.createElement(Icon.image,{s:10,sw:1.8}),genMeta.aspect),
             React.createElement("span",{className:"sheet-meta-item",title:"Resolution"},
-              React.createElement(Icon.monitor,{s:10,sw:1.8}),genMeta.size),
-            generatedDateLabel && React.createElement("span",{className:"sheet-meta-item",title:"Generated"},
-              React.createElement(Icon.clock,{s:10,sw:1.8}),generatedDateLabel))
+              React.createElement(Icon.monitor,{s:10,sw:1.8}),resLabel),
+            // Quality (GPT Image only: low/medium/high) replaces the generated-date chip.
+            // Uploads and Nano Banana carry no quality, so the chip is simply absent there.
+            genMeta.quality && React.createElement("span",{className:"sheet-meta-item",title:"Quality",style:{textTransform:"capitalize"}},
+              React.createElement((Icon.diamond||Icon.sparkles),{s:10,sw:1.8}),genMeta.quality))
         : React.createElement("span",{className:"sheet-frame-cap-label"},genUrl?"Generated":"Reference frame")),
     /* Portal to <body>: the card has content-visibility:auto (paint/layout
        containment), which would otherwise make this card the containing block for
