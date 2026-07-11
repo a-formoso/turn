@@ -8,9 +8,11 @@
    Everything here is wired to REAL app state — projects come from the live list,
    the pipeline steps open the actual rooms (through the app's guarded room
    switch), "New Project" creates a film, project cards open that film, and
-   "View all" hands off to the poster wall (HomeScreen). Chrome that has no
-   backing feature yet (Docs, Discord) degrades to an explicit "coming soon"
-   toast rather than a dead link.
+   "View all" hands off to the poster wall (HomeScreen).
+
+   DESIGN: matches the signed-out landing page (landing.jsx) for visual
+   continuity — the same paper palette, Spectral serif headlines, Space Grotesk
+   wordmark, black pill buttons, and Reel-orange as the single warm accent.
 
    Gating (in app.jsx): this dashboard only shows once the user has >=2 films;
    below that the classic poster wall is shown instead. */
@@ -41,8 +43,6 @@
   }
 
   const initials = (t)=> (t||"Untitled").trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase() || "·";
-
-  const soon = (name)=>{ if(window.appToast) window.appToast(name+" — coming soon","info"); };
 
   // Pipeline steps mirror window.ROOMS but with the landing-page phrasing.
   const STEPS = [
@@ -84,8 +84,6 @@
           current && h("span",{className:"hd-proj-badge"}, displayType(current)),
           Ic("chevD",14))),
       h("div",{className:"hd-top-actions"},
-        h("button",{className:"hd-tbtn", onClick:()=>soon("Docs")}, Ic("script",15), "Docs"),
-        h("button",{className:"hd-tbtn", onClick:()=>soon("Discord")}, Ic("globe",15), "Discord"),
         h("button",{className:"hd-tbtn hd-accent", onClick:onCreate}, Ic("plus",15), "New Project"),
         accountSlot ? h("div",{className:"hd-acct"}, accountSlot) : null));
 
