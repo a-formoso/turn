@@ -110,7 +110,18 @@
       return ()=>{ cancelled = true; };
     }, [missing]);   // re-run when the set of cover-less films changes
 
+    // ----- full-screen poster preview (the app's shared immersive lightbox) --
+    const [viewer, setViewer] = React.useState(null);   // {url, title} | null
+    React.useEffect(()=>{
+      if(!viewer) return;
+      const onKey = (e)=>{ if(e.key==="Escape") setViewer(null); };
+      window.addEventListener("keydown", onKey);
+      return ()=> window.removeEventListener("keydown", onKey);
+    },[viewer]);
+
     // ----- manual poster actions (per card, on hover) -------------------------
+    const doView = (p,e)=>{ e.stopPropagation();
+      if(p.cover) setViewer({ url:p.cover, title:p.title||"Untitled film" }); };
     const doDownload = (p,e)=>{ e.stopPropagation();
       if(!p.cover) return;
       const a = document.createElement("a"); a.href = p.cover;
@@ -149,9 +160,13 @@
 
     const activeStep = STEPS.find(s=>s.id===activeRoom) || STEPS[0];
     // Clean cinematic panel per the reference design: big radius + soft shadow,
-    // just the play button and the film's title.
-    const hero_panel = h("div",{className:"hd-hero-media",
-        style: hero && hero.cover ? { backgroundImage:'url("'+hero.cover+'")' } : null},
+    // just the play button and the film's title. Clicking the artwork itself
+    // (not the play button) opens the full-screen poster preview.
+    const hero_panel = h("div",{className:"hd-hero-media"+(hero&&hero.cover?" has-art":""),
+        style: hero && hero.cover ? { backgroundImage:'url("'+hero.cover+'")' } : null,
+        title: hero && hero.cover ? "View poster full screen" : undefined,
+        onClick:(e)=>{ if(e.target===e.currentTarget && hero && hero.cover)
+          setViewer({ url:hero.cover, title:hero.title||"Untitled film" }); }},
       !(hero && hero.cover) && h("div",{className:"hd-hero-media-fallback"}),
       h("button",{className:"hd-play", onClick:()=> onGoRoom && onGoRoom("stage"), title:"Go to The Stage"},
         Ic("play",26)),
@@ -189,8 +204,10 @@
               h("span",{className:"hd-card-spin"}),
               h("span",{className:"hd-card-gen-lab"},"Painting poster…")),
             h("span",{className:"hd-card-pill"}, phaseOf(p).toUpperCase()),
-            // poster actions (hover): download / regenerate / restore previous
+            // poster actions (hover): view full screen / download / regenerate / restore
             h("div",{className:"hd-card-actions"},
+              p.cover && h("button",{className:"hd-cact", title:"View poster full screen",
+                onClick:(e)=>doView(p,e)}, Ic("maximize",13)),
               p.cover && h("button",{className:"hd-cact", title:"Download poster",
                 onClick:(e)=>doDownload(p,e)}, Ic("download",13)),
               h("button",{className:"hd-cact", title:(p.cover?"Regenerate":"Generate")+" poster",
@@ -226,6 +243,23 @@
           h("a",{className:"lp-foot-link",href:"#terms"},"Terms"),
           h("a",{className:"lp-foot-link",href:"#contact"},"Contact"))));
 
+    // full-screen poster preview — the app's shared immersive lightbox chrome
+    // (.lb-overlay/.lb-panel, same as the Art Room's sheet viewer)
+    const posterViewer = viewer && h("div",{className:"lb-overlay",
+        onMouseDown:(e)=>{ if(e.target===e.currentTarget) setViewer(null); }},
+      h("div",{className:"lb-panel"},
+        h("div",{className:"lb-head"},
+          h("span",{className:"lb-title"}, viewer.title),
+          h("button",{className:"ag-x", onClick:()=>setViewer(null), title:"Close (Esc)"}, Ic("x",17))),
+        h("div",{className:"lb-imgwrap",
+            onMouseDown:(e)=>{ if(e.target===e.currentTarget) setViewer(null); }},
+          h("img",{className:"lb-img", src:viewer.url, alt:viewer.title+" — poster"})),
+        h("div",{className:"lb-foot"},
+          h("button",{className:"lb-dl", onClick:()=>{
+              const a=document.createElement("a"); a.href=viewer.url;
+              a.download=(viewer.title||"poster").replace(/[^\w-]+/g,"-")+"-poster.jpg"; a.click(); }},
+            Ic("download",14), "Download poster"))));
+
     return h("div",{className:"hd-root"},
       h("div",{className:"hd-main"},
         // full-height vertical rails at the 1280px column edges — the landing's
@@ -236,7 +270,8 @@
           heroSection,
           recentSection,
           featureSection,
-          footer)));
+          footer)),
+      posterViewer);
   }
 
   window.HomeDashboard = HomeDashboard;

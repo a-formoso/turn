@@ -5763,6 +5763,7 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
   background:var(--lpw-black) center/cover no-repeat;
   box-shadow:0 28px 56px -28px rgba(15,16,18,.5);
   display:flex; align-items:center; justify-content:center; }
+.hd-hero-media.has-art{ cursor:zoom-in; }
 .hd-hero-media-fallback{ position:absolute; inset:0;
   background:radial-gradient(120% 120% at 30% 20%,#22242b 0%,#121319 60%,#0d0d0e 100%); }
 .hd-play{ position:relative; z-index:1; width:68px; height:68px; border-radius:999px; cursor:pointer;
