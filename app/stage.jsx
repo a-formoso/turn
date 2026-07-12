@@ -29,6 +29,38 @@ function _stageAspectCss(aspect){
 function _stageSavedSource(){
   try{ const v=localStorage.getItem("turn_stage_visual_source"); return v==="halves" ? "halves" : "shots"; }catch(e){ return "shots"; }
 }
+/* Full-screen for any rendered-video player: native fullscreen on the <video>,
+   falling back to a self-mounting in-app overlay (same .stage2-lightbox chrome)
+   when the browser refuses — embedded frames often leave the request pending or
+   reject it. Shared by the clip console, the Versions viewer and the Timeline/
+   Audio players so every generated video can go full screen the same way. */
+function _stageVideoFullscreen(v, url){
+  const src = url || (v && (v.currentSrc || v.src)) || "";
+  const overlay = ()=>{
+    if(!src) return;
+    const wrap = document.createElement("div"); wrap.className = "stage2-lightbox";
+    const vid = document.createElement("video");
+    vid.className = "stage2-lightbox-media"; vid.src = src;
+    vid.controls = true; vid.autoplay = true; vid.playsInline = true;
+    if(v){ try{ vid.currentTime = v.currentTime||0; }catch(e){} }
+    wrap.appendChild(vid);
+    const onKey = (e)=>{ if(e.key==="Escape") close(); };
+    const close = ()=>{ try{ wrap.remove(); }catch(e){} document.removeEventListener("keydown", onKey); };
+    wrap.addEventListener("mousedown",(e)=>{ if(e.target===wrap) close(); });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(wrap);
+  };
+  if(!v){ overlay(); return; }
+  try{
+    if(v.requestFullscreen){ const p = v.requestFullscreen(); if(p&&p.catch) p.catch(()=>{}); }
+    else if(v.webkitRequestFullscreen) v.webkitRequestFullscreen();
+    else if(v.webkitEnterFullscreen){ v.webkitEnterFullscreen(); return; }   // iOS Safari
+    else { overlay(); return; }
+    // an embedded frame can leave the request PENDING forever — if nothing is
+    // fullscreen shortly after, open the overlay instead
+    setTimeout(()=>{ if(!document.fullscreenElement && !document.webkitFullscreenElement) overlay(); }, 600);
+  }catch(e){ overlay(); }
+}
 function _chipClass(k){ return String(k||"").toLowerCase().replace(/[^a-z0-9_-]+/g,"-").replace(/^-+|-+$/g,"") || "tag"; }
 function _fmtSecs(n){ n=Number(n)||0; return (Math.round(n*10)/10).toString().replace(/\.0$/,"")+"s"; }
 function stageCreditInfo(balance, cost){
@@ -2116,7 +2148,8 @@ function StageVersionsView({ clip, stageModel, onBack, onReuse }){
           }) : _stEl("div",{className:"stage2-versions-empty"},"No versions match these filters.")),
         // center — player + details
         _stEl("div",{className:"stage2-versions-viewer"},
-          sel ? _stEl("video",{key:sel.url,className:"stage2-versions-video",src:sel.url,controls:true,playsInline:true}) : null,
+          sel ? _stEl("video",{key:sel.url,className:"stage2-versions-video",src:sel.url,controls:true,playsInline:true,
+            title:"Double-click for full screen",onDoubleClick:(e)=>_stageVideoFullscreen(e.currentTarget)}) : null,
           sel && _stEl("div",{className:"stage2-versions-details"},
             _stEl("div",{className:"stage2-versions-dhead"},"Version details"),
             detailRows.map(([k,v])=>_stEl("div",{key:k,className:"stage2-vdetail"},
@@ -2220,6 +2253,7 @@ function StageTimelineView({ allClips, vids, imgs, visualSource, selId, onSelect
     _stEl("div",{className:"stage2-tl-player"},
       curUrl
         ? _stEl("video",{key:curUrl,ref:videoRef,src:curUrl,controls:true,playsInline:true,onEnded,
+            title:"Double-click for full screen",onDoubleClick:(e)=>_stageVideoFullscreen(e.currentTarget),
             poster:cur?clipPrimaryFrame(cur, imgs, visualSource)||undefined:undefined})
         : _stEl("div",{className:"stage2-tl-empty"},
             _stEl("div",null,(cur?cur.label+" isn't rendered yet.":"No clips yet.")),
@@ -2313,7 +2347,8 @@ function StageAudioView({ allClips, vids, auds, selId, onSelectClip }){
         title:sceneClips.some(c=>vids[c.id])?"Play the scene with the post mix":"Render this scene's clips first"},
         playing?"■ Stop":"▶ Play scene mix")),
     _stEl("div",{className:"stage2-au-player"},
-      curUrl ? _stEl("video",{key:curUrl,ref:videoRef,src:curUrl,controls:true,playsInline:true,onEnded:onClipEnded})
+      curUrl ? _stEl("video",{key:curUrl,ref:videoRef,src:curUrl,controls:true,playsInline:true,onEnded:onClipEnded,
+          title:"Double-click for full screen",onDoubleClick:(e)=>_stageVideoFullscreen(e.currentTarget)})
         : _stEl("div",{className:"stage2-tl-empty"},"This scene has no rendered clips yet — render them in the Shoot tab.")),
     _stEl("div",{className:"stage2-au-lanes"},
       lane("native","Picture (native mix)",
