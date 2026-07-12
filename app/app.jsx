@@ -493,8 +493,7 @@ function App(){
 
   // ---- cloud projects + doc sync ----
   const [projects, setProjects] = React.useState([]);
-  const [homeOpen, setHomeOpen] = React.useState(false);   // Home / Dashboard (film wall)
-  const [homeView, setHomeView] = React.useState("dash");  // Home overlay tab: "dash" (dashboard) | "projects" (poster wall)
+  const [homeOpen, setHomeOpen] = React.useState(false);   // Home / Dashboard overlay (only shown at >=2 films)
   const [currentProjectId, setCurrentProjectId] = React.useState(null);
   const cloudMode = !!(session && currentProjectId);
   // ADMIN — demo upkeep account. The Matrix sample story (and "Reset to sample story")
@@ -752,46 +751,6 @@ function App(){
     setProjects(ps=>[created, ...ps]);
     await loadProjectIntoState(created.id);
     setArtView("lookbook");   // a fresh film opens the Art Room on the Lookbook (front of the pipeline)
-  };
-  /* Home screen: mint an AI poster for a film from its title + logline and persist it
-     onto doc.cover, so the film wall shows real key art. Routes through the same image
-     proxy as the rest of the studio (no key in the browser). */
-  const generatePoster = async (proj)=>{
-    if(!proj || !proj.id) return;
-    /* the poster follows the film's RENDER STYLE — but only the currently open project
-       has its cast loaded, so other films on the wall keep the neutral cinematic prompt.
-       Photoreal-family films also keep it (the base prompt already reads cinematic). */
-    const posterStyle = (()=>{
-      try{
-        if(proj.id!==currentProjectId || !(characters||[]).length) return "";
-        const tally = {};
-        characters.forEach(c=>{ const k=(typeof inferCharacterRenderStyleKey==="function") ? inferCharacterRenderStyleKey(c) : (c.renderStyleKey||"");
-          if(k && k!=="surprise") tally[k]=(tally[k]||0)+1; });
-        const top = Object.keys(tally).sort((a,b)=>tally[b]-tally[a])[0];
-        if(!top || /^(photoreal|horror)/.test(top)) return "";
-        const cs = (window.CHAR_RENDER_STYLES||{})[top];
-        return cs && cs.rendering ? String(cs.rendering).split(/[;,]/).slice(0,2).join(",").trim() : "";
-      }catch(e){ return ""; }
-    })();
-    const prompt = (typeof window.posterPrompt==="function")
-      ? window.posterPrompt(proj, posterStyle)
-      : ("Cinematic movie poster key art for the film “"+(proj.title||"Untitled film")+"”. "+
-         "A single striking hero image; bold cinematic composition. NO text anywhere.");
-    let url = await window.nbGenerate(prompt, { aspectRatio:"9:16", quality:"medium" });
-    if(!url) throw new Error("The poster came back empty — try again.");
-    if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 640, 0.82); }catch(e){} }
-    if(typeof window.cloudSaveCover==="function") await window.cloudSaveCover(proj.id, url);
-    setProjects(ps=>ps.map(p=>p.id===proj.id?{ ...p, cover:url }:p));
-    return url;
-  };
-  /* Home wall: the user dragged films into a new order. Stamp each a sequential
-     homeOrder (so the custom arrangement wins over the created-date default) in state
-     immediately, and persist each onto its doc so it survives reload / syncs devices. */
-  const reorderProjects = (orderedIds)=>{
-    if(!orderedIds || !orderedIds.length) return;
-    const pos = Object.fromEntries(orderedIds.map((id,i)=>[id,i]));
-    setProjects(ps=> ps.map(p=> pos[p.id]!=null ? { ...p, ord:pos[p.id] } : p));   // stamp position; HomeScreen sorts by it
-    orderedIds.forEach((id,i)=>{ if(typeof window.cloudSaveOrder==="function") window.cloudSaveOrder(id, i); });
   };
   /* SERIES: turn the CURRENT project into episode 1 of a new show — its
      departments become the show's shared bible. (Sheets generated before the
@@ -2426,31 +2385,20 @@ function App(){
       activating: !(creditBalance && window.turnIsPaidPlan(creditBalance.plan)),
       onNewStory: ()=>{ setWelcomeOpen(false); startNewStory(); },
       onClose: ()=>setWelcomeOpen(false) }),
-    homeOpen && cloudMode && (
-      // The dashboard only appears once the user has >=2 films; below that (or when
-      // "View all" is chosen) we fall back to the classic poster wall.
-      (homeView==="projects" || (projects||[]).filter(p=>String(p.isShow)!=="true").length < 2)
-        ? (typeof window.HomeScreen!=="undefined" && React.createElement(window.HomeScreen,{
-            projects, currentId:currentProjectId,
-            onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
-            onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
-            onDelete: deleteProject,
-            onGeneratePoster: generatePoster,
-            onReorder: reorderProjects,
-            onClose: ()=>setHomeOpen(false),
-            accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
-              onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }))
-        // default Home = the dashboard
-        : (typeof window.HomeDashboard!=="undefined" && React.createElement(window.HomeDashboard,{
-            projects, currentId:currentProjectId, room,
-            onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
-            onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
-            onAllProjects: ()=>setHomeView("projects"),
-            onGoRoom: async (rid)=>{ if(!currentProjectId){ await createProject(); } setHomeOpen(false); if(rid==="writers") setView("spine"); guardedSetRoom(rid); },
-            onClose: ()=>setHomeOpen(false),
-            accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
-              onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }))
-    ),
+    // Home = the dashboard, and ONLY once the user has >=2 films. Below that,
+    // opening Home routes straight into the Writers' Room (see onHome), so the
+    // dashboard overlay never renders for a 0/1-film studio.
+    homeOpen && cloudMode
+      && (projects||[]).filter(p=>String(p.isShow)!=="true").length >= 2
+      && typeof window.HomeDashboard!=="undefined"
+      && React.createElement(window.HomeDashboard,{
+          projects, currentId:currentProjectId, room,
+          onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
+          onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
+          onGoRoom: async (rid)=>{ if(!currentProjectId){ await createProject(); } setHomeOpen(false); if(rid==="writers") setView("spine"); guardedSetRoom(rid); },
+          onClose: ()=>setHomeOpen(false),
+          accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
+            onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }),
     t.grain && React.createElement("div",{style:{position:"fixed",inset:0,pointerEvents:"none",zIndex:50,
       opacity:.025,mixBlendMode:"overlay",
       backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")"}}),
@@ -2464,7 +2412,13 @@ function App(){
       onReset: isAdmin ? resetStory : null,
       onToggleAI:toggleAI,
       onNewStory:startNewStory,
-      onHome: cloudMode ? (()=>{ setHomeView("dash"); setHomeOpen(true); }) : null,
+      onHome: cloudMode ? (()=>{
+        // Home only opens the dashboard for an established studio (>=2 films).
+        // A 0/1-film studio skips Home entirely and lands in the Writers' Room.
+        const nFilms = (projects||[]).filter(p=>String(p.isShow)!=="true").length;
+        if(nFilms >= 2){ setHomeOpen(true); return; }
+        (async()=>{ if(!currentProjectId){ await createProject(); } setHomeOpen(false); setView("spine"); guardedSetRoom("writers"); })();
+      }) : null,
       // ADMIN ONLY: inspect the whole continuity JSON (the Film Bible) the studio reads from
       onViewBible: isAdmin ? (()=> buildFilmBible({ project, scenes, characters, props, locations, shots, drafts, beatsMap, lookbook, lookbookNote })) : null,
       onManageStyles: (userEmail || null),   // every signed-in user manages their own styles (admin also gets the global tier inside)

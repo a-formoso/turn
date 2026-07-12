@@ -1,21 +1,20 @@
-/* home-dashboard.jsx — the Home / landing dashboard.
+/* home-dashboard.jsx — the Home dashboard (the studio's front door).
 
-   A richer front door than the poster wall (home.jsx): a top bar (brand +
-   project selector + actions + account), a hero that pitches the studio and
-   drops you straight into the production pipeline, a "Recent Projects" strip
-   built from the user's real films, and a feature strip.
+   A top bar (brand + current-project chip + actions + account), a hero that
+   pitches the studio and drops you straight into the production pipeline, a
+   "Recent Projects" strip built from the user's real films, and a feature strip.
 
    Everything here is wired to REAL app state — projects come from the live list,
    the pipeline steps open the actual rooms (through the app's guarded room
-   switch), "New Project" creates a film, project cards open that film, and
-   "View all" hands off to the poster wall (HomeScreen).
+   switch), "New Project" creates a film, and project cards open that film.
 
    DESIGN: matches the signed-out landing page (landing.jsx) for visual
    continuity — the same paper palette, Spectral serif headlines, Space Grotesk
    wordmark, black pill buttons, and Reel-orange as the single warm accent.
 
-   Gating (in app.jsx): this dashboard only shows once the user has >=2 films;
-   below that the classic poster wall is shown instead. */
+   Gating (in app.jsx): this dashboard is the ONLY Home, and only shows once the
+   user has >=2 films; below that, opening Home lands straight in the Writers'
+   Room instead. */
 
 (function(){
   const h = React.createElement;
@@ -63,7 +62,7 @@
 
   function HomeDashboard(props){
     const { projects, currentId, room,
-            onOpen, onCreate, onAllProjects, onGoRoom, onClose, accountSlot } = props;
+            onOpen, onCreate, onGoRoom, onClose, accountSlot } = props;
 
     // real films only (shows are containers), newest-updated first (list already sorted)
     const films = (projects||[]).filter(p=> String(p.isShow)!=="true");
@@ -78,11 +77,10 @@
         h("button",{className:"hd-brand", onClick:onClose, title:"Back to your film"},
           (typeof BrandMark!=="undefined") && h(BrandMark,null),
           h("span",{className:"hd-brand-name"},"TURN")),
-        h("button",{className:"hd-proj", onClick:onAllProjects, title:"Switch project"},
+        h("div",{className:"hd-proj", title:"Current project"},
           h("span",{className:"hd-proj-ic"}, Ic("clapper",15)),
           h("span",{className:"hd-proj-name"}, (current && current.title) || "No project open"),
-          current && h("span",{className:"hd-proj-badge"}, displayType(current)),
-          Ic("chevD",14))),
+          current && h("span",{className:"hd-proj-badge"}, displayType(current)))),
       h("div",{className:"hd-top-actions"},
         h("button",{className:"hd-tbtn hd-accent", onClick:onCreate}, Ic("plus",15), "New Project"),
         accountSlot ? h("div",{className:"hd-acct"}, accountSlot) : null));
@@ -120,8 +118,7 @@
     // ----- recent projects --------------------------------------------------
     const recentSection = h("section",{className:"hd-recent"},
       h("div",{className:"hd-sec-head"},
-        h("h2",{className:"hd-sec-title"},"Recent Projects"),
-        h("button",{className:"hd-viewall", onClick:onAllProjects}, "View all ", Ic("arrowR",14))),
+        h("h2",{className:"hd-sec-title"},"Recent Projects")),
       h("div",{className:"hd-recent-row"},
         recent.map(p=> h("button",{ key:p.id, className:"hd-card"+(p.id===currentId?" current":""),
             onClick:()=> onOpen && onOpen(p.id)},
