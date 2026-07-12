@@ -242,8 +242,7 @@
         h("span",{className:"lp-logo sm"},"Cinema Machine"),
         h("nav",{className:"lp-foot-links","aria-label":"Legal"},
           h("a",{className:"lp-foot-link",href:"/privacy.html",target:"_blank",rel:"noopener"},"Privacy"),
-          h("a",{className:"lp-foot-link",href:"/terms.html",target:"_blank",rel:"noopener"},"Terms"),
-          h("a",{className:"lp-foot-link",href:"mailto:support@infinitestudioai.com"},"Contact"))));
+          h("a",{className:"lp-foot-link",href:"/terms.html",target:"_blank",rel:"noopener"},"Terms"))));
 
     // full-screen poster preview — the app's shared immersive lightbox chrome
     // (.lb-overlay/.lb-panel, same as the Art Room's sheet viewer)
