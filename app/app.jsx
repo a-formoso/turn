@@ -824,8 +824,11 @@ function App(){
     const firstWithArt = (list)=>{ for(const e of list.slice(0,4)){ const u = e && e.id && urlOf(e.id); if(u) return { url:u, name:(e.name||e.title||"").trim() }; } return null; };
     return { ok:true, cast, world:firstWithArt(locs), prop:firstWithArt(props), style };
   };
-  const generatePoster = async (proj)=>{
+  const generatePoster = async (proj, opts)=>{
     if(!proj || !proj.id) return "";
+    // REGENERATE keeps the outgoing poster as one-deep history (doc.coverPrev)
+    // so the Home card's Restore can bring it back.
+    const keepPrev = (opts && opts.keepPrev) ? (proj.cover || "") : undefined;
     // In-flight dedupe (keyed by film id, app-level so it survives the dashboard
     // unmounting/remounting): if a poster for this film is ALREADY being painted,
     // hand back the SAME promise instead of launching a second, duplicate spend.
@@ -888,13 +891,20 @@ function App(){
       let url = await window.nbGenerate(prompt, genOpts);
       if(!url) throw new Error("The poster came back empty — try again.");
       if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 640, 0.82); }catch(e){} }
-      if(typeof window.cloudSaveCover==="function") await window.cloudSaveCover(proj.id, url);
-      setProjects(ps=>ps.map(p=>p.id===proj.id?{ ...p, cover:url }:p));
+      if(typeof window.cloudSaveCover==="function") await window.cloudSaveCover(proj.id, url, keepPrev);
+      setProjects(ps=>ps.map(p=>p.id===proj.id?{ ...p, cover:url, ...(keepPrev!==undefined?{coverPrev:keepPrev}:{}) }:p));
       return url;
     })();
     inflight[proj.id] = run;
     try{ return await run; }
     finally{ delete inflight[proj.id]; }
+  };
+  /* Home card "Restore": swap the film's poster with its one-deep history. */
+  const restorePoster = async (proj)=>{
+    if(!proj || !proj.id || !proj.coverPrev || typeof window.cloudSwapCover!=="function") return;
+    const r = await window.cloudSwapCover(proj.id);
+    if(r) setProjects(ps=>ps.map(p=>p.id===proj.id?{ ...p, cover:r.cover, coverPrev:r.coverPrev }:p));
+    else if(typeof window.appToast==="function") window.appToast("Couldn't restore the previous poster.","error");
   };
   /* SERIES: turn the CURRENT project into episode 1 of a new show — its
      departments become the show's shared bible. (Sheets generated before the
@@ -2541,6 +2551,8 @@ function App(){
           onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
           onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
           onGeneratePoster: generatePoster,
+          onRegenPoster: (p)=>generatePoster(p, { keepPrev:true }),
+          onRestorePoster: restorePoster,
           onGoRoom: async (rid)=>{ if(!currentProjectId){ await createProject(); } setHomeOpen(false); if(rid==="writers") setView("spine"); guardedSetRoom(rid); },
           onClose: ()=>setHomeOpen(false),
           accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,

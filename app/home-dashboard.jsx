@@ -67,11 +67,17 @@
 
   function HomeDashboard(props){
     const { projects, currentId, room,
-            onOpen, onCreate, onGeneratePoster, onGoRoom, onClose, accountSlot } = props;
+            onOpen, onCreate, onGeneratePoster, onRegenPoster, onRestorePoster,
+            onGoRoom, onClose, accountSlot } = props;
 
     // real films only (shows are containers), newest-updated first (list already sorted)
     const films = (projects||[]).filter(p=> String(p.isShow)!=="true");
-    const recent = films.slice(0,5);
+    // Recent Projects is a PAGED window (‹ › arrows) over all films, 5 at a time
+    const PER = 5;
+    const [start, setStart] = React.useState(0);
+    const maxStart = Math.max(0, films.length - PER);
+    const from = Math.min(start, maxStart);
+    const recent = films.slice(from, from + PER);
     const current = films.find(p=> p.id===currentId) || null;
     const hero = current || films.find(p=> p.cover) || films[0] || null;
     const activeRoom = room || "writers";
@@ -103,6 +109,20 @@
       })();
       return ()=>{ cancelled = true; };
     }, [missing]);   // re-run when the set of cover-less films changes
+
+    // ----- manual poster actions (per card, on hover) -------------------------
+    const doDownload = (p,e)=>{ e.stopPropagation();
+      if(!p.cover) return;
+      const a = document.createElement("a"); a.href = p.cover;
+      a.download = (p.title||"poster").replace(/[^\w-]+/g,"-")+"-poster.jpg"; a.click(); };
+    const doRegen = async (p,e)=>{ e.stopPropagation();
+      if(genBusy[p.id] || typeof onRegenPoster!=="function") return;
+      setGenBusy(b=>({ ...b, [p.id]:true }));
+      try{ await onRegenPoster(p); }
+      catch(err){ if(window.appToast) window.appToast(String((err&&err.message)||"Couldn't paint a poster."),"error"); }
+      finally{ setGenBusy(b=>{ const n={ ...b }; delete n[p.id]; return n; }); } };
+    const doRestore = async (p,e)=>{ e.stopPropagation();
+      if(typeof onRestorePoster==="function") await onRestorePoster(p); };
 
     // ----- top bar ----------------------------------------------------------
     // Mirrors the landing nav (.lp-nav): frosted full-width bar, content constrained
@@ -152,10 +172,16 @@
     // ----- recent projects --------------------------------------------------
     const recentSection = h("section",{className:"hd-recent"},
       h("div",{className:"hd-sec-head"},
-        h("h2",{className:"hd-sec-title"},"Recent Projects")),
+        h("h2",{className:"hd-sec-title"},"Recent Projects"),
+        films.length > PER && h("div",{className:"hd-nav"},
+          h("button",{className:"hd-navbtn", disabled:from<=0, title:"Previous",
+            onClick:()=> setStart(Math.max(0, from - PER))}, Ic("chevL",15)),
+          h("button",{className:"hd-navbtn", disabled:from>=maxStart, title:"Next",
+            onClick:()=> setStart(Math.min(maxStart, from + PER))}, Ic("chevR",15)))),
       h("div",{className:"hd-recent-row"},
-        recent.map(p=> h("button",{ key:p.id, className:"hd-card"+(p.id===currentId?" current":""),
-            onClick:()=> onOpen && onOpen(p.id)},
+        recent.map(p=> h("div",{ key:p.id, className:"hd-card"+(p.id===currentId?" current":""),
+            role:"button", tabIndex:0, onClick:()=> onOpen && onOpen(p.id),
+            onKeyDown:(e)=>{ if(e.key==="Enter") onOpen && onOpen(p.id); }},
           h("div",{className:"hd-card-art",
               style: p.cover ? { backgroundImage:'url("'+p.cover+'")' } : null},
             !p.cover && h("span",{className:"hd-card-initials"}, initials(p.title)),
@@ -163,11 +189,21 @@
               h("span",{className:"hd-card-spin"}),
               h("span",{className:"hd-card-gen-lab"},"Painting poster…")),
             h("span",{className:"hd-card-pill"}, phaseOf(p).toUpperCase()),
+            // poster actions (hover): download / regenerate / restore previous
+            h("div",{className:"hd-card-actions"},
+              p.cover && h("button",{className:"hd-cact", title:"Download poster",
+                onClick:(e)=>doDownload(p,e)}, Ic("download",13)),
+              h("button",{className:"hd-cact", title:(p.cover?"Regenerate":"Generate")+" poster",
+                disabled:!!genBusy[p.id], onClick:(e)=>doRegen(p,e)}, Ic("redo",13)),
+              p.coverPrev && h("button",{className:"hd-cact", title:"Restore previous poster",
+                onClick:(e)=>doRestore(p,e)}, Ic("undo",13))),
             h("div",{className:"hd-card-shade"},
               h("div",{className:"hd-card-name"}, p.title||"Untitled film"),
               h("div",{className:"hd-card-sub"}, displayType(p)),
               h("div",{className:"hd-card-meta"}, Ic("history",12), updatedAgo(p.updated_at||p.created_at)))))),
-        h("button",{className:"hd-card hd-card-new", onClick:onCreate},
+        // the New tile rides along only while the page has a free slot — with a
+        // full page of posters the orange top-bar button covers creation
+        recent.length < PER && h("button",{className:"hd-card hd-card-new", onClick:onCreate},
           h("div",{className:"hd-card-art hd-card-new-art"},
             Ic("plus",26),
             h("div",{className:"hd-card-new-lab"},"New Project")))));
@@ -180,6 +216,15 @@
           h("div",{className:"hd-feat-title"}, f.title),
           h("div",{className:"hd-feat-body"}, f.body)))));
 
+    // ----- footer — mirrors the landing footer (.lp-foot), same links --------
+    const footer = h("footer",{className:"hd-foot"},
+      h("div",{className:"hd-foot-in"},
+        h("span",{className:"lp-logo sm"},"Cinema Machine"),
+        h("nav",{className:"lp-foot-links","aria-label":"Legal"},
+          h("a",{className:"lp-foot-link",href:"#privacy"},"Privacy"),
+          h("a",{className:"lp-foot-link",href:"#terms"},"Terms"),
+          h("a",{className:"lp-foot-link",href:"#contact"},"Contact"))));
+
     return h("div",{className:"hd-root"},
       h("div",{className:"hd-main"},
         // full-height vertical rails at the 1280px column edges — the landing's
@@ -189,7 +234,8 @@
         h("div",{className:"hd-scroll"},
           heroSection,
           recentSection,
-          featureSection)));
+          featureSection,
+          footer)));
   }
 
   window.HomeDashboard = HomeDashboard;

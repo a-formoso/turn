@@ -148,7 +148,7 @@ async function cloudListProjects(){
     // cards can show each film's honest pipeline PHASE without fetching whole
     // docs — shots exist → Production; location cards → Pre-production; else Development.
     const { data, error } = await sb.from("turn_projects")
-      .select("id,title,updated_at,created_at,isShow:doc->>isShow,showId:doc->>showId,episodeNo:doc->>episodeNo,cover:doc->>cover,fmt:doc->project->>format,logline:doc->project->>logline,ord:doc->>homeOrder,hasShots:doc->shots->0->>id,hasLocs:doc->locations->0->>id")
+      .select("id,title,updated_at,created_at,isShow:doc->>isShow,showId:doc->>showId,episodeNo:doc->>episodeNo,cover:doc->>cover,coverPrev:doc->>coverPrev,fmt:doc->project->>format,logline:doc->project->>logline,ord:doc->>homeOrder,hasShots:doc->shots->0->>id,hasLocs:doc->locations->0->>id")
       .order("updated_at",{ ascending:false });
     // null = REQUEST FAILED (e.g. expired token → 401), [] = genuinely no projects.
     // Callers must not treat a failure as "new user" — that's how an auth hiccup
@@ -159,16 +159,35 @@ async function cloudListProjects(){
 }
 /* persist a film's poster (a downscaled data URL) onto its doc.cover, merging so the
    rest of the story doc is untouched. Used by the Home screen's poster generator. */
-async function cloudSaveCover(id, cover){
+async function cloudSaveCover(id, cover, prevCover){
   const sb = sbClient(); if(!sb || !id) return;
   try{
     const { data } = await sb.from("turn_projects").select("doc").eq("id", id).single();
     const doc = (data && data.doc) || {};
     doc.cover = cover || "";
+    // one-deep poster history: a REGENERATE passes the outgoing poster so the
+    // Home card's Restore can bring it back
+    if(prevCover!==undefined) doc.coverPrev = prevCover || "";
     await sb.from("turn_projects").update({ doc }).eq("id", id);
   }catch(e){}
 }
 window.cloudSaveCover = cloudSaveCover;
+/* swap a film's poster with its one-deep history (doc.cover <-> doc.coverPrev) —
+   the Home card's Restore. Returns the new pair, or null on failure. */
+async function cloudSwapCover(id){
+  const sb = sbClient(); if(!sb || !id) return null;
+  try{
+    const { data } = await sb.from("turn_projects").select("doc").eq("id", id).single();
+    const doc = (data && data.doc) || {};
+    if(!doc.coverPrev) return null;   // nothing to restore
+    const cur = doc.cover || "";
+    doc.cover = doc.coverPrev; doc.coverPrev = cur;
+    const { error } = await sb.from("turn_projects").update({ doc }).eq("id", id);
+    if(error) return null;
+    return { cover:doc.cover, coverPrev:doc.coverPrev };
+  }catch(e){ return null; }
+}
+window.cloudSwapCover = cloudSwapCover;
 /* persist a film's manual position on the Home wall onto doc.homeOrder (merged), so a
    user-arranged order survives reload and rides along in cloudListProjects (`ord`). */
 async function cloudSaveOrder(id, order){
