@@ -1185,7 +1185,7 @@ function App(){
     setDraftingVisualIds(ids=> ids.indexOf(ch.id)>=0 ? ids : [...ids, ch.id]);
     const driven = scenes.filter(s=>s.driver===ch.id);
     try{
-      const res = (typeof aiCharacterVisuals==="function") ? await aiCharacterVisuals(ch, driven, lbProject("characters")) : null;
+      const res = (typeof aiCharacterVisuals==="function") ? await aiCharacterVisuals(ch, driven, lbProject("characters"), { scenes, drafts }) : null;
       if(res) updateCharacter(ch.id, res);
     }catch(e){}
     setDraftingVisualIds(ids=> ids.filter(x=>x!==ch.id));
@@ -1226,7 +1226,7 @@ function App(){
     if(await _imgOf(c.id)) return;                       // owner already has a sheet
     let cc = c;
     if(typeof window.charVisualsDrafted==="function" && !window.charVisualsDrafted(cc) && typeof aiCharacterVisuals==="function"){
-      try{ const patch = await aiCharacterVisuals(cc, scenes.filter(s=>s.driver===cc.id), lbProject("characters"));
+      try{ const patch = await aiCharacterVisuals(cc, scenes.filter(s=>s.driver===cc.id), lbProject("characters"), { scenes, drafts });
         if(patch){ updateCharacter(cc.id, patch); cc = { ...cc, ...patch }; } }catch(e){}
     }
     try{ await generateCharMaster(cc); }
@@ -1246,7 +1246,7 @@ function App(){
     setDraftingVisualIds(targetIds);
     setDraftingAllVisuals(true);
     try{
-      const map = await aiCastVisualBible(targets, scenes, lbProject("characters"));
+      const map = await aiCastVisualBible(targets, scenes, lbProject("characters"), { scenes, drafts });
       // merge ONLY the targeted (undrafted) characters — never touch the rest
       if(map){
         const allow = new Set(targetIds);
@@ -2194,7 +2194,7 @@ function App(){
       isDrafted: (c)=> (typeof charVisualsDrafted==="function") ? charVisualsDrafted(c) : true,
       imageOf: async (id)=> _grabImg(id),
       draftSpec: async (c)=>{ if(typeof aiCharacterVisuals!=="function") return null;
-        const patch = await aiCharacterVisuals(c, scenes.filter(s=>s.driver===c.id), lbProject("characters"));
+        const patch = await aiCharacterVisuals(c, scenes.filter(s=>s.driver===c.id), lbProject("characters"), { scenes, drafts });
         if(patch) updateCharacter(c.id, patch); return patch; },
       suggestStates: async (c)=>{ if(typeof aiSuggestStates!=="function") return null;
         const raw = await aiSuggestStates(c, scenes.filter(s=>s.driver===c.id), project);
