@@ -57,10 +57,10 @@
   ];
 
   const FEATURES = [
-    { icon:"sparkles", title:"Cinematic Generation", body:"Cinematic video generation with native audio." },
-    { icon:"layers",   title:"Multi-Modal Inputs",   body:"Text, images, videos, audio. Up to 12 assets combined." },
-    { icon:"camera",   title:"Director-Level Control",body:"Camera, lighting, performance, and more." },
-    { icon:"film",     title:"From Shot to Sequence", body:"Build scenes, extend, and refine with ease." },
+    { icon:"sparkles", title:"Cinematic Generation", body:"Film-grade video with native audio — every take arrives with its sound." },
+    { icon:"layers",   title:"Multi-Modal Inputs",   body:"Frames, storyboards, voices and character sheets — up to 12 references steer each render." },
+    { icon:"camera",   title:"Director-Level Control",body:"Camera, lighting and performance, specified shot by shot — never left to chance." },
+    { icon:"film",     title:"From Shot to Sequence", body:"Shots pack into clips, clips into scenes — extend and refine take by take." },
   ];
 
   function Ic(name, s){ const I = (window.Icon && (Icon[name]||Icon.grid)); return I ? h(I,{s:s||16}) : null; }
