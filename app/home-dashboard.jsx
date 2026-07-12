@@ -62,7 +62,7 @@
 
   function HomeDashboard(props){
     const { projects, currentId, room,
-            onOpen, onCreate, onGoRoom, onClose, accountSlot } = props;
+            onOpen, onCreate, onGeneratePoster, onGoRoom, onClose, accountSlot } = props;
 
     // real films only (shows are containers), newest-updated first (list already sorted)
     const films = (projects||[]).filter(p=> String(p.isShow)!=="true");
@@ -70,6 +70,34 @@
     const current = films.find(p=> p.id===currentId) || null;
     const hero = current || films.find(p=> p.cover) || films[0] || null;
     const activeRoom = room || "writers";
+
+    // ----- auto-poster: any recent film without key art gets one minted for it -------
+    // Generated covers are persisted (onGeneratePoster writes doc.cover) so a film is
+    // only ever painted ONCE — on the next open it already has p.cover and is skipped.
+    const [genBusy, setGenBusy] = React.useState({});   // id -> true while its poster renders
+    const attempted = React.useRef({});                 // id -> true once tried this mount (no retry loops)
+    const missing = recent.filter(p=> !p.cover).map(p=> p.id).join(",");
+    React.useEffect(()=>{
+      if(typeof onGeneratePoster!=="function") return;
+      let cancelled = false;
+      (async ()=>{
+        for(const p of recent){
+          if(cancelled) break;
+          if(p.cover || attempted.current[p.id]) continue;   // already has art, or already tried
+          attempted.current[p.id] = true;
+          setGenBusy(b=> ({ ...b, [p.id]:true }));
+          try{ await onGeneratePoster(p); }
+          catch(err){
+            // stop the batch on failure (e.g. out of image credits) so we don't burn attempts
+            if(window.appToast) window.appToast(String((err&&err.message)||"Couldn't paint a poster."),"error");
+            if(!cancelled) setGenBusy(b=>{ const n={ ...b }; delete n[p.id]; return n; });
+            break;
+          }
+          finally{ if(!cancelled) setGenBusy(b=>{ const n={ ...b }; delete n[p.id]; return n; }); }
+        }
+      })();
+      return ()=>{ cancelled = true; };
+    }, [missing]);   // re-run when the set of cover-less films changes
 
     // ----- top bar ----------------------------------------------------------
     const topbar = h("header",{className:"hd-topbar"},
@@ -125,6 +153,9 @@
           h("div",{className:"hd-card-art",
               style: p.cover ? { backgroundImage:'url("'+p.cover+'")' } : null},
             !p.cover && h("span",{className:"hd-card-initials"}, initials(p.title)),
+            genBusy[p.id] && h("div",{className:"hd-card-gen"},
+              h("span",{className:"hd-card-spin"}),
+              h("span",{className:"hd-card-gen-lab"},"Painting poster…")),
             h("span",{className:"hd-card-pill"}, displayType(p).toUpperCase()),
             h("div",{className:"hd-card-shade"},
               h("div",{className:"hd-card-name"}, p.title||"Untitled film"),

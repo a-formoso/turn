@@ -5777,6 +5777,11 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .hd-card:hover .hd-card-art{ transform:translateY(-3px); box-shadow:0 16px 34px -20px rgba(15,16,18,.4); }
 .hd-card.current .hd-card-art{ box-shadow:0 0 0 2px var(--lpw-accent); }
 .hd-card-initials{ font-family:var(--f-display); font-size:30px; font-weight:700; color:rgba(255,255,255,.7); }
+.hd-card-gen{ position:absolute; inset:0; z-index:2; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+  background:rgba(13,13,14,.55); color:#fff; -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px); }
+.hd-card-gen-lab{ font-family:var(--f-mono); font-size:10px; letter-spacing:.04em; text-transform:uppercase; color:rgba(255,255,255,.9); }
+.hd-card-spin{ width:24px; height:24px; border-radius:50%; border:2.5px solid rgba(255,255,255,.28); border-top-color:#fff; animation:hdcardspin .8s linear infinite; }
+@keyframes hdcardspin{ to{ transform:rotate(360deg); } }
 .hd-card-pill{ position:absolute; top:9px; left:9px; z-index:1; font-family:var(--f-mono); font-size:8.5px; font-weight:700;
   letter-spacing:.08em; padding:3px 8px; border-radius:999px; color:#fff; background:rgba(10,11,14,.66);
   backdrop-filter:blur(4px); }

@@ -752,6 +752,36 @@ function App(){
     await loadProjectIntoState(created.id);
     setArtView("lookbook");   // a fresh film opens the Art Room on the Lookbook (front of the pipeline)
   };
+  /* Dashboard: mint an AI poster for a film from its title + logline and persist it
+     onto doc.cover, so the Recent Projects cards show real key art. Routes through the
+     same image proxy as the rest of the studio (no key in the browser). Returns the
+     data URL (and stamps it into the projects list) so callers can show it immediately. */
+  const generatePoster = async (proj)=>{
+    if(!proj || !proj.id) return "";
+    // In-flight dedupe (keyed by film id, app-level so it survives the dashboard
+    // unmounting/remounting): if a poster for this film is ALREADY being painted,
+    // hand back the SAME promise instead of launching a second, duplicate spend.
+    const inflight = (window.__posterInflight = window.__posterInflight || {});
+    if(inflight[proj.id]) return inflight[proj.id];
+    const run = (async ()=>{
+      const title = proj.title || "Untitled film";
+      const logline = ((proj && proj.logline) || "").trim();
+      const prompt = "Cinematic movie poster key art for the film “"+title+"”. "+
+        (logline ? logline+". " : "")+
+        "A single striking hero image; bold dramatic composition; rich cinematic colour and "+
+        "evocative lighting; the mood that sells the story at a glance. "+
+        "Vertical theatrical poster framing. Absolutely NO text, NO title, NO lettering or captions anywhere.";
+      let url = await window.nbGenerate(prompt, { aspectRatio:"9:16", quality:"medium" });
+      if(!url) throw new Error("The poster came back empty — try again.");
+      if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 640, 0.82); }catch(e){} }
+      if(typeof window.cloudSaveCover==="function") await window.cloudSaveCover(proj.id, url);
+      setProjects(ps=>ps.map(p=>p.id===proj.id?{ ...p, cover:url }:p));
+      return url;
+    })();
+    inflight[proj.id] = run;
+    try{ return await run; }
+    finally{ delete inflight[proj.id]; }
+  };
   /* SERIES: turn the CURRENT project into episode 1 of a new show — its
      departments become the show's shared bible. (Sheets generated before the
      conversion stay readable via the asset layer's episode-scope fallback.) */
@@ -2395,6 +2425,7 @@ function App(){
           projects, currentId:currentProjectId, room,
           onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
           onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
+          onGeneratePoster: generatePoster,
           onGoRoom: async (rid)=>{ if(!currentProjectId){ await createProject(); } setHomeOpen(false); if(rid==="writers") setView("spine"); guardedSetRoom(rid); },
           onClose: ()=>setHomeOpen(false),
           accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
