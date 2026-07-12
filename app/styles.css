@@ -5689,20 +5689,34 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
   --lpw-ink:#0F1012; --lpw-ink-2:#3C3F44; --lpw-sub:#5D6066;
   --lpw-black:#0D0D0E; --lpw-accent:#E0742B; }
 
+/* full-height vertical rails at the 1280px column edges — the landing page's
+   structural signature (.lp-rails), so Home shares the same page grid. */
+.hd-rails{ position:absolute; inset:0; pointer-events:none; }
+.hd-rails::before,.hd-rails::after{ content:""; position:absolute; top:0; bottom:0; width:1px; background:var(--lpw-line); }
+.hd-rails::before{ left:max(0px,calc((100% - 1280px)/2)); }
+.hd-rails::after{ right:max(0px,calc((100% - 1280px)/2)); }
+
 /* brand + account in the top bar (no left rail). Wordmark matches the landing
    logo: Space Grotesk, tight tracking. */
 .hd-brand{ display:flex; align-items:center; gap:10px; background:none; border:0;
   cursor:pointer; color:var(--lpw-ink); padding:0; }
 .hd-brand svg{ width:24px; height:24px; }
-.hd-brand-name{ font-family:var(--f-display); font-weight:700; letter-spacing:.03em; font-size:18px; color:var(--lpw-ink); }
+.hd-brand-name{ font-family:var(--f-display); font-weight:400; letter-spacing:.03em; font-size:18px; color:var(--lpw-ink); }
+.hd-brand-name b{ font-weight:700; }
 .hd-topbar-l{ display:flex; align-items:center; gap:18px; min-width:0; }
 .hd-acct{ display:flex; align-items:center; margin-left:6px; }
 
 /* main column */
-.hd-main{ flex:1 1 auto; min-width:0; display:flex; flex-direction:column; }
-.hd-topbar{ display:flex; align-items:center; justify-content:space-between; gap:16px;
-  padding:15px clamp(20px,4vw,48px); border-bottom:1px solid var(--lpw-line);
+.hd-main{ position:relative; flex:1 1 auto; min-width:0; display:flex; flex-direction:column; }
+/* frosted full-width bar; content constrained to the SAME 1280px column as the
+   rails, with rail segments crossing it (mirrors .lp-nav / .lp-nav-in). */
+.hd-topbar{ position:relative; border-bottom:1px solid var(--lpw-line);
   background:rgba(252,252,251,.86); backdrop-filter:blur(10px); }
+.hd-topbar::before,.hd-topbar::after{ content:""; position:absolute; top:0; bottom:0; width:1px; background:var(--lpw-line); }
+.hd-topbar::before{ left:max(0px,calc((100% - 1280px)/2)); }
+.hd-topbar::after{ right:max(0px,calc((100% - 1280px)/2)); }
+.hd-topbar-in{ max-width:1280px; margin:0 auto; display:flex; align-items:center; justify-content:space-between;
+  gap:16px; padding:13px clamp(20px,4vw,48px); }
 .hd-proj{ display:flex; align-items:center; gap:9px; padding:7px 13px; background:var(--lpw-card);
   border:1px solid var(--lpw-line-2); border-radius:999px; cursor:pointer; color:var(--lpw-ink);
   font-family:var(--f-display); font-weight:600; font-size:13px; max-width:360px; transition:.14s; }
@@ -5720,8 +5734,8 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .hd-tbtn.hd-accent{ background:var(--lpw-black); border-color:var(--lpw-black); color:#fff; }
 .hd-tbtn.hd-accent:hover{ background:#26262a; transform:translateY(-1px); }
 
-/* scroll body */
-.hd-scroll{ flex:1 1 auto; overflow:auto; padding:clamp(36px,5vw,64px) clamp(20px,4vw,48px) 56px; }
+/* scroll body (overflow-x hidden: the full-bleed 100vw section rules below) */
+.hd-scroll{ flex:1 1 auto; overflow:auto; overflow-x:hidden; padding:clamp(36px,5vw,64px) clamp(20px,4vw,48px) 56px; }
 
 /* hero */
 .hd-hero{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.05fr); gap:clamp(32px,5vw,64px);
@@ -5732,7 +5746,7 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .hd-hero-sub{ font-size:clamp(15px,1.4vw,17px); line-height:1.6; color:var(--lpw-sub); max-width:34ch; margin:0 0 26px; }
 .hd-steps{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:0 0 26px; }
 .hd-step{ display:flex; flex-direction:column; gap:3px; text-align:left; padding:12px 13px;
-  border-radius:0; cursor:pointer; background:var(--lpw-card); border:1px solid var(--lpw-line-2);
+  border-radius:12px; cursor:pointer; background:var(--lpw-card); border:1px solid transparent;
   color:var(--lpw-ink); transition:.14s; }
 .hd-step:hover:not(.soon){ background:var(--lpw-card-2); border-color:#d6d6d1; }
 .hd-step-no{ font-family:var(--f-mono); font-size:11px; color:var(--lpw-sub); }
@@ -5762,17 +5776,23 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .hd-hero-media-cap{ position:absolute; left:16px; bottom:14px; z-index:1; color:#fff; font-size:13px;
   font-weight:600; text-shadow:0 1px 8px rgba(0,0,0,.6); }
 
-/* recent projects */
-.hd-recent{ max-width:1200px; margin:clamp(44px,5vw,64px) auto 0; }
-.hd-sec-head{ display:flex; align-items:baseline; justify-content:space-between; margin:0 0 18px; }
-.hd-sec-title{ font-family:"Spectral",Georgia,serif; font-size:clamp(22px,2.4vw,30px); font-weight:600; letter-spacing:-.01em; margin:0; color:var(--lpw-ink); }
+/* recent projects — a full-bleed hairline rule ABOVE the section crosses the
+   rails in a "+", exactly like the landing's .lp-section dividers. */
+.hd-recent{ position:relative; max-width:1200px; margin:clamp(44px,5vw,64px) auto 0; padding-top:clamp(44px,5vw,64px); }
+.hd-recent::before{ content:""; position:absolute; top:0; left:50%; transform:translateX(-50%);
+  width:100vw; height:1px; background:var(--lpw-line); }
+/* centered head with the landing's mono act-label eyebrow (.lp-act) */
+.hd-sec-head{ text-align:center; margin:0 0 clamp(22px,3vw,34px); }
+.hd-act{ font-family:var(--f-mono); font-size:10.5px; letter-spacing:.22em; text-transform:uppercase;
+  color:var(--lpw-sub); margin-bottom:12px; }
+.hd-sec-title{ font-family:"Spectral",Georgia,serif; font-size:clamp(24px,2.8vw,36px); font-weight:600; letter-spacing:-.01em; margin:0; color:var(--lpw-ink); }
 .hd-viewall{ display:inline-flex; align-items:center; gap:6px; background:none; border:0;
   color:var(--lpw-sub); font-size:13px; font-weight:600; cursor:pointer; transition:.12s; }
 .hd-viewall:hover{ color:var(--lpw-accent); }
 .hd-recent-row{ display:grid; grid-template-columns:repeat(5,1fr); gap:16px; }
 .hd-card{ padding:0; border:0; background:none; cursor:pointer; text-align:left; }
-.hd-card-art{ position:relative; aspect-ratio:3/4; border-radius:0; overflow:hidden;
-  background:#14161c center/cover no-repeat; border:1px solid var(--lpw-line-2); display:flex;
+.hd-card-art{ position:relative; aspect-ratio:3/4; border-radius:14px; overflow:hidden;
+  background:#14161c center/cover no-repeat; border:1px solid var(--lpw-line); display:flex;
   align-items:center; justify-content:center; transition:transform .14s,box-shadow .14s; }
 .hd-card:hover .hd-card-art{ transform:translateY(-3px); box-shadow:0 16px 34px -20px rgba(15,16,18,.4); }
 .hd-card.current .hd-card-art{ box-shadow:0 0 0 2px var(--lpw-accent); }
@@ -5794,9 +5814,11 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .hd-card:hover .hd-card-new-art{ color:var(--lpw-accent); border-color:var(--lpw-accent); }
 .hd-card-new-lab{ font-family:var(--f-display); font-size:12.5px; font-weight:600; }
 
-/* feature strip */
-.hd-features{ display:grid; grid-template-columns:repeat(4,1fr); gap:18px; max-width:1200px;
-  margin:clamp(40px,5vw,60px) auto 0; padding:26px; background:var(--lpw-card); border:1px solid var(--lpw-line); border-radius:16px; }
+/* feature strip — the divider rule floats midway in the gap above it */
+.hd-features{ position:relative; display:grid; grid-template-columns:repeat(4,1fr); gap:18px; max-width:1200px;
+  margin:clamp(64px,8vw,96px) auto 0; padding:26px; background:var(--lpw-card); border:1px solid transparent; border-radius:16px; }
+.hd-features::before{ content:""; position:absolute; top:calc(clamp(64px,8vw,96px) / -2); left:50%; transform:translateX(-50%);
+  width:100vw; height:1px; background:var(--lpw-line); }
 .hd-feat{ display:flex; align-items:flex-start; gap:12px; }
 .hd-feat-ic{ flex:0 0 auto; width:40px; height:40px; border-radius:10px; display:flex;
   align-items:center; justify-content:center; background:#fff; border:1px solid var(--lpw-line-2); color:var(--lpw-accent); }

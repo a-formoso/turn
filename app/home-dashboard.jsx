@@ -100,18 +100,21 @@
     }, [missing]);   // re-run when the set of cover-less films changes
 
     // ----- top bar ----------------------------------------------------------
+    // Mirrors the landing nav (.lp-nav): frosted full-width bar, content constrained
+    // to the SAME 1280px column as the rails below, wordmark = the landing logo.
     const topbar = h("header",{className:"hd-topbar"},
-      h("div",{className:"hd-topbar-l"},
-        h("button",{className:"hd-brand", onClick:onClose, title:"Back to your film"},
-          (typeof BrandMark!=="undefined") && h(BrandMark,null),
-          h("span",{className:"hd-brand-name"},"TURN")),
-        h("div",{className:"hd-proj", title:"Current project"},
-          h("span",{className:"hd-proj-ic"}, Ic("clapper",15)),
-          h("span",{className:"hd-proj-name"}, (current && current.title) || "No project open"),
-          current && h("span",{className:"hd-proj-badge"}, displayType(current)))),
-      h("div",{className:"hd-top-actions"},
-        h("button",{className:"hd-tbtn hd-accent", onClick:onCreate}, Ic("plus",15), "New Project"),
-        accountSlot ? h("div",{className:"hd-acct"}, accountSlot) : null));
+      h("div",{className:"hd-topbar-in"},
+        h("div",{className:"hd-topbar-l"},
+          h("button",{className:"hd-brand", onClick:onClose, title:"Back to your film"},
+            (typeof BrandMark!=="undefined") && h(BrandMark,null),
+            h("span",{className:"hd-brand-name"},"Cinema ",h("b",null,"Machine"))),
+          h("div",{className:"hd-proj", title:"Current project"},
+            h("span",{className:"hd-proj-ic"}, Ic("clapper",15)),
+            h("span",{className:"hd-proj-name"}, (current && current.title) || "No project open"),
+            current && h("span",{className:"hd-proj-badge"}, displayType(current)))),
+        h("div",{className:"hd-top-actions"},
+          h("button",{className:"hd-tbtn hd-accent", onClick:onCreate}, Ic("plus",15), "New Project"),
+          accountSlot ? h("div",{className:"hd-acct"}, accountSlot) : null)));
 
     // ----- hero -------------------------------------------------------------
     const stepper = h("div",{className:"hd-steps"},
@@ -124,9 +127,14 @@
         h("span",{className:"hd-step-name"}, st.name))));
 
     const activeStep = STEPS.find(s=>s.id===activeRoom) || STEPS[0];
+    // Viewfinder dressing reuses the landing's own classes (.lp-video-corners /
+    // .lp-video-badge) so the two surfaces share one look and can't drift.
     const hero_panel = h("div",{className:"hd-hero-media",
         style: hero && hero.cover ? { backgroundImage:'url("'+hero.cover+'")' } : null},
       !(hero && hero.cover) && h("div",{className:"hd-hero-media-fallback"}),
+      h("div",{className:"lp-video-corners","aria-hidden":"true"}),
+      h("div",{className:"lp-video-corners b","aria-hidden":"true"}),
+      hero && h("span",{className:"lp-video-badge"}, displayType(hero).toUpperCase()),
       h("button",{className:"hd-play", onClick:()=> onGoRoom && onGoRoom("stage"), title:"Go to The Stage"},
         Ic("play",26)),
       hero && h("div",{className:"hd-hero-media-cap"}, hero.title||"Untitled film"));
@@ -146,6 +154,7 @@
     // ----- recent projects --------------------------------------------------
     const recentSection = h("section",{className:"hd-recent"},
       h("div",{className:"hd-sec-head"},
+        h("div",{className:"hd-act"},"Now showing"),
         h("h2",{className:"hd-sec-title"},"Recent Projects")),
       h("div",{className:"hd-recent-row"},
         recent.map(p=> h("button",{ key:p.id, className:"hd-card"+(p.id===currentId?" current":""),
@@ -175,6 +184,9 @@
 
     return h("div",{className:"hd-root"},
       h("div",{className:"hd-main"},
+        // full-height vertical rails at the 1280px column edges — the landing's
+        // structural signature (.lp-rails), crossing each section rule in a "+"
+        h("div",{className:"hd-rails","aria-hidden":"true"}),
         topbar,
         h("div",{className:"hd-scroll"},
           heroSection,
