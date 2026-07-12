@@ -770,34 +770,59 @@ function App(){
      read the bible and load assets from the show scope (falling back to the
      episode scope for any legacy per-episode sheets). Capped to a few leads for
      a coherent poster and sane cost. */
-  const _castRefsFor = async (proj)=>{
-    if(!proj || !proj.id || typeof window.cloudLoadProject!=="function") return { ok:true, urls:[] };
+  const _posterCanonFor = async (proj)=>{
+    const NONE = { ok:true, cast:[], world:null, prop:null, style:null };
+    if(!proj || !proj.id || typeof window.cloudLoadProject!=="function") return NONE;
     let row;
-    try{ row = await window.cloudLoadProject(proj.id); }catch(e){ return { ok:false, urls:[] }; }
-    if(!row) return { ok:false, urls:[] };   // read failed — don't persist a wrong poster
+    try{ row = await window.cloudLoadProject(proj.id); }catch(e){ return { ok:false }; }
+    if(!row) return { ok:false };   // read failed — don't persist a wrong poster
     const doc = row.doc || {};
-    let chars = (Array.isArray(doc.characters) && doc.characters)
-      || (doc.bible && Array.isArray(doc.bible.characters) && doc.bible.characters) || [];
+    const pickList = (k)=> (Array.isArray(doc[k]) && doc[k])
+      || (doc.bible && Array.isArray(doc.bible[k]) && doc.bible[k]) || [];
+    let chars = pickList("characters"), locs = pickList("locations"), props = pickList("props");
     let scopeId = proj.id;
-    if(doc.showId){   // episode → pull the shared cast from the show's bible
+    if(doc.showId){   // episode → pull the shared world from the show's bible
       let showRow;
-      try{ showRow = await window.cloudLoadProject(doc.showId); }catch(e){ return { ok:false, urls:[] }; }
-      if(!showRow) return { ok:false, urls:[] };   // couldn't reach the show bible — retry later
-      const bibleChars = showRow.doc && showRow.doc.bible && showRow.doc.bible.characters;
-      if(Array.isArray(bibleChars) && bibleChars.length){ chars = bibleChars; scopeId = doc.showId; }
+      try{ showRow = await window.cloudLoadProject(doc.showId); }catch(e){ return { ok:false }; }
+      if(!showRow) return { ok:false };   // couldn't reach the show bible — retry later
+      const bible = (showRow.doc && showRow.doc.bible) || {};
+      if(Array.isArray(bible.characters) && bible.characters.length){
+        chars = bible.characters;
+        if(Array.isArray(bible.locations) && bible.locations.length) locs = bible.locations;
+        if(Array.isArray(bible.props) && bible.props.length) props = bible.props;
+        scopeId = doc.showId;
+      }
     }
-    const ids = chars.slice(0, 3).map(c=>c && c.id).filter(Boolean);
-    if(!ids.length) return { ok:true, urls:[] };
+    // The film's OWN medium: the dominant picked render style across its entities —
+    // an animated film must get an animated one-sheet, not a photoreal one.
+    const tally = {};
+    [...chars, ...props, ...locs].forEach(e=>{ const k = e && e.renderStyleKey; if(k) tally[k]=(tally[k]||0)+1; });
+    const topKey = Object.keys(tally).sort((a,b)=>tally[b]-tally[a])[0] || null;
+    let style = null;
+    if(topKey && topKey!=="photoreal"){
+      const block = (window.CHAR_RENDER_STYLES||{})[topKey];
+      const medium = block && block.rendering;
+      if(medium) style = { label:String((window.RENDER_STYLE_LABELS||{})[topKey]||topKey).replace(/^[🔒🌐]\s*/,""), medium };
+    }
+    // one asset read covers everything: lead cast (identity-critical) + the first
+    // few locations/props (world grounding — the poster must show THIS film's
+    // world and objects, never invented ones)
+    const castIds = chars.slice(0,3).map(c=>c && c.id).filter(Boolean);
+    const locIds  = locs.slice(0,4).map(l=>l && l.id).filter(Boolean);
+    const propIds = props.slice(0,4).map(p=>p && p.id).filter(Boolean);
+    const ids = [...castIds, ...locIds, ...propIds];
+    if(!ids.length) return { ...NONE, style };
     let byId;
     try{ byId = (typeof window.cloudAssetLoadMany==="function") ? (await window.cloudAssetLoadMany(scopeId, ids, true) || {}) : {}; }
-    catch(e){ return { ok:false, urls:[] }; }
+    catch(e){ return { ok:false }; }
     if(scopeId!==proj.id){   // legacy fallback: some sheets may sit under the episode id
       const missing = ids.filter(id=> !(byId[id] && byId[id].url));
       if(missing.length){ try{ const ep = await window.cloudAssetLoadMany(proj.id, missing) || {}; byId = { ...ep, ...byId }; }catch(e){} }
     }
-    const urls = [];
-    for(const id of ids){ const u = byId[id] && byId[id].url; if(u) urls.push(u); }
-    return { ok:true, urls };
+    const urlOf = (id)=> (byId[id] && byId[id].url) || "";
+    const cast = castIds.map(urlOf).filter(Boolean);
+    const firstWithArt = (list)=>{ for(const e of list.slice(0,4)){ const u = e && e.id && urlOf(e.id); if(u) return { url:u, name:(e.name||e.title||"").trim() }; } return null; };
+    return { ok:true, cast, world:firstWithArt(locs), prop:firstWithArt(props), style };
   };
   const generatePoster = async (proj)=>{
     if(!proj || !proj.id) return "";
@@ -809,22 +834,49 @@ function App(){
     const run = (async ()=>{
       const title = proj.title || "Untitled film";
       const logline = ((proj && proj.logline) || "").trim();
-      // Pull the film's LEAD cast portraits (from the cloud, so it works for any
-      // recent film, not just the one open in the studio) to use as reference
-      // images — the poster should depict the ACTUAL cast, never invented people.
-      const castRes = await _castRefsFor(proj);
-      if(!castRes.ok) return "";   // couldn't read the cast — skip WITHOUT spending; retries next open
-      const cast = castRes.urls;
+      // THE POSTER RECIPE — every poster is grounded in the film's own canon,
+      // loaded from the cloud (works for any recent film, not just the open one):
+      //   1. CAST     lead character portrait sheets ride as refs — the poster
+      //               shows THESE people, never invented faces.
+      //   2. WORLD    the primary location plate rides as a ref — the setting is
+      //               THIS film's world, never an invented backdrop.
+      //   3. PROP     a signature object may feature, faithful to its sheet.
+      //   4. MEDIUM   the film's dominant render style (Pixar, ukiyo-e, …) sets
+      //               the poster's medium — an animated film gets an animated
+      //               one-sheet; photoreal films get a live-action one-sheet.
+      // Identity-critical reads FAIL CLOSED (skip this round, no spend, retry on
+      // the next dashboard open) so a wrong poster is never baked in.
+      const canon = await _posterCanonFor(proj);
+      if(!canon.ok) return "";
+      const refs = [];
       let prompt = "Cinematic movie poster key art for the film “"+title+"”. "+
         (logline ? logline+". " : "");
-      if(cast.length){
-        prompt += "The attached reference image(s) show this film's actual cast — depict THESE exact "+
-          "characters as the poster's subjects, keeping each face, likeness and wardrobe faithful. "+
+      if(canon.cast.length){
+        canon.cast.forEach(u=>refs.push(u));
+        prompt += "Reference image"+(canon.cast.length>1?("s 1-"+canon.cast.length):" 1")+
+          " show"+(canon.cast.length>1?"":"s")+" this film's ACTUAL lead cast — depict exactly these "+
+          "characters as the poster's subjects, keeping every face, likeness and wardrobe faithful. "+
           "Do not invent, add or substitute any other people. ";
       }else{
         prompt += "Show an evocative, character-free scene — lean on setting, atmosphere and iconography. "+
           "Do NOT invent or depict any characters/people. ";
       }
+      if(canon.world){
+        refs.push(canon.world.url);
+        prompt += "Reference image "+refs.length+" shows the film's real primary location"+
+          (canon.world.name?(", “"+canon.world.name+"”"):"")+" — set the poster IN THIS world, matching its "+
+          "architecture, landscape, era and atmosphere. Do not invent a different setting. ";
+      }
+      if(canon.prop){
+        refs.push(canon.prop.url);
+        prompt += "Reference image "+refs.length+" shows "+
+          (canon.prop.name?("“"+canon.prop.name+"”, "):"")+"a signature object from the film — feature it "+
+          "only if it strengthens the composition, faithful to the reference. ";
+      }
+      prompt += canon.style
+        ? "Render the key art in the film's own medium: "+canon.style.medium+" ("+canon.style.label+" style) — "+
+          "the reference images define the exact look of the people and places; keep them consistent. "
+        : "Photorealistic live-action one-sheet. ";
       prompt += "A single striking hero image; bold dramatic composition; rich cinematic colour and "+
         "evocative lighting; the mood that sells the story at a glance. "+
         "Vertical theatrical poster framing. Absolutely NO text, NO title, NO lettering or captions anywhere.";
@@ -832,7 +884,7 @@ function App(){
       // back to the default model only if that id isn't available (proxy off).
       const genOpts = { aspectRatio:"9:16", quality:"medium" };
       if((window.NB_MODELS||[]).some(m=>m.id==="gpt-image-2")) genOpts.model = "gpt-image-2";
-      if(cast.length) genOpts.extraImages = cast;
+      if(refs.length) genOpts.extraImages = refs;
       let url = await window.nbGenerate(prompt, genOpts);
       if(!url) throw new Error("The poster came back empty — try again.");
       if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 640, 0.82); }catch(e){} }
