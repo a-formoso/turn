@@ -72,8 +72,9 @@
 
     // real films only (shows are containers), newest-updated first (list already sorted)
     const films = (projects||[]).filter(p=> String(p.isShow)!=="true");
-    // Recent Projects is a PAGED window (‹ › arrows) over all films, 5 at a time
-    const PER = 5;
+    // Recent Projects is a PAGED window (‹ › arrows) over all films — FOUR film
+    // cards a page; the fifth column is always the New Project card
+    const PER = 4;
     const [start, setStart] = React.useState(0);
     const maxStart = Math.max(0, films.length - PER);
     const from = Math.min(start, maxStart);
@@ -95,6 +96,9 @@
         for(const p of recent){
           if(cancelled) break;
           if(p.cover || attempted.current[p.id]) continue;   // already has art, or already tried
+          // no story yet → nothing to ground a poster in (a blank "Untitled film"
+          // would get generic junk art and burn credits) — wait for a logline
+          if(!String(p.logline||"").trim()) continue;
           attempted.current[p.id] = true;
           setGenBusy(b=> ({ ...b, [p.id]:true }));
           try{ await onGeneratePoster(p); }
@@ -159,17 +163,16 @@
         h("span",{className:"hd-step-name"}, st.name))));
 
     const activeStep = STEPS.find(s=>s.id===activeRoom) || STEPS[0];
-    // Clean cinematic panel per the reference design: big radius + soft shadow,
-    // just the play button and the film's title. Clicking the artwork itself
-    // (not the play button) opens the full-screen poster preview.
-    const hero_panel = h("div",{className:"hd-hero-media"+(hero&&hero.cover?" has-art":""),
-        style: hero && hero.cover ? { backgroundImage:'url("'+hero.cover+'")' } : null,
-        title: hero && hero.cover ? "View poster full screen" : undefined,
-        onClick:(e)=>{ if(e.target===e.currentTarget && hero && hero.cover)
-          setViewer({ url:hero.cover, title:hero.title||"Untitled film" }); }},
-      !(hero && hero.cover) && h("div",{className:"hd-hero-media-fallback"}),
+    // THE PREMIERE SCREEN — a video placeholder for the current film once it's
+    // fully assembled (the Post room will play it here). Until then: a dark
+    // cinema screen with the play button into The Stage. Poster previews live
+    // on the project cards, not here — a 9:16 poster crops badly at 16:10.
+    const hero_panel = h("div",{className:"hd-hero-media"},
+      h("div",{className:"hd-hero-media-fallback"}),
+      h("span",{className:"lp-video-badge"},"PREMIERE · COMING SOON"),
       h("button",{className:"hd-play", onClick:()=> onGoRoom && onGoRoom("stage"), title:"Go to The Stage"},
         Ic("play",26)),
+      h("div",{className:"hd-hero-media-note"},"Your finished film will play here"),
       hero && h("div",{className:"hd-hero-media-cap"}, hero.title||"Untitled film"));
 
     const heroSection = h("section",{className:"hd-hero"},
@@ -218,9 +221,8 @@
               h("div",{className:"hd-card-name"}, p.title||"Untitled film"),
               h("div",{className:"hd-card-sub"}, displayType(p)),
               h("div",{className:"hd-card-meta"}, Ic("history",12), updatedAgo(p.updated_at||p.created_at)))))),
-        // the New tile rides along only while the page has a free slot — with a
-        // full page of posters the orange top-bar button covers creation
-        recent.length < PER && h("button",{className:"hd-card hd-card-new", onClick:onCreate},
+        // the New Project card is ALWAYS the fifth column
+        h("button",{className:"hd-card hd-card-new", onClick:onCreate},
           h("div",{className:"hd-card-art hd-card-new-art"},
             Ic("plus",26),
             h("div",{className:"hd-card-new-lab"},"New Project")))));

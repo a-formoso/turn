@@ -5760,13 +5760,16 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .hd-btn-ghost{ background:#fff; color:var(--lpw-ink); border-color:var(--lpw-line-2); }
 .hd-btn-ghost:hover{ background:var(--lpw-card-2); border-color:#d6d6d1; }
 .hd-hero-right{ min-width:0; }
-/* hero media = the homepage's media panel (.lp-video spec: 16px radius, hairline border) */
+/* hero media = the PREMIERE SCREEN, styled like the homepage's media panel
+   (.lp-video spec: 16px radius, hairline border) — a video placeholder for the
+   assembled film, not a poster frame */
 .hd-hero-media{ position:relative; aspect-ratio:16/10; border-radius:16px; overflow:hidden;
-  background:var(--lpw-black) center/cover no-repeat; border:1px solid var(--lpw-line);
-  display:flex; align-items:center; justify-content:center; }
-.hd-hero-media.has-art{ cursor:zoom-in; }
+  background:var(--lpw-black); border:1px solid var(--lpw-line);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; }
 .hd-hero-media-fallback{ position:absolute; inset:0;
   background:radial-gradient(120% 120% at 30% 20%,#22242b 0%,#121319 60%,#0d0d0e 100%); }
+.hd-hero-media-note{ position:relative; z-index:1; font-family:var(--f-mono); font-size:10.5px;
+  letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.45); }
 .hd-play{ position:relative; z-index:1; width:68px; height:68px; border-radius:999px; cursor:pointer;
   border:0; background:#fff; color:var(--lpw-black); display:flex; align-items:center;
   justify-content:center; padding-left:4px; transition:transform .16s; }

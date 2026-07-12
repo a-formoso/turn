@@ -942,14 +942,16 @@ function App(){
         "where a title would sit — but render absolutely NO text, NO title, NO lettering, NO logos. "+
         "Dramatic camera angle (low, high or telephoto compression), never a flat eye-level frontal lineup "+
         "of people looking into the camera. Vertical theatrical framing.";
-      // Paint dashboard posters with GPT Image 2 (server-side via the proxy). Fall
+      // Paint dashboard posters with GPT Image 2 (server-side via the proxy) at
+      // HIGH quality / 2K — key art is a hero surface, not a thumbnail. Fall
       // back to the default model only if that id isn't available (proxy off).
-      const genOpts = { aspectRatio:"9:16", quality:"medium" };
+      const genOpts = { aspectRatio:"9:16", quality:"high", imageSize:"2K" };
       if((window.NB_MODELS||[]).some(m=>m.id==="gpt-image-2")) genOpts.model = "gpt-image-2";
       if(refs.length) genOpts.extraImages = refs;
       let url = await window.nbGenerate(prompt, genOpts);
       if(!url) throw new Error("The poster came back empty — try again.");
-      if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 640, 0.82); }catch(e){} }
+      // keep enough pixels for the full-screen viewer (1080-wide, ~2x the card)
+      if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 1080, 0.85); }catch(e){} }
       if(typeof window.cloudSaveCover==="function") await window.cloudSaveCover(proj.id, url, keepPrev);
       setProjects(ps=>ps.map(p=>p.id===proj.id?{ ...p, cover:url, ...(keepPrev!==undefined?{coverPrev:keepPrev}:{}) }:p));
       return url;
@@ -2608,7 +2610,11 @@ function App(){
       && React.createElement(window.HomeDashboard,{
           projects, currentId:currentProjectId, room,
           onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
-          onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
+          // LAZY like everywhere else: "New Project" opens the New Story intake —
+          // the film is only minted when a story actually LAUNCHES. The old eager
+          // createProject() stranded an Untitled film (and its auto-painted poster)
+          // every time someone clicked in and changed their mind.
+          onCreate: ()=>{ setHomeOpen(false); setRoom("writers"); setView("spine"); startNewStory(); },
           onGeneratePoster: generatePoster,
           onRegenPoster: (p)=>generatePoster(p, { keepPrev:true }),
           onRestorePoster: restorePoster,
