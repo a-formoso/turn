@@ -43,6 +43,11 @@
 
   const initials = (t)=> (t||"Untitled").trim().split(/\s+/).slice(0,2).map(w=>w[0]||"").join("").toUpperCase() || "·";
 
+  // Honest pipeline phase from the cheap list-row probes (cloudListProjects):
+  // a shot list means the film is shooting; location cards mean the Art Room
+  // has begun; otherwise it's still being written.
+  const phaseOf = (p)=> (p && p.hasShots) ? "In Production" : (p && p.hasLocs) ? "Pre-Production" : "Development";
+
   // Pipeline steps mirror window.ROOMS but with the landing-page phrasing.
   const STEPS = [
     { id:"writers", no:"01", phase:"Development",    name:"Writers Room",   live:true },
@@ -123,14 +128,11 @@
         h("span",{className:"hd-step-name"}, st.name))));
 
     const activeStep = STEPS.find(s=>s.id===activeRoom) || STEPS[0];
-    // Viewfinder dressing reuses the landing's own classes (.lp-video-corners /
-    // .lp-video-badge) so the two surfaces share one look and can't drift.
+    // Clean cinematic panel per the reference design: big radius + soft shadow,
+    // just the play button and the film's title.
     const hero_panel = h("div",{className:"hd-hero-media",
         style: hero && hero.cover ? { backgroundImage:'url("'+hero.cover+'")' } : null},
       !(hero && hero.cover) && h("div",{className:"hd-hero-media-fallback"}),
-      h("div",{className:"lp-video-corners","aria-hidden":"true"}),
-      h("div",{className:"lp-video-corners b","aria-hidden":"true"}),
-      hero && h("span",{className:"lp-video-badge"}, displayType(hero).toUpperCase()),
       h("button",{className:"hd-play", onClick:()=> onGoRoom && onGoRoom("stage"), title:"Go to The Stage"},
         Ic("play",26)),
       hero && h("div",{className:"hd-hero-media-cap"}, hero.title||"Untitled film"));
@@ -150,7 +152,6 @@
     // ----- recent projects --------------------------------------------------
     const recentSection = h("section",{className:"hd-recent"},
       h("div",{className:"hd-sec-head"},
-        h("div",{className:"hd-act"},"Now showing"),
         h("h2",{className:"hd-sec-title"},"Recent Projects")),
       h("div",{className:"hd-recent-row"},
         recent.map(p=> h("button",{ key:p.id, className:"hd-card"+(p.id===currentId?" current":""),
@@ -161,9 +162,10 @@
             genBusy[p.id] && h("div",{className:"hd-card-gen"},
               h("span",{className:"hd-card-spin"}),
               h("span",{className:"hd-card-gen-lab"},"Painting poster…")),
-            h("span",{className:"hd-card-pill"}, displayType(p).toUpperCase()),
+            h("span",{className:"hd-card-pill"}, phaseOf(p).toUpperCase()),
             h("div",{className:"hd-card-shade"},
               h("div",{className:"hd-card-name"}, p.title||"Untitled film"),
+              h("div",{className:"hd-card-sub"}, displayType(p)),
               h("div",{className:"hd-card-meta"}, Ic("history",12), updatedAgo(p.updated_at||p.created_at)))))),
         h("button",{className:"hd-card hd-card-new", onClick:onCreate},
           h("div",{className:"hd-card-art hd-card-new-art"},

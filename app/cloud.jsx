@@ -144,8 +144,11 @@ async function cloudListProjects(){
     // show fields ride along (Phase 3): a SHOW is a project row whose doc carries
     // isShow + bible; an EPISODE carries showId + episodeNo. PostgREST returns the
     // jsonb ->> extracts as strings (or null).
+    // hasShots/hasLocs: tiny scalar probes (the first element's id) so the Home
+    // cards can show each film's honest pipeline PHASE without fetching whole
+    // docs — shots exist → Production; location cards → Pre-production; else Development.
     const { data, error } = await sb.from("turn_projects")
-      .select("id,title,updated_at,created_at,isShow:doc->>isShow,showId:doc->>showId,episodeNo:doc->>episodeNo,cover:doc->>cover,fmt:doc->project->>format,logline:doc->project->>logline,ord:doc->>homeOrder")
+      .select("id,title,updated_at,created_at,isShow:doc->>isShow,showId:doc->>showId,episodeNo:doc->>episodeNo,cover:doc->>cover,fmt:doc->project->>format,logline:doc->project->>logline,ord:doc->>homeOrder,hasShots:doc->shots->0->>id,hasLocs:doc->locations->0->>id")
       .order("updated_at",{ ascending:false });
     // null = REQUEST FAILED (e.g. expired token → 401), [] = genuinely no projects.
     // Callers must not treat a failure as "new user" — that's how an auth hiccup
