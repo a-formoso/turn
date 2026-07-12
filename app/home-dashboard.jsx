@@ -179,7 +179,7 @@
       h("div",{className:"hd-hero-left"},
         h("h1",{className:"hd-hero-title"}, "From idea to",h("br",null),
           h("span",{className:"hd-accent-text"},"final frame.")),
-        h("p",{className:"hd-hero-sub"},"Your studio is open. Develop the story, design the world, and shoot the film — all in one place."),
+        h("p",{className:"hd-hero-sub"},"Your studio is open. Develop the story, design the world, and shoot the film"),
         stepper,
         h("div",{className:"hd-hero-cta"},
           h("button",{className:"hd-btn hd-btn-accent", onClick:()=> onGoRoom && onGoRoom(activeStep.live?activeStep.id:"stage")},
