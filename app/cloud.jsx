@@ -370,17 +370,21 @@ async function cloudAssetLoad(projectId, entityId){
 /* Batch-load many assets: ONE lean DB query for all entity ids + ONE batched signing,
    instead of a query+sign per entity. Returns { entityId: { url, meta } }. Used to
    pre-warm the image cache so a tab (e.g. Characters) shows instantly. */
-async function cloudAssetLoadMany(projectId, entityIds){
+async function cloudAssetLoadMany(projectId, entityIds, strict){
   const sb = sbClient();
   const ids = Array.from(new Set((entityIds||[]).filter(Boolean)));
-  if(!sb || !ids.length) return {};
+  if(!sb){ if(strict) throw new Error("cloud unavailable"); return {}; }
+  if(!ids.length) return {};
   let rows = [];
   try{
-    const { data } = await sb.from("turn_generations")
+    // strict mode surfaces query failures (throws) so callers can tell a genuine
+    // "no assets" result apart from a transient read failure; default stays lenient.
+    const { data, error } = await sb.from("turn_generations")
       .select("entity_id, storage_path, meta")
       .eq("project_id", projectId).in("entity_id", ids);
+    if(error) throw error;
     rows = data || [];
-  }catch(e){ return {}; }
+  }catch(e){ if(strict) throw e; return {}; }
   const urlByPath = await cloudSignedUrlsBatch(rows.filter(r=>r.storage_path).map(r=>r.storage_path));
   const out = {};
   for(const r of rows){ const u = r.storage_path && urlByPath[r.storage_path]; if(u) out[r.entity_id] = { url:u, path:r.storage_path, meta:r.meta||null }; }

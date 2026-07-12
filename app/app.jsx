@@ -756,6 +756,49 @@ function App(){
      onto doc.cover, so the Recent Projects cards show real key art. Routes through the
      same image proxy as the rest of the studio (no key in the browser). Returns the
      data URL (and stamps it into the projects list) so callers can show it immediately. */
+  /* Resolve a film's LEAD cast portrait URLs to use as poster reference images.
+     Loads from the cloud by film id, so it works for ANY recent film on the
+     dashboard (not just the one currently open).
+     Returns { ok, urls }:
+       ok:false  → couldn't read the film's cast (auth/network blip). The caller
+                   must NOT paint a poster this round (no spend); it retries on
+                   the next dashboard open instead of baking in wrong art.
+       ok:true, urls:[]  → the film genuinely has no cast portraits → paint a
+                   character-free poster (never invent people).
+     For a SHOW EPISODE the shared cast lives in the show's bible (keyed by
+     doc.showId), and its portrait sheets are stored under the show id — so we
+     read the bible and load assets from the show scope (falling back to the
+     episode scope for any legacy per-episode sheets). Capped to a few leads for
+     a coherent poster and sane cost. */
+  const _castRefsFor = async (proj)=>{
+    if(!proj || !proj.id || typeof window.cloudLoadProject!=="function") return { ok:true, urls:[] };
+    let row;
+    try{ row = await window.cloudLoadProject(proj.id); }catch(e){ return { ok:false, urls:[] }; }
+    if(!row) return { ok:false, urls:[] };   // read failed — don't persist a wrong poster
+    const doc = row.doc || {};
+    let chars = (Array.isArray(doc.characters) && doc.characters)
+      || (doc.bible && Array.isArray(doc.bible.characters) && doc.bible.characters) || [];
+    let scopeId = proj.id;
+    if(doc.showId){   // episode → pull the shared cast from the show's bible
+      let showRow;
+      try{ showRow = await window.cloudLoadProject(doc.showId); }catch(e){ return { ok:false, urls:[] }; }
+      if(!showRow) return { ok:false, urls:[] };   // couldn't reach the show bible — retry later
+      const bibleChars = showRow.doc && showRow.doc.bible && showRow.doc.bible.characters;
+      if(Array.isArray(bibleChars) && bibleChars.length){ chars = bibleChars; scopeId = doc.showId; }
+    }
+    const ids = chars.slice(0, 3).map(c=>c && c.id).filter(Boolean);
+    if(!ids.length) return { ok:true, urls:[] };
+    let byId;
+    try{ byId = (typeof window.cloudAssetLoadMany==="function") ? (await window.cloudAssetLoadMany(scopeId, ids, true) || {}) : {}; }
+    catch(e){ return { ok:false, urls:[] }; }
+    if(scopeId!==proj.id){   // legacy fallback: some sheets may sit under the episode id
+      const missing = ids.filter(id=> !(byId[id] && byId[id].url));
+      if(missing.length){ try{ const ep = await window.cloudAssetLoadMany(proj.id, missing) || {}; byId = { ...ep, ...byId }; }catch(e){} }
+    }
+    const urls = [];
+    for(const id of ids){ const u = byId[id] && byId[id].url; if(u) urls.push(u); }
+    return { ok:true, urls };
+  };
   const generatePoster = async (proj)=>{
     if(!proj || !proj.id) return "";
     // In-flight dedupe (keyed by film id, app-level so it survives the dashboard
@@ -766,15 +809,30 @@ function App(){
     const run = (async ()=>{
       const title = proj.title || "Untitled film";
       const logline = ((proj && proj.logline) || "").trim();
-      const prompt = "Cinematic movie poster key art for the film “"+title+"”. "+
-        (logline ? logline+". " : "")+
-        "A single striking hero image; bold dramatic composition; rich cinematic colour and "+
+      // Pull the film's LEAD cast portraits (from the cloud, so it works for any
+      // recent film, not just the one open in the studio) to use as reference
+      // images — the poster should depict the ACTUAL cast, never invented people.
+      const castRes = await _castRefsFor(proj);
+      if(!castRes.ok) return "";   // couldn't read the cast — skip WITHOUT spending; retries next open
+      const cast = castRes.urls;
+      let prompt = "Cinematic movie poster key art for the film “"+title+"”. "+
+        (logline ? logline+". " : "");
+      if(cast.length){
+        prompt += "The attached reference image(s) show this film's actual cast — depict THESE exact "+
+          "characters as the poster's subjects, keeping each face, likeness and wardrobe faithful. "+
+          "Do not invent, add or substitute any other people. ";
+      }else{
+        prompt += "Show an evocative, character-free scene — lean on setting, atmosphere and iconography. "+
+          "Do NOT invent or depict any characters/people. ";
+      }
+      prompt += "A single striking hero image; bold dramatic composition; rich cinematic colour and "+
         "evocative lighting; the mood that sells the story at a glance. "+
         "Vertical theatrical poster framing. Absolutely NO text, NO title, NO lettering or captions anywhere.";
       // Paint dashboard posters with GPT Image 2 (server-side via the proxy). Fall
       // back to the default model only if that id isn't available (proxy off).
       const genOpts = { aspectRatio:"9:16", quality:"medium" };
       if((window.NB_MODELS||[]).some(m=>m.id==="gpt-image-2")) genOpts.model = "gpt-image-2";
+      if(cast.length) genOpts.extraImages = cast;
       let url = await window.nbGenerate(prompt, genOpts);
       if(!url) throw new Error("The poster came back empty — try again.");
       if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 640, 0.82); }catch(e){} }
