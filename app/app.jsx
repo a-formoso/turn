@@ -771,7 +771,11 @@ function App(){
         "A single striking hero image; bold dramatic composition; rich cinematic colour and "+
         "evocative lighting; the mood that sells the story at a glance. "+
         "Vertical theatrical poster framing. Absolutely NO text, NO title, NO lettering or captions anywhere.";
-      let url = await window.nbGenerate(prompt, { aspectRatio:"9:16", quality:"medium" });
+      // Paint dashboard posters with GPT Image 2 (server-side via the proxy). Fall
+      // back to the default model only if that id isn't available (proxy off).
+      const genOpts = { aspectRatio:"9:16", quality:"medium" };
+      if((window.NB_MODELS||[]).some(m=>m.id==="gpt-image-2")) genOpts.model = "gpt-image-2";
+      let url = await window.nbGenerate(prompt, genOpts);
       if(!url) throw new Error("The poster came back empty — try again.");
       if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 640, 0.82); }catch(e){} }
       if(typeof window.cloudSaveCover==="function") await window.cloudSaveCover(proj.id, url);
