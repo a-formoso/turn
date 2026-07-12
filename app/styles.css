@@ -5727,8 +5727,9 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .hd-tbtn.hd-accent{ background:var(--lpw-accent); border-color:var(--lpw-accent); color:#fff; }
 .hd-tbtn.hd-accent:hover{ background:#c96524; transform:translateY(-1px); }
 
-/* scroll body (overflow-x hidden: the full-bleed 100vw section rules below) */
-.hd-scroll{ flex:1 1 auto; overflow:auto; overflow-x:hidden; padding:clamp(36px,5vw,64px) clamp(20px,4vw,48px) 56px; }
+/* scroll body (overflow-x hidden: the full-bleed 100vw section rules below;
+   no bottom padding — the footer band sits flush like the landing's) */
+.hd-scroll{ flex:1 1 auto; overflow:auto; overflow-x:hidden; padding:clamp(36px,5vw,64px) clamp(20px,4vw,48px) 0; }
 
 /* hero */
 .hd-hero{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.05fr); gap:clamp(32px,5vw,64px);
@@ -5837,12 +5838,11 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .hd-feat-title{ font-family:var(--f-display); font-size:13.5px; font-weight:600; color:var(--lpw-ink); }
 .hd-feat-body{ font-size:12px; color:var(--lpw-sub); margin-top:3px; line-height:1.4; }
 
-/* footer — mirrors the landing footer band, its top rule crossing the rails */
-.hd-foot{ position:relative; margin-top:clamp(64px,8vw,96px); color:var(--lpw-sub); }
-.hd-foot::before{ content:""; position:absolute; top:0; left:50%; transform:translateX(-50%);
-  width:100vw; height:1px; background:var(--lpw-line); }
-.hd-foot-in{ max-width:1200px; margin:0 auto; display:flex; align-items:center; justify-content:space-between;
-  gap:16px; flex-wrap:wrap; height:76px; }
+/* footer — EXACTLY the landing footer: same band (full-viewport border-top rule,
+   .lp-foot equivalent) and the same .lp-foot-in inner block (1280px column +
+   its own inline padding), sitting flush at the bottom of the scroll. */
+.hd-foot{ position:relative; left:50%; transform:translateX(-50%); width:100vw;
+  margin-top:clamp(64px,8vw,96px); border-top:1px solid var(--lpw-line); color:var(--lpw-sub); }
 
 /* responsive */
 @media (max-width:1080px){ .hd-hero{ grid-template-columns:1fr; } .hd-recent-row{ grid-template-columns:repeat(3,1fr); } .hd-features{ grid-template-columns:repeat(2,1fr); } }

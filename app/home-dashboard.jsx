@@ -216,9 +216,10 @@
           h("div",{className:"hd-feat-title"}, f.title),
           h("div",{className:"hd-feat-body"}, f.body)))));
 
-    // ----- footer — mirrors the landing footer (.lp-foot), same links --------
+    // ----- footer — EXACTLY the landing footer: the same .lp-foot-in inner block
+    // (1280px column + its own padding), full-bleed band, flush at the bottom.
     const footer = h("footer",{className:"hd-foot"},
-      h("div",{className:"hd-foot-in"},
+      h("div",{className:"lp-foot-in"},
         h("span",{className:"lp-logo sm"},"Cinema Machine"),
         h("nav",{className:"lp-foot-links","aria-label":"Legal"},
           h("a",{className:"lp-foot-link",href:"#privacy"},"Privacy"),

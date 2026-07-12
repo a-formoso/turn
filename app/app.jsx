@@ -824,6 +824,58 @@ function App(){
     const firstWithArt = (list)=>{ for(const e of list.slice(0,4)){ const u = e && e.id && urlOf(e.id); if(u) return { url:u, name:(e.name||e.title||"").trim() }; } return null; };
     return { ok:true, cast, world:firstWithArt(locs), prop:firstWithArt(props), style };
   };
+  /* THE POSTER LOOK — a recipe built from the classic one-sheet archetypes
+     (Bass's single bold symbol; the Struzan painted montage; the lone figure
+     dwarfed by a vast world à la Dune/Gravity/Lawrence; the Exorcist-style
+     silhouette against one light source; the charged two-lead confrontation;
+     the big-face portrait with the world ghosted into it; the uncanny frozen
+     tableau). Each film gets ONE archetype (stable hash of its id, filtered to
+     what its cast size supports) plus a palette and a light treatment — so
+     posters are cinematic AND different film to film. Regenerate rotates to a
+     different look, so a re-roll is a new concept, not the same image again. */
+  const _posterLook = (proj, castN, vary)=>{
+    const A = {
+      symbol:     "THE ICONIC SYMBOL — distill the film into one bold symbolic image: a single object or motif from the story, monumental and graphic against a near-empty field. No figures.",
+      vast:       "THE LONE FIGURE IN A VAST WORLD — the protagonist small in the frame, dwarfed by the enormous world around them; scale, weather and atmosphere carry the drama.",
+      face:       "THE BIG FACE — an extreme close portrait of the protagonist filling the frame, eyes carrying the story; imagery of the film's world ghosted faintly into the shadows of the portrait.",
+      silhouette: "THE SILHOUETTE — the protagonist as a dark shape against a single blazing light source (a doorway, a sky, a beam); identity read through outline and wardrobe.",
+      back:       "THE THRESHOLD — the protagonist seen from behind, facing into the world or conflict that waits for them; we stand where they stand.",
+      duel:       "THE CONFRONTATION — the two leads opposed across the frame, faces lit differently, charged negative space between them.",
+      montage:    "THE PAINTED MONTAGE — a classic hand-painted cascade: the lead large and luminous, the others layered smaller around them on a sweeping diagonal, edges dissolving into the world.",
+      tableau:    "THE FROZEN MOMENT — one arresting, uncanny moment from the story staged wide like a still from a dream; something is quietly wrong.",
+    };
+    const pool = castN===0 ? ["symbol","vast","tableau"]
+      : castN===1 ? ["vast","face","silhouette","back"]
+      : castN===2 ? ["duel","vast","silhouette","tableau"]
+      : ["montage","tableau","vast"];
+    const PALETTES = [
+      "burnt orange against deep teal",
+      "near-monochrome slate with a single crimson accent",
+      "sodium-vapour amber night",
+      "bleached bone-white and ink black",
+      "wet neon — magenta and cyan on black rain",
+      "golden-hour haze, long shadows",
+      "cold moonlit blue broken by one warm lamplight",
+      "storm green-grey with pale skin tones",
+    ];
+    const LIGHTS = [
+      "one hard rim-light from behind, everything else falling to black",
+      "a single overhead shaft of light through darkness",
+      "low-key chiaroscuro, half the frame swallowed by shadow",
+      "backlit through smoke or dust, god-rays",
+      "practical glow — neon, fire or a lone bulb as the only source",
+      "vast soft dusk light, the sky doing the work",
+    ];
+    const s = String(proj.id || proj.title || "poster");
+    let hsh = 0; for(let i=0;i<s.length;i++) hsh = ((hsh*31) + s.charCodeAt(i)) >>> 0;
+    let ai = hsh % pool.length, pi = (hsh>>>3) % PALETTES.length, li = (hsh>>>6) % LIGHTS.length;
+    if(vary){   // a re-roll must LOOK different: step to another concept + treatment
+      ai = (ai + 1 + Math.floor(Math.random()*Math.max(1, pool.length-1))) % pool.length;
+      pi = (pi + 1 + Math.floor(Math.random()*(PALETTES.length-1))) % PALETTES.length;
+      li = (li + 1 + Math.floor(Math.random()*(LIGHTS.length-1))) % LIGHTS.length;
+    }
+    return { concept:A[pool[ai]], usesCast: pool[ai]!=="symbol", palette:PALETTES[pi], light:LIGHTS[li] };
+  };
   const generatePoster = async (proj, opts)=>{
     if(!proj || !proj.id) return "";
     // REGENERATE keeps the outgoing poster as one-deep history (doc.coverPrev)
@@ -851,38 +903,45 @@ function App(){
       // the next dashboard open) so a wrong poster is never baked in.
       const canon = await _posterCanonFor(proj);
       if(!canon.ok) return "";
+      const look = _posterLook(proj, canon.cast.length, !!(opts && opts.keepPrev));
+      const castUsed = look.usesCast ? canon.cast : [];
       const refs = [];
-      let prompt = "Cinematic movie poster key art for the film “"+title+"”. "+
-        (logline ? logline+". " : "");
-      if(canon.cast.length){
-        canon.cast.forEach(u=>refs.push(u));
-        prompt += "Reference image"+(canon.cast.length>1?("s 1-"+canon.cast.length):" 1")+
-          " show"+(canon.cast.length>1?"":"s")+" this film's ACTUAL lead cast — depict exactly these "+
-          "characters as the poster's subjects, keeping every face, likeness and wardrobe faithful. "+
-          "Do not invent, add or substitute any other people. ";
+      let prompt = "Theatrical one-sheet movie poster key art for “"+title+"”. "+
+        (logline ? logline+" " : "")+
+        "\nCONCEPT — "+look.concept+
+        "\nPALETTE & LIGHT: "+look.palette+"; "+look.light+". ";
+      if(castUsed.length){
+        castUsed.forEach(u=>refs.push(u));
+        prompt += "\nCAST: reference image"+(castUsed.length>1?("s 1-"+castUsed.length):" 1")+
+          " show"+(castUsed.length>1?"":"s")+" this film's ACTUAL cast — the poster's figure"+
+          (castUsed.length>1?"s":"")+" must be exactly these people: wherever a face is visible it is "+
+          "faithful to the reference (likeness and wardrobe), and where the concept hides the face the "+
+          "build, hair and wardrobe still match. Never invent, add or substitute people. ";
       }else{
-        prompt += "Show an evocative, character-free scene — lean on setting, atmosphere and iconography. "+
-          "Do NOT invent or depict any characters/people. ";
+        prompt += "\nNO PEOPLE: do not invent or depict any characters — carry the poster on object, "+
+          "setting, atmosphere and iconography alone. ";
       }
       if(canon.world){
         refs.push(canon.world.url);
-        prompt += "Reference image "+refs.length+" shows the film's real primary location"+
-          (canon.world.name?(", “"+canon.world.name+"”"):"")+" — set the poster IN THIS world, matching its "+
-          "architecture, landscape, era and atmosphere. Do not invent a different setting. ";
+        prompt += "\nWORLD: reference image "+refs.length+" is the film's real primary location"+
+          (canon.world.name?(" (“"+canon.world.name+"”)"):"")+" — the poster's setting is THIS world: its "+
+          "architecture, landscape, era and weather. Do not invent a different setting. ";
       }
       if(canon.prop){
         refs.push(canon.prop.url);
-        prompt += "Reference image "+refs.length+" shows "+
+        prompt += "\nOBJECT: reference image "+refs.length+" is "+
           (canon.prop.name?("“"+canon.prop.name+"”, "):"")+"a signature object from the film — feature it "+
-          "only if it strengthens the composition, faithful to the reference. ";
+          "only if it serves the concept, faithful to the reference. ";
       }
       prompt += canon.style
-        ? "Render the key art in the film's own medium: "+canon.style.medium+" ("+canon.style.label+" style) — "+
-          "the reference images define the exact look of the people and places; keep them consistent. "
-        : "Photorealistic live-action one-sheet. ";
-      prompt += "A single striking hero image; bold dramatic composition; rich cinematic colour and "+
-        "evocative lighting; the mood that sells the story at a glance. "+
-        "Vertical theatrical poster framing. Absolutely NO text, NO title, NO lettering or captions anywhere.";
+        ? "\nMEDIUM: render in the film's own medium — "+canon.style.medium+" ("+canon.style.label+" style); "+
+          "the references define the exact look of the people and places. "
+        : "\nMEDIUM: photographic live-action one-sheet, shot like a $100M campaign. ";
+      prompt += "\nCRAFT: one single striking image, not a collage of floating heads; layered depth "+
+        "(foreground element, subject, atmospheric background); bold negative space held clear at the top "+
+        "where a title would sit — but render absolutely NO text, NO title, NO lettering, NO logos. "+
+        "Dramatic camera angle (low, high or telephoto compression), never a flat eye-level frontal lineup "+
+        "of people looking into the camera. Vertical theatrical framing.";
       // Paint dashboard posters with GPT Image 2 (server-side via the proxy). Fall
       // back to the default model only if that id isn't available (proxy off).
       const genOpts = { aspectRatio:"9:16", quality:"medium" };
