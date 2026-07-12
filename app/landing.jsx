@@ -231,8 +231,8 @@ function Landing({ onStart, onSignIn }){
       React.createElement("div",{className:"lp-foot-in"},
         React.createElement("span",{className:"lp-logo sm"},"Cinema Machine"),
         React.createElement("nav",{className:"lp-foot-links","aria-label":"Legal"},
-          React.createElement("a",{className:"lp-foot-link",href:"#privacy"},"Privacy"),
-          React.createElement("a",{className:"lp-foot-link",href:"#terms"},"Terms"),
-          React.createElement("a",{className:"lp-foot-link",href:"#contact"},"Contact"))))));
+          React.createElement("a",{className:"lp-foot-link",href:"/privacy.html",target:"_blank",rel:"noopener"},"Privacy"),
+          React.createElement("a",{className:"lp-foot-link",href:"/terms.html",target:"_blank",rel:"noopener"},"Terms"),
+          React.createElement("a",{className:"lp-foot-link",href:"mailto:support@infinitestudioai.com"},"Contact"))))));
 }
 window.Landing = Landing;

@@ -73,4 +73,11 @@ if (html.includes("text/babel") || html.includes("@babel/standalone"))
 if (html.length === before) throw new Error("index.html rewrite made no changes");
 writeFileSync(join(DIST, "index.html"), html);
 
+// standalone legal pages — self-contained static HTML, copied verbatim so the
+// footer links (/privacy.html, /terms.html) work on the deployed site
+for (const page of ["privacy.html", "terms.html"]) {
+  cpSync(join(ROOT, page), join(DIST, page));
+  copied++;
+}
+
 console.log(`dist/ built: ${built} js files transpiled+minified, ${copied} assets copied, index.html rewritten (no Babel).`);

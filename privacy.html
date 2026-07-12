@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy Policy — Cinema Machine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Spectral:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#FCFCFB; --card:#F6F6F4; --line:#E8E8E5; --ink:#0F1012; --ink2:#3C3F44;
+    --sub:#5D6066; --black:#0D0D0E; --accent:#E0742B;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink2);font-family:"Hanken Grotesk",system-ui,sans-serif;
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .page{position:relative}
+  .rails{position:absolute;inset:0;pointer-events:none}
+  .rails::before,.rails::after{content:"";position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
+  .rails::before{left:max(0px,calc((100% - 1280px)/2))}
+  .rails::after{right:max(0px,calc((100% - 1280px)/2))}
+  header{position:sticky;top:0;z-index:5;background:rgba(252,252,251,.86);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line)}
+  .nav-in{max-width:1280px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;
+    gap:16px;padding:13px clamp(20px,4vw,48px)}
+  .logo{font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:19px;letter-spacing:.03em;
+    color:var(--ink);text-decoration:none}
+  .back{display:inline-flex;align-items:center;gap:8px;padding:9px 17px;border-radius:999px;
+    border:1px solid #E1E1DD;background:#fff;color:var(--ink);font-size:13.5px;font-weight:600;
+    text-decoration:none;transition:.14s}
+  .back:hover{background:#F1F1EE}
+  main{max-width:760px;margin:0 auto;padding:clamp(40px,6vw,80px) clamp(20px,4vw,48px) 80px}
+  h1{font-family:"Spectral",Georgia,serif;font-weight:600;font-size:clamp(30px,4vw,44px);
+    line-height:1.1;letter-spacing:-.01em;color:var(--ink);margin-bottom:10px}
+  .meta{font-size:13px;color:var(--sub);margin-bottom:38px}
+  h2{font-family:"Spectral",Georgia,serif;font-weight:600;font-size:22px;color:var(--ink);
+    margin:38px 0 10px}
+  p{margin:0 0 14px}
+  ul{margin:0 0 14px 22px}
+  li{margin-bottom:7px}
+  a{color:var(--accent)}
+  .note{background:var(--card);border-radius:12px;padding:16px 18px;font-size:14px;color:var(--sub);margin:26px 0}
+  footer{border-top:1px solid var(--line);color:var(--sub)}
+  .foot-in{max-width:1280px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;
+    gap:16px;flex-wrap:wrap;height:76px;padding:0 clamp(20px,4vw,48px)}
+  .foot-logo{font-family:"Space Grotesk",sans-serif;font-weight:700;font-size:15px;letter-spacing:.03em;color:var(--ink)}
+  .foot-links{display:flex;align-items:center;gap:26px}
+  .foot-links a{font-size:12.5px;color:var(--sub);text-decoration:none}
+  .foot-links a:hover{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="rails" aria-hidden="true"></div>
+<header>
+  <div class="nav-in">
+    <a class="logo" href="/">Cinema Machine</a>
+    <a class="back" href="/">&larr; Back to the studio</a>
+  </div>
+</header>
+<main>
+  <h1>Privacy Policy</h1>
+  <div class="meta">Cinema Machine, by Infinite Studio AI &middot; Effective 12 July 2026</div>
+
+  <p>This policy explains what information Cinema Machine ("we", "us") collects when you use
+  the service at cinema.infinitestudioai.com, how we use it, and the choices you have.
+  Cinema Machine is an AI film studio: you bring story ideas and the service helps you develop
+  them into scripts, artwork, voices and video.</p>
+
+  <h2>What we collect</h2>
+  <ul>
+    <li><b>Account information.</b> Your email address and a password, used to create and sign in
+      to your account. We do not collect your name unless you include it in your content.</li>
+    <li><b>Your creative content.</b> The films you build — story ideas, loglines, scripts,
+      characters, artwork, voices, storyboards and video clips — is stored so it syncs across
+      your devices and sessions.</li>
+    <li><b>Billing information.</b> Payments are processed by <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Stripe</a>.
+      We never see or store your card number; we store your subscription tier, credit balance
+      and Stripe customer reference so your plan works.</li>
+    <li><b>Usage basics.</b> Standard technical logs (such as request timestamps and error logs)
+      needed to run and secure the service. We do not run third-party advertising or
+      cross-site tracking.</li>
+  </ul>
+
+  <h2>How your content is processed</h2>
+  <p>When you use generation features (writing, images, voices, video), the relevant parts of
+  your content — for example a scene description or a character reference image — are sent
+  server-side to the AI model providers that power the studio (such as providers of text,
+  image, voice and video models). These providers process the content to return the generated
+  result. We send only what the feature needs, and your provider requests run through our
+  servers — your account never exposes API keys in the browser.</p>
+
+  <h2>Where your data lives</h2>
+  <p>Account data and creative content are stored with our backend provider
+  (<a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase</a>), protected by
+  row-level security so your projects are readable only by your account. Some working data
+  (such as local drafts, preferences and render takes) is stored in your own browser and never
+  leaves your device.</p>
+
+  <h2>What we don't do</h2>
+  <ul>
+    <li>We don't sell your personal information or your creative work.</li>
+    <li>We don't use your creative content to train our own models.</li>
+    <li>We don't show ads or share your data with advertisers.</li>
+  </ul>
+
+  <h2>How long we keep it</h2>
+  <p>Your account and content are kept while your account is active. If you delete a film, it is
+  removed from your library; if you ask us to delete your account, we remove your account data
+  and stored content within 30 days, except records we must keep for legal or accounting
+  reasons (such as invoices).</p>
+
+  <h2>Your choices</h2>
+  <ul>
+    <li>You can delete individual films from your library at any time.</li>
+    <li>You can cancel your subscription at any time; your remaining credits stay usable.</li>
+    <li>You can request a copy or deletion of your data by emailing
+      <a href="mailto:support@infinitestudioai.com">support@infinitestudioai.com</a>.</li>
+  </ul>
+
+  <h2>Cookies and local storage</h2>
+  <p>We use only what the service needs to work: a session token so you stay signed in, and
+  browser local storage for preferences and drafts. No advertising or analytics cookies.</p>
+
+  <h2>Children</h2>
+  <p>Cinema Machine is not directed at children under 16, and we don't knowingly collect their
+  personal information.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes materially, we'll note the new effective date here and, for
+  significant changes, tell you in the app or by email.</p>
+
+  <h2>Contact</h2>
+  <p>Questions or requests: <a href="mailto:support@infinitestudioai.com">support@infinitestudioai.com</a></p>
+</main>
+<footer>
+  <div class="foot-in">
+    <span class="foot-logo">Cinema Machine</span>
+    <nav class="foot-links" aria-label="Legal">
+      <a href="/privacy.html">Privacy</a>
+      <a href="/terms.html">Terms</a>
+      <a href="mailto:support@infinitestudioai.com">Contact</a>
+    </nav>
+  </div>
+</footer>
+</div>
+</body>
+</html>
