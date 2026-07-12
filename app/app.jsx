@@ -493,7 +493,7 @@ function App(){
 
   // ---- cloud projects + doc sync ----
   const [projects, setProjects] = React.useState([]);
-  const [homeOpen, setHomeOpen] = React.useState(false);   // Home / Dashboard (film wall)
+  const [homeOpen, setHomeOpen] = React.useState(false);   // Home / Dashboard overlay (only shown at >=2 films)
   const [currentProjectId, setCurrentProjectId] = React.useState(null);
   const cloudMode = !!(session && currentProjectId);
   // ADMIN — demo upkeep account. The Matrix sample story (and "Reset to sample story")
@@ -752,45 +752,97 @@ function App(){
     await loadProjectIntoState(created.id);
     setArtView("lookbook");   // a fresh film opens the Art Room on the Lookbook (front of the pipeline)
   };
-  /* Home screen: mint an AI poster for a film from its title + logline and persist it
-     onto doc.cover, so the film wall shows real key art. Routes through the same image
-     proxy as the rest of the studio (no key in the browser). */
-  const generatePoster = async (proj)=>{
-    if(!proj || !proj.id) return;
-    /* the poster follows the film's RENDER STYLE — but only the currently open project
-       has its cast loaded, so other films on the wall keep the neutral cinematic prompt.
-       Photoreal-family films also keep it (the base prompt already reads cinematic). */
-    const posterStyle = (()=>{
-      try{
-        if(proj.id!==currentProjectId || !(characters||[]).length) return "";
-        const tally = {};
-        characters.forEach(c=>{ const k=(typeof inferCharacterRenderStyleKey==="function") ? inferCharacterRenderStyleKey(c) : (c.renderStyleKey||"");
-          if(k && k!=="surprise") tally[k]=(tally[k]||0)+1; });
-        const top = Object.keys(tally).sort((a,b)=>tally[b]-tally[a])[0];
-        if(!top || /^(photoreal|horror)/.test(top)) return "";
-        const cs = (window.CHAR_RENDER_STYLES||{})[top];
-        return cs && cs.rendering ? String(cs.rendering).split(/[;,]/).slice(0,2).join(",").trim() : "";
-      }catch(e){ return ""; }
-    })();
-    const prompt = (typeof window.posterPrompt==="function")
-      ? window.posterPrompt(proj, posterStyle)
-      : ("Cinematic movie poster key art for the film “"+(proj.title||"Untitled film")+"”. "+
-         "A single striking hero image; bold cinematic composition. NO text anywhere.");
-    let url = await window.nbGenerate(prompt, { aspectRatio:"9:16", quality:"medium" });
-    if(!url) throw new Error("The poster came back empty — try again.");
-    if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 640, 0.82); }catch(e){} }
-    if(typeof window.cloudSaveCover==="function") await window.cloudSaveCover(proj.id, url);
-    setProjects(ps=>ps.map(p=>p.id===proj.id?{ ...p, cover:url }:p));
-    return url;
+  /* Dashboard: mint an AI poster for a film from its title + logline and persist it
+     onto doc.cover, so the Recent Projects cards show real key art. Routes through the
+     same image proxy as the rest of the studio (no key in the browser). Returns the
+     data URL (and stamps it into the projects list) so callers can show it immediately. */
+  /* Resolve a film's LEAD cast portrait URLs to use as poster reference images.
+     Loads from the cloud by film id, so it works for ANY recent film on the
+     dashboard (not just the one currently open).
+     Returns { ok, urls }:
+       ok:false  → couldn't read the film's cast (auth/network blip). The caller
+                   must NOT paint a poster this round (no spend); it retries on
+                   the next dashboard open instead of baking in wrong art.
+       ok:true, urls:[]  → the film genuinely has no cast portraits → paint a
+                   character-free poster (never invent people).
+     For a SHOW EPISODE the shared cast lives in the show's bible (keyed by
+     doc.showId), and its portrait sheets are stored under the show id — so we
+     read the bible and load assets from the show scope (falling back to the
+     episode scope for any legacy per-episode sheets). Capped to a few leads for
+     a coherent poster and sane cost. */
+  const _castRefsFor = async (proj)=>{
+    if(!proj || !proj.id || typeof window.cloudLoadProject!=="function") return { ok:true, urls:[] };
+    let row;
+    try{ row = await window.cloudLoadProject(proj.id); }catch(e){ return { ok:false, urls:[] }; }
+    if(!row) return { ok:false, urls:[] };   // read failed — don't persist a wrong poster
+    const doc = row.doc || {};
+    let chars = (Array.isArray(doc.characters) && doc.characters)
+      || (doc.bible && Array.isArray(doc.bible.characters) && doc.bible.characters) || [];
+    let scopeId = proj.id;
+    if(doc.showId){   // episode → pull the shared cast from the show's bible
+      let showRow;
+      try{ showRow = await window.cloudLoadProject(doc.showId); }catch(e){ return { ok:false, urls:[] }; }
+      if(!showRow) return { ok:false, urls:[] };   // couldn't reach the show bible — retry later
+      const bibleChars = showRow.doc && showRow.doc.bible && showRow.doc.bible.characters;
+      if(Array.isArray(bibleChars) && bibleChars.length){ chars = bibleChars; scopeId = doc.showId; }
+    }
+    const ids = chars.slice(0, 3).map(c=>c && c.id).filter(Boolean);
+    if(!ids.length) return { ok:true, urls:[] };
+    let byId;
+    try{ byId = (typeof window.cloudAssetLoadMany==="function") ? (await window.cloudAssetLoadMany(scopeId, ids, true) || {}) : {}; }
+    catch(e){ return { ok:false, urls:[] }; }
+    if(scopeId!==proj.id){   // legacy fallback: some sheets may sit under the episode id
+      const missing = ids.filter(id=> !(byId[id] && byId[id].url));
+      if(missing.length){ try{ const ep = await window.cloudAssetLoadMany(proj.id, missing) || {}; byId = { ...ep, ...byId }; }catch(e){} }
+    }
+    const urls = [];
+    for(const id of ids){ const u = byId[id] && byId[id].url; if(u) urls.push(u); }
+    return { ok:true, urls };
   };
-  /* Home wall: the user dragged films into a new order. Stamp each a sequential
-     homeOrder (so the custom arrangement wins over the created-date default) in state
-     immediately, and persist each onto its doc so it survives reload / syncs devices. */
-  const reorderProjects = (orderedIds)=>{
-    if(!orderedIds || !orderedIds.length) return;
-    const pos = Object.fromEntries(orderedIds.map((id,i)=>[id,i]));
-    setProjects(ps=> ps.map(p=> pos[p.id]!=null ? { ...p, ord:pos[p.id] } : p));   // stamp position; HomeScreen sorts by it
-    orderedIds.forEach((id,i)=>{ if(typeof window.cloudSaveOrder==="function") window.cloudSaveOrder(id, i); });
+  const generatePoster = async (proj)=>{
+    if(!proj || !proj.id) return "";
+    // In-flight dedupe (keyed by film id, app-level so it survives the dashboard
+    // unmounting/remounting): if a poster for this film is ALREADY being painted,
+    // hand back the SAME promise instead of launching a second, duplicate spend.
+    const inflight = (window.__posterInflight = window.__posterInflight || {});
+    if(inflight[proj.id]) return inflight[proj.id];
+    const run = (async ()=>{
+      const title = proj.title || "Untitled film";
+      const logline = ((proj && proj.logline) || "").trim();
+      // Pull the film's LEAD cast portraits (from the cloud, so it works for any
+      // recent film, not just the one open in the studio) to use as reference
+      // images — the poster should depict the ACTUAL cast, never invented people.
+      const castRes = await _castRefsFor(proj);
+      if(!castRes.ok) return "";   // couldn't read the cast — skip WITHOUT spending; retries next open
+      const cast = castRes.urls;
+      let prompt = "Cinematic movie poster key art for the film “"+title+"”. "+
+        (logline ? logline+". " : "");
+      if(cast.length){
+        prompt += "The attached reference image(s) show this film's actual cast — depict THESE exact "+
+          "characters as the poster's subjects, keeping each face, likeness and wardrobe faithful. "+
+          "Do not invent, add or substitute any other people. ";
+      }else{
+        prompt += "Show an evocative, character-free scene — lean on setting, atmosphere and iconography. "+
+          "Do NOT invent or depict any characters/people. ";
+      }
+      prompt += "A single striking hero image; bold dramatic composition; rich cinematic colour and "+
+        "evocative lighting; the mood that sells the story at a glance. "+
+        "Vertical theatrical poster framing. Absolutely NO text, NO title, NO lettering or captions anywhere.";
+      // Paint dashboard posters with GPT Image 2 (server-side via the proxy). Fall
+      // back to the default model only if that id isn't available (proxy off).
+      const genOpts = { aspectRatio:"9:16", quality:"medium" };
+      if((window.NB_MODELS||[]).some(m=>m.id==="gpt-image-2")) genOpts.model = "gpt-image-2";
+      if(cast.length) genOpts.extraImages = cast;
+      let url = await window.nbGenerate(prompt, genOpts);
+      if(!url) throw new Error("The poster came back empty — try again.");
+      if(typeof window.downscaleRef==="function"){ try{ url = await window.downscaleRef(url, 640, 0.82); }catch(e){} }
+      if(typeof window.cloudSaveCover==="function") await window.cloudSaveCover(proj.id, url);
+      setProjects(ps=>ps.map(p=>p.id===proj.id?{ ...p, cover:url }:p));
+      return url;
+    })();
+    inflight[proj.id] = run;
+    try{ return await run; }
+    finally{ delete inflight[proj.id]; }
   };
   /* SERIES: turn the CURRENT project into episode 1 of a new show — its
      departments become the show's shared bible. (Sheets generated before the
@@ -2426,16 +2478,21 @@ function App(){
       activating: !(creditBalance && window.turnIsPaidPlan(creditBalance.plan)),
       onNewStory: ()=>{ setWelcomeOpen(false); startNewStory(); },
       onClose: ()=>setWelcomeOpen(false) }),
-    homeOpen && cloudMode && typeof window.HomeScreen!=="undefined" && React.createElement(window.HomeScreen,{
-      projects, currentId:currentProjectId,
-      onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
-      onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
-      onDelete: deleteProject,
-      onGeneratePoster: generatePoster,
-      onReorder: reorderProjects,
-      onClose: ()=>setHomeOpen(false),
-      accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
-        onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }),
+    // Home = the dashboard, and ONLY once the user has >=2 films. Below that,
+    // opening Home routes straight into the Writers' Room (see onHome), so the
+    // dashboard overlay never renders for a 0/1-film studio.
+    homeOpen && cloudMode
+      && (projects||[]).filter(p=>String(p.isShow)!=="true").length >= 2
+      && typeof window.HomeDashboard!=="undefined"
+      && React.createElement(window.HomeDashboard,{
+          projects, currentId:currentProjectId, room,
+          onOpen: async (id)=>{ setHomeOpen(false); await switchProject(id); },
+          onCreate: async ()=>{ await createProject(); setHomeOpen(false); setRoom("writers"); setView("spine"); },
+          onGeneratePoster: generatePoster,
+          onGoRoom: async (rid)=>{ if(!currentProjectId){ await createProject(); } setHomeOpen(false); if(rid==="writers") setView("spine"); guardedSetRoom(rid); },
+          onClose: ()=>setHomeOpen(false),
+          accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
+            onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }),
     t.grain && React.createElement("div",{style:{position:"fixed",inset:0,pointerEvents:"none",zIndex:50,
       opacity:.025,mixBlendMode:"overlay",
       backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")"}}),
@@ -2449,7 +2506,13 @@ function App(){
       onReset: isAdmin ? resetStory : null,
       onToggleAI:toggleAI,
       onNewStory:startNewStory,
-      onHome: cloudMode ? (()=>setHomeOpen(true)) : null,
+      onHome: cloudMode ? (()=>{
+        // Home only opens the dashboard for an established studio (>=2 films).
+        // A 0/1-film studio skips Home entirely and lands in the Writers' Room.
+        const nFilms = (projects||[]).filter(p=>String(p.isShow)!=="true").length;
+        if(nFilms >= 2){ setHomeOpen(true); return; }
+        (async()=>{ if(!currentProjectId){ await createProject(); } setHomeOpen(false); setView("spine"); guardedSetRoom("writers"); })();
+      }) : null,
       // ADMIN ONLY: inspect the whole continuity JSON (the Film Bible) the studio reads from
       onViewBible: isAdmin ? (()=> buildFilmBible({ project, scenes, characters, props, locations, shots, drafts, beatsMap, lookbook, lookbookNote })) : null,
       onManageStyles: (userEmail || null),   // every signed-in user manages their own styles (admin also gets the global tier inside)
