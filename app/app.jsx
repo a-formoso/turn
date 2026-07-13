@@ -1137,6 +1137,13 @@ function App(){
     const id = "char-"+Date.now().toString(36);
     setCharacters(cs=>[...cs, { id, name:"New character", role:"",
       color:"linear-gradient(135deg,#6a6f7a,#262a30)", conscious:"", unconscious:"", arc:"", manual:true }]);
+    return id;
+  };
+  // Writers' Room rail "+": add AND select, so the Character panel opens on the
+  // new character ready to type (name, role and pronouns are edited right there).
+  const addCharacterAndSelect = ()=>{
+    const id = addCharacter();
+    setSelChar(id); setInspOpen(true);
   };
   // SOFT DELETE: move the full character into the restore bin (its scenes are scene-side
   // and untouched, so restoring the same id re-links them). The generated sheet is KEPT
@@ -2741,12 +2748,14 @@ function App(){
         ? (railOpen && React.createElement(LeftRail,{project,characters,scenes,selId,selChar,
             onSelect:(id)=>{ selectScene(id); setRailOpen(false); },
             onSelectChar:(id)=>{ setSelChar(id); setInspOpen(true); setRailOpen(false); },
+            onAddCharacter:addCharacterAndSelect,
             showFramework:t.framework,onCollapse:()=>setRailOpen(false),
             onAddScene:addScene,onReorder:reorderScenes,compact:!wide}))
         : (railOpen
           ? React.createElement(LeftRail,{project,characters,scenes,selId,selChar,
               onSelect:selectScene,
               onSelectChar:(id)=>{ setSelChar(id); setInspOpen(true); },
+              onAddCharacter:addCharacterAndSelect,
               showFramework:t.framework,onCollapse:()=>setRailOpen(false),
               onAddScene:addScene,onReorder:reorderScenes,compact:!wide})
           : React.createElement(CollapsedStrip,{side:"left",label:"Story",icon:Icon.panelLeft,

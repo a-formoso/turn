@@ -507,7 +507,7 @@ function RailSection({ label, icon:Ic, onAdd, defaultOpen=true, children }){
     open && children);
 }
 
-function LeftRail({ project, characters, scenes, selId, selChar, onSelect, onSelectChar, showFramework, onCollapse, onAddScene, onReorder, compact }){
+function LeftRail({ project, characters, scenes, selId, selChar, onSelect, onSelectChar, onAddCharacter, showFramework, onCollapse, onAddScene, onReorder, compact }){
   const ci = project.controllingIdea;
   const secOpen = !compact;
   // group scenes by act
@@ -547,7 +547,7 @@ function LeftRail({ project, characters, scenes, selId, selChar, onSelect, onSel
               React.createElement("div",{style:{fontSize:12,color:"var(--txt-1)",lineHeight:1.4}},v))))),
 
       // CHARACTERS
-      React.createElement(RailSection,{label:"Cast",icon:Icon.user,onAdd:()=>{},defaultOpen:true},
+      React.createElement(RailSection,{label:"Cast",icon:Icon.user,onAdd:onAddCharacter,defaultOpen:true},
         characters.map(c=>{
           const driven = scenes.filter(s=>s.driver===c.id).length;
           return React.createElement("div",{key:c.id,

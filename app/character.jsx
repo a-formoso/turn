@@ -58,8 +58,19 @@ function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJump
       React.createElement("div",{className:"char-head"},
         React.createElement("div",{className:"char-head-av",style:{background:c.color}},initials),
         React.createElement("div",{style:{flex:1,minWidth:0}},
-          React.createElement(EditText,{value:c.name,className:"char-head-name",onCommit:v=>onUpdate(c.id,{name:v})}),
-          React.createElement(EditText,{value:c.role,className:"char-head-role",onCommit:v=>onUpdate(c.id,{role:v})}))),
+          React.createElement(EditText,{value:c.name,className:"char-head-name",placeholder:"Character name\u2026",
+            onCommit:v=>onUpdate(c.id,{name:v})}),
+          React.createElement(EditText,{value:c.role,className:"char-head-role",
+            placeholder:"Role \u00b7 who they are \u2014 e.g. Texture \u00b7 community \u2014 pensioner regular\u2026",
+            onCommit:v=>onUpdate(c.id,{role:v})}),
+          // PRONOUNS \u2014 canonical, fed into the scene drafter (same field the Art
+          // Room card edits) so the script never drifts from the character's gender
+          React.createElement("div",{style:{display:"flex",alignItems:"center",gap:6,marginTop:4}},
+            React.createElement("span",{className:"obj-lab",style:{marginBottom:0}},"Pronouns"),
+            React.createElement("select",{className:"char-pronoun-sel",
+              value:(c.pronouns||(typeof window.charPronouns==="function"?window.charPronouns(c):"they/them")),
+              onChange:e=>onUpdate(c.id,{pronouns:e.target.value})},
+              ["he/him","she/her","they/them"].map(pn=>React.createElement("option",{key:pn,value:pn},pn)))))),
 
       // DESIRE
       React.createElement("div",{className:"insp-block",style:{marginTop:16}},
