@@ -2882,9 +2882,9 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
           React.createElement("div",{className:"role-line"},
             React.createElement("span",{className:"role-lab"},"Pronouns"),
             React.createElement("select",{className:"char-pronoun-sel",
-              value:(c.pronouns||(typeof window.charPronouns==="function"?window.charPronouns(c):"they/them")),
+              value:((c.pronouns==="he/him"||c.pronouns==="she/her") ? c.pronouns : ((typeof window.charPronouns==="function"?window.charPronouns(c):"") || "")),
               onChange:e=>onUpdate(c.id,{pronouns:e.target.value})},
-              ["he/him","she/her","they/them"].map(p=>React.createElement("option",{key:p,value:p},p)))))),
+              [["","set pronouns\u2026"],["he/him","he/him"],["she/her","she/her"]].map(function(o){return React.createElement("option",{key:o[0]||"unset",value:o[0],disabled:!o[0]},o[1]);}))))),
         // ALWAYS-VISIBLE scenes row — ONE line, paged 4 chips at a time with ‹ ›
         // arrows (a lead who appears in 12+ scenes was wrapping the card header)
         React.createElement("div",{className:"sheet-scenes"},

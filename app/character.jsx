@@ -68,9 +68,9 @@ function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJump
           React.createElement("div",{style:{display:"flex",alignItems:"center",gap:6,marginTop:4}},
             React.createElement("span",{className:"obj-lab",style:{marginBottom:0}},"Pronouns"),
             React.createElement("select",{className:"char-pronoun-sel",
-              value:(c.pronouns||(typeof window.charPronouns==="function"?window.charPronouns(c):"they/them")),
+              value:((c.pronouns==="he/him"||c.pronouns==="she/her") ? c.pronouns : ((typeof window.charPronouns==="function"?window.charPronouns(c):"") || "")),
               onChange:e=>onUpdate(c.id,{pronouns:e.target.value})},
-              ["he/him","she/her","they/them"].map(pn=>React.createElement("option",{key:pn,value:pn},pn)))))),
+              [["","set pronouns\u2026"],["he/him","he/him"],["she/her","she/her"]].map(function(o){return React.createElement("option",{key:o[0]||"unset",value:o[0],disabled:!o[0]},o[1]);}))))),
 
       // DESIRE
       React.createElement("div",{className:"insp-block",style:{marginTop:16}},

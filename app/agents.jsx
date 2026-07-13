@@ -651,7 +651,10 @@ async function agentScriptBreakdown(ctx){
       // (1) DRIFT CHECK — script pronoun vs canonical pronoun
       const scriptPron = pronOf(c.gender_used);
       const canonPron = (typeof window.charPronouns==="function") ? window.charPronouns(ch) : "";
-      if(scriptPron && canonPron && scriptPron!==canonPron){
+      if(scriptPron==="they/them"){
+        // house rule: singular they never becomes canon — the SCRIPT is what needs fixing
+        ctx.emit({k:"flag", t:"Sc "+s.no+" refers to "+ch.name+" with singular \u201cthey\u201d \u2014 rewrite to "+(canonPron||"he/she or the name")+" (house rule: explicit pronouns only; Consistency Check can fix this)."});
+      } else if(scriptPron && canonPron && scriptPron!==canonPron){
         drift++;
         const ok = await ctx.propose({
           title:"Gender drift — "+ch.name,
