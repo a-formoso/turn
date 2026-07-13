@@ -171,8 +171,7 @@ function Verdict({ scene }){
 }
 
 /* ---------- editable beat map ---------- */
-function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters, onRedraftScript }){
-  const [redrafting, setRedrafting] = React.useState(false);
+function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
   const [deriving, setDeriving] = React.useState(false);
   const hasScript = !!(draft && ((draft.blocks && draft.blocks.length) || (Array.isArray(draft) && draft.length)));
   const deriveFromScript = async ()=>{
@@ -256,31 +255,13 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters, onRed
       title:"Put the beat you just deleted back in its place — with the scene's turn marker as it was"},
       React.createElement(Icon.undo,{s:12}),
       "Undo — restore deleted beat "+(lastDeleted.index+1)),
-    hasScript && React.createElement("button",{className:"beat-build-btn",disabled:deriving,
+    hasScript && React.createElement("button",{className:"beat-build-btn primary",disabled:deriving,
       onClick:()=>rebuildFromScript(blankMap),
       title:"Read this scene's screenplay and build the beat / subtext map from it"},
       React.createElement(Icon.sparkles,{s:12}),
       deriving ? "Reading the script…" : (blankMap ? "Build from script" : "Rebuild from script")),
-    // the REVERSE direction: rewrite the scene's screenplay from the CURRENT beat
-    // cards (reshape the subtext here, then rebuild the text). The existing draft
-    // is pushed into version history, so Undo restores it.
-    hasScript && !blankMap && onRedraftScript && React.createElement("button",{className:"beat-build-btn",
-      disabled:deriving||redrafting,
-      onClick:async ()=>{ if(redrafting) return; setRedrafting(true);
-        try{ await onRedraftScript(scene, beats); } finally{ setRedrafting(false); } },
-      title:"Rewrite this scene's screenplay from the CURRENT beat cards — the reverse of 'Rebuild from script'. The current draft stays in version history (Undo restores it)."},
-      React.createElement(Icon.redo,{s:12}),
-      redrafting ? "Redrafting the script…" : "Redraft script from beats"),
-    // CENTERED progress overlay while MUSE rebuilds the scene — portaled to <body>
-    // (fixed + dead-centre on any screen/device, immune to panel transforms)
-    redrafting && ReactDOM.createPortal(
-      React.createElement("div",{className:"redraft-overlay"},
-        React.createElement("div",{className:"redraft-card"},
-          React.createElement("span",{className:"orb"}),
-          React.createElement("div",{className:"redraft-t"},"MUSE is redrafting Scene "+(scene.no!=null?scene.no:"")),
-          React.createElement("div",{className:"redraft-d"},
-            "Rebuilding the screenplay from the current beats — about a minute. The previous draft stays in version history (Undo restores it)."))),
-      document.body),
+    // ("Redraft script from beats" lives in the SCRIPT view's toolbar only —
+    // the duplicate button here was removed by product decision 2026-07-13.)
     React.createElement("div",{className:"beat-labels"},
       React.createElement("div",{className:"cell"},
         React.createElement("div",{className:"obj-lab",style:{marginBottom:3}},"Driver"),
@@ -457,7 +438,7 @@ function Inspector({ scene, beats, draft, onCharge, onUpdate, characters, scenes
         React.createElement("div",{className:"insp-eyebrow",style:{marginBottom:10}},
           React.createElement("span",{className:"insp-scene-no"},String(scene.no).padStart(2,"0")),
           React.createElement("span",{className:"eyebrow"},"Beat / Subtext map \u2014 editable")),
-        React.createElement(BeatEditor,{scene,beats,onBeats,focusBeat,draft,characters,onRedraftScript})),
+        React.createElement(BeatEditor,{scene,beats,onBeats,focusBeat,draft,characters})),
 
       tab==="analysis" && React.createElement("div",{style:{paddingTop:2}},
         React.createElement("div",{className:"divider"},

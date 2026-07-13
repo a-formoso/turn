@@ -1300,28 +1300,13 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
 .muse-bubble.open{background:transparent}
 .muse-bubble .ai-orb{width:40px;height:40px;position:relative;z-index:2}   /* orb stays crisp above the pulse */
 
-/* attention pulse — a whole soft accent SHADE blooms from inside the orb's body and
-   swells outward: brightest at its core, fading softer toward its outer reach. Two
-   staggered blooms breathe continuously and slowly. */
-.muse-bubble::before,
-.muse-bubble::after{content:"";position:absolute;left:50%;top:50%;width:60px;height:60px;
-  margin:-30px 0 0 -30px;border-radius:50%;pointer-events:none;z-index:1;
-  background:radial-gradient(circle,
-    rgba(224,116,43,.7) 0%,
-    rgba(224,116,43,.45) 32%,
-    rgba(224,116,43,.18) 58%,
-    transparent 80%);
-  transform:scale(.35);opacity:0;
-  animation:muse-pulse 4.4s ease-out infinite}
-.muse-bubble::after{animation-delay:2.2s}   /* second bloom, half a cycle behind */
-.muse-bubble.open::before,.muse-bubble.open::after,
-.muse-bubble:hover::before,.muse-bubble:hover::after{animation:none;opacity:0}  /* calm once opened or hovered */
-@keyframes muse-pulse{
-  0%  {transform:scale(.35);opacity:0}
-  22% {opacity:.85}                        /* the shade fills, brightest near the body */
-  100%{transform:scale(1.6);opacity:0}     /* a clear bloom reaching past the orb's edge */
-}
-@media (prefers-reduced-motion: reduce){ .muse-bubble::before,.muse-bubble::after{animation:none;opacity:0} }
+/* attention pulse — the SAME expanding soft ring the Art Room's Re-draft buttons
+   use while working (the draft-busy keyframes), running on the orb's circle. The
+   orb's own slow conic spin is kept. */
+.muse-bubble .ai-orb{animation:spin 8s linear infinite, draft-busy 1.15s ease-in-out infinite}
+.muse-bubble.open .ai-orb,
+.muse-bubble:hover .ai-orb{animation:spin 8s linear infinite}   /* calm once opened or hovered */
+@media (prefers-reduced-motion: reduce){ .muse-bubble .ai-orb{animation:none} }
 
 /* ── MUSE voice ORB (no modal): a wave ripples around the button by state ── */
 .muse-orb-wrap{position:fixed;right:24px;bottom:24px;z-index:75;
@@ -3551,6 +3536,11 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   border:1px solid var(--line-3);background:transparent;color:var(--txt-2);font-family:var(--f-ui);font-size:11.5px;font-weight:500;cursor:pointer;transition:.12s}
 .beat-build-btn:hover:not(:disabled){background:var(--bg-3);color:var(--txt-1)}
 .beat-build-btn:disabled{opacity:.55;cursor:default}
+/* the tab's PRIMARY action ("Rebuild from script") — same chip language as the
+   inspector's other action buttons (char-draft-btn), no more camouflage */
+.beat-build-btn.primary{border:1px solid var(--line-2);background:var(--bg-3);color:var(--txt-1);font-weight:600}
+.beat-build-btn.primary svg{color:var(--pos)}
+.beat-build-btn.primary:hover:not(:disabled){background:var(--bg-4);color:var(--txt-0)}
 .brief-modal{max-width:760px}
 .brief-pre{white-space:pre-wrap;word-break:break-word;font-family:var(--f-body);font-size:13.5px;line-height:1.6;color:var(--txt-1)}
 .brief-empty{padding:18px 20px;color:var(--txt-2);font-size:13.5px;line-height:1.6}
