@@ -271,6 +271,16 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters, onRed
       title:"Rewrite this scene's screenplay from the CURRENT beat cards — the reverse of 'Rebuild from script'. The current draft stays in version history (Undo restores it)."},
       React.createElement(Icon.redo,{s:12}),
       redrafting ? "Redrafting the script…" : "Redraft script from beats"),
+    // CENTERED progress overlay while MUSE rebuilds the scene — portaled to <body>
+    // (fixed + dead-centre on any screen/device, immune to panel transforms)
+    redrafting && ReactDOM.createPortal(
+      React.createElement("div",{className:"redraft-overlay"},
+        React.createElement("div",{className:"redraft-card"},
+          React.createElement("span",{className:"orb"}),
+          React.createElement("div",{className:"redraft-t"},"MUSE is redrafting Scene "+(scene.no!=null?scene.no:"")),
+          React.createElement("div",{className:"redraft-d"},
+            "Rebuilding the screenplay from the current beats — about a minute. The previous draft stays in version history (Undo restores it)."))),
+      document.body),
     React.createElement("div",{className:"beat-labels"},
       React.createElement("div",{className:"cell"},
         React.createElement("div",{className:"obj-lab",style:{marginBottom:3}},"Driver"),

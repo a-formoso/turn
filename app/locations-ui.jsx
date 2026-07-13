@@ -444,14 +444,11 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
         React.createElement("div",{style:{flex:1}},
           React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Production Designer (Location Scout)",
             React.createElement(window.InfoTip,{label:"About Locations",
-              text:"Every place the film visits, pulled straight from the script's sluglines. Each gets a multi-angle coverage plate \u2014 the same space from several views \u2014 so any shot set there matches its geometry, materials and light. 'Design all locations' builds every place in one pass \u2014 pulls them from the sluglines, drafts each spec, and stages its depth grid; 'Generate all locations' then renders the plates."}))),
+              text:"Every place the film visits, pulled straight from the script's sluglines. Each gets a multi-angle coverage plate \u2014 the same space from several views \u2014 so any shot set there matches its geometry, materials and light. 'Design all locations' builds every place in one pass \u2014 pulls them from the sluglines, drafts each spec, and stages its depth grid; 'Generate all locations' then renders the plates.\n\nLOCATIONS DERIVE FROM THE SCRIPT \u2014 there's no hand-adding here: write the place into the screenplay's sluglines and 'Design all locations' pulls it in."}))),
         React.createElement("div",{className:"art-intro-actions"},
           // NO hand-adding (product rule 2026-07-13): locations derive from the
           // script's sluglines — write the place into the screenplay and
           // 'Design all locations' pulls it in; the Art Room never invents places.
-          React.createElement("span",{className:"art-derive-hint",
-            title:"Locations derive from the script's sluglines. Write the place into the screenplay and 'Design all locations' pulls it in."},
-            "Locations come from the script"),
           React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!scriptHasLocs),onClick:onDraftAll,
             title:"Build every location from the story in one pass \u2014 pull any missing places from the script's sluglines, draft each spec (the space, significance, look dev), and stage its depth grid"},
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all locations"),

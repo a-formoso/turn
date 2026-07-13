@@ -3602,7 +3602,7 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
             ((typeof roomCopy==="function" && roomCopy(project,"characters").title) || "Casting Director (Character Designer)"),
             React.createElement(window.InfoTip,{label:"About Character Sheets",
               text:((typeof roomCopy==="function" && roomCopy(project,"characters").tip) ||
-                "A canonical visual reference for every character \u2014 the consistency anchor you feed into each shot so they look identical in every frame. 'Design the cast' runs the Casting Director agent: on its own it drafts each character's look, finds their appearance changes (wounds, dirt, costume shifts), then generates the master sheet (pulling in their prop sheets + any cameo) and every appearance-state variant. 'Draft all' + 'Generate all characters' stay as the manual paths.")}))),
+                "A canonical visual reference for every character \u2014 the consistency anchor you feed into each shot so they look identical in every frame. 'Design the cast' runs the Casting Director agent: on its own it drafts each character's look, finds their appearance changes (wounds, dirt, costume shifts), then generates the master sheet (pulling in their prop sheets + any cameo) and every appearance-state variant. 'Draft all' + 'Generate all characters' stay as the manual paths.\n\nTHE CAST DERIVES FROM THE STORY \u2014 there's no hand-adding here: add a character in the Writers' Room (Cast +), write them into scenes, and they appear here ready to design.")}))),
         React.createElement("div",{className:"art-intro-actions"},
           cameoCount>0 && React.createElement("button",{className:"art-cameo-mgr",onClick:()=>setMgrOpen(true),
             title:"Review & manage locked likenesses"},
@@ -3610,9 +3610,6 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
           // NO hand-adding here (product rule 2026-07-13): the cast derives from the
           // STORY — new characters are added in the Writers' Room (Cast rail +) and
           // written into scenes; the Art Room designs what the story establishes.
-          React.createElement("span",{className:"art-derive-hint",
-            title:"The cast derives from the story. Add a character in the Writers' Room (Cast +), write them into scenes, and they appear here ready to design."},
-            "Cast comes from the story \u00b7 add people in the Writers' Room"),
           onCast && React.createElement("button",{className:"art-draftall",disabled:!characters.length,onClick:onCast,
             title:"Casting Director — drafts each character's look, finds their appearance changes, and generates the master sheet + every state variant, on its own"},
             React.createElement(Icon.robot,{s:14}),"Design the cast"),

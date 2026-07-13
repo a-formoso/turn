@@ -876,14 +876,11 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
             ((typeof roomCopy==="function" && roomCopy(project,"props").title) || "Props Master"),
             React.createElement(window.InfoTip,{label:"About Props",
               text:((typeof roomCopy==="function" && roomCopy(project,"props").tip) ||
-                "Continuity objects \u2014 the things characters wear and carry, plus the set dressing the camera sees. Carried and set-dressing props get their own multi-view reference sheet (worn items render on their owner's character sheet instead); a set-dressing sheet can then ride the location plate's Edit panel as a reference image so the fixture lands exactly as designed. 'Design all props' builds every prop from the story in one pass \u2014 pulls missing items from the cast, drafts each spec, and maps every prop to its scenes; 'Generate all props' then renders the sheets.")}))),
+                "Continuity objects \u2014 the things characters wear and carry, plus the set dressing the camera sees. Carried and set-dressing props get their own multi-view reference sheet (worn items render on their owner's character sheet instead); a set-dressing sheet can then ride the location plate's Edit panel as a reference image so the fixture lands exactly as designed. 'Design all props' builds every prop from the story in one pass \u2014 pulls missing items from the cast, drafts each spec, and maps every prop to its scenes; 'Generate all props' then renders the sheets.\n\nPROPS DERIVE FROM THE SCRIPT \u2014 there's no hand-adding here: name the object in the screenplay (worn, carried or set dressing) and 'Design all props' pulls it in.")}))),
         React.createElement("div",{className:"art-intro-actions"},
           // NO hand-adding (product rule 2026-07-13): props derive from the script —
           // name an object in the screenplay (worn, carried or set dressing) and
           // 'Design all props' pulls it in; the Art Room never invents story objects.
-          React.createElement("span",{className:"art-derive-hint",
-            title:"Props derive from the script. Write the object into the screenplay (worn, carried, or set dressing) and 'Design all props' pulls it in."},
-            "Props come from the script"),
           React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!castHasProps),onClick:onDraftAll,
             title:"Build every prop from the story in one pass \u2014 pull missing items from the cast, draft each spec (object, significance, look dev) from the script, and map every prop to the scenes it appears in"},
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all props"),

@@ -2855,8 +2855,6 @@ function App(){
                   body:"Scene "+scn.no+"\u2019s screenplay is rewritten from the CURRENT beat cards \u2014 reshape the beats first, then rebuild. The current draft stays in version history (Undo restores it).",
                   confirmLabel:"Redraft from beats" });
                 if(!ok) return false;
-                if(typeof window.appToast==="function")
-                  window.appToast("MUSE is redrafting Scene "+scn.no+" from its beats \u2014 this can take a minute\u2026","info");
                 const done = await polishScene(scn, b);
                 if(typeof window.appToast==="function"){
                   if(done) window.appToast("Scene "+scn.no+" redrafted from its beats \u2014 Undo restores the previous draft.","ok");
