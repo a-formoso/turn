@@ -393,7 +393,7 @@ window.RenderStylesModal = RenderStylesModal;
 /* StoryBriefModal — shows the logline + synopsis (the composed brief) the story's spine,
    beats and cast were built from, so the user can review exactly what was generated and
    spot where anything deviated. Saved at build time on project.sourceBrief. */
-function StoryBriefModal({ project, onClose }){
+function StoryBriefModal({ project, onClose, onRebuild }){
   const p = project || {};
   const brief = (p.sourceBrief||"").trim();
   const logline = (p.logline||p.premise||"").trim();
@@ -406,6 +406,14 @@ function StoryBriefModal({ project, onClose }){
           React.createElement((Icon.book||Icon.file||Icon.layers),{s:15}),"Story brief — what the spine was built from",
           when && React.createElement("span",{className:"bible-sub"},"generated "+when)),
         React.createElement("button",{className:"bible-x",onClick:onClose,title:"Close"},React.createElement(Icon.x,{s:16}))),
+      // RECOVERY / RE-ROLL: the brief is the story's true source — rebuild runs the
+      // full Adaptation build again from it into a BRAND-NEW film (a fresh telling,
+      // never an in-place overwrite: the current film and all its art stay intact).
+      brief && onRebuild && React.createElement("div",{className:"brief-rebuild-row"},
+        React.createElement("button",{className:"flag-btn primary",onClick:()=>{ onClose(); onRebuild(); },
+          title:"Run the full story build again from this brief into a NEW film — spine, cast and script freshly generated. This film is untouched."},
+          React.createElement(Icon.sparkles,{s:13}),"Rebuild as a new film"),
+        React.createElement("span",{className:"brief-rebuild-note"},"builds a fresh telling from this brief \u2014 this film stays untouched")),
       brief
         ? React.createElement("pre",{className:"bible-pre brief-pre"}, brief)
         : React.createElement("div",{className:"brief-empty"},
@@ -418,7 +426,7 @@ function StoryBriefModal({ project, onClose }){
 }
 window.StoryBriefModal = StoryBriefModal;
 
-function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, onManageStyles, hasFilmStyle, theme, onTheme, authSlot, projectSlot, onHome }){
+function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, onManageStyles, onRebuildFromBrief, hasFilmStyle, theme, onTheme, authSlot, projectSlot, onHome }){
   const [bibleOpen, setBibleOpen] = React.useState(false);
   const [briefOpen, setBriefOpen] = React.useState(false);
   const [stylesOpen, setStylesOpen] = React.useState(false);
@@ -426,7 +434,7 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
   React.useEffect(()=>{ const h=()=>setApiKeysOpen(true); window.addEventListener("turn-open-api-keys",h); return ()=>window.removeEventListener("turn-open-api-keys",h); },[]);
   return React.createElement("div",{className:"topbar"},
     bibleOpen && onViewBible && React.createElement(FilmBibleModal,{ getBible:onViewBible, onClose:()=>setBibleOpen(false) }),
-    briefOpen && React.createElement(StoryBriefModal,{ project, onClose:()=>setBriefOpen(false) }),
+    briefOpen && React.createElement(StoryBriefModal,{ project, onClose:()=>setBriefOpen(false), onRebuild:onRebuildFromBrief }),
     stylesOpen && onManageStyles && React.createElement(RenderStylesModal,{ onClose:()=>setStylesOpen(false) }),
     apiKeysOpen && React.createElement(ApiKeysModal,{ onClose:()=>setApiKeysOpen(false) }),
     React.createElement("div",{className:"tb-left"},

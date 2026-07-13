@@ -1188,7 +1188,7 @@ function App(){
     setCharDrafting(ch.id);
     const driven = scenes.filter(s=>s.driver===ch.id);
     try{
-      const res = (typeof aiDraftCharacter==="function") ? await aiDraftCharacter(ch, driven, project) : null;
+      const res = (typeof aiDraftCharacter==="function") ? await aiDraftCharacter(ch, driven, project, { scenes, drafts }) : null;
       if(res) updateCharacter(ch.id, res);
     }catch(e){}
     setCharDrafting(null);
@@ -2700,6 +2700,25 @@ function App(){
       onReset: isAdmin ? resetStory : null,
       onToggleAI:toggleAI,
       onNewStory:startNewStory,
+      // Brief modal's "Rebuild as a new film" — the brief is the story's true
+      // source, so recovery-by-regeneration runs the SAME Adaptation build into a
+      // brand-new film (a fresh telling; the current film is never overwritten).
+      onRebuildFromBrief: async ()=>{
+        const brief = String(project.sourceBrief||"").trim();
+        if(!brief){ if(window.appToast) window.appToast("This story has no saved brief to rebuild from.","info"); return; }
+        if(!planActive()){ requirePlan("rebuild a story"); return; }
+        const ok = await window.appConfirm({ title:"Rebuild as a new film?",
+          body:"Runs the full story build again from this brief into a BRAND-NEW film \u2014 spine, cast and script freshly generated (a new telling, not a copy; results differ run to run). \u201c"+(project.title||"Untitled")+"\u201d and all its art stay exactly as they are. This spends build credits.",
+          confirmLabel:"Build the new film" });
+        if(!ok) return;
+        const keep = { format:project.format, framework:project.framework, logline:(project.logline||"").trim() };
+        if(cloudMode && typeof createProject==="function"){ await createProject(); }
+        else { applyDoc(emptyDoc()); setArtView("lookbook"); }
+        setRoom("writers"); setView("spine");
+        setProject(p=>({ ...p, ...(keep.format?{format:keep.format}:{}), ...(keep.framework?{framework:keep.framework}:{}),
+          logline:keep.logline || p.logline, sourceBrief:brief, sourceBriefAt:new Date().toISOString() }));
+        setAgentLaunch({id:"adapt", input:brief}); setAgentsOpen(true);
+      },
       onHome: cloudMode ? (()=>{
         // Home only opens the dashboard for an established studio (>=2 films).
         // A 0/1-film studio skips Home entirely and lands in the Writers' Room.

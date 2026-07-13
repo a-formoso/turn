@@ -1433,6 +1433,19 @@ function _consMentions(text, prop){
 }
 const _consTruncated = (v)=> { const t=String(v||"").trim(); return t.length>=180 && /[A-Za-z]$/.test(t) && !/(etc|vs|no)\.$/.test(t); };
 
+/* optimal-string-alignment distance (Levenshtein + adjacent transposition) —
+   tiny strings only; powers the cast-name spelling lint ("Plamer"→"Palmer"=1). */
+function _consOSA(a,b){
+  const m=a.length,n=b.length; if(Math.abs(m-n)>2) return 9;
+  const d=Array.from({length:m+1},(_,i)=>[i,...Array(n).fill(0)]);
+  for(let j=0;j<=n;j++) d[0][j]=j;
+  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++){
+    const c = a[i-1]===b[j-1]?0:1;
+    d[i][j]=Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+c);
+    if(i>1&&j>1&&a[i-1]===b[j-2]&&a[i-2]===b[j-1]) d[i][j]=Math.min(d[i][j], d[i-2][j-2]+1);
+  }
+  return d[m][n];
+}
 async function agentConsistency(ctx){
   const MAX_CARDS = 12;
   const bible = ctx.bible || { props:[], locations:[], shots:[], patchProp:()=>{}, patchLocation:()=>{} };
@@ -1480,6 +1493,71 @@ async function agentConsistency(ctx){
     const sceneShots = bible.shots.filter(sh=> sh.sceneId===scene.id);
     const rosterIds = (typeof sceneRoster==="function") ? sceneRoster(scene, ctx.model.characters, ctx.model.drafts, sceneShots) : [];
     const sceneIssues = [];
+
+    /* 0.2 — CAST-NAME SPELLING: hand edits misspell names ("Winson", "PLAMER"),
+       and a misspelled name silently breaks scene-roster detection, identity
+       references and renders. A capitalized token that NEAR-matches one cast
+       name part (edit distance 1, or 2 for 7+ letters, same first letter) and
+       exactly matches NO cast/prop/location word is almost certainly a typo —
+       one approval fixes every occurrence in the scene's script AND beats.
+       Deterministic, no model calls. */
+    if(cards < MAX_CARDS){
+      const bmSp = ctx.model.beats[scene.id] || {};
+      const beatText = [bmSp.desire,bmSp.obstacle,bmSp.driverLabel,bmSp.reactorLabel]
+        .concat((bmSp.rows||[]).reduce((a,r)=>a.concat([r.drive&&r.drive.a,r.drive&&r.drive.d,r.react&&r.react.a,r.react&&r.react.d]),[]))
+        .filter(Boolean).join(" ");
+      const hay = scriptText+" "+beatText;
+      const legit = new Set();
+      const addParts=(nm)=>String(nm||"").split(/[^A-Za-z']+/).forEach(w=>{ if(w) legit.add(w.toLowerCase()); });
+      cast.forEach(c=>addParts(c.name));
+      bible.props.forEach(pp=>addParts(pp.name));
+      bible.locations.forEach(l=>addParts(l.name));
+      addParts(scene.loc); addParts(scene.title);
+      const nameParts=[]; cast.forEach(c=>String(c.name||"").split(/[^A-Za-z']+/).forEach(w=>{ if(w.length>=4) nameParts.push({ part:w, name:c.name }); }));
+      // common capitalized-at-sentence-start words that sit one letter from many
+      // names — never propose these ("Water" is not a typo of WALTER)
+      const STOP=new Set(("water,walter,there,their,then,than,them,they,when,where,what,while,which,would,could,should,about,after,before,"+
+        "again,against,under,over,other,every,never,going,being,doing,having,taking,making,coming,leaving,looking,turning,morning,"+
+        "night,light,right,street,shop,door,counter,first,last,still,while,white,black,brown,green,grey,gray,stone,house,hands,"+
+        "watch,watches,words,world,thing,things,place,front,behind,beside,inside,outside,through,across,around,toward,towards").split(","));
+      const seenTok=new Set(); const typos=[];
+      (hay.match(/\b[A-Za-z][A-Za-z']{3,}\b/g)||[]).forEach(tok=>{
+        const low=tok.toLowerCase();
+        if(seenTok.has(low)) return; seenTok.add(low);
+        if(legit.has(low) || STOP.has(low)) return;
+        for(const pd of nameParts){
+          const pl=pd.part.toLowerCase();
+          if(pl[0]!==low[0]) continue;
+          const dist=_consOSA(low,pl);
+          if(dist>0 && dist<=(pl.length>=7?2:1)){ typos.push({ tok, part:pd.part, name:pd.name }); break; }
+        }
+      });
+      for(const t of typos.slice(0,3)){
+        if(ctx.cancelled()) return;
+        if(cards>=MAX_CARDS) break;
+        cards++;
+        const rx = new RegExp("\\b"+t.tok.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","g");
+        const rep = (t.tok===t.tok.toUpperCase()) ? t.part.toUpperCase() : t.part;
+        const count=(hay.match(rx)||[]).length;
+        const ok = await ctx.propose({ title:"Sc "+scene.no+" \u2014 \u201c"+t.tok+"\u201d looks like a misspelling of "+t.name.toUpperCase(),
+          reason:"\u201c"+t.tok+"\u201d appears "+count+"\u00d7 in this scene's script/beats but exactly matches no cast, prop or location name \u2014 a letter away from "+t.name.toUpperCase()+". A misspelled name breaks roster detection, identity references and renders.",
+          rationale:"Approve to replace every \u201c"+t.tok+"\u201d in Sc "+scene.no+"'s script and beats with \u201c"+rep+"\u201d. Reject if it's intentional (a nickname or different person) \u2014 then add them properly in the Writers' Room instead.",
+          before:t.tok+" \u00d7"+count, after:rep });
+        if(ctx.cancelled()) return;
+        if(ok){
+          const fix=(x)=> typeof x==="string" ? x.replace(rx,rep) : x;
+          ctx.model.drafts[scene.id] = { ...draft, blocks: blocks.map(b=>({ ...b, text:fix(b.text) })) };
+          const nb = ctx.model.beats[scene.id];
+          if(nb){ ctx.model.beats[scene.id] = { ...nb, desire:fix(nb.desire), obstacle:fix(nb.obstacle),
+            driverLabel:fix(nb.driverLabel), reactorLabel:fix(nb.reactorLabel),
+            rows:(nb.rows||[]).map(r=>({ ...r,
+              drive:{ ...(r.drive||{}), a:fix(r.drive&&r.drive.a), d:fix(r.drive&&r.drive.d) },
+              react:{ ...(r.react||{}), a:fix(r.react&&r.react.a), d:fix(r.react&&r.react.d) } })) }; }
+          ctx.sync(); fixes++;
+          ctx.emit({k:"ok", t:"Sc "+scene.no+": \u201c"+t.tok+"\u201d \u2192 \u201c"+rep+"\u201d \u2014 "+count+" occurrence"+(count===1?"":"s")+" fixed."});
+        }
+      }
+    }
 
     /* 0 — BEAT MAPPING: the drafting model sometimes tags script blocks by POSITION
        (one beat per block, tail unmapped) instead of content. Shots, storyboards and
