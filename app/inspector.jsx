@@ -171,7 +171,8 @@ function Verdict({ scene }){
 }
 
 /* ---------- editable beat map ---------- */
-function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
+function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters, onRedraftScript }){
+  const [redrafting, setRedrafting] = React.useState(false);
   const [deriving, setDeriving] = React.useState(false);
   const hasScript = !!(draft && ((draft.blocks && draft.blocks.length) || (Array.isArray(draft) && draft.length)));
   const deriveFromScript = async ()=>{
@@ -260,6 +261,16 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
       title:"Read this scene's screenplay and build the beat / subtext map from it"},
       React.createElement(Icon.sparkles,{s:12}),
       deriving ? "Reading the script…" : (blankMap ? "Build from script" : "Rebuild from script")),
+    // the REVERSE direction: rewrite the scene's screenplay from the CURRENT beat
+    // cards (reshape the subtext here, then rebuild the text). The existing draft
+    // is pushed into version history, so Undo restores it.
+    hasScript && !blankMap && onRedraftScript && React.createElement("button",{className:"beat-build-btn",
+      disabled:deriving||redrafting,
+      onClick:async ()=>{ if(redrafting) return; setRedrafting(true);
+        try{ await onRedraftScript(scene, beats); } finally{ setRedrafting(false); } },
+      title:"Rewrite this scene's screenplay from the CURRENT beat cards — the reverse of 'Rebuild from script'. The current draft stays in version history (Undo restores it)."},
+      React.createElement(Icon.redo,{s:12}),
+      redrafting ? "Redrafting the script…" : "Redraft script from beats"),
     React.createElement("div",{className:"beat-labels"},
       React.createElement("div",{className:"cell"},
         React.createElement("div",{className:"obj-lab",style:{marginBottom:3}},"Driver"),
@@ -315,7 +326,7 @@ const ANALYSIS = (scene, beats) => [
   { lab:"Turning Point", txt: scene.turningPoint || "Locate the beat where the gap opens." },
 ];
 
-function Inspector({ scene, beats, draft, onCharge, onUpdate, characters, scenes, onAddScene, onDeleteScene, onMove, onBeats,
+function Inspector({ scene, beats, draft, onCharge, onUpdate, characters, scenes, onAddScene, onDeleteScene, onMove, onBeats, onRedraftScript,
                      sceneIndex, sceneCount, onCollapse, project, tab:tabProp, onTab, focusBeat }){
   // tab is controllable by the parent (e.g. the Script gutter opens the Beats tab);
   // falls back to local state when no controller is wired.
@@ -436,7 +447,7 @@ function Inspector({ scene, beats, draft, onCharge, onUpdate, characters, scenes
         React.createElement("div",{className:"insp-eyebrow",style:{marginBottom:10}},
           React.createElement("span",{className:"insp-scene-no"},String(scene.no).padStart(2,"0")),
           React.createElement("span",{className:"eyebrow"},"Beat / Subtext map \u2014 editable")),
-        React.createElement(BeatEditor,{scene,beats,onBeats,focusBeat,draft,characters})),
+        React.createElement(BeatEditor,{scene,beats,onBeats,focusBeat,draft,characters,onRedraftScript})),
 
       tab==="analysis" && React.createElement("div",{style:{paddingTop:2}},
         React.createElement("div",{className:"divider"},

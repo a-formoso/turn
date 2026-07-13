@@ -2822,6 +2822,21 @@ function App(){
                 if(inspDrawer) setInspOpen(false); }})
           : React.createElement(Inspector,{scene:sel,beats,draft:(sel?drafts[sel.id]:null),onCharge,onUpdate:updateScene,characters,scenes,
               onAddScene:addScene,onDeleteScene:deleteScene,onMove:moveScene,onBeats:setBeatsFor,
+              // "Redraft script from beats" (Beats tab): the reverse of Rebuild-from-script.
+              // polishScene re-derives the prose from the CURRENT beat cards and commits a
+              // VERSION, so Undo restores the previous draft.
+              onRedraftScript: async (scn, b)=>{
+                const ok = await window.appConfirm({ title:"Redraft the script from beats?",
+                  body:"Scene "+scn.no+"\u2019s screenplay is rewritten from the CURRENT beat cards \u2014 reshape the beats first, then rebuild. The current draft stays in version history (Undo restores it).",
+                  confirmLabel:"Redraft from beats" });
+                if(!ok) return false;
+                const done = await polishScene(scn, b);
+                if(typeof window.appToast==="function"){
+                  if(done) window.appToast("Scene "+scn.no+" redrafted from its beats \u2014 Undo restores the previous draft.","ok");
+                  else window.appToast("Couldn\u2019t redraft \u2014 the writing model may be unreachable.","error");
+                }
+                return done;
+              },
               sceneIndex:scenes.findIndex(s=>s.id===selId),sceneCount:scenes.length,
               onCollapse:()=>setInspOpen(false),project,
               tab:inspTab,onTab:setInspTab,focusBeat});
