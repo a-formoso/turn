@@ -645,6 +645,7 @@ function App(){
   const loadProjectIntoState = async (id)=>{
     const row = await cloudLoadProject(id);
     if(!row) return;
+    if(typeof window.cloudNoteDocRev==="function") window.cloudNoteDocRev(id, row.doc);
     const uid = (typeof cloudUserId==="function") ? cloudUserId(session) : null;
     if(typeof nbUseCloud==="function") nbUseCloud(id, uid);   // re-scope the image cache to this film
     if(typeof window.vgResetAll==="function") window.vgResetAll();   // and clear voice/video caches
@@ -653,6 +654,7 @@ function App(){
     const d = row.doc || {};
     if(d.showId){
       const bibleRow = await cloudLoadProject(d.showId);
+      if(bibleRow && typeof window.cloudNoteDocRev==="function") window.cloudNoteDocRev(d.showId, bibleRow.doc);
       const bible = (bibleRow && bibleRow.doc && bibleRow.doc.bible) || {};
       setCurrentShowId(d.showId);
       setCurrentEpisodeNo(d.episodeNo || null);
@@ -1018,6 +1020,20 @@ function App(){
     try{ localStorage.setItem(NAV_KEY, JSON.stringify({ room, view, artView })); }catch(e){}
   },[room, view, artView]);
 
+  // MULTI-WINDOW CONFLICT: the save fence (cloud.jsx) refused to overwrite a
+  // newer revision written by another window. Don't clobber — tell the user and
+  // reload the latest doc into this window (their change here is lost, which is
+  // the honest outcome; before the fence it silently destroyed the OTHER window's
+  // work instead).
+  const _conflictBusy = React.useRef(false);
+  const _docConflictCheck = (r)=>{
+    if(!r || !r.conflict || _conflictBusy.current) return;
+    _conflictBusy.current = true;
+    if(typeof window.appToast==="function")
+      window.appToast("This film was changed in another window — loading the latest version. Keep the film open in ONE window while editing.","error");
+    Promise.resolve(loadProjectIntoState(currentProjectId))
+      .finally(()=>{ setTimeout(()=>{ _conflictBusy.current = false; }, 1500); });
+  };
   // persist the editable story so a browser refresh / reopen keeps the user's work
   const saveTimer = React.useRef(null);
   const projectsRef = React.useRef(projects); projectsRef.current = projects;   // latest rows, for save-time meta
@@ -1038,10 +1054,10 @@ function App(){
             // series episode: shared departments live in the SHOW's bible; the
             // episode keeps its own story (scenes/beats/drafts/shots/…)
             const { characters:_bc, locations:_bl, props:_bp, lookbook:_blb, lookbookNote:_bln, ...epDoc } = doc;
-            cloudSaveDoc(currentProjectId, { ...epDoc, showId:currentShowId, episodeNo:currentEpisodeNo, ...keep });
-            cloudSaveDoc(currentShowId, { isShow:true,
-              bible:{ characters, locations, props, lookbook, lookbookNote } });
-          } else cloudSaveDoc(currentProjectId, { ...doc, ...keep });
+            Promise.resolve(cloudSaveDoc(currentProjectId, { ...epDoc, showId:currentShowId, episodeNo:currentEpisodeNo, ...keep })).then(_docConflictCheck);
+            Promise.resolve(cloudSaveDoc(currentShowId, { isShow:true,
+              bible:{ characters, locations, props, lookbook, lookbookNote } })).then(_docConflictCheck);
+          } else Promise.resolve(cloudSaveDoc(currentProjectId, { ...doc, ...keep })).then(_docConflictCheck);
         }
       }
       else { try{ localStorage.setItem(STORY_KEY, JSON.stringify(doc)); }catch(e){} }
@@ -1960,7 +1976,16 @@ function App(){
   Object.values(runtimeMap).forEach(r=>{ r.hot = rtAvg>0 && r.sec > rtAvg*1.75; });
 
   // ---- editing handlers (scenes + beats) ----
-  const updateScene = (id,patch)=>setScenes(ss=>ss.map(s=>s.id===id?{...s,...patch}:s));
+  const updateScene = (id,patch)=>{
+    setScenes(ss=>ss.map(s=>s.id===id?{...s,...patch}:s));
+    // the Beats tab's DRIVER label is a stored string — changing the scene's
+    // driver used to leave it (and the beat-card name columns) showing the old
+    // character, which read as "my edit did nothing". Keep it in step.
+    if(patch.driver){
+      const nm = ((characters||[]).find(c=>c.id===patch.driver)||{}).name;
+      if(nm) setBeatsMap(m=>{ const b=m[id]; return b ? { ...m, [id]:{ ...b, driverLabel:nm } } : m; });
+    }
+  };
   const onCharge = (field,val)=>updateScene(selId,{[field]:val});
   const addScene = (afterId)=>{
     const id = newId();
@@ -2830,6 +2855,8 @@ function App(){
                   body:"Scene "+scn.no+"\u2019s screenplay is rewritten from the CURRENT beat cards \u2014 reshape the beats first, then rebuild. The current draft stays in version history (Undo restores it).",
                   confirmLabel:"Redraft from beats" });
                 if(!ok) return false;
+                if(typeof window.appToast==="function")
+                  window.appToast("MUSE is redrafting Scene "+scn.no+" from its beats \u2014 this can take a minute\u2026","info");
                 const done = await polishScene(scn, b);
                 if(typeof window.appToast==="function"){
                   if(done) window.appToast("Scene "+scn.no+" redrafted from its beats \u2014 Undo restores the previous draft.","ok");

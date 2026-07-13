@@ -219,9 +219,31 @@ async function cloudLoadProject(id){
     return data;
   }catch(e){ return null; }
 }
+/* MULTI-WINDOW SAVE FENCE — the auto-save is a full-doc overwrite, so two open
+   sessions on one account used to silently erase each other's edits (last writer
+   wins). Every doc now carries a monotonic _rev; a save only lands if the cloud
+   still holds the revision THIS session last saw (atomic .eq filter — no read
+   race). A stale window's save matches 0 rows and reports {conflict:true}
+   instead of clobbering the newer work. */
+const _docRevSeen = {};   // project id -> the _rev this session last loaded/wrote
+function cloudNoteDocRev(id, doc){ if(id) _docRevSeen[id] = (doc && Number(doc._rev)) || 0; }
+window.cloudNoteDocRev = cloudNoteDocRev;
 async function cloudSaveDoc(id, doc){
-  const sb = sbClient(); if(!sb || !id) return;
-  try{ await sb.from("turn_projects").update({ doc }).eq("id", id); }catch(e){}
+  const sb = sbClient(); if(!sb || !id) return { ok:false };
+  const seen = _docRevSeen[id] || 0;
+  const next = { ...doc, _rev: seen + 1 };
+  try{
+    let q = sb.from("turn_projects").update({ doc: next }).eq("id", id);
+    // fence: overwrite only the revision we last saw. Legacy docs (no _rev yet)
+    // match the null/0 branch once, then join the fenced world.
+    q = seen ? q.eq("doc->>_rev", String(seen))
+             : q.or("doc->>_rev.is.null,doc->>_rev.eq.0");
+    const { data, error } = await q.select("id");
+    if(error) return { ok:false };
+    if(!data || !data.length) return { ok:false, conflict:true };
+    _docRevSeen[id] = seen + 1;
+    return { ok:true };
+  }catch(e){ return { ok:false }; }
 }
 async function cloudRenameProject(id, title){
   const sb = sbClient(); if(!sb || !id) return;
