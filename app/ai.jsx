@@ -266,8 +266,17 @@ window.charPronouns = charPronouns;
    character's canonical pronouns (prevents the bible<->script gender drift at the source). */
 function castPronounBlock(cast){
   const list = (cast && cast.length) ? cast : (((window.TURN_DATA||{}).CHARACTERS)||[]);
-  const lines = (list||[]).filter(c=>c&&c.name).map(c=> c.name+": "+charPronouns(c));
-  return lines.length ? ("CAST PRONOUNS (use these EXACTLY — never contradict them):\n"+lines.join("\n")+"\n") : "";
+  // NAME↔IDENTITY BINDING: each cast name is bound to who that person IS, not just
+  // their pronouns. Without this the drafter once reused a cast name for a brand-new
+  // background person (the young enforcer "Kelan Broderick" written into a scene as
+  // a stooped pensioner) — conflating two people under one name and poisoning every
+  // downstream sheet and render that references the character.
+  const brief = (c)=>{ const bits=[c.role, c.identity].map(x=>String(x||"").trim()).filter(Boolean);
+    const b = bits.join(" · ").slice(0,120); return b ? (" — "+b) : ""; };
+  const lines = (list||[]).filter(c=>c&&c.name).map(c=> c.name+brief(c)+" · "+charPronouns(c));
+  return lines.length ? ("CAST (BINDING — each name belongs to exactly THIS person; use these pronouns EXACTLY; "+
+    "never write a cast name onto a different kind of person — if the scene needs someone who matches "+
+    "no one below, give them a NEW name instead):\n"+lines.join("\n")+"\n") : "";
 }
 window.castPronounBlock = castPronounBlock;
 
