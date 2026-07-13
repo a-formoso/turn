@@ -532,6 +532,7 @@ async function aiAuthorScene(scene, prevScene, characters){
   const prompt = storyContext(scene, prevScene) +
     (fwBrief ? "\n\n"+fwBrief : "") +
     "\n\nCAST of this film (use ONLY these characters \u2014 never invent or borrow names from other films): "+ (castList||"(none defined)") +
+    "\n" + castPronounBlock(cast) +
     "\n\n" + ask +
     "\nReturn ONLY JSON (no markdown, no commentary): {"+
     '"title":"short evocative scene title","loc":"INT./EXT. LOCATION - DAY/NIGHT","summary":"1-2 sentence description of what happens",'+
@@ -608,7 +609,7 @@ async function aiBeatsFromScript(scene, draft, characters){
   const prompt =
     "Below is a scene's FINISHED screenplay, already split into numbered beats. RECONSTRUCT its BEAT MAP — "+
     "the action/reaction subtext exchange for each beat — FROM the prose. Keep the SAME beat numbers and count.\n\n"+
-    "CAST (use these exact names): "+cast.map(c=>c.name).join(", ")+"\n\nSCENE "+scene.no+" — "+(scene.title||"")+"\n"+body+"\n\n"+
+    castPronounBlock(cast)+"\nSCENE "+scene.no+" — "+(scene.title||"")+"\n"+body+"\n\n"+
     "Each beat's drive/react `d`: "+SELF_CONTAINED_BEATS+"\n"+
     'Return ONLY JSON: {"driverLabel":"the character driving the scene (a CAST name)","reactorLabel":"the main other character (a CAST name)","desire":"what the driver wants here","obstacle":"what blocks it","turnAt":<beat# where the value flips>,"beats":[{"n":<beat#>,"drive":{"a":"ActionVerb","d":"what the driver DOES this beat, present tense"},"react":{"a":"ReactionVerb","d":"how the other responds"}}]}';
   try{
@@ -1362,6 +1363,10 @@ async function spineBatch(brief, part, fmt, fw){
     "Generate ONLY "+range+". That is EXACTLY "+count+" scenes. "+
     sceneRule+
     "VARY THE DRIVER: protagonist drives most, but antagonist(s) and key supporting characters EACH drive several scenes. "+
+    "NAME\u2194IDENTITY DISCIPLINE: a personal name belongs to exactly ONE person. Characters NAMED in the brief keep exactly "+
+    "the identity the brief gives them \u2014 never reuse a brief name for a different kind of person (a name the brief attaches "+
+    "to a young enforcer must never label a pensioner in a summary). If a scene needs a NEW minor character, give them a FRESH "+
+    "name that does not appear in the brief. "+
     "Driver ids are lowercase FIRST names that fit the story's world \u2014 make them distinctive and varied, NOT stock defaults (avoid 'alex','jack','sarah','marcus','maya','sam'); never use a role word ('antagonist','mentor') as a driver id. Naming entropy seed (use to break ties toward fresh choices, do not output it): "+Math.random().toString(36).slice(2,9)+". "+
     "Keep every string SHORT (titles 2-4 words, summary one clause). "+
     closer+
@@ -1405,10 +1410,20 @@ async function aiBuildStoryWorld(brief, spine){
   if(!aiAvailable()) return null;
   const scenes = (spine && spine.scenes) || [];
   const drivers = Array.from(new Set(scenes.map(s=>s.driver))).filter(Boolean);
-  const sceneList = scenes.map(s=>"Sc"+(s.no||"")+" "+s.title+" (driver: "+s.driver+")").join("; ");
+  // the cast is defined LOOKING AT the scene summaries (not just titles/driver ids):
+  // scene prose baptises characters, and each name's identity must be defined as
+  // the scenes actually USE it — this is where "Kelan the enforcer" was once
+  // invented blind while scene 1's summary already used the name for a pensioner.
+  const sceneList = scenes.map(s=>"Sc"+(s.no||"")+" "+s.title+" (driver: "+s.driver+")"
+    +(s.summary?(" \u2014 "+String(s.summary).slice(0,180)):"")).join("\n");
   const prompt = "You are a story architect. For the film below, define its world and cast using the Infinite Studio method.\n"+
-    "TITLE: "+((spine&&spine.title)||"UNTITLED")+"\nLOGLINE / SYNOPSIS:\n"+String(brief).slice(0,2600)+"\nSCENES: "+sceneList.slice(0,1400)+"\n\n"+
+    "TITLE: "+((spine&&spine.title)||"UNTITLED")+"\nLOGLINE / SYNOPSIS:\n"+String(brief).slice(0,2600)+"\nSCENES (with summaries \u2014 the names in them are binding):\n"+sceneList.slice(0,2600)+"\n\n"+
     "Driver ids used across scenes: "+drivers.join(", ")+". Create one cast member per driver id (id MUST match exactly), plus any essential others.\n"+
+    "RECONCILE NAMES WITH THE SCENES: every personal NAME used in a scene summary belongs to exactly ONE person, and that "+
+    "person's cast IDENTITY must match how the scenes actually use the name (a name the summaries use for a stooped pensioner "+
+    "must be defined as that pensioner \u2014 never re-imagined as someone else). If the summaries seem to use one name for two "+
+    "different kinds of people, keep the name for the PRINCIPAL and give the other person a new name. Add a cast entry for any "+
+    "named minor character the scenes rely on.\n"+
     "controllingIdea: value = the positive value the story proves (e.g. 'We find freedom'), cause = how/why (e.g. 'when we face the truth'), polarity = ironic|idealistic|pessimistic.\n"+
     "setting: period, duration, location, conflict (one short phrase each).\n"+
     "cast: 3-6 PRINCIPAL characters. For each: id (lowercase, matches a driver id where possible), name (CAPS), and role formatted as THREE optional parts in this exact shape: FUNCTION [ \u00b7 ARCHETYPE ] [ \u2014 IDENTITY ]. "+
