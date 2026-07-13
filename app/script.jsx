@@ -369,10 +369,23 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       setPolishWait(false); setPolishing(false);
       if(ok){ setJustPolished(true); setTimeout(()=>setJustPolished(false), 1400); }
     };
-    if(live) polishUI = React.createElement("button",
-      {className:`draft-btn sm ${isPolished?"ghost":""}`,onClick:runPolish,disabled:polishing},
-      React.createElement(Icon.wand,{s:14}),
-      polishWait ? "MUSE is writing\u2026" : (isPolished ? "Re-polish" : "Polish with MUSE"));
+    // ONE name for one lever (user ruling 2026-07-13): this is the same engine as
+    // the Beats tab's button — the scene rebuilt from its CURRENT beats — so it
+    // carries the same label here. The centered overlay mirrors the Beats tab's.
+    if(live) polishUI = React.createElement(React.Fragment,null,
+      React.createElement("button",
+        {className:`draft-btn sm ${isPolished?"ghost":""}`,onClick:runPolish,disabled:polishing,
+         title:"Rewrite this scene's screenplay from its CURRENT beat cards — the previous draft stays in version history (Undo restores it)"},
+        React.createElement(Icon.wand,{s:14}),
+        polishWait ? "Redrafting\u2026" : "Redraft script from beats"),
+      polishWait && ReactDOM.createPortal(
+        React.createElement("div",{className:"redraft-overlay"},
+          React.createElement("div",{className:"redraft-card"},
+            React.createElement("span",{className:"orb"}),
+            React.createElement("div",{className:"redraft-t"},"MUSE is redrafting Scene "+(scene&&scene.no!=null?scene.no:"")),
+            React.createElement("div",{className:"redraft-d"},
+              "Rebuilding the screenplay from the current beats \u2014 about a minute. The previous draft stays in version history (Undo restores it)."))),
+        document.body));
 
     // undo / redo — one linear history of the scene's screenplay states (manual edits,
     // MUSE polishes and drafts all push onto the same stack). Appears once there's history.

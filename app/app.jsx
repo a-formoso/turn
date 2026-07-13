@@ -1976,7 +1976,38 @@ function App(){
   Object.values(runtimeMap).forEach(r=>{ r.hot = rtAvg>0 && r.sec > rtAvg*1.75; });
 
   // ---- editing handlers (scenes + beats) ----
+  const [recastBusy, setRecastBusy] = React.useState(null);   // {no, name} while a driver recast runs
+  /* DRIVER CHANGED → the labels sync instantly, but the scene's summary, desire
+     and beat TEXTS still describe the old driver (prose can't follow a dropdown).
+     Offer to RECAST the scene's subtext for the new driver; the screenplay is
+     then rebuilt with "Redraft script from beats" so nothing rewrites unseen. */
+  const _offerDriverRecast = async (sceneId, oldId, newId)=>{
+    const scn = scenes.find(s=>s.id===sceneId); if(!scn) return;
+    const b = beatsMap[sceneId];
+    if(!b || !b.rows || !b.rows.length) return;
+    if(typeof window.aiRecastDriver!=="function" || !(typeof aiAvailable==="function" && aiAvailable())) return;
+    const nameOf = (cid)=>(((characters||[]).find(c=>c.id===cid)||{}).name || String(cid||"").toUpperCase());
+    const OLD = nameOf(oldId), NEW = nameOf(newId);
+    const ok = await window.appConfirm({ title:"Recast the scene for "+NEW+"?",
+      body:"The driver changed ("+OLD+" \u2192 "+NEW+"), but Scene "+scn.no+"\u2019s summary, desire and beat texts still describe "+OLD+" doing the driving. Rewrite the subtext so "+NEW+" drives? You review the beats, then \u2018Redraft script from beats\u2019 rebuilds the screenplay.",
+      confirmLabel:"Recast for "+NEW, cancelLabel:"Keep the text as is" });
+    if(!ok) return;
+    setRecastBusy({ no:scn.no, name:NEW });
+    try{
+      const res = await window.aiRecastDriver(scn, b, characters, newId, oldId);
+      if(res){
+        updateScene(sceneId, { ...(res.summary?{summary:res.summary}:{}), ...(res.objective?{objective:res.objective}:{}) });
+        setBeatsMap(m=>{ const cur=m[sceneId]||b; return { ...m, [sceneId]:{ ...cur, driverLabel:NEW,
+          desire:res.desire||cur.desire, obstacle:res.obstacle||cur.obstacle, rows:res.rows||cur.rows } }; });
+        if(typeof window.appToast==="function")
+          window.appToast("Scene "+scn.no+" recast for "+NEW+" \u2014 review the beats, then \u2018Redraft script from beats\u2019 to rebuild the screenplay.","ok");
+      } else if(typeof window.appToast==="function")
+        window.appToast("Couldn\u2019t recast the scene \u2014 the writing model may be unreachable.","error");
+    }catch(e){ if(typeof window.appToast==="function") window.appToast("Couldn\u2019t recast: "+((e&&e.message)||"error"),"error"); }
+    setRecastBusy(null);
+  };
   const updateScene = (id,patch)=>{
+    const before = patch.driver ? ((scenes.find(s=>s.id===id)||{}).driver) : null;
     setScenes(ss=>ss.map(s=>s.id===id?{...s,...patch}:s));
     // the Beats tab's DRIVER label is a stored string — changing the scene's
     // driver used to leave it (and the beat-card name columns) showing the old
@@ -1984,6 +2015,8 @@ function App(){
     if(patch.driver){
       const nm = ((characters||[]).find(c=>c.id===patch.driver)||{}).name;
       if(nm) setBeatsMap(m=>{ const b=m[id]; return b ? { ...m, [id]:{ ...b, driverLabel:nm } } : m; });
+      // and offer the content recast (fire-and-forget; confirm-gated, spends one text call)
+      if(before && before!==patch.driver) _offerDriverRecast(id, before, patch.driver);
     }
   };
   const onCharge = (field,val)=>updateScene(selId,{[field]:val});
@@ -3041,6 +3074,13 @@ function App(){
     // Undo affordance — persists whether the Writers' Room is open or closed.
     // Suppressed for Adaptation (full build-from-scratch): the toast is easy to miss
     // beneath the result modal, and the in-room "Undo last" still covers it.
+    // centered progress while a driver recast runs (same chrome as the redraft overlay)
+    recastBusy && React.createElement("div",{className:"redraft-overlay"},
+      React.createElement("div",{className:"redraft-card"},
+        React.createElement("span",{className:"orb"}),
+        React.createElement("div",{className:"redraft-t"},"Recasting Scene "+recastBusy.no+" for "+recastBusy.name),
+        React.createElement("div",{className:"redraft-d"},
+          "MUSE is rewriting the scene\u2019s summary, desire and beats so "+recastBusy.name+" drives \u2014 about half a minute."))),
     agentUndo.length>0 && agentUndo[agentUndo.length-1].label!=="Adaptation" && React.createElement("div",{className:"agent-undo"},
       React.createElement("span",{className:"au-ic"},React.createElement(Icon.undo,{s:15})),
       React.createElement("div",{className:"au-text"},

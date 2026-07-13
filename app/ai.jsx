@@ -460,6 +460,46 @@ async function aiDraftScene(scene, beats, prevScene){
 }
 window.aiDraftScene = aiDraftScene;
 
+/* DRIVER RECAST — the scene's driver changed, but the summary, desire and beat
+   texts still DESCRIBE the old driver doing the driving (prose can't follow a
+   dropdown mechanically). Rewrites the scene at the SUBTEXT level so the new
+   character drives: summary, objective, desire, antagonism and every beat's
+   drive side — same beat count, same escalation shape, reactor kept unless the
+   new driver WAS the reactor. The screenplay is then rebuilt separately via
+   "Redraft script from beats" (user-triggered, so nothing overwrites unseen). */
+async function aiRecastDriver(scene, beats, characters, newDriverId, oldDriverId){
+  if(!aiAvailable() || !scene || !beats) return null;
+  const nameOf = (id)=>(((characters||[]).find(c=>c.id===id)||{}).name || String(id||"").toUpperCase());
+  const NEW = nameOf(newDriverId), OLD = nameOf(oldDriverId);
+  const rows = (beats.rows||[]).map(r=>({ n:r.n,
+    drive:{ a:(r.drive&&r.drive.a)||"", d:(r.drive&&r.drive.d)||"" },
+    react:{ a:(r.react&&r.react.a)||"", d:(r.react&&r.react.d)||"" } }));
+  if(!rows.length) return null;
+  const prompt = storyContext(scene, null) + "\n" + castPronounBlock(characters) +
+    "\nCURRENT BEAT MAP (the drive side currently describes "+OLD+"):\n" +
+    JSON.stringify({ desire:beats.desire, antagonism:beats.obstacle, reactor:beats.reactorLabel, rows }) +
+    "\n\nTHE SCENE'S DRIVER HAS CHANGED: "+NEW+" now DRIVES this scene (it was "+OLD+"). "+
+    "Rewrite the scene at the subtext level so "+NEW+" is the one driving:\n"+
+    "- summary: 1-2 sentences of what happens, with "+NEW+" driving.\n"+
+    "- objective: "+NEW+"'s scene objective, one line.\n"+
+    "- desire: what "+NEW+" wants here.\n"+
+    "- antagonism: what blocks them (keep the reactor "+(beats.reactorLabel||"")+" unless "+NEW+" WAS the reactor).\n"+
+    "- rows: EXACTLY "+rows.length+" beats, the same escalation shape and turn; every drive action is now "+NEW+"'s ("+OLD+" may remain only in a non-driving role if they'd realistically still be in the scene). `a` stays a 1-3 word verb phrase, `d` is the prose.\n"+
+    "Use the cast pronouns exactly.\n"+
+    'Return ONLY JSON: {"summary":"...","objective":"...","desire":"...","antagonism":"...","rows":[{"n":1,"drive":{"a":"...","d":"..."},"react":{"a":"...","d":"..."}}]}';
+  try{
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
+    const j = extractJSON(res); if(!j) return null;
+    const cl = (x,n)=>scrubBrand(String(x||"").trim()).slice(0,n);
+    const outRows = (Array.isArray(j.rows) && j.rows.length===rows.length) ? j.rows.map((r,i)=>({ n:i+1,
+      drive:{ a:cl(r.drive&&r.drive.a,42)||rows[i].drive.a||"Action", d:cl(r.drive&&r.drive.d,320)||rows[i].drive.d },
+      react:{ a:cl(r.react&&r.react.a,42)||rows[i].react.a||"Reaction", d:cl(r.react&&r.react.d,320)||rows[i].react.d } })) : null;
+    return { summary:cl(j.summary,320), objective:cl(j.objective,200),
+      desire:cl(j.desire,260), obstacle:cl(j.antagonism||j.obstacle,260), rows:outRows };
+  }catch(e){ return null; }
+}
+window.aiRecastDriver = aiRecastDriver;
+
 function clampCharge(v, fb){ v = Math.round(Number(v)); if(isNaN(v)) return fb==null?0:fb; return Math.max(-3, Math.min(3, v)); }
 
 /* ---- AUTHOR a whole scene: summary, value charge, objective, and BEATS.
@@ -692,7 +732,7 @@ const APP_FEATURES = [
   { name:"Script view", what:"each scene's screenplay, generated from its beats; the left gutter shows every beat and anchors it to the actual stored screenplay text for that beat, including a concise script excerpt and a visible missing-text state if a mapped beat has no screenplay block. The page follows shooting-script conventions: the scene number flanks the slugline in both margins, a speaker returning after intervening action gets (CONT'D) automatically, and transition lines (CUT TO:, FADE OUT.) are detected and set right. You can EDIT the screenplay directly: an 'Edit' button (pencil) in the script toolbar turns every block — slugline, action, character cue, parenthetical, dialogue, transition — into an editable line you type straight into; changes save when you click away from a block ('Done editing' leaves edit mode). Each edit is committed as a new version, so the Undo / Redo buttons step back and forth through your manual edits (and MUSE drafts/polishes) on one shared history." },
   { name:"Draft with MUSE", what:"drafts the ONE selected scene only. If that scene has no beats yet, it first authors the whole scene (title, description, value charge, beats) and then writes its script." },
   { name:"Auto-draft all (N left)", what:"drafts EVERY still-undrafted scene in order, threading continuity scene-to-scene. The (N left) counts scenes with no draft yet. Same engine as Draft with MUSE, just batched." },
-  { name:"Polish with MUSE / Re-polish", what:"rewrites an already-drafted scene's prose into final prose while keeping its beats locked." },
+  { name:"Redraft script from beats (one lever, two homes)", what:"the ONE rebuild lever for a scene's screenplay, with the SAME label in both places it lives: the Script view's toolbar button (formerly 'Polish with MUSE' / 'Re-polish') and the Beats tab's button. Both run the identical engine: the scene's prose is rewritten fresh from its CURRENT beat cards (the old prose is never read \u2014 beats are the source), a CENTERED full-screen progress card shows while MUSE works, and the outgoing draft lands in version history so Undo restores it. Reshape the beats first to reshape the scene; press it on an untouched scene simply to elevate the structural draft into final prose. DRIVER RECAST: changing a scene's DRIVER (the Scene tab dropdown) syncs the Beats tab's labels instantly, and \u2014 because prose can't follow a dropdown \u2014 OFFERS to recast the scene's subtext for the new driver (a confirm, then MUSE rewrites the summary, objective, desire, antagonism and every beat's drive side for the new character, same beat count and escalation; a centered progress card shows while it runs). Review the recast beats, then 'Redraft script from beats' rebuilds the screenplay to match. Declining the recast keeps all text as it was." },
   { name:"Undo / Redo (version history)", what:"every draft, polish AND manual edit is kept on one linear per-scene history; the Undo / Redo buttons in the script toolbar move between those versions (so you can undo a manual screenplay edit just like reverting a MUSE polish). The button tooltips name the version each step lands on (e.g. 'Manual edit', 'MUSE polish', 'Original draft')." },
   { name:"Continuity check", what:"flags a payoff with no earlier setup, a reference that lands before its setup, or a setup that never pays off; updates live as you reorder or edit scenes." },
   { name:"Board view", what:"all scenes laid out as cards in three act columns." },
