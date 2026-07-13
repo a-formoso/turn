@@ -5853,3 +5853,10 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
   background:conic-gradient(from 0deg,var(--neg),var(--pos),var(--neg)); animation:spin 1.2s linear infinite; }
 .redraft-t{ font-family:var(--f-display); font-size:15px; font-weight:600; color:var(--txt-0,var(--txt-1)); }
 .redraft-d{ font-size:12.5px; color:var(--txt-2); line-height:1.5; }
+
+/* Brief modal — the rebuild action sits in its own toolbar row between the
+   header and the brief text, not floating over it */
+.brief-rebuild-row{ display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:12px 18px; border-bottom:1px solid var(--line); flex:0 0 auto; }
+.brief-rebuild-row .flag-btn{ flex:0 0 auto; }
+.brief-rebuild-note{ font-size:12px; color:var(--txt-2); }
