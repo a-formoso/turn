@@ -147,6 +147,17 @@ window.AccountChip = AccountChip;
 
 /* ProjectSwitcher — current film name + dropdown to switch / create / rename /
    delete projects. Only shown when signed in (cloud mode). */
+/* short creation date for a switcher row — "Jul 12"; when another film shares
+   both the name AND the day, the time is appended ("Jul 14 · 09:41") so twins
+   stay distinguishable. */
+function _projRowDate(p, all){
+  const iso = p.created_at || p.updated_at; if(!iso) return "";
+  const d = new Date(iso);
+  const day = d.toLocaleDateString("en-US",{ month:"short", day:"numeric" });
+  const sameDayTwin = (all||[]).some(o=> o.id!==p.id && o.title===p.title &&
+    new Date(o.created_at||o.updated_at||0).toDateString()===d.toDateString());
+  return sameDayTwin ? (day+" \u00b7 "+d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })) : day;
+}
 function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, onDelete, formatLabel, frameworkLabel, onNewEpisode, onMakeShow, canMakeShow }){
   const [open, setOpen] = React.useState(false);
   const [renaming, setRenaming] = React.useState(null);   // id being renamed
@@ -178,7 +189,10 @@ function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, on
     : React.createElement("div",{key:p.id,className:"proj-row"+(p.id===currentId?" on":"")+(p.showId?" ep":"")},
         React.createElement("button",{className:"proj-row-main",onClick:()=>{ onSwitch(p.id); setOpen(false); }},
           React.createElement("span",{className:"proj-dot"}),
-          React.createElement("span",{className:"proj-row-name"},p.title)),
+          React.createElement("span",{className:"proj-row-name"},p.title),
+          // creation date disambiguates same-named films (e.g. a rebuild alongside
+          // its original); same-day twins also get the time
+          (p.created_at||p.updated_at) && React.createElement("span",{className:"proj-row-date"},_projRowDate(p, projects))),
         React.createElement("button",{className:"proj-row-act",title:"Rename",
           onClick:()=>{ setRenaming(p.id); setDraft(p.title); }},
           React.createElement(Icon.wand,{s:12})),
