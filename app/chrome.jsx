@@ -486,7 +486,11 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
       // Export is a Writers' Room action (screenplay / story formats) — only there,
       // and only once a story exists (nothing to export from an empty canvas).
       room==="writers" && (scenes||[]).length>0 && React.createElement(ExportMenu,{project,scenes,drafts,onReset}),
-      React.createElement(OverflowMenu,{onNewStory,project,scenes,drafts,onReset,room}),
+      // ⋯ overflow: ADMIN ONLY (user ruling 2026-07-14 — non-admins see exactly:
+      // theme · Brief · New Story · Export · account). Its only unique item is the
+      // admin Reset; New Story and the export formats already live in the visible
+      // whitelisted controls, so users lose nothing.
+      window.turnIsAdmin && React.createElement(OverflowMenu,{onNewStory,project,scenes,drafts,onReset,room}),
       // 'Agents' moved to the ViewNav's right zone (Writers' Room), mirroring the Art Room's
       // 'Run pre-production' — both sit to the right of their centered tab strip.
       authSlot || React.createElement("div",{className:"avatar"},"MV")),
