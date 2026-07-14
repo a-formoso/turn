@@ -394,6 +394,10 @@ window.RenderStylesModal = RenderStylesModal;
    beats and cast were built from, so the user can review exactly what was generated and
    spot where anything deviated. Saved at build time on project.sourceBrief. */
 function StoryBriefModal({ project, onClose, onRebuild }){
+  // the rebuild runs the full story build, so the WRITING MODEL is chosen here
+  // first — the same picker (and persisted choice) as the New Story window
+  const [mid, setMid] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId() : "");
+  const pickModel = (id)=>{ setMid(id); if(typeof window.setWritingModelId==="function") window.setWritingModelId(id); };
   const p = project || {};
   const brief = (p.sourceBrief||"").trim();
   const logline = (p.logline||p.premise||"").trim();
@@ -413,6 +417,10 @@ function StoryBriefModal({ project, onClose, onRebuild }){
         React.createElement("button",{className:"flag-btn primary",onClick:()=>{ onClose(); onRebuild(); },
           title:"Run the full story build again from this brief into a NEW film — spine, cast and script freshly generated. This film is untouched."},
           React.createElement(Icon.sparkles,{s:13}),"Rebuild as a new film"),
+        React.createElement("label",{className:"brief-model-pick",title:"The engine the rebuild runs on — same picker as the New Story window; your choice persists"},
+          React.createElement("span",{className:"obj-lab",style:{marginBottom:0}},"Writing model"),
+          React.createElement("select",{className:"ns-model-sel",value:mid,onChange:(e)=>pickModel(e.target.value)},
+            (window.WRITING_MODELS||[]).map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label)))),
         React.createElement("span",{className:"brief-rebuild-note"},"builds a fresh telling from this brief \u2014 this film stays untouched")),
       brief
         ? React.createElement("pre",{className:"bible-pre brief-pre"}, brief)

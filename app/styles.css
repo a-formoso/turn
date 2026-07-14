@@ -5860,3 +5860,4 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
   padding:12px 18px; border-bottom:1px solid var(--line); flex:0 0 auto; }
 .brief-rebuild-row .flag-btn{ flex:0 0 auto; }
 .brief-rebuild-note{ font-size:12px; color:var(--txt-2); }
+.brief-model-pick{ display:inline-flex; align-items:center; gap:7px; }
