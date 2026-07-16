@@ -418,9 +418,8 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
   const q = query.trim().toLowerCase();
   const matchesQuery = (l)=> (typeof searchWordMatch==="function") ? searchWordMatch((l.name||"")+" "+(l.intExt||""), q) : (!q || (l.name||"").toLowerCase().indexOf(q)>=0);
   const ieOf = (l)=> (l && l.intExt) || "INT";
-  const shown = (sceneFilter ? list.filter(l=>inScene(l, sceneFilter)) : list)
-    .filter(l=> !ieFilter || ieOf(l)===ieFilter)
-    .filter(matchesQuery);
+  const ieCountBase = (sceneFilter ? list.filter(l=>inScene(l, sceneFilter)) : list).filter(matchesQuery);
+  const shown = ieCountBase.filter(l=> !ieFilter || ieOf(l)===ieFilter);
   // 9-up pagination; suspended while a batch runs so the queue can reach every card
   const pager = usePager(shown.length, !!batchActiveId);
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s?s.no:sid; };
@@ -501,11 +500,11 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
         React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Show"),
         [["","All"],["INT","INT"],["EXT","EXT"],["INT/EXT","INT/EXT"]].map(kv=>{
           const k=kv[0], lab=kv[1];
-          const n = k ? list.filter(l=>ieOf(l)===k).length : list.length;
-          if(k && !n) return null;
+          if(k && !list.some(l=>ieOf(l)===k)) return null;
+          const n = k ? ieCountBase.filter(l=>ieOf(l)===k).length : ieCountBase.length;
           return React.createElement("button",{key:k||"all",
-            className:"kind-chip"+(k?(k==="INT/EXT"?" intext":(k==="EXT"?" ext":" int")):"")+(ieFilter===k?" on":""),
-            title: k ? ("Show only "+lab+" locations") : "Show every location",
+            className:"kind-chip"+(k?(k==="INT/EXT"?" intext":(k==="EXT"?" ext":" int")):"")+(ieFilter===k?" on":"")+(n?"":" empty"),
+            title: k ? ("Show only "+lab+" locations"+(sceneFilter?" in this scene":"")) : ("Show every location"+(sceneFilter?" in this scene":"")),
             onClick:()=>setIeFilter(k)}, lab, React.createElement("i",null,n));
         })),
       sceneList.length>0 && React.createElement("div",{className:"prop-scenebar"},

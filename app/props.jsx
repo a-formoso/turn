@@ -811,9 +811,12 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   const q = query.trim().toLowerCase();
   const matchesQuery = (p)=> searchWordMatch((p.name||"")+" "+(p.ownerName||""), q);
   const kindOf = (p)=> (p && p.kind) || "carried";
-  const shown = (sceneFilter ? list.filter(p=>inScene(p, sceneFilter)) : list)
-    .filter(p=> !kindFilter || kindOf(p)===kindFilter)
-    .filter(matchesQuery);
+  // base for the SHOW chip counts: scene focus + search applied, but NOT the kind
+  // filter (each chip counts its own kind WITHIN that base). So the numbers re-scope
+  // to the focused scene — they match the scene dropdown's "(N props)" — instead of
+  // always showing the whole-film totals.
+  const kindCountBase = (sceneFilter ? list.filter(p=>inScene(p, sceneFilter)) : list).filter(matchesQuery);
+  const shown = kindCountBase.filter(p=> !kindFilter || kindOf(p)===kindFilter);
   // 9-up pagination; suspended while a batch runs so the queue can reach every card
   const pager = usePager(shown.length, !!batchActiveId);
   // duplicate detection: map each prop id -> the set of ids it duplicates (same owner + object)
@@ -949,11 +952,13 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
       React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.box,{s:13}),"Show"),
       [["","All"],["worn","Worn"],["carried","Carried"],["dressing","Set dressing"]].map(kv=>{
         const k=kv[0], lab=kv[1];
-        const n = k ? list.filter(p=>kindOf(p)===k).length : list.length;
-        if(k && !n) return null;   // a film with no set dressing shows no dead chip
+        // hide a chip only for a kind the FILM never has (structural), so the chip
+        // set stays stable across scenes; the COUNT is scene-scoped (kindCountBase)
+        if(k && !list.some(p=>kindOf(p)===k)) return null;
+        const n = k ? kindCountBase.filter(p=>kindOf(p)===k).length : kindCountBase.length;
         return React.createElement("button",{key:k||"all",
-          className:"kind-chip"+(k?(" "+k):"")+(kindFilter===k?" on":""),
-          title: k ? ("Show only "+lab.toLowerCase()+" props") : "Show every prop",
+          className:"kind-chip"+(k?(" "+k):"")+(kindFilter===k?" on":"")+(n?"":" empty"),
+          title: k ? ("Show only "+lab.toLowerCase()+" props"+(sceneFilter?" in this scene":"")) : ("Show every prop"+(sceneFilter?" in this scene":"")),
           onClick:()=>setKindFilter(k)}, lab, React.createElement("i",null,n));
       })),
     // scene filter + per-scene batch generate

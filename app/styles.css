@@ -2850,6 +2850,8 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   font-family:var(--f-mono);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;
   background:transparent;color:var(--ink-3);border:1px solid var(--line);transition:filter .12s}
 .kind-chip i{font-style:normal;opacity:.65;font-weight:600}
+.kind-chip.empty{opacity:.4}
+.kind-chip.empty.on{opacity:1}
 .kind-chip:hover{filter:brightness(1.15);border-color:var(--ink-4)}
 .kind-chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .kind-chip.worn.on{background:oklch(0.62 0.12 285 / .22);color:oklch(0.8 0.1 285);border-color:oklch(0.62 0.12 285 / .55)}
