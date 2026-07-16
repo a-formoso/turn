@@ -1209,7 +1209,11 @@ function App(){
     const driven = scenes.filter(s=>s.driver===ch.id);
     try{
       const res = (typeof aiCharacterVisuals==="function") ? await aiCharacterVisuals(ch, driven, lbProject("characters"), { scenes, drafts }) : null;
-      if(res) updateCharacter(ch.id, res);
+      if(res){ updateCharacter(ch.id, res);
+        // pull-on-draft consumed the CURRENT Lookbook — stamp it applied, exactly
+        // like the batch path does, or the very first per-card draft raises a false
+        // "Lookbook changed" banner the moment the dept gains content
+        markApplied("characters"); }
     }catch(e){}
     setDraftingVisualIds(ids=> ids.filter(x=>x!==ch.id));
   };
@@ -1445,7 +1449,7 @@ function App(){
     setDraftingPropIds(ids=> ids.indexOf(pr.id)>=0 ? ids : [...ids, pr.id]);
     try{
       const res = await aiPropVisuals(pr, characters, lbProject("props"));
-      if(res) updateProp(pr.id, keepPickedStyle(pr, res));
+      if(res){ updateProp(pr.id, keepPickedStyle(pr, res)); markApplied("props"); }
     }catch(e){}
     setDraftingPropIds(ids=> ids.filter(x=>x!==pr.id));
   };
@@ -1573,7 +1577,7 @@ function App(){
     setDraftingLocIds(ids=> ids.indexOf(l.id)>=0 ? ids : [...ids, l.id]);
     try{
       const fields = await aiLocationVisuals(l, scenes, lbProject("locations"));
-      if(fields) setLocations(ls=>ls.map(x=>x.id===l.id?{...x, ...keepPickedStyle(x, fields)}:x));
+      if(fields){ setLocations(ls=>ls.map(x=>x.id===l.id?{...x, ...keepPickedStyle(x, fields)}:x)); markApplied("locations"); }
     }catch(e){}
     setDraftingLocIds(ids=> ids.filter(x=>x!==l.id));
   };
@@ -2269,7 +2273,7 @@ function App(){
       imageOf: async (id)=> _grabImg(id),
       draftSpec: async (c)=>{ if(typeof aiCharacterVisuals!=="function") return null;
         const patch = await aiCharacterVisuals(c, scenes.filter(s=>s.driver===c.id), lbProject("characters"), { scenes, drafts });
-        if(patch) updateCharacter(c.id, patch); return patch; },
+        if(patch){ updateCharacter(c.id, patch); markApplied("characters"); } return patch; },
       suggestStates: async (c)=>{ if(typeof aiSuggestStates!=="function") return null;
         const raw = await aiSuggestStates(c, scenes.filter(s=>s.driver===c.id), project);
         if(!raw || !raw.length) return null;
