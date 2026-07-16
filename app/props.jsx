@@ -886,7 +886,13 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
     if(!sceneFilter || batchActiveId) return;
     if(kindFilter) setKindFilter("");   // the scene batch covers ALL kinds in the scene
     const eligible = draftedIds(shown);
-    if(!eligible.length){ batch.setMsg("Draft these props first \u2014 nothing in this scene is ready to generate."); return; }
+    if(!eligible.length){
+      const nonWorn = shown.filter(p=>p.kind!=="worn");
+      batch.setMsg(!nonWorn.length
+        ? "Every prop mapped to this scene is WORN \u2014 worn items render on their owner\u2019s character sheet (Characters tab), not here. Nothing separate to generate."
+        : "Draft these props first (\u201cDraft details\u201d on each card) \u2014 nothing in this scene is ready to generate yet.");
+      return;
+    }
     batch.begin(eligible, shown.length - eligible.length);
   };
   const startAllBatch = ()=>{

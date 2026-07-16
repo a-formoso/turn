@@ -1614,8 +1614,18 @@ function BatchBar({ batch, noun }){
   // question or status, or the click looks like it did nothing.
   const barRef = React.useRef(null);
   React.useEffect(()=>{
-    if((prompt || msg) && barRef.current && barRef.current.scrollIntoView)
-      barRef.current.scrollIntoView({ block:"nearest", behavior:"smooth" });
+    const el = barRef.current;
+    if(!(prompt || msg) || !el) return;
+    // scroll the actual overflow ancestor (.art-scroll) so the bar is visible even
+    // when the trigger button sits far below it — scrollIntoView({block:nearest})
+    // was unreliable inside that nested scroller. Then flash it so the answer to a
+    // low click ("regenerate all?", "draft first") is impossible to miss.
+    let sc = el.parentElement;
+    while(sc && !(sc.scrollHeight > sc.clientHeight + 4 && /auto|scroll/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement;
+    if(sc){ const top = el.offsetTop - sc.offsetTop - 12;
+      try{ sc.scrollTo({ top: Math.max(0, top), behavior:"smooth" }); }catch(e){ sc.scrollTop = Math.max(0, top); } }
+    else if(el.scrollIntoView) el.scrollIntoView({ block:"center", behavior:"smooth" });
+    el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
   },[!!prompt, msg]);
   if(!activeId && !prompt && !msg) return null;
   const N = noun || "card";
