@@ -2842,8 +2842,10 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .prop-kind-badge.clickable,.loc-intext-badge.clickable{cursor:pointer;transition:filter .12s,transform .12s}
 .prop-kind-badge.clickable:hover,.loc-intext-badge.clickable:hover{filter:brightness(1.18)}
 .prop-kind-badge.clickable:active,.loc-intext-badge.clickable:active{transform:scale(.96)}
-/* kind / INT-EXT filter bar — same grammar as the scene bar, chips echo the badges */
-.kind-filterbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:10px 0 0;padding:0 2px}
+/* kind / INT-EXT filter bar — boxed like its toolbar siblings (the Style picker
+   and the scene-focus bar), chips echo the badge palettes */
+.kind-filterbar{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 11px;
+  border:1px solid var(--line-2);border-radius:9px;background:var(--bg-3);white-space:nowrap}
 .kind-chip{appearance:none;display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;
   font-family:var(--f-mono);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;
   background:transparent;color:var(--ink-3);border:1px solid var(--line);transition:filter .12s}
@@ -3070,6 +3072,7 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .prop-toolbar > .prop-scenebar{flex:0 1 auto;margin:0;height:42px;padding-top:0;padding-bottom:0;flex-wrap:nowrap}
 /* in a toolbar row, the "Style · all" / "World scale" controls match the 42px search & scene-focus height */
 .prop-toolbar > .char-style-all{height:42px}
+.prop-toolbar > .kind-filterbar{height:42px}
 
 /* free-text prop search */
 .prop-searchbar{display:flex;align-items:center;gap:9px;margin:0 0 14px;padding:0 13px;height:42px;
