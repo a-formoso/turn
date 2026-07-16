@@ -1409,6 +1409,34 @@ function App(){
     });
   };
   const _normPropName = s=> String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
+  // SELF-HEAL worn↔carried (user ruling 2026-07-14: users never fix this by hand):
+  // any SAVED card carrying a misfiled carried object (a bag, a phone, documents
+  // filed under worn accessories) is normalised automatically the moment the cast
+  // is in state — the item moves to the carried list AND its linked prop card
+  // flips kind to "carried", so nothing wrong ever reaches a render. Deterministic
+  // and idempotent: after one pass nothing matches, so the effect goes quiet.
+  React.useEffect(()=>{
+    if(hydratingRef.current || !characters.length) return;
+    if(typeof window.turnReclassifyWornCarried!=="function") return;
+    const patches = [];
+    characters.forEach(c=>{
+      const r = window.turnReclassifyWornCarried(c.accessories, c.props);
+      if(r.changed) patches.push({ id:c.id, acc:r.acc, props:r.props, moved:r.moved });
+    });
+    if(!patches.length) return;
+    setCharacters(cs=>cs.map(c=>{ const p=patches.find(x=>x.id===c.id);
+      return p ? { ...c, accessories:p.acc, props:p.props } : c; }));
+    setProps(ps=>ps.map(pr=>{
+      if(pr.kind!=="worn") return pr;
+      const p = patches.find(x=>x.id===pr.ownerId); if(!p) return pr;
+      const prn = _normPropName(pr.name);
+      const hit = p.moved.some(m=>{ const mn=_normPropName(m);
+        return mn===prn || mn.includes(prn) || prn.includes(mn); });
+      return hit ? { ...pr, kind:"carried" } : pr;
+    }));
+    if(typeof window.appToast==="function")
+      window.appToast(patches.length+" character card"+(patches.length>1?"s":"")+" tidied automatically — carried objects (bags, phones, documents) moved off the worn list; their prop cards are now carried-type.","info");
+  },[characters, hydrationTick]);
   // RENAME SYNC (character bullet → prop card): editing a worn/carried item on a
   // character card renames the matching prop card (keeping its sheet), the mirror of
   // removeOwnedProp. Match on owner + normalised name, same as seeding/removal.
