@@ -2292,7 +2292,14 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
             // Quality (GPT Image only: low/medium/high) replaces the generated-date chip.
             // Uploads and Nano Banana carry no quality, so the chip is simply absent there.
             genMeta.quality && React.createElement("span",{className:"sheet-meta-item",title:"Quality",style:{textTransform:"capitalize"}},
-              React.createElement((Icon.diamond||Icon.sparkles),{s:10,sw:1.8}),genMeta.quality))
+              React.createElement((Icon.diamond||Icon.sparkles),{s:10,sw:1.8}),genMeta.quality),
+            // generation DATE — shown on every sheet card (Lookbook, Characters,
+            // Props, Locations, Shots). Prefer the stored short date; else derive it
+            // from the iso timestamp. Time (when present) rides the tooltip.
+            (()=>{ const d = genMeta.date || (genMeta.iso ? (()=>{ try{ return new Date(genMeta.iso).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); }catch(e){ return ""; } })() : "");
+              if(!d) return null;
+              return React.createElement("span",{className:"sheet-meta-item",title:"Generated"+(genMeta.time?(" \u00b7 "+genMeta.time):"")},
+                React.createElement((Icon.calendar||Icon.clock),{s:10,sw:1.8}), d); })())
         : React.createElement("span",{className:"sheet-frame-cap-label"},genUrl?"Generated":"Reference frame")),
     /* Portal to <body>: the card has content-visibility:auto (paint/layout
        containment), which would otherwise make this card the containing block for

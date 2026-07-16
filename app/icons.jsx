@@ -59,6 +59,9 @@ const Icon = {
     React.createElement("circle",{key:1,cx:12,cy:8,r:3.5}),
     React.createElement("path",{key:2,d:"M5 20c0-3.5 3-6 7-6s7 2.5 7 6"})]}),
   heart:(p)=>I({...p,d:"M12 20s-7-4.7-9.3-9C1 8 2.5 4.5 6 4.5c2 0 3.2 1.2 4 2.3.8-1.1 2-2.3 4-2.3 3.5 0 5 3.5 3.3 6.5C19 15.3 12 20 12 20z"}),
+  calendar:(p)=>I({...p,children:[
+    React.createElement("rect",{key:1,x:3,y:4.5,width:18,height:16,rx:2}),
+    React.createElement("path",{key:2,d:"M3 9h18M8 2.5v4M16 2.5v4"})]}),
   clock:(p)=>I({...p,children:[
     React.createElement("circle",{key:1,cx:12,cy:12,r:8.5}),
     React.createElement("path",{key:2,d:"M12 7v5l3 2"})]}),
