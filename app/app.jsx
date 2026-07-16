@@ -2520,13 +2520,21 @@ function App(){
         const slug = (s)=> String(s||"").toLowerCase().replace(/\([^)]*\)/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
         const keyOf = (e)=> (typeof lookbookSourceKey==="function") ? lookbookSourceKey(e) : slug(e&&e.source);
         const seen = new Set(_lbWork.map(c=>keyOf(c)));
-        const cards = [];
+        let cards = [];
         (r.refs||[]).forEach((e,i)=>{
           const key = keyOf(e);
           if(!e.source || !key || seen.has(key)) return;
           seen.add(key);
           cards.push({ id:"look-"+slug(e.source).slice(0,24)+"-"+i, source:e.source, category:e.category||"Palette", note:e.note||"", negativePrompt:"" });
         });
+        // GROWTH GUARD — the brief is 8 touchstones covering the categories. A re-run
+        // may only FILL GAPS (one card per still-missing category), never grow the
+        // wall, whatever the model returns (bug 2026-07-16: re-runs stacked 48 cards).
+        const _noted = _lbWork.filter(c=>(c.note||"").trim());
+        if(_noted.length){
+          const covered = new Set(_noted.map(c=>c.category));
+          cards = cards.filter(c=>{ if(covered.has(c.category)) return false; covered.add(c.category); return true; });
+        }
         if(cards.length){
           _lbWork = (typeof dedupeLookbookCards==="function") ? dedupeLookbookCards([..._lbWork, ...cards]) : [..._lbWork, ...cards];
           setLookbook(ls=> (typeof dedupeLookbookCards==="function") ? dedupeLookbookCards([...ls, ...cards]) : [...ls, ...cards]);
@@ -2563,6 +2571,32 @@ function App(){
         const work = (typeof dedupeLookbookCards==="function") ? dedupeLookbookCards(_lbWork) : _lbWork;
         for(const c of work){ if(!lookbookCardDrafted(c)) continue; if(await _grabImg(c.id)) continue; out.push(c); }
         return out;
+      },
+      // repair plan for a lookbook that outgrew its brief (the pre-guard bug):
+      // KEEP every hand-added card, every card with a rendered frame, and one noted
+      // card per category; everything else (agent-added, unrendered, category already
+      // covered) is excess. Applied ONLY behind the agent's approval card.
+      trimPlan: async ()=>{
+        const work = (typeof dedupeLookbookCards==="function") ? dedupeLookbookCards(_lbWork) : _lbWork.slice();
+        const keepIds = new Set(), covered = new Set(), drop = [];
+        for(const c of work){
+          const rendered = !!(await _grabImg(c.id));
+          if(c.manual || rendered){ keepIds.add(c.id); if((c.note||"").trim()) covered.add(c.category); }
+        }
+        work.forEach(c=>{
+          if(keepIds.has(c.id)) return;
+          if((c.note||"").trim() && !covered.has(c.category)){ covered.add(c.category); keepIds.add(c.id); return; }
+          drop.push(c);
+        });
+        return { keep: work.filter(c=>keepIds.has(c.id)), drop };
+      },
+      applyTrim: (plan)=>{
+        const dropIds = new Set(((plan&&plan.drop)||[]).map(c=>c.id));
+        if(!dropIds.size) return 0;
+        _lbWork = _lbWork.filter(c=>!dropIds.has(c.id));
+        setLookbook(ls=> ls.filter(c=>!dropIds.has(c.id)));
+        (plan.drop||[]).forEach(c=>{ try{ if(typeof nbClearAsset==="function") nbClearAsset(c.id); }catch(e){} });
+        return dropIds.size;
       },
       generateFrame: async (c)=>{ if(typeof window.generateLookbookFrame!=="function") throw new Error("frame generator unavailable"); return window.generateLookbookFrame(c, project); },
     };

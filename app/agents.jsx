@@ -1206,6 +1206,29 @@ async function agentVisualResearcher(ctx){
   }
   ctx.emit({k:"plan", t:"Researching the film's visual language — writing the look statement, gathering/deduping reference touchstones across every department (palette, lighting, lens, texture, plus wardrobe for the cast and production design for props & sets), and proposing the film's RENDER STYLE from the story (approval-gated — a yes sets every character/prop/location style dropdown in one pass). Use “Generate all frames” afterwards when you want to render mood frames."});
 
+  // 0) REPAIR — a lookbook that outgrew its 8-touchstone brief (the pre-guard
+  // growth bug stacked +8 cards per re-run). Approval-gated: keeps every hand-added
+  // card, every rendered frame and one reference per category; proposes dropping
+  // the excess so users never prune the wall by hand.
+  if(typeof lb.trimPlan==="function" && typeof lb.applyTrim==="function"){
+    let plan=null;
+    try{ plan = await lb.trimPlan(); }catch(e){}
+    if(plan && plan.drop && plan.drop.length){
+      ctx.emit({k:"observe", t:"This lookbook holds "+(plan.keep.length+plan.drop.length)+" references — far past its 8-touchstone brief (an earlier bug let every re-run add more). "+plan.drop.length+" are excess: agent-added, no rendered frame, category already covered."});
+      const ok = await ctx.propose({
+        title:"Trim the lookbook back to its brief",
+        reason:"The brief is 8 touchstones covering the categories; the excess cards only multiply “missing frame” counts and generation costs.",
+        rationale:"Keeps every hand-added reference, every card with a rendered mood frame, and one reference per category ("+plan.keep.length+" stay). Removes "+plan.drop.length+" excess unrendered card"+(plan.drop.length!==1?"s":"")+": "+plan.drop.slice(0,8).map(c=>c.source).join(", ")+(plan.drop.length>8?"…":"")+".",
+        before: (plan.keep.length+plan.drop.length)+" reference cards",
+        after: plan.keep.length+" reference cards — the brief, nothing more",
+      });
+      if(ctx.cancelled()) return;
+      if(ok){ const n = lb.applyTrim(plan); ctx.emit({k:"ok", t:"Trimmed "+n+" excess reference"+(n!==1?"s":"")+" — the lookbook is back to its brief."}); }
+      else ctx.emit({k:"flag", t:"Trim declined — every card stays."});
+    }
+  }
+  if(ctx.cancelled()) return;
+
   // 1) research: statement + reference entries, written through to the Colorist
   ctx.emit({k:"act", t:"Reading the story, writing the look statement, gathering references…"});
   let res;
