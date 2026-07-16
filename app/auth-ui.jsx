@@ -173,10 +173,13 @@ function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, on
   const current = (projects||[]).find(p=>p.id===currentId);
   const title = current ? current.title : "Loading\u2026";
   // Phase 3 grouping: SHOW rows hold the shared bible; episodes nest beneath them
-  const shows = (projects||[]).filter(p=>String(p.isShow)==="true");
+  // STABLE ORDER (user ruling 2026-07-14): films sort by CREATION date, newest
+  // first — never by last-updated, so the list doesn't reshuffle as you work
+  const _byCreated = (a,b)=> new Date(b.created_at||b.updated_at||0) - new Date(a.created_at||a.updated_at||0);
+  const shows = (projects||[]).filter(p=>String(p.isShow)==="true").sort(_byCreated);
   const episodesOf = (sid)=> (projects||[]).filter(p=>p.showId===sid)
     .sort((a,b)=>(Number(a.episodeNo)||0)-(Number(b.episodeNo)||0));
-  const standalone = (projects||[]).filter(p=>String(p.isShow)!=="true" && !p.showId);
+  const standalone = (projects||[]).filter(p=>String(p.isShow)!=="true" && !p.showId).sort(_byCreated);
 
   const row = (p)=> renaming===p.id
     ? React.createElement("div",{key:p.id,className:"proj-rename"},
