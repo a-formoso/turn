@@ -177,11 +177,12 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
   // Director…) get a live model PICKER in the header — synced with the drafting picker.
   const isArt = agent.room === "art";
   const _MODELS = window.WRITING_MODELS || [];
-  const [artMid, setArtMid] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId() : "");
+  const [artMid, setArtMid] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId("specs") : "");
+  const _rec = (window.recommendedWritingModelId && window.recommendedWritingModelId("specs")) || "";
   const pickArtModel = (id)=>{ setArtMid(id); if(typeof window.setWritingModelId==="function") window.setWritingModelId(id); };
   // Writers' Room agents run on the user's SELECTED writing model (not a hardcoded
   // one) — so picking Fable 5 in New Story actually runs Fable 5, not Opus 4.8.
-  const _mid = isArt ? artMid : ((window.getWritingModelId && window.getWritingModelId()) || "claude-fable-5");
+  const _mid = isArt ? artMid : ((window.getWritingModelId && window.getWritingModelId("story")) || "claude-fable-5");
   const modelLabel = (_MODELS.find(m=>m.id===_mid)||{}).label || _mid || "model";
   const start = async ()=>{
     cancelled.current = false;
@@ -226,7 +227,7 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
             ? React.createElement("select",{className:"ag-runner-model ag-runner-model-sel",disabled:running,
                 title:running?"Finishes this run on the current model — switch between runs":"Model running this agent — pick before you start",
                 value:_mid,onChange:(e)=>pickArtModel(e.target.value)},
-                _MODELS.map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label)))
+                _MODELS.map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label + (m.id===_rec ? "  · recommended" : ""))))
             : React.createElement("span",{className:"ag-runner-model",title:"Model running this agent"}, modelLabel)),
         React.createElement("div",{className:"ag-runner-sub"},
           status==="idle"?"Ready":status==="done"?"Finished":status==="waiting"?"Awaiting your approval":"Working\u2026")),

@@ -241,8 +241,9 @@ function NSInterview({ formatLabel, onComplete, onBack }){
 function NewStoryIntake({ onClose, onLaunch, aiOn }){
   // the writing model developing THIS story — synced with the global drafting picker,
   // so loglines, research, synopsis and the spine build all run on the picked engine
-  const [mid, setMid] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId() : "");
+  const [mid, setMid] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId("story") : "");
   const pickModel = (id)=>{ setMid(id); if(typeof window.setWritingModelId==="function") window.setWritingModelId(id); };
+  const _rec = (window.recommendedWritingModelId && window.recommendedWritingModelId("story")) || "";
   const [format, setFormat] = React.useState("film");   // Step 0 — what are we making?
   const [framework, setFramework] = React.useState("threeact");   // Step 0 — how is it told?
   // did the writer ACTIVELY pick these, or sail past the defaults? An explicit pick is
@@ -362,7 +363,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
           React.createElement(Icon.sparkles,{s:11}),
           React.createElement("select",{className:"ns-model-sel",value:mid,disabled:loading,
             onChange:(e)=>pickModel(e.target.value)},
-            (window.WRITING_MODELS||[]).map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label)))),
+            (window.WRITING_MODELS||[]).map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label + (m.id===_rec ? "  · recommended" : ""))))),
         React.createElement("button",{className:"ag-x",onClick:onClose},React.createElement(Icon.x,{s:17}))),
 
       // progress stepper — which of the four intake screens we're on

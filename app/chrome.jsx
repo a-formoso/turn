@@ -396,8 +396,9 @@ window.RenderStylesModal = RenderStylesModal;
 function StoryBriefModal({ project, onClose, onRebuild }){
   // the rebuild runs the full story build, so the WRITING MODEL is chosen here
   // first — the same picker (and persisted choice) as the New Story window
-  const [mid, setMid] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId() : "");
+  const [mid, setMid] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId("story") : "");
   const pickModel = (id)=>{ setMid(id); if(typeof window.setWritingModelId==="function") window.setWritingModelId(id); };
+  const _rec = (window.recommendedWritingModelId && window.recommendedWritingModelId("story")) || "";
   const p = project || {};
   const brief = (p.sourceBrief||"").trim();
   const logline = (p.logline||p.premise||"").trim();
@@ -420,7 +421,7 @@ function StoryBriefModal({ project, onClose, onRebuild }){
         React.createElement("label",{className:"brief-model-pick",title:"The engine the rebuild runs on — same picker as the New Story window; your choice persists"},
           React.createElement("span",{className:"obj-lab",style:{marginBottom:0}},"Writing model"),
           React.createElement("select",{className:"ns-model-sel",value:mid,onChange:(e)=>pickModel(e.target.value)},
-            (window.WRITING_MODELS||[]).map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label)))),
+            (window.WRITING_MODELS||[]).map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label + (m.id===_rec ? "  · recommended" : ""))))),
         React.createElement("span",{className:"brief-rebuild-note"},"builds a fresh telling from this brief \u2014 this film stays untouched")),
       brief
         ? React.createElement("pre",{className:"bible-pre brief-pre"}, brief)
