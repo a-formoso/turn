@@ -242,6 +242,14 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
     const rows=beats.rows.slice(); const [m]=rows.splice(i,1); rows.splice(j,0,m);
     commit({...beats, rows:renumber(rows)}); };
   const toggleTurn = (n)=>commit({...beats, turnAt: beats.turnAt===n?0:n});
+  // per-beat VALUE CHARGE (optional layer): where the scene's emotional value stands
+  // at the END of this beat, -3..+3. Unset = the beat doesn't declare one. Feeds the
+  // Shot Designer so coverage follows the shifts (a drop reads tighter/starker).
+  const setRowCharge = (i, val)=>commit({...beats, rows:beats.rows.map((r,j)=>{
+    if(j!==i) return r;
+    if(val===""){ const c={...r}; delete c.charge; return c; }
+    return {...r, charge:Number(val)};
+  })});
 
   // a beat map can be a bare skeleton (one empty row, no desire/obstacle) — detect it so
   // the "Build from script" button reads right and skips the overwrite confirm.
@@ -282,6 +290,13 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
           React.createElement("span",{className:"bn"},r.n),
           React.createElement("button",{className:"beat-turn-btn",onClick:()=>toggleTurn(r.n)},
             React.createElement(Icon.bolt,{s:10}), r.n===beats.turnAt?"Turning point":"Mark turn"),
+          React.createElement("select",{
+            className:"beat-charge-sel"+(r.charge>0?" pos":(r.charge<0?" neg":"")),
+            value:(r.charge==null?"":String(r.charge)),
+            title:"This beat's value charge \u2014 where the scene's emotional value stands at the END of this beat (+3 best \u2026 \u22123 worst). Optional; the Shot Designer reads the shifts and shapes the coverage around them.",
+            onChange:(e)=>setRowCharge(i, e.target.value)},
+            [["","\u00b1 value"],["3","+3"],["2","+2"],["1","+1"],["0","0"],["-1","\u22121"],["-2","\u22122"],["-3","\u22123"]].map(kv=>
+              React.createElement("option",{key:kv[0]||"unset",value:kv[0]},kv[1]))),
           React.createElement("div",{className:"beat-edit-tools"},
             React.createElement("button",{className:"bx",disabled:i===0,onClick:()=>moveBeat(i,-1)},React.createElement(Icon.chevU,{s:14})),
             React.createElement("button",{className:"bx",disabled:i===beats.rows.length-1,onClick:()=>moveBeat(i,1)},React.createElement(Icon.chevD,{s:14})),
