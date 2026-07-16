@@ -2834,6 +2834,34 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .loc-name-row .edit-in{flex:1;min-width:0}
 .loc-intext-badge.int{background:oklch(0.6 0.08 250 / .18);color:oklch(0.8 0.08 250);border:1px solid oklch(0.6 0.08 250 / .35)}
 .loc-intext-badge.ext{background:oklch(0.6 0.12 150 / .16);color:oklch(0.78 0.12 150);border:1px solid oklch(0.6 0.12 150 / .35)}
+[data-theme="light"] .loc-intext-badge.int{color:oklch(0.42 0.08 250)}
+[data-theme="light"] .loc-intext-badge.ext{color:oklch(0.4 0.12 150)}
+[data-theme="light"] .prop-kind-badge.worn{color:oklch(0.44 0.12 285)}
+[data-theme="light"] .prop-kind-badge.carried{color:oklch(0.46 0.15 38)}
+/* the kind/INT-EXT badges double as filter buttons */
+.prop-kind-badge.clickable,.loc-intext-badge.clickable{cursor:pointer;transition:filter .12s,transform .12s}
+.prop-kind-badge.clickable:hover,.loc-intext-badge.clickable:hover{filter:brightness(1.18)}
+.prop-kind-badge.clickable:active,.loc-intext-badge.clickable:active{transform:scale(.96)}
+/* kind / INT-EXT filter bar — same grammar as the scene bar, chips echo the badges */
+.kind-filterbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:10px 0 0;padding:0 2px}
+.kind-chip{appearance:none;display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;
+  font-family:var(--f-mono);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;
+  background:transparent;color:var(--ink-3);border:1px solid var(--line);transition:filter .12s}
+.kind-chip i{font-style:normal;opacity:.65;font-weight:600}
+.kind-chip:hover{filter:brightness(1.15);border-color:var(--ink-4)}
+.kind-chip.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.kind-chip.worn.on{background:oklch(0.62 0.12 285 / .22);color:oklch(0.8 0.1 285);border-color:oklch(0.62 0.12 285 / .55)}
+.kind-chip.carried.on{background:oklch(0.62 0.16 35 / .2);color:oklch(0.76 0.14 38);border-color:oklch(0.62 0.16 35 / .55)}
+.kind-chip.dressing.on{background:oklch(0.6 0.11 150 / .2);color:oklch(0.74 0.1 150);border-color:oklch(0.6 0.11 150 / .55)}
+.kind-chip.int.on{background:oklch(0.6 0.08 250 / .22);color:oklch(0.82 0.08 250);border-color:oklch(0.6 0.08 250 / .55)}
+.kind-chip.ext.on{background:oklch(0.6 0.12 150 / .2);color:oklch(0.8 0.12 150);border-color:oklch(0.6 0.12 150 / .55)}
+.kind-chip.intext.on{background:oklch(0.6 0.1 200 / .2);color:oklch(0.8 0.1 200);border-color:oklch(0.6 0.1 200 / .55)}
+[data-theme="light"] .kind-chip.worn.on{color:oklch(0.42 0.12 285)}
+[data-theme="light"] .kind-chip.carried.on{color:oklch(0.44 0.15 38)}
+[data-theme="light"] .kind-chip.dressing.on{color:oklch(0.42 0.1 150)}
+[data-theme="light"] .kind-chip.int.on{color:oklch(0.4 0.08 250)}
+[data-theme="light"] .kind-chip.ext.on{color:oklch(0.38 0.12 150)}
+[data-theme="light"] .kind-chip.intext.on{color:oklch(0.38 0.1 200)}
 .loc-style-chip{display:inline-flex;align-items:center;gap:5px;margin-left:8px;padding:1px 8px 1px 6px;border-radius:20px;
   background:var(--bg-2);border:1px solid var(--line-2);font-size:10.5px;color:var(--txt-2);vertical-align:middle}
 .loc-style-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;box-shadow:0 0 0 1px rgba(255,255,255,.12) inset}

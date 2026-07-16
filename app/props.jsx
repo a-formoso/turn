@@ -471,7 +471,7 @@ function propSwatch(kind){
     : "linear-gradient(135deg,#b8412e,#5a2018)";
 }
 
-function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft, onEnsureOwner, drafting, onView, batchActiveId, onBatchDone, onChipClick, onTagOne, taggingScene, dupIds, dupProps, onMerge, derivedScenes }){
+function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft, onEnsureOwner, drafting, onView, batchActiveId, onBatchDone, onChipClick, onTagOne, taggingScene, dupIds, dupProps, onMerge, derivedScenes, onKindClick }){
   const d = propDefaults(p);
   const finalPrompt = combinedPropPrompt(p, project);
   const drafted = propVisualsDrafted(p);
@@ -600,7 +600,11 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
           React.createElement("div",{className:"sheet-name",title:p.name||""},
             React.createElement(EditText,{value:p.name,placeholder:"Prop name\u2026",onCommit:val=>onUpdate(p.id,{name:val})})),
           React.createElement("div",{className:"sheet-role"},
-            React.createElement("span",{className:"prop-kind-badge "+(p.kind==="worn"?"worn":p.kind==="dressing"?"dressing":"carried")},
+            React.createElement("span",{className:"prop-kind-badge clickable "+(p.kind==="worn"?"worn":p.kind==="dressing"?"dressing":"carried"),
+              role:"button",tabIndex:0,
+              title:"Show only "+(p.kind==="dressing"?"set-dressing":(p.kind||"carried"))+" props",
+              onClick:()=> onKindClick && onKindClick(p.kind||"carried"),
+              onKeyDown:(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); onKindClick && onKindClick(p.kind||"carried"); } }},
               p.kind==="dressing" ? "set dressing" : (p.kind||"carried")),
             p.kind==="dressing"
               ? (" \u00b7 "+(((typeof propHomeLocation==="function") && (propHomeLocation(p)||{}).name) || "no location yet"))
@@ -721,6 +725,7 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   const [view, setView] = React.useState(null);   // {url, character/prop}
   if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   const [sceneFilter, setSceneFilter] = React.useState("");   // "" = all
+  const [kindFilter, setKindFilter] = React.useState("");     // "" | worn | carried | dressing
   const [query, setQuery] = React.useState("");               // free-text name/owner search
   const [searchOpen, setSearchOpen] = React.useState(false);  // collapsible search: icon-only until clicked
   const searchRef = React.useRef(null);
@@ -783,7 +788,10 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   // the "h" buried in "throat". Stacks on top of the scene filter.
   const q = query.trim().toLowerCase();
   const matchesQuery = (p)=> searchWordMatch((p.name||"")+" "+(p.ownerName||""), q);
-  const shown = (sceneFilter ? list.filter(p=>inScene(p, sceneFilter)) : list).filter(matchesQuery);
+  const kindOf = (p)=> (p && p.kind) || "carried";
+  const shown = (sceneFilter ? list.filter(p=>inScene(p, sceneFilter)) : list)
+    .filter(p=> !kindFilter || kindOf(p)===kindFilter)
+    .filter(matchesQuery);
   // 9-up pagination; suspended while a batch runs so the queue can reach every card
   const pager = usePager(shown.length, !!batchActiveId);
   // duplicate detection: map each prop id -> the set of ids it duplicates (same owner + object)
@@ -851,6 +859,7 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   const draftedIds = (subset)=> subset.filter(p=>propVisualsDrafted(p) && p.kind!=="worn").map(p=>p.id);
   const startSceneBatch = ()=>{
     if(!sceneFilter || batchActiveId) return;
+    if(kindFilter) setKindFilter("");   // the scene batch covers ALL kinds in the scene
     const eligible = draftedIds(shown);
     if(!eligible.length){ batch.setMsg("Draft these props first \u2014 nothing in this scene is ready to generate."); return; }
     batch.begin(eligible, shown.length - eligible.length);
@@ -860,6 +869,7 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
     const eligible = draftedIds(list);
     if(!eligible.length){ batch.setMsg("Draft the props first \u2014 nothing is ready to generate yet."); return; }
     if(sceneFilter) setSceneFilter("");            // mount every card so the queue can reach each one
+    if(kindFilter) setKindFilter("");
     batch.begin(eligible, list.length - eligible.length);
   };
   const eligibleAll = list.filter(p=>propVisualsDrafted(p) && p.kind!=="worn").length;
@@ -911,6 +921,19 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
           allStyling ? ("Inventing… "+allStyling.i+"/"+allStyling.total) : "Style · all props"),
         React.createElement(window.RenderStylePicker,{value:allStyleKey,disabled:!!allStyling,
           placeholderLabel:"Mixed — per prop",onPick:applyStyleAll})),
+    // worn/carried/dressing filter — one chip per kind, styled like the cards' kind
+    // badges; the badge on any card is clickable to the same filter
+    list.length>1 && React.createElement("div",{className:"kind-filterbar"},
+      React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.box,{s:13}),"Show"),
+      [["","All"],["worn","Worn"],["carried","Carried"],["dressing","Set dressing"]].map(kv=>{
+        const k=kv[0], lab=kv[1];
+        const n = k ? list.filter(p=>kindOf(p)===k).length : list.length;
+        if(k && !n) return null;   // a film with no set dressing shows no dead chip
+        return React.createElement("button",{key:k||"all",
+          className:"kind-chip"+(k?(" "+k):"")+(kindFilter===k?" on":""),
+          title: k ? ("Show only "+lab.toLowerCase()+" props") : "Show every prop",
+          onClick:()=>setKindFilter(k)}, lab, React.createElement("i",null,n));
+      })),
     // scene filter + per-scene batch generate
     tagged && sceneList.length>0 && React.createElement("div",{className:"prop-scenebar"},
       React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Focus a scene"),
@@ -931,6 +954,7 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
           ? React.createElement(React.Fragment,null,
               React.createElement("div",{className:"sheet-grid"},
                 pager.slice(shown).map(p=>React.createElement(PropSheet,{key:p.id,p,project,characters,scenes,onUpdate,onDelete,onDraft,onEnsureOwner,
+                  onKindClick:(k)=>setKindFilter(x=>x===k?"":k),
                   drafting:draftingId===p.id||(draftingIds||[]).indexOf(p.id)>=0||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
                   batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
                   onTagOne,taggingScene:taggingSceneId===p.id,derivedScenes:effMap[p.id],
@@ -944,8 +968,13 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
                   ? "Nothing in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")+" matches that search. Clear the search or pick another scene."
                   : "No prop name or owner matches that search."),
                 React.createElement("button",{className:"art-draftall",style:{marginTop:16},onClick:()=>setQuery("")},"Clear search"))
+            : kindFilter && !sceneFilter
+              ? React.createElement("div",{className:"prop-empty"},
+                  React.createElement("div",{className:"art-soon-t"},"No "+(kindFilter==="dressing"?"set-dressing":kindFilter)+" props"),
+                  React.createElement("div",{className:"art-soon-d"},"Nothing on the tab is filed as "+(kindFilter==="dressing"?"set dressing":kindFilter)+" right now."),
+                  React.createElement("button",{className:"art-draftall",style:{marginTop:16},onClick:()=>setKindFilter("")},"Show all props"))
             : React.createElement("div",{className:"prop-empty"},
-                React.createElement("div",{className:"art-soon-t"},"No props appear in this scene"),
+                React.createElement("div",{className:"art-soon-t"},"No props appear in this scene"+(kindFilter?(" ("+(kindFilter==="dressing"?"set dressing":kindFilter)+" only)"):"")),
                 React.createElement("div",{className:"art-soon-d"},"Nothing the cast wears or carries was found in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")+". Try another scene, or run \u201cDesign all props\u201d to re-map."),
                 React.createElement("button",{className:"art-draftall",style:{marginTop:16},onClick:()=>setSceneFilter("")},"Show all props")))
       : React.createElement("div",{className:"prop-empty"},

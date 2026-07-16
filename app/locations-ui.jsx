@@ -9,7 +9,7 @@ function locSwatch(intExt){
     : "linear-gradient(135deg,#4a5a78,#222c3e)";     // interior — slate
 }
 
-function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage }){
+function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage, onIeClick }){
   const d = locVisualDefaults(l);
   const scenePresets = (typeof locScenePresets==="function") ? locScenePresets(l, project) : [];
   const finalPrompt = combinedLocationPrompt(l, project, {});
@@ -200,7 +200,11 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
       React.createElement("div",{className:"sheet-head"},
         React.createElement("div",{style:{flex:1,minWidth:0}},
           React.createElement("div",{className:"sheet-name loc-name-row",title:l.name||""},
-            React.createElement("span",{className:"loc-intext-badge "+(/EXT/.test(l.intExt||"")?"ext":"int")},l.intExt||"INT"),
+            React.createElement("span",{className:"loc-intext-badge clickable "+(/EXT/.test(l.intExt||"")?"ext":"int"),
+              role:"button",tabIndex:0,title:"Show only "+(l.intExt||"INT")+" locations",
+              onClick:()=> onIeClick && onIeClick(l.intExt||"INT"),
+              onKeyDown:(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); onIeClick && onIeClick(l.intExt||"INT"); } }},
+              l.intExt||"INT"),
             React.createElement(EditText,{value:l.name,placeholder:"Location name\u2026",onCommit:val=>onUpdate(l.id,{name:val})})),
           React.createElement("div",{className:"prop-scenes"},
             React.createElement("span",{className:"prop-scenes-lab"},"Scenes"),
@@ -373,6 +377,7 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
   const [view, setView] = React.useState(null);
   if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   const [sceneFilter, setSceneFilter] = React.useState("");
+  const [ieFilter, setIeFilter] = React.useState("");   // "" | INT | EXT | INT/EXT
   const [query, setQuery] = React.useState("");               // free-text name search
   const [searchOpen, setSearchOpen] = React.useState(false);  // collapsible search: icon-only until clicked
   const searchRef = React.useRef(null);
@@ -412,7 +417,10 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
   const inScene = (l, sid)=> Array.isArray(l.scenes) && l.scenes.indexOf(sid)>=0;
   const q = query.trim().toLowerCase();
   const matchesQuery = (l)=> (typeof searchWordMatch==="function") ? searchWordMatch((l.name||"")+" "+(l.intExt||""), q) : (!q || (l.name||"").toLowerCase().indexOf(q)>=0);
-  const shown = (sceneFilter ? list.filter(l=>inScene(l, sceneFilter)) : list).filter(matchesQuery);
+  const ieOf = (l)=> (l && l.intExt) || "INT";
+  const shown = (sceneFilter ? list.filter(l=>inScene(l, sceneFilter)) : list)
+    .filter(l=> !ieFilter || ieOf(l)===ieFilter)
+    .filter(matchesQuery);
   // 9-up pagination; suspended while a batch runs so the queue can reach every card
   const pager = usePager(shown.length, !!batchActiveId);
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s?s.no:sid; };
@@ -422,6 +430,7 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
   const draftedIds = (subset)=> subset.filter(l=> (typeof locVisualsDrafted==="function") ? locVisualsDrafted(l) : true).map(l=>l.id);
   const startSceneBatch = ()=>{
     if(!sceneFilter || batchActiveId) return;
+    if(ieFilter) setIeFilter("");   // the scene batch covers INT and EXT alike
     const eligible = draftedIds(shown);
     if(!eligible.length){ batch.setMsg("Draft these locations first \u2014 nothing in this scene is ready to generate."); return; }
     batch.begin(eligible, shown.length - eligible.length);
@@ -431,6 +440,7 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
     const eligible = draftedIds(list);
     if(!eligible.length){ batch.setMsg("Draft the locations first \u2014 nothing is ready to generate yet."); return; }
     if(sceneFilter) setSceneFilter("");
+    if(ieFilter) setIeFilter("");
     batch.begin(eligible, list.length - eligible.length);
   };
   const eligibleAll = list.filter(l=> (typeof locVisualsDrafted==="function") ? locVisualsDrafted(l) : true).length;
@@ -487,6 +497,17 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
           React.createElement("option",{value:"B"},"Critter scale (Class B)"),
           React.createElement("option",{value:"C"},"Giant scale (Class C)"),
           React.createElement("option",{value:"D"},"Microscopic scale (Class D)"))),
+      list.length>1 && React.createElement("div",{className:"kind-filterbar"},
+        React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Show"),
+        [["","All"],["INT","INT"],["EXT","EXT"],["INT/EXT","INT/EXT"]].map(kv=>{
+          const k=kv[0], lab=kv[1];
+          const n = k ? list.filter(l=>ieOf(l)===k).length : list.length;
+          if(k && !n) return null;
+          return React.createElement("button",{key:k||"all",
+            className:"kind-chip"+(k?(k==="INT/EXT"?" intext":(k==="EXT"?" ext":" int")):"")+(ieFilter===k?" on":""),
+            title: k ? ("Show only "+lab+" locations") : "Show every location",
+            onClick:()=>setIeFilter(k)}, lab, React.createElement("i",null,n));
+        })),
       sceneList.length>0 && React.createElement("div",{className:"prop-scenebar"},
         React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Focus a scene"),
         React.createElement("select",{className:"prop-select prop-scenebar-select",value:sceneFilter,
@@ -506,13 +527,15 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
           ? React.createElement(React.Fragment,null,
               React.createElement("div",{className:"sheet-grid"},
                 pager.slice(shown).map(l=>React.createElement(LocationSheet,{key:l.id,l,project,scenes,onUpdate,onDelete,onDraft,
+                  onIeClick:(k)=>setIeFilter(x=>x===k?"":k),
                   drafting:draftingId===l.id||(draftingIds||[]).indexOf(l.id)>=0||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
                   batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
                   onDraftStaging,draftingStage:draftingStageId===l.id}))),
               React.createElement(PagerBar,{pager,noun:"location"}))
           : React.createElement("div",{className:"prop-empty"},
-              React.createElement("div",{className:"art-soon-t"},"No locations in this scene"),
-              React.createElement("button",{className:"art-draftall",style:{marginTop:16},onClick:()=>setSceneFilter("")},"Show all locations")))
+              React.createElement("div",{className:"art-soon-t"}, sceneFilter ? "No locations in this scene" : ("No "+ieFilter+" locations")),
+              React.createElement("button",{className:"art-draftall",style:{marginTop:16},
+                onClick:()=>{ setSceneFilter(""); setIeFilter(""); }},"Show all locations")))
       : React.createElement("div",{className:"prop-empty"},
           React.createElement("div",{className:"art-soon-ic"},React.createElement(Icon.layers,{s:30})),
           React.createElement("div",{className:"art-soon-t"},"No locations yet"),
