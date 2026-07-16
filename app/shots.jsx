@@ -768,7 +768,11 @@ function buildShotPrompt(sh, ctx){
   // ATTACHED prop sheets (the image-map entries): dressing sheets ride only on tight
   // shots / when the object is the action's subject — wides trust the plate. The SCALE
   // clauses below still see propsAll: an in-plate fixture stays scale-constrained.
-  const props    = propsAll.filter(p=>shotPropAttachable(p, sh));
+  // WORN items never have their own sheet (they render ON the owner's character
+  // sheet) — so they must NEVER be numbered as attached images: that produced
+  // prompts naming "Image 5..13" with only 4 files attached. They ride as TEXT.
+  const wornProps = propsAll.filter(p=>p.kind==="worn");
+  const props    = propsAll.filter(p=>p.kind!=="worn" && shotPropAttachable(p, sh));
   const size = sizeOf(sh.size), angle = angleOf(sh.angle), move = moveOf(sh.move), lens = lensOf(sh.lens);
   const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
 
@@ -834,8 +838,12 @@ function buildShotPrompt(sh, ctx){
   if(_scale) stage.push(_scale);
   const _objectScale = (typeof shotObjectScaleClause==="function") ? shotObjectScaleClause(subjects, [...propsAll, ...((ctx.carriedForward)||[])], loc) : "";
   if(_objectScale) stage.push(_objectScale);
+  // FIRST-FRAME BIAS: this still seeds the beat's VIDEO clip, so stage its opening
+  // instant, not its peak — and never freeze a mouth mid-vowel (bad start frame,
+  // bad lip-sync anchor; the audio drives the mouth once the clip moves).
+  stage.push("Stage the beat's OPENING instant — the action just beginning, not its peak; this frame starts the moving clip");
   const _dlg = clean(sh.dialogue).replace(/^["“]|["”]$/g,"");
-  if(_dlg) stage.push('Caught mid-line as the character speaks "'+_dlg+'"');
+  if(_dlg) stage.push('About to speak — face engaged, lips just parting for "'+_dlg+'", not frozen mid-vowel');
   const STAGING = stage.join(". ") + ".";
 
   // ---- THE NUMBERED IMAGE MAP (the FIRST thing in the prompt) — tells the generator
@@ -863,9 +871,13 @@ function buildShotPrompt(sh, ctx){
   else { if(_locLabel) imgs.push(_locLabel); _castLabels.forEach(l=>imgs.push(l)); }
   _propLabels.forEach(l=>imgs.push(l));
   _carriedLabels.forEach(l=>imgs.push(l));
-  const MAP = imgs.length
+  let MAP = imgs.length
     ? ("Compose a new cinematic still. " + imgs.map((m,i)=>"Image "+(i+1)+" is "+m+".").join(" "))
     : "Compose a new cinematic still.";
+  if(wornProps.length){
+    MAP += " Worn items have no separate sheets — each is part of its owner's character sheet and must match exactly as designed there: "
+      + wornProps.map(p=> p.name+" (on "+(p.ownerName||"its owner")+")").join("; ")+".";
+  }
 
   // ---- ASSEMBLE: image map, then the style spine, then the staging line, then constraints ----
   let out = MAP + "\n\n" + STYLE_SPINE + "\n\n— " + STAGING;
@@ -967,7 +979,7 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   const castSpec = inCast.map(id=>{ const c=(ctx.charById||{})[id]; return c?{ id, note:c.name+" character sheet" }:null; }).filter(Boolean);
   // same dressing gate as buildShotPrompt/collectShotRefs — labels must match files
   const propSpec = inPr.map(id=>{ const p=(ctx.propById||{})[id];
-    if(!p || !shotPropAttachable(p, sh)) return null;
+    if(!p || p.kind==="worn" || !shotPropAttachable(p, sh)) return null;   // worn ride the owner's sheet
     return { id, note:p.name+" prop sheet" }; }).filter(Boolean);
   const carrySpec= carried.map(id=>{ const p=(ctx.propById||{})[id]; return p?{ id, note:p.name+" prop sheet (carried over from an earlier beat)" }:null; }).filter(Boolean);
   const orderedSpecs = (locWeight==="ambient")

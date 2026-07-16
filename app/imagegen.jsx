@@ -891,7 +891,13 @@ async function proxyGenerate(prompt, opts, provider){
   if(opts.extraImages && opts.extraImages.length) refs.push(...opts.extraImages);
   const images = [];
   const referenceMaxDim = Math.max(512, Math.min(1536, Number(opts.referenceMaxDim)||1024));
-  for(const src of refs){ let du = await oaiToDataUrl(src); if(du) du = await downscaleRef(du, referenceMaxDim); if(du) images.push(du); }
+  // the BASE image (an edit's own frame / the rolling-chain seed) may carry a higher
+  // cap than the identity sheets: crushing a 2K frame to 640px before an EDIT visibly
+  // softened the result — the model can only re-render what it was shown.
+  const baseMaxDim = Math.max(referenceMaxDim, Math.min(1536, Number(opts.baseMaxDim)||0)) || referenceMaxDim;
+  for(let i=0;i<refs.length;i++){ const isBase = (i===0 && !!opts.referenceImage);
+    let du = await oaiToDataUrl(refs[i]); if(du) du = await downscaleRef(du, isBase ? baseMaxDim : referenceMaxDim);
+    if(du) images.push(du); }
 
   const sb = (typeof window.sbClient==="function") ? window.sbClient() : null;
   if(!sb || !sb.functions){

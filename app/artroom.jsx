@@ -1290,6 +1290,10 @@ function useImageGen(opts){
     if(gopts.referenceMaxDim) genOpts.referenceMaxDim = gopts.referenceMaxDim;
     else if(opts.referenceMaxDim) genOpts.referenceMaxDim = opts.referenceMaxDim;
     if(refImage) genOpts.referenceImage = refImage;
+    // an EDIT re-renders FROM this very frame — send the base at full working
+    // fidelity (identity sheets keep the smaller cap); 640px bases were visibly
+    // softening edited frames
+    if(isEditMode) genOpts.baseMaxDim = 1536;
     // Lite has no documented search-grounding support — never attach the tool to it
     if(groundEnabled && usedModel!=="gemini-3.1-flash-lite-image"){ genOpts.groundSearch = true; if(isFlash) genOpts.groundImageSearch = true; }
 

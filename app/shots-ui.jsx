@@ -109,6 +109,7 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
   // object leads the action; the plate delivers them in wides. Without this the
   // thumbnail strip SHOWS sheets that never actually attach.
   const inProps = inPropIds.map(id=>ctx.propById[id]).filter(Boolean)
+    .filter(p=> p.kind!=="worn")
     .filter(p=> (typeof shotPropAttachable!=="function") || shotPropAttachable(p, sh));
   const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
   // the "Shot prompt" preview reflects what WILL generate: a non-head shot chains from the
@@ -148,7 +149,8 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
     // subject (shotPropAttachable) — MUST mirror buildShotPrompt's filter exactly,
     // or the prompt's image-map numbering mislabels the attached files
     const propSpec = inPr.map(id=>{ const p=ctx.propById[id];
-      if(!p || (typeof shotPropAttachable==="function" && !shotPropAttachable(p, sh))) return null;
+      if(!p || p.kind==="worn") return null;   // worn items ride the owner's sheet — never a file of their own
+      if(typeof shotPropAttachable==="function" && !shotPropAttachable(p, sh)) return null;
       return { id, note:p.name+" prop sheet" }; }).filter(Boolean);
     const ordered = (locWeight==="ambient") ? [...castSpec, ...locSpec, ...propSpec] : [...locSpec, ...castSpec, ...propSpec];
     const out = [];
