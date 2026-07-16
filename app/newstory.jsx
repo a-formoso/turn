@@ -223,7 +223,7 @@ function NSInterview({ formatLabel, onComplete, onBack }){
           React.createElement("span",{className:"ns-talk-dots"},
             React.createElement("i"),React.createElement("i"),React.createElement("i"))))),
 
-    err && React.createElement("div",{className:"ns-err"},err),
+    err && React.createElement("div",{className:"ns-err"},(window.turnLinkifyReact?window.turnLinkifyReact(err):err)),
 
     React.createElement("div",{className:"ns-talk-input"},
       Voice.sttSupported && React.createElement("button",{className:"ns-mic"+(listening?" on":""),onClick:toggleMic,disabled:thinking,
@@ -258,6 +258,13 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
   const [candidates, setCandidates] = React.useState([]);
   const [chosen, setChosen] = React.useState("");
   const [err, setErr] = React.useState("");
+  // while this window is open, provider ERROR toasts land in ITS error line
+  // (links clickable) instead of a detached corner toast
+  React.useEffect(()=>{
+    const prev = window.turnErrorSink;
+    window.turnErrorSink = (msg)=>{ setErr(msg); return true; };
+    return ()=>{ window.turnErrorSink = prev; };
+  },[]);
   // synopsis stage
   const [syn, setSyn] = React.useState(null);        // full research+synopsis object
   const [title, setTitle] = React.useState("");      // editable work-title (seeds from research)
@@ -428,7 +435,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
               Voice.sttSupported
                 ? "Press the mic and just talk — I’ll ask a few friendly questions, then shape loglines from your answers. Prefer typing? You can do that too."
                 : "I’ll ask a few friendly questions and shape loglines from your answers. (Voice input isn’t available in this browser, so you’ll type your answers — same conversation.)"),
-            err && React.createElement("div",{className:"ns-err"},err),
+            err && React.createElement("div",{className:"ns-err"},(window.turnLinkifyReact?window.turnLinkifyReact(err):err)),
             React.createElement("div",{className:"ns-foot"},
               React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Cancel"),
               seed==="talk"
@@ -470,7 +477,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
               React.createElement("div",{className:"ns-input-lab"},"Final logline"),
               React.createElement("textarea",{className:"ns-input",value:chosen,
                 onChange:e=>setChosen(e.target.value),rows:3})),
-            err && React.createElement("div",{className:"ns-err"},err),
+            err && React.createElement("div",{className:"ns-err"},(window.turnLinkifyReact?window.turnLinkifyReact(err):err)),
             React.createElement("div",{className:"ns-foot"},
               React.createElement("button",{className:"ns-btn ghost",onClick:()=>setStep("format")},"\u2190 Back"),
               React.createElement("button",{className:"ns-btn link",onClick:()=>develop("loglines"),disabled:loading||synLoading},
@@ -511,7 +518,7 @@ function NewStoryIntake({ onClose, onLaunch, aiOn }){
               React.createElement("div",{className:"syn-para-lab"},pg.label||pg.key),
               React.createElement("textarea",{className:"ns-input syn-input",value:pg.text,rows:3,
                 onChange:e=>{ const v=e.target.value; setParas(ps=>ps.map((x,j)=>j===i?{...x,text:v}:x)); }}))),
-            err && React.createElement("div",{className:"ns-err"},err),
+            err && React.createElement("div",{className:"ns-err"},(window.turnLinkifyReact?window.turnLinkifyReact(err):err)),
             React.createElement("div",{className:"ns-foot"},
               React.createElement("button",{className:"ns-btn ghost",onClick:()=>setStep("loglines")},"\u2190 Back"),
               React.createElement("button",{className:"ns-btn link",onClick:researchSynopsis,disabled:synLoading},

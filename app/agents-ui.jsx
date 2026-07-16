@@ -11,11 +11,20 @@ function AgentIcon({ name, s=18 }){
 const STEP_ICON = { plan:Icon.target, act:Icon.sparkles, observe:Icon.eye, ok:Icon.check,
   flag:Icon.alert, done:Icon.check, report:Icon.film };
 
+/* URLs inside error/trace text (e.g. a provider's billing link) render as
+   clickable links that open in a new tab. */
+function _linkifyText(text){
+  return String(text||"").split(/(https?:\/\/[^\s)"']*[^\s)"'.,;:!?])/g).map((part,i)=>
+    /^https?:\/\//.test(part)
+      ? React.createElement("a",{key:i,href:part,target:"_blank",rel:"noopener noreferrer"},part)
+      : part);
+}
+window.turnLinkifyReact = _linkifyText;
 function TraceStep({ step }){
   const Ic = STEP_ICON[step.k] || Icon.sparkles;
   return React.createElement("div",{className:"ag-step k-"+step.k},
     React.createElement("span",{className:"ag-step-ic"},React.createElement(Ic,{s:13})),
-    React.createElement("div",{className:"ag-step-t"}, step.t,
+    React.createElement("div",{className:"ag-step-t"}, _linkifyText(step.t),
       step.report && React.createElement(TableReadReport,{rep:step.report}),
       step.voiceReport && React.createElement(VoiceCheckReport,{rep:step.voiceReport})));
 }
@@ -169,6 +178,14 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
 
   React.useEffect(()=>{ if(bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight; },[trace,pending]);
   React.useEffect(()=>()=>{ cancelled.current = true; if(resolver.current) resolver.current(false); },[]);
+  // while this panel is open, ERROR toasts land HERE (bottom of the modal, links
+  // clickable) instead of as a detached corner toast
+  const [errNotes, setErrNotes] = React.useState([]);
+  React.useEffect(()=>{
+    const prev = window.turnErrorSink;
+    window.turnErrorSink = (msg)=>{ setErrNotes(es=> es[es.length-1]===msg ? es : [...es, msg].slice(-3)); return true; };
+    return ()=>{ window.turnErrorSink = prev; };
+  },[]);
   // auto-run ONLY when launched with a prepared brief (New Story / Rebuild → the
   // Adaptation build): the model picker sat on the screen that prepared it. Every
   // other launch (all the Art Room tab buttons) opens READY — model picker live,
@@ -253,6 +270,12 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
         React.createElement("span",{className:"ai-typing"},React.createElement("i",null),React.createElement("i",null),React.createElement("i",null))),
       pending && React.createElement(ProposalCard,{card:pending,
         onApprove:()=>decide(true),onReject:()=>decide(false)})),
+
+    errNotes.length>0 && React.createElement("div",{className:"ag-errbar",role:"alert"},
+      React.createElement("span",{className:"ag-errbar-ic"},"⚠"),
+      React.createElement("div",{className:"ag-errbar-msgs"},
+        errNotes.map((m,i)=>React.createElement("div",{key:i,className:"ag-errbar-msg"}, _linkifyText(m)))),
+      React.createElement("button",{className:"ag-errbar-x",onClick:()=>setErrNotes([]),title:"Dismiss"},"✕")),
 
     React.createElement("div",{className:"ag-runner-foot"},
       status==="idle" && React.createElement("button",{className:"ag-run",onClick:start},

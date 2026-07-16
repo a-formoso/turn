@@ -1579,6 +1579,18 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
 .tr-note-tx{font-size:12px;line-height:1.45;color:var(--txt-1)}
 
 /* runner footer */
+/* in-modal error bar — provider/AI errors land here while the panel is open,
+   with any URLs clickable (billing consoles etc.) */
+.ag-errbar{display:flex;align-items:flex-start;gap:9px;margin:0 16px 0;padding:10px 12px;border-radius:10px;background:oklch(0.42 0.12 30 / .14);border:1px solid oklch(0.55 0.15 30 / .4);color:var(--alert);font-size:12.5px;line-height:1.45}
+html[data-theme="light"] .ag-errbar{background:oklch(0.62 0.16 30 / .1);border-color:oklch(0.55 0.17 30 / .35)}
+.ag-errbar-ic{flex:0 0 auto;opacity:.9}
+.ag-errbar-msgs{flex:1;min-width:0}
+.ag-errbar-msg{word-break:break-word}
+.ag-errbar-msg + .ag-errbar-msg{margin-top:5px;padding-top:5px;border-top:1px dashed oklch(0.55 0.15 30 / .3)}
+.ag-errbar-x{flex:0 0 auto;appearance:none;border:0;background:transparent;color:inherit;opacity:.6;cursor:pointer;font-size:12px;padding:0 2px}
+.ag-errbar-x:hover{opacity:1}
+.ag-errbar a,.ns-err a,.ag-step-t a,.turn-toast-msg a{color:inherit;text-decoration:underline;text-underline-offset:2px;word-break:break-all}
+.ag-errbar a:hover,.ns-err a:hover,.ag-step-t a:hover,.turn-toast-msg a:hover{opacity:.85}
 .ag-runner-foot{display:flex;gap:10px;padding:13px 16px;border-top:1px solid var(--line);justify-content:flex-end}
 .ag-run{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 18px;border-radius:9px;border:0;
   background:var(--pos);color:var(--ink-on-accent);font-family:var(--f-ui);font-size:13px;font-weight:600;cursor:pointer;transition:.12s}
