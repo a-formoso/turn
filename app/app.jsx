@@ -1261,18 +1261,20 @@ function App(){
   // continuity states for them. NON-DESTRUCTIVE by design: already-drafted or
   // hand-edited characters are never overwritten, so this is safe to auto-run.
   const draftAllVisuals = async ()=>{
-    if(draftingAllVisuals || !(typeof aiCastVisualBible==="function")) return;
+    if(draftingAllVisuals || !(typeof aiCastVisualBible==="function")) return false;
     const drafted = (typeof window.charVisualsDrafted==="function") ? window.charVisualsDrafted : (()=>true);
     const targets = characters.filter(c=> !drafted(c));
-    if(!targets.length) return;                 // nothing to do — don't fire AI
+    if(!targets.length) return true;            // nothing to do — that's a success
     const targetIds = targets.map(c=>c.id);
     setDraftingVisualIds(targetIds);
     setDraftingAllVisuals(true);
+    let landed = false;                          // did any spec actually land?
     try{
       const map = await aiCastVisualBible(targets, scenes, lbProject("characters"), { scenes, drafts });
       // merge ONLY the targeted (undrafted) characters — never touch the rest
       if(map){
         const allow = new Set(targetIds);
+        landed = targetIds.some(id=>map[id]);
         setCharacters(cs=>cs.map(c=> (allow.has(c.id) && map[c.id]) ? {...c, ...map[c.id]} : c));
       }
       // continuity (if applicable): add suggested appearance states, dedup by label, never remove
@@ -1297,6 +1299,7 @@ function App(){
       if(targets.length) markApplied("characters");
     }catch(e){}
     setDraftingAllVisuals(false);
+    return landed;
     setDraftingVisualIds([]);
   };
 
@@ -1497,13 +1500,19 @@ function App(){
   // silently fill the spec for any undrafted character so the user can go straight
   // to Props → generate → Characters → generate without a manual "Draft all" step.
   // Guarded so it only ever attempts once and never overwrites drafted/edited cards.
+  const _autoDraftTried = React.useRef(false);   // once per SESSION guard (never loops)
   React.useEffect(()=>{
     if(visualsSeeded || hydratingRef.current) return;
     if(room!=="art") return;
     if(!characters.length) return;                 // wait for hydration
-    setVisualsSeeded(true);                         // attempt once per story, then never again
+    if(_autoDraftTried.current) return;
+    _autoDraftTried.current = true;
     const drafted = (typeof window.charVisualsDrafted==="function") ? window.charVisualsDrafted : (()=>true);
-    if(characters.some(c=>!drafted(c))) draftAllVisuals();
+    if(!characters.some(c=>!drafted(c))){ setVisualsSeeded(true); return; }
+    // latch the per-story flag ONLY when specs actually landed — a failed attempt
+    // (model unreachable, cast mid-hydration after a rebuild) used to latch forever
+    // and strand the user on a wall of manual draft buttons
+    Promise.resolve(draftAllVisuals()).then((ok)=>{ if(ok) setVisualsSeeded(true); });
   },[room, visualsSeeded, characters, hydrationTick]);
   // map each prop to the scenes it appears in (worn -> owner presence, carried -> AI exact)
   const [taggingScenes, setTaggingScenes] = React.useState(false);

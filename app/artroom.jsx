@@ -3548,6 +3548,12 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
   // finish) — only THEN do we surface the manual "Draft" button; otherwise it's
   // noise. The cast is auto-drafted once on first Art Room entry.
   const someUndrafted = eligibleAll < list.length;
+  // STAGED HEADER (design-clarity ruling 2026-07-14): exactly ONE primary action
+  // per pipeline stage — draft (specs missing) → generate (specs done, sheets
+  // missing) → done. The other actions stay reachable but demoted to ghosts,
+  // and nothing renders as disabled orange noise.
+  const sheetedAll = (typeof nbGetImage==="function") ? list.filter(c=> !!nbGetImage(c.id)).length : 0;
+  const castStage = someUndrafted ? "draft" : (sheetedAll < list.length ? "generate" : "done");
   const startAllBatch = ()=>{
     if(batchActiveId) return;
     const eligible = draftedIds(list);
@@ -3610,13 +3616,15 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
           // NO hand-adding here (product rule 2026-07-13): the cast derives from the
           // STORY — new characters are added in the Writers' Room (Cast rail +) and
           // written into scenes; the Art Room designs what the story establishes.
-          onCast && React.createElement("button",{className:"art-draftall",disabled:!characters.length,onClick:onCast,
+          // ONE primary per stage: "Design the cast" leads while specs are missing,
+          // "Generate all" leads once everything is drafted; the rest are ghosts.
+          onCast && React.createElement("button",{className:"art-draftall"+(castStage==="draft"?"":" ghost"),disabled:!characters.length,onClick:onCast,
             title:"Casting Director — drafts each character's look, finds their appearance changes, and generates the master sheet + every state variant, on its own"},
             React.createElement(Icon.robot,{s:14}),"Design the cast"),
-          someUndrafted && React.createElement("button",{className:"art-draftall",disabled:draftingAll,onClick:onDraftAll,
-            title:"Draft the spec for any character that doesn't have one yet \u2014 identity, wardrobe, props & accessories, continuity and look dev (the master reference prompt builds from these)"},
-            React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":(eligibleAll>0?"Draft remaining":"Draft all characters")),
-          React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
+          someUndrafted && React.createElement("button",{className:"art-draftall ghost",disabled:draftingAll,onClick:onDraftAll,
+            title:"Draft the spec for any character that doesn't have one yet \u2014 identity, wardrobe, props & accessories, continuity and look dev (the master reference prompt builds from these). Specs only \u2014 no images; the manual alternative to Design the cast."},
+            React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":(eligibleAll>0?"Draft remaining":"Draft all (specs only)")),
+          castStage!=="draft" && React.createElement("button",{className:"art-draftall"+(castStage==="generate"?"":" ghost"),disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the reference sheet for every drafted character \u2014 you choose whether to redo ones that already have a sheet"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all characters", typeof window.nbCostChip==="function" && window.nbCostChip(1))))),
     list.length>0 && React.createElement("div",{className:"prop-toolbar"},
