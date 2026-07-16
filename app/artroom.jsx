@@ -3652,7 +3652,11 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
           sceneList.map(s=>{ const n=(charsInSceneMap[s.id]?charsInSceneMap[s.id].size:0);
             return React.createElement("option",{key:s.id,value:s.id},
               "Scene "+String(s.no).padStart(2,"0")+" · "+(s.title||"")+"  ("+n+" character"+(n!==1?"s":"")+")"); })),
-        sceneFilter && React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId,onClick:startSceneBatch,
+        // staged like the header: sheets render FROM drafted specs, so the scene
+        // batch button only appears once someone in the scene is drafted — before
+        // that it was a full-orange no-op (the hint line explains what to do first)
+        sceneFilter && (charsInSceneMap[sceneFilter] ? list.some(c=> charsInSceneMap[sceneFilter].has(c.id) && charVisualsDrafted(c)) : false)
+          && React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId,onClick:startSceneBatch,
           title:"Generate the reference sheets for the characters in this scene — you choose whether to redo ones that already have a sheet"},
           React.createElement(Icon.sparkles,{s:14}),
           batchActiveId?"Generating…":("Generate all in Scene "+String(sceneNoOf(sceneFilter)).padStart(2,"0")), typeof window.nbCostChip==="function" && window.nbCostChip(1)))),
