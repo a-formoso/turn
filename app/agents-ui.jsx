@@ -169,26 +169,28 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
 
   React.useEffect(()=>{ if(bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight; },[trace,pending]);
   React.useEffect(()=>()=>{ cancelled.current = true; if(resolver.current) resolver.current(false); },[]);
-  // auto-run once when launched ready: New Story passes a logline; an input-less agent
-  // (e.g. the Storyboard Director) auto-starts straight away.
-  React.useEffect(()=>{ if(autoStart && (!agent.needsInput || (initialInput||"").trim())){ const t=setTimeout(()=>start(),60); return ()=>clearTimeout(t); } },[]);
+  // auto-run ONLY when launched with a prepared brief (New Story / Rebuild → the
+  // Adaptation build): the model picker sat on the screen that prepared it. Every
+  // other launch (all the Art Room tab buttons) opens READY — model picker live,
+  // run starts on the user's press (user ruling 2026-07-16: never start a text
+  // generation without the chance to switch engines first).
+  React.useEffect(()=>{ if(autoStart && agent.needsInput && (initialInput||"").trim()){ const t=setTimeout(()=>start(),60); return ()=>clearTimeout(t); } },[]);
 
-  // ALL Writers' Room agents run on Claude; ART agents (Visual Researcher, Casting
-  // Director…) get a live model PICKER in the header — synced with the drafting picker.
+  // EVERY agent gets the live model PICKER in its header — pre-set to the app's
+  // recommendation for its kind of work (story prose vs structured specs), locked
+  // while running. The run is pinned to whatever the picker shows.
   const isArt = agent.room === "art";
   const _MODELS = window.WRITING_MODELS || [];
-  const [artMid, setArtMid] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId("specs") : "");
-  const _rec = (window.recommendedWritingModelId && window.recommendedWritingModelId("specs")) || "";
-  const pickArtModel = (id)=>{ setArtMid(id); if(typeof window.setWritingModelId==="function") window.setWritingModelId(id); };
-  // Writers' Room agents run on the user's SELECTED writing model (not a hardcoded
-  // one) — so picking Fable 5 in New Story actually runs Fable 5, not Opus 4.8.
-  const _mid = isArt ? artMid : ((window.getWritingModelId && window.getWritingModelId("story")) || "claude-fable-5");
-  const modelLabel = (_MODELS.find(m=>m.id===_mid)||{}).label || _mid || "model";
+  const _task = isArt ? "specs" : "story";
+  const [_mid0, setMid0] = React.useState(()=> (typeof window.getWritingModelId==="function") ? window.getWritingModelId(isArt?"specs":"story") : "");
+  const _rec = (window.recommendedWritingModelId && window.recommendedWritingModelId(_task)) || "";
+  const pickArtModel = (id)=>{ setMid0(id); if(typeof window.setWritingModelId==="function") window.setWritingModelId(id); };
+  const _mid = _mid0 || "claude-fable-5";
   const start = async ()=>{
     cancelled.current = false;
     setTrace([]); setPending(null); setStatus("running");
     const prevForce = window.__forceWritingModel;
-    if(!isArt) window.__forceWritingModel = _mid;   // pin the run to the user's chosen writing model
+    window.__forceWritingModel = _mid;   // pin the run to exactly what the header shows
     const ctx = ctxFactory({
       input: inputRef.current,
       agentName: agent.name,
@@ -223,12 +225,10 @@ function AgentRunner({ agent, ctxFactory, onClose, onView, onBack, initialInput,
       React.createElement("span",{className:"ag-runner-ic"},React.createElement(AgentIcon,{name:agent.icon,s:16})),
       React.createElement("div",{className:"ag-runner-t"},
         React.createElement("div",{className:"ag-runner-name"},agent.name,
-          isArt
-            ? React.createElement("select",{className:"ag-runner-model ag-runner-model-sel",disabled:running,
-                title:running?"Finishes this run on the current model — switch between runs":"Model running this agent — pick before you start",
-                value:_mid,onChange:(e)=>pickArtModel(e.target.value)},
-                _MODELS.map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label + (m.id===_rec ? "  · recommended" : ""))))
-            : React.createElement("span",{className:"ag-runner-model",title:"Model running this agent"}, modelLabel)),
+          React.createElement("select",{className:"ag-runner-model ag-runner-model-sel",disabled:running,
+              title:running?"Finishes this run on the current model — switch between runs":"Model running this agent — pick before you start",
+              value:_mid,onChange:(e)=>pickArtModel(e.target.value)},
+              _MODELS.map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label + (m.id===_rec ? "  · recommended" : ""))))),
         React.createElement("div",{className:"ag-runner-sub"},
           status==="idle"?"Ready":status==="done"?"Finished":status==="waiting"?"Awaiting your approval":"Working\u2026")),
       React.createElement("button",{className:"ag-x",onClick:onClose,title:"Close"},React.createElement(Icon.x,{s:16}))),
