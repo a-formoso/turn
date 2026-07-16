@@ -772,11 +772,33 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   const effMap = React.useMemo(()=>{
     const m = {};
     if(typeof scenesWhereCharacterAppears!=="function") return m;
+    // does THIS scene's script/summary actually name the object? (head noun, or a
+    // meaningful word of its name — 4+ letters so "of"/"the" never match)
+    const namesIt = (p, s)=>{
+      const hay = (((typeof window.sceneScriptText==="function") ? window.sceneScriptText(s.id, drafts) : "")
+        +" "+(s.summary||"")).toLowerCase();
+      if(!hay.trim()) return false;
+      const head = propHeadNoun(p.name);
+      if(head && hay.indexOf(head)>=0) return true;
+      return String(p.name||"").toLowerCase().split(/[^a-z0-9]+/)
+        .filter(w=>w.length>=4).some(w=> hay.indexOf(w)>=0);
+    };
     list.forEach(p=>{
       if(Array.isArray(p.scenes)) return;
       if(!(p.ownerId || p.ownerName)) return;
-      const ids = scenesWhereCharacterAppears(p.ownerId, p.ownerName, scenes, drafts) || [];
-      if(ids.length) m[p.id] = ids;
+      // WORN: the owner's presence IS the prop's presence (it's on their body).
+      // CARRIED: owner presence only OVER-counts (a briefcase isn't in every scene
+      // its owner walks through — that once ballooned one scene's count to 36 of 43
+      // props); an unmapped carried object is pinned to the scenes that actually
+      // NAME it, and stays out of scene focus entirely if none do — "Re-map scenes"
+      // / "Design all props" stores the AI-narrowed map.
+      if((p.kind||"carried")==="worn"){
+        const ids = scenesWhereCharacterAppears(p.ownerId, p.ownerName, scenes, drafts) || [];
+        if(ids.length) m[p.id] = ids;
+      } else {
+        const ids = (scenes||[]).filter(s=>namesIt(p,s)).map(s=>s.id);
+        if(ids.length) m[p.id] = ids;
+      }
     });
     return m;
   },[list, scenes, drafts]);

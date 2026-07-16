@@ -2548,6 +2548,7 @@ function scenesWhereCharacterAppears(ownerId, ownerName, scenes, drafts){
   return out;
 }
 window.scenesWhereCharacterAppears = scenesWhereCharacterAppears;
+window.sceneScriptText = sceneScriptText;
 
 async function aiPropScenes(props, scenes, drafts, characters){
   if(!props || !props.length || !scenes || !scenes.length) return null;
