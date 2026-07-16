@@ -2395,12 +2395,38 @@ function CopyBox({ label, text }){
     }
     setCopied(true); setTimeout(()=>setCopied(false), 1400);
   };
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(()=>{
+    if(!open) return;
+    const h=(e)=>{ if(e.key==="Escape") setOpen(false); };
+    document.addEventListener("keydown",h);
+    return ()=>document.removeEventListener("keydown",h);
+  },[open]);
+  const chars = String(text||"").length;
   return React.createElement("div",{className:"copybox"},
     React.createElement("div",{className:"copybox-head"},
       React.createElement("span",{className:"copybox-lab"},label),
-      React.createElement("button",{className:"copybox-btn",onClick:copy},
-        React.createElement(Icon[copied?"check":"copy"]||Icon.check,{s:12}), copied?"Copied":"Copy")),
-    React.createElement("div",{className:"copybox-text"},text));
+      React.createElement("div",{className:"copybox-actions"},
+        React.createElement("button",{className:"copybox-btn",onClick:()=>setOpen(true),
+          title:"Preview the full prompt in a larger window"},
+          React.createElement(Icon.maximize||Icon.eye,{s:12}), "Preview"),
+        React.createElement("button",{className:"copybox-btn",onClick:copy},
+          React.createElement(Icon[copied?"check":"copy"]||Icon.check,{s:12}), copied?"Copied":"Copy"))),
+    React.createElement("div",{className:"copybox-text",onClick:()=>setOpen(true),
+      title:"Click to preview the full prompt"},text),
+    open && ReactDOM.createPortal(
+      React.createElement("div",{className:"bible-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) setOpen(false); }},
+        React.createElement("div",{className:"copybox-modal"},
+          React.createElement("div",{className:"copybox-modal-head"},
+            React.createElement("span",{className:"copybox-modal-lab"},label),
+            React.createElement("span",{className:"copybox-modal-count"}, chars.toLocaleString()+" characters"),
+            React.createElement("button",{className:"copybox-btn",onClick:copy},
+              React.createElement(Icon[copied?"check":"copy"]||Icon.check,{s:13}), copied?"Copied":"Copy prompt"),
+            React.createElement("button",{className:"copybox-modal-x",onClick:()=>setOpen(false),title:"Close (Esc)"},
+              React.createElement(Icon.x,{s:16}))),
+          React.createElement("div",{className:"copybox-modal-body"},text))),
+      document.body)
+  );
 }
 
 /* drop a dangling, mid-word fragment left by an older hard-truncation (e.g.

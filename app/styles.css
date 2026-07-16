@@ -3619,8 +3619,19 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .copybox-btn{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:var(--pos);
   font-family:var(--f-ui);font-size:11px;font-weight:600;cursor:pointer;padding:2px 4px;border-radius:5px}
 .copybox-btn:hover{background:var(--pos-soft)}
+.copybox-actions{display:inline-flex;align-items:center;gap:2px}
 .copybox-text{padding:9px 11px;font-family:var(--f-mono);font-size:11px;line-height:1.55;color:var(--txt-1);
-  white-space:pre-wrap;max-height:130px;overflow-y:auto}
+  white-space:pre-wrap;max-height:130px;overflow-y:auto;cursor:zoom-in}
+/* full-prompt preview modal (opens from the copybox Preview button or clicking the text) */
+.copybox-modal{width:min(760px,94vw);max-height:86vh;display:flex;flex-direction:column;
+  background:var(--bg-1);border:1px solid var(--line-2);border-radius:14px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+.copybox-modal-head{display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line)}
+.copybox-modal-lab{font-family:var(--f-mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--txt-2);flex:1;min-width:0}
+.copybox-modal-count{font-family:var(--f-mono);font-size:10px;color:var(--txt-3);white-space:nowrap}
+.copybox-modal-x{display:inline-flex;border:0;background:transparent;color:var(--txt-3);cursor:pointer;padding:3px;border-radius:6px}
+.copybox-modal-x:hover{background:var(--bg-3);color:var(--txt-1)}
+.copybox-modal-body{padding:16px 18px;overflow-y:auto;white-space:pre-wrap;
+  font-family:var(--f-mono);font-size:12.5px;line-height:1.62;color:var(--txt-1)}
 
 .art-soon{flex:1;min-height:60vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
   text-align:center;padding:40px}
