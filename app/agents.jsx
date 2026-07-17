@@ -1759,6 +1759,15 @@ async function agentConsistency(ctx){
       bible.props.filter(p=>p.kind==="worn" && p.ownerId).forEach(p=>{
         const hits = sceneShots.filter(sh=> _consMentions(String(sh.action||"")+" "+String(sh.composition||""), p) && (sh.subjects||[]).indexOf(p.ownerId)<0);
         if(hits.length){ flags++; ctx.emit({k:"flag", t:"Sc "+scene.no+" · "+hits.length+" shot"+(hits.length===1?"":"s")+" describe \""+p.name+"\" without its owner "+(p.ownerName||"its owner")+" in frame — the item may be rendered on the wrong character; re-draft or edit those shots."}); }
+        // a CLOSE-UP featuring a worn item, with no macro sheet generated: the frame
+        // will invent the item's design at magnification (the owner sheet's few pixels
+        // can't hold it). Report-only — generating spends credits, so it's the user's call.
+        const tight = sceneShots.filter(sh=> /^(CU|MCU|ECU|INSERT)$/i.test(String(sh.size||""))
+          && _consMentions(String(sh.action||"")+" "+String(sh.composition||""), p));
+        if(tight.length){
+          let hasSheet=false; try{ hasSheet = !!(typeof nbGetImage==="function" && nbGetImage(p.id)); }catch(e){}
+          if(!hasSheet){ flags++; ctx.emit({k:"flag", t:"Sc "+scene.no+" · a close-up features \""+p.name+"\" but it has no macro sheet — at CU size the frame will re-invent its design. Generate one on its prop card (built against "+(p.ownerName||"its owner")+"'s sheet) so tight shots lock the item."}); }
+        }
       });
     }
 

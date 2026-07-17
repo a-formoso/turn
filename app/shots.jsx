@@ -427,7 +427,17 @@ function propPhysicalScaleLabel(p){
    Used by buildShotPrompt (image-map labels), collectShotRefs and generateShotFrame
    (real attachments) — all three MUST apply it identically or labels mislabel files. */
 function shotPropAttachable(p, sh){
-  if(!p || p.kind!=="dressing") return true;
+  if(!p) return false;
+  // WORN items: the owner's character sheet is their canon in wides/mediums (they
+  // ride as TEXT there). An optional per-card CLOSE-UP sheet attaches ONLY when the
+  // item reads large (CU/MCU/ECU/INSERT) AND that sheet has actually been generated.
+  // Existence is checked on the SYNC cache so the prompt's numbered image map and
+  // the async attach paths always agree (cold cache = consistently skipped).
+  if(p.kind==="worn"){
+    if(!/^(CU|MCU|ECU|INSERT)$/i.test(String((sh&&sh.size)||""))) return false;
+    try{ return !!(typeof nbGetImage==="function" && nbGetImage(p.id)); }catch(e){ return false; }
+  }
+  if(p.kind!=="dressing") return true;
   // SHELL GUARD (before the tight-shot rule): never attach an object's EXTERIOR sheet
   // to a shot filmed INSIDE it — when the scene's location is marked "Interior of"
   // this prop, the plate is canon (an exterior reference would invite the generator
@@ -768,11 +778,12 @@ function buildShotPrompt(sh, ctx){
   // ATTACHED prop sheets (the image-map entries): dressing sheets ride only on tight
   // shots / when the object is the action's subject — wides trust the plate. The SCALE
   // clauses below still see propsAll: an in-plate fixture stays scale-constrained.
-  // WORN items never have their own sheet (they render ON the owner's character
-  // sheet) — so they must NEVER be numbered as attached images: that produced
-  // prompts naming "Image 5..13" with only 4 files attached. They ride as TEXT.
-  const wornProps = propsAll.filter(p=>p.kind==="worn");
-  const props    = propsAll.filter(p=>p.kind!=="worn" && shotPropAttachable(p, sh));
+  // WORN items ride as TEXT by default (their canon is the owner's character sheet
+  // — numbering them once produced prompts naming "Image 5..13" with 4 files
+  // attached). EXCEPTION: a worn item with a generated CLOSE-UP sheet on a tight
+  // shot IS attached — shotPropAttachable owns that rule for prompt + attach alike.
+  const wornProps = propsAll.filter(p=> p.kind==="worn" && !shotPropAttachable(p, sh));
+  const props    = propsAll.filter(p=> shotPropAttachable(p, sh));
   const size = sizeOf(sh.size), angle = angleOf(sh.angle), move = moveOf(sh.move), lens = lensOf(sh.lens);
   const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
 
@@ -979,7 +990,7 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   const castSpec = inCast.map(id=>{ const c=(ctx.charById||{})[id]; return c?{ id, note:c.name+" character sheet" }:null; }).filter(Boolean);
   // same dressing gate as buildShotPrompt/collectShotRefs — labels must match files
   const propSpec = inPr.map(id=>{ const p=(ctx.propById||{})[id];
-    if(!p || p.kind==="worn" || !shotPropAttachable(p, sh)) return null;   // worn ride the owner's sheet
+    if(!p || !shotPropAttachable(p, sh)) return null;   // worn attach only on tight shots WITH a generated close-up sheet
     return { id, note:p.name+" prop sheet" }; }).filter(Boolean);
   const carrySpec= carried.map(id=>{ const p=(ctx.propById||{})[id]; return p?{ id, note:p.name+" prop sheet (carried over from an earlier beat)" }:null; }).filter(Boolean);
   const orderedSpecs = (locWeight==="ambient")

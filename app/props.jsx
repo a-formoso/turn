@@ -588,11 +588,11 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
       // plate), so the separate "Upload a finished sheet" button is intentionally omitted.
       dropToImport:true,
       specGate:{ ready:(drafted || !p.manual), hint:"Draft the design spec first \u2014 form & material are what the sheet is built from." },
-      // WORN items: the character sheet is their canon \u2014 no separate sheet generation
-      // (a standalone render would just create a second, conflicting design)
-      generateDisabled: p.kind==="worn",
-      generateDisabledLabel: "Rendered on "+(p.ownerName||"the owner")+"'s sheet",
-      generateDisabledTitle: "Worn items render ON the character's sheet \u2014 that image is their canon. A separate prop sheet would re-imagine the item and conflict with it. To adjust the design, edit the spec here (it feeds the character prompt) and regenerate "+(p.ownerName||"the owner")+"'s sheet.",
+      // WORN items: the character sheet stays their default canon (wides/mediums).
+      // A separate CLOSE-UP macro sheet is OPTIONAL, generated per-card on demand
+      // against the OWNER's sheet (so the designs agree); it attaches to shots only
+      // at CU/MCU/ECU/INSERT sizes where the item reads large. Batch generation
+      // still skips worn items.
       onDelete:()=>onDelete(p.id), deleteLabel:"Delete prop" }),
     React.createElement("div",{className:"sheet-body"},
       React.createElement("div",{className:"sheet-head"},
@@ -610,9 +610,9 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
               ? (" \u00b7 "+(((typeof propHomeLocation==="function") && (propHomeLocation(p)||{}).name) || "no location yet"))
               : (p.ownerName ? (" \u00b7 "+p.ownerName) : " \u00b7 unassigned")),
           p.kind==="worn" && React.createElement("div",{className:"prop-worn-note",
-            title:"Worn items are baked into "+(p.ownerName||"the owner")+"'s character-sheet prompt (with this card's form & material) and rendered there \u2014 they don't need a separate sheet. Only carried props get their own. Keep this spec accurate; it feeds the character prompt."},
+            title:"Worn items are baked into "+(p.ownerName||"the owner")+"'s character-sheet prompt (with this card's form & material) and rendered there \u2014 that stays the canon for wide and medium shots. Generate here ONLY if this item gets a CLOSE-UP: the macro sheet is built against "+(p.ownerName||"the owner")+"'s sheet so the two designs agree, and it attaches to CU/MCU/ECU/INSERT shots where the item reads large. Batch buttons still skip worn items \u2014 this is per-card, on demand."},
             React.createElement(Icon.sparkles,{s:11}),
-            React.createElement("span",null,"Rendered on ",React.createElement("b",null,p.ownerName||"the character"),"'s sheet \u2014 no separate sheet needed")),
+            React.createElement("span",null,"Rendered on ",React.createElement("b",null,p.ownerName||"the character"),"'s sheet \u2014 generate a separate macro sheet only for CLOSE-UPS")),
           p.kind==="dressing" && React.createElement("div",{className:"prop-worn-note",
             title:"Two ways to place this fixture into its location's plate: open the plate's Edit panel and click this fixture's Set-dressing chip (inserts an edit instruction built from this card's spec), or \u2014 once this sheet is generated \u2014 use the chip's attach button to ALSO ride this sheet along as a reference image, locking the exact design."},
             React.createElement(Icon.sparkles,{s:11}),
