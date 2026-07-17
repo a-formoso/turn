@@ -430,7 +430,7 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 .char-row:hover{background:var(--bg-2)}
 .char-av{
   width:26px;height:26px;border-radius:7px;flex:0 0 26px;display:grid;place-items:center;
-  font-family:var(--f-display);font-weight:600;font-size:11px;color:var(--txt-0);
+  font-family:var(--f-display);font-weight:600;font-size:11px;color:#fff;
   border:1px solid var(--line-2);
 }
 .char-info{flex:1;min-width:0}
