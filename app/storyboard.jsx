@@ -756,6 +756,8 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
     /* saved halves — the Stage's video-gen hand-off, managed in place: view, restore
        the previous saved version, or delete. Stale halves (cut from an older sheet
        version) say so and point at the ⋮ menu's re-save. */
+    gen.genUrl && window.QaCheckButton && _sbEl("div",{className:"card-qa-row sb-qa-row"},
+      _sbEl(window.QaCheckButton,{ gen, name:name, noun:"storyboard sheet" })),
     (halves.top||halves.bottom) && _sbEl("div",{className:"sb-halves"},
       _sbEl("button",{className:"sb-halves-head",onClick:()=>setHalvesOpen(o=>!o),
         "aria-expanded":halvesOpen?"true":"false",

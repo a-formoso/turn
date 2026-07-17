@@ -377,7 +377,9 @@ function LocationVariant({ l, v, project, onTime, onRemove, onView }){
       React.createElement("button",{className:"loc-variant-x",title:"Remove variant",onClick:onRemove},React.createElement(Icon.x,{s:12}))),
     React.createElement(SheetFrame,{ gen, slotId:"locvar-"+l.id+"-"+v.id, name:(l.name||"")+" \u00b7 "+v.time,
       avatarColor:locSwatch(l.intExt), initials:(v.time||"?").slice(0,2).toUpperCase(), drafted:true, drafting:false,
-      entity:l, onView, slotPlaceholder:"Drop a photo", noun:"variant", compact:true }));
+      entity:l, onView, slotPlaceholder:"Drop a photo", noun:"variant", compact:true }),
+    gen.genUrl && window.QaCheckButton && React.createElement("div",{className:"card-qa-row"},
+      React.createElement(window.QaCheckButton,{ gen, name:(l.name||"")+" \u00b7 "+v.time, noun:"time-of-day plate" })));
 }
 
 function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingIds, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, onSetWorldScale }){

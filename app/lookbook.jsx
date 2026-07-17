@@ -239,6 +239,11 @@ function LookbookCard({ c, project, onUpdate, onDelete, onView, batchActiveId, o
             React.createElement(EditText,{value:c.source,placeholder:"Reference — film, cinematographer, palette…",onCommit:val=>onUpdate(c.id,{source:val})})),
           React.createElement("div",{className:"sheet-role"}, c.category||"Palette"))),
 
+      gen.genUrl && window.QaCheckButton && React.createElement("div",{className:"card-qa-row"},
+        React.createElement(window.QaCheckButton,{ gen, name:c.source||"Reference", noun:"mood frame",
+          specFields:()=>({ category:(c.category||""), note:(c.note||"") }),
+          onApplySpec:(patch)=>onUpdate(c.id, patch) })),
+
       !drafted && !gen.genUrl && React.createElement("div",{className:"sheet-undrafted"},
         React.createElement(Icon.alert,{s:13}),
         React.createElement("span",null,"No ‘what to borrow’ note yet — add one below, then generate its mood frame.")),
