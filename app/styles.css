@@ -3804,6 +3804,26 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 
 /* ---- mobile content reflow (<=640px) ---- */
 @media (max-width:640px){
+  /* SCRIPT: the page grid really stacks — the old rule set flex-direction on
+     .sp-seg, but .sp-seg is display:contents (the columns live on .script-body's
+     grid), so the script column stayed squeezed to half a phone. One column now:
+     each beat's gutter renders as a header strip above its script text. */
+  .script-body{grid-template-columns:1fr}
+
+  /* ART ROOM toolbars: rows wrap, selects never run off the right edge */
+  .art-intro-row{flex-wrap:wrap;gap:10px}
+  .art-intro-actions{flex-wrap:wrap;justify-content:flex-start}
+  .prop-toolbar{flex-wrap:wrap}
+  .prop-scenebar{flex-wrap:wrap}
+  .prop-scenebar-select{flex:1 1 100%;min-width:0;max-width:100%}
+  .kind-filterbar{height:auto;min-height:42px;flex-wrap:wrap;white-space:normal;padding:6px 11px;row-gap:6px}
+  .prop-toolbar > .kind-filterbar{height:auto}
+  .char-style-all{max-width:100%;flex-wrap:wrap;height:auto;min-height:36px;padding:6px 11px}
+
+  /* the floating model dock (GPT · 16:9 · 2K) sat mid-screen over card
+     actions on a phone — drop it to the lower right, clear of the MUSE fab */
+  .nb-dock{top:auto;bottom:150px;transform:none;right:10px}
+
   .canvas-head{padding:12px 14px 0}
   .canvas-title{font-size:14px}
   .canvas-sub{font-size:10px}
