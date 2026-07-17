@@ -299,7 +299,9 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
               : "Approve this frame as the seed the next shot chains from.",
             onClick:()=>onUpdate(sh.id,{ locked: !sh.locked })},
             _el(Icon.check,{s:11}), _el("span",null, sh.locked?"Approved":"Approve")),
-          window.QaCheckButton && _el(window.QaCheckButton,{ gen, name:beatLabel, noun:"shot frame", className:"shot-lock-btn" }))),
+          window.QaCheckButton && _el(window.QaCheckButton,{ gen, name:beatLabel, noun:"shot frame", className:"shot-lock-btn",
+            specFields:()=>({ action:(sh.action||""), composition:(sh.composition||"") }),
+            onApplySpec:(patch)=>onUpdate(sh.id, patch) }))),
 
       // the SCRIPT BEAT this shot covers — straight from the scene's beat map, so the
       // shot's source text is on the card (read-only; edit beats in the Writers' Room)

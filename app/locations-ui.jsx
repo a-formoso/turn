@@ -226,7 +226,9 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
         React.createElement("div",{className:"sheet-head-actions"},
           React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(l)},
             React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft details"),
-          window.QaCheckButton && React.createElement(window.QaCheckButton,{ gen, name:l.name, noun:"location plate" }))),
+          window.QaCheckButton && React.createElement(window.QaCheckButton,{ gen, name:l.name, noun:"location plate",
+            specFields:()=>({ architecture:(l.architecture||""), materials:(l.materials||""), lighting:(l.lighting||"") }),
+            onApplySpec:(patch)=>onUpdate(l.id, patch) }))),
 
       React.createElement("div",{className:"char-style-row"},
         React.createElement("span",{className:"char-style-lab"},"Render style"),

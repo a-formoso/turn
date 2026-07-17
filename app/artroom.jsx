@@ -1027,6 +1027,20 @@ function buildCharRefPrompt(c, project, props){
   const _rulesBase = (_rb.rules||[]).map(r=> /no text/i.test(r) ? _noTextRule : r);
   const _negItems = String(c.negativePrompt || v.negativePrompt || "").split(/,\s*/).map(x=>x.replace(/\.$/,"").trim()).filter(Boolean);
   const _rules = _negItems.length ? [ ..._rulesBase, "strictly avoid: "+_negItems.join(", ") ] : _rulesBase;
+  // HELD MOBILITY / SIGNATURE SUPPORT ITEM (cane-class): if the spec's own text
+  // describes one, it must be IN HAND on the sheet — the hardcoded "both hands
+  // empty" used to contradict it and the generator obeyed the explicit hands
+  // field (the Winston Palmer no-cane QA case). Detection reads only what the
+  // spec already says, so nothing is ever invented.
+  const _HELD_RX = /\b(cane|walking stick|walking-stick|crutch(?:es)?|staff|walker|zimmer frame|walking frame)\b/i;
+  const _heldSrc = [accAll.join("; "), clean(mask), clean(body), clean(F.build), clean(F.arms)].filter(Boolean).join(" · ");
+  const _heldM = _heldSrc.match(_HELD_RX);
+  let _heldItem = "";
+  if(_heldM){
+    const kw = _heldM[0].toLowerCase();
+    const fromList = accAll.find(it=> String(it).toLowerCase().indexOf(kw)>=0);
+    _heldItem = fromList ? String(fromList).split("(")[0].trim() : _heldM[0];
+  }
   const spec = {
     task: "character casting reference sheet",
     character: {
@@ -1043,13 +1057,15 @@ function buildCharRefPrompt(c, project, props){
     wardrobe: {
       wearing: clean(mask)||undefined,
       accessories: accAll.length ? accAll.join("; ") : undefined,
-      hands: "both hands empty and relaxed at sides",
+      hands: _heldItem
+        ? ("one hand closed around the "+_heldItem+" with weight settled naturally onto it — in EVERY full-body view; the other hand empty and relaxed at side")
+        : "both hands empty and relaxed at sides",
     },
     layout: {
       format: "a 4-panel casting reference sheet in 16:9 landscape: four tall vertical panels divided by thin clean vertical lines; the first panel is wider and contains a large hero portrait, the other three panels contain full-body turnaround views; the SAME character throughout",
       panels_left_to_right: [
         "PANEL 1 — large close-up hero FACE PORTRAIT, front-facing, neutral controlled expression, shoulders/chest crop, face fills most of the panel, exact identity anchor",
-        "PANEL 2 — full-body FRONT view, head-to-toe, facing camera, arms relaxed at sides, clean silhouette",
+        "PANEL 2 — full-body FRONT view, head-to-toe, facing camera, "+(_heldItem?("one hand on the "+_heldItem+", the other relaxed at side"):"arms relaxed at sides")+", clean silhouette",
         "PANEL 3 — full-body THREE-QUARTER FRONT view, head-to-toe, turned about 45 degrees, same wardrobe and proportions",
         "PANEL 4 — full-body BACK view, head-to-toe, facing away, same wardrobe and proportions"
       ],
@@ -1862,8 +1878,29 @@ function _qaWhereChips(where){
   if(parts.length>1 && parts.every(p=>p.length>2 && !/^\d+$/.test(p))) return parts;
   return [parts.join(", ")].filter(Boolean);
 }
-function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen }){
+function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, specFields, onApplySpec }){
   const r = report;
+  const [applying, setApplying] = React.useState(false);
+  // "Apply to spec": fold the prompt advice into the card's own drafted fields —
+  // one writing-model call, previewed via confirm; regenerating stays manual.
+  const applyAdvice = async ()=>{
+    if(applying || !r.promptFix || typeof window.aiApplyQaAdvice!=="function" || !specFields || !onApplySpec) return;
+    setApplying(true);
+    let patch = null;
+    try{ patch = await window.aiApplyQaAdvice(noun, specFields(), r.promptFix); }catch(e){}
+    setApplying(false);
+    if(!patch){ if(typeof window.appToast==="function") window.appToast("Nothing to change — the spec already covers the advice (or the writing model is unavailable).","info"); return; }
+    const summary = Object.keys(patch).map(k=> k.toUpperCase()+" → "+patch[k].slice(0,90)+(patch[k].length>90?"…":"")).join("\n");
+    let ok = true;
+    if(typeof window.appConfirm==="function")
+      ok = await window.appConfirm({ title:"Apply the advice to "+(name||"this card")+"'s spec?",
+        body:"These field(s) will be updated — the image is untouched until you Regenerate:\n\n"+summary,
+        confirmLabel:"Apply to spec", cancelLabel:"Cancel" });
+    if(!ok) return;
+    onApplySpec(patch);
+    if(typeof window.appToast==="function") window.appToast("Spec updated — Regenerate the "+(noun||"sheet")+" when ready (that spends an image credit).","success");
+    onClose();
+  };
   const sev = r.verdict==="pass" ? "pass" : r.verdict==="major" ? "major" : "minor";
   const clean = r.deviations.length===0 && r.inventions.length===0;
   const finding = (d,i,invented)=> React.createElement("div",{key:i,className:"qa-item"},
@@ -1906,9 +1943,14 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen }){
         React.createElement("div",{className:"qa-quote edit"},r.editInstruction)),
       r.promptFix && React.createElement("div",{className:"qa-sec"},
         React.createElement("div",{className:"qa-sec-lab",
-          title:"This amends the WRITTEN SPEC, not the image: fold it into the card's Draft-details fields (lighting, staging, materials…), then Regenerate the sheet. It is not an Edit instruction — for a quick image fix, use Edit / Edit a panel with a direct instruction instead."},
-          "Prompt advice — fold into the card's spec, then Regenerate (not an Edit instruction)"),
-        React.createElement("div",{className:"qa-quote"},r.promptFix)),
+          title:"This amends the WRITTEN SPEC, not the image: Apply to spec folds it into the card's drafted fields for you, then Regenerate the sheet. It is not an Edit instruction — for a quick image fix, use Run suggested edit instead."},
+          "Prompt advice — amends the card's spec (not an Edit instruction)"),
+        React.createElement("div",{className:"qa-quote"},r.promptFix),
+        (specFields && onApplySpec) && React.createElement("button",{className:"ns-btn ghost qa-apply-btn",disabled:applying,
+          title:"Fold this advice into the card's drafted spec fields — one writing-model call, previewed before it applies; the image is untouched until you Regenerate",
+          onClick:applyAdvice},
+          applying ? React.createElement("span",{className:"ns-spin"}) : React.createElement(Icon.sparkles,{s:12}),
+          applying ? "Folding into the spec…" : "Apply to spec")),
       React.createElement("div",{className:"qa-foot"},
         React.createElement("span",{className:"qa-foot-note"},"1 vision read · no image credits spent"),
         React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Close"),
@@ -1925,7 +1967,7 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen }){
 /* ---- QA button — lives on the card face next to "Draft details" (chars, props,
    locations) and in the shot head row. Self-contained: busy state, the vision
    read, and the report modal. Hidden until the card has a generated image. */
-function QaCheckButton({ gen, name, noun, className }){
+function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec }){
   const [busy, setBusy] = React.useState(false);
   const [report, setReport] = React.useState(null);
   if(!gen || !gen.genUrl) return null;
@@ -1954,6 +1996,7 @@ function QaCheckButton({ gen, name, noun, className }){
       busy ? React.createElement("span",{className:"ns-spin"}) : React.createElement(Icon.eye,{s:12}),
       busy ? "QA…" : "QA check"),
     report && ReactDOM.createPortal(React.createElement(QaReport,{ name, noun, report, gening:gen.gening,
+      specFields, onApplySpec,
       onClose:()=>setReport(null),
       onRunEdit:(instr)=>gen.generate({ editInstruction:instr }),
       onRegen:()=>gen.generate() }), document.body));
@@ -2897,7 +2940,13 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
               React.createElement(Icon.mic,{s:12}), "Voice"),
             React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(c)},
               React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft details"),
-            React.createElement(QaCheckButton,{ gen, name:c.name, noun:"character sheet" }))),
+            React.createElement(QaCheckButton,{ gen, name:c.name, noun:"character sheet",
+              specFields:()=>({ body:(c.coreBody||""), wardrobe:(c.wardrobeMask||c.wardrobe||""), accessories:(c.accessories||"") }),
+              onApplySpec:(patch)=>{ const up={};
+                if(patch.body!=null) up.coreBody=patch.body;
+                if(patch.wardrobe!=null){ if((c.wardrobeMask||"").trim()) up.wardrobeMask=patch.wardrobe; else up.wardrobe=patch.wardrobe; }
+                if(patch.accessories!=null) up.accessories=patch.accessories;
+                onUpdate(c.id, up); } }))),
         React.createElement("div",{className:"sheet-role-block"+(roleOpen?" open":"")},
           React.createElement("button",{className:"role-toggle",onClick:()=>setRoleOpen(o=>!o),
             title:roleOpen?"Collapse":"Expand role details"},
