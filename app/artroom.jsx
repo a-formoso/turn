@@ -1893,12 +1893,12 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
     const summary = Object.keys(patch).map(k=> k.toUpperCase()+" → "+patch[k].slice(0,90)+(patch[k].length>90?"…":"")).join("\n");
     let ok = true;
     if(typeof window.appConfirm==="function")
-      ok = await window.appConfirm({ title:"Apply the advice to "+(name||"this card")+"'s spec?",
-        body:"These field(s) will be updated — the image is untouched until you Regenerate:\n\n"+summary,
-        confirmLabel:"Apply to spec", cancelLabel:"Cancel" });
+      ok = await window.appConfirm({ title:"Apply the advice and regenerate?",
+        body:"These field(s) update, then the "+(noun||"sheet")+" REGENERATES immediately from the new spec (1 image generation) — so the sheet on the card always matches its spec. The current image stays in version history; restoring it later also restores its own prompt on the card.\n\n"+summary,
+        confirmLabel:"Apply & regenerate", cancelLabel:"Cancel" });
     if(!ok) return;
     onApplySpec(patch);
-    if(typeof window.appToast==="function") window.appToast("Spec updated — Regenerate the "+(noun||"sheet")+" when ready (that spends an image credit).","success");
+    if(typeof window.appToast==="function") window.appToast("Spec updated — regenerating the "+(noun||"sheet")+" now; the previous version stays in history.","success");
     onClose();
   };
   const sev = r.verdict==="pass" ? "pass" : r.verdict==="major" ? "major" : "minor";
@@ -1946,11 +1946,11 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
           title:"This amends the WRITTEN SPEC, not the image: Apply to spec folds it into the card's drafted fields for you, then Regenerate the sheet. It is not an Edit instruction — for a quick image fix, use Run suggested edit instead."},
           "Prompt advice — amends the card's spec (not an Edit instruction)"),
         React.createElement("div",{className:"qa-quote"},r.promptFix),
-        (specFields && onApplySpec) && React.createElement("button",{className:"ns-btn ghost qa-apply-btn",disabled:applying,
-          title:"Fold this advice into the card's drafted spec fields — one writing-model call, previewed before it applies; the image is untouched until you Regenerate",
+        (specFields && onApplySpec) && React.createElement("button",{className:"ns-btn ghost qa-apply-btn",disabled:applying||gening,
+          title:"Fold this advice into the card's drafted spec fields (one writing-model call, previewed first), then REGENERATE immediately so the sheet always matches its spec — the current image stays in version history",
           onClick:applyAdvice},
           applying ? React.createElement("span",{className:"ns-spin"}) : React.createElement(Icon.sparkles,{s:12}),
-          applying ? "Folding into the spec…" : "Apply to spec")),
+          applying ? "Folding into the spec…" : "Apply to spec & regenerate")),
       React.createElement("div",{className:"qa-foot"},
         React.createElement("span",{className:"qa-foot-note"},"1 vision read · no image credits spent"),
         React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Close"),
@@ -1970,6 +1970,16 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
 function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec }){
   const [busy, setBusy] = React.useState(false);
   const [report, setReport] = React.useState(null);
+  // Apply-to-spec REGENERATES immediately (user ruling 2026-07-18: the current sheet
+  // must always match the spec). The regen fires from an EFFECT one render later, so
+  // gen.generate() closes over the UPDATED entity — calling it synchronously would
+  // rebuild the prompt from the stale pre-patch spec and regenerate the old look.
+  const [pendingRegen, setPendingRegen] = React.useState(false);
+  React.useEffect(()=>{
+    if(!pendingRegen) return;
+    setPendingRegen(false);
+    gen.generate();
+  },[pendingRegen]);
   if(!gen || !gen.genUrl) return null;
   const run = async ()=>{
     if(busy || gen.gening) return;
@@ -1996,7 +2006,8 @@ function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec }){
       busy ? React.createElement("span",{className:"ns-spin"}) : React.createElement(Icon.eye,{s:12}),
       busy ? "QA…" : "QA check"),
     report && ReactDOM.createPortal(React.createElement(QaReport,{ name, noun, report, gening:gen.gening,
-      specFields, onApplySpec,
+      specFields,
+      onApplySpec: onApplySpec ? (patch)=>{ onApplySpec(patch); setPendingRegen(true); } : undefined,
       onClose:()=>setReport(null),
       onRunEdit:(instr)=>gen.generate({ editInstruction:instr }),
       onRegen:()=>gen.generate() }), document.body));
@@ -3177,7 +3188,15 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
         React.createElement(CopyBox,{label:"4-panel casting sheet \u2014 feed to your image tool",text:promptText}),
         React.createElement(SheetField,{label:"Negative prompt \u2014 exclude",value:c.negativePrompt||v.negativePrompt,multiline:true,
           onCommit:val=>onUpdate(c.id,{negativePrompt:val})}),
-        React.createElement(CopyBox,{label:"Final prompt \u2014 master + negative (sent to Nano Banana)",text:finalPrompt})),
+        // the FINAL box always holds the prompt that generated the CURRENT sheet
+        // (stored per version, so restoring an older version restores its prompt
+        // here too); before any sheet exists it previews the next generation.
+        React.createElement(CopyBox,{label:(gen.genUrl && gen.genMeta && gen.genMeta.prompt)
+            ? "Final prompt \u2014 generated the CURRENT sheet" : "Final prompt \u2014 master + negative (sent at generation)",
+          text:(gen.genUrl && gen.genMeta && gen.genMeta.prompt) || finalPrompt}),
+        (gen.genUrl && gen.genMeta && gen.genMeta.prompt && gen.genMeta.prompt!==finalPrompt) &&
+          React.createElement("div",{className:"prompt-drift-note"},
+            "The spec has changed since this sheet was generated \u2014 Regenerate to bring the sheet back in step with it.")),
 
       cameoOpen && React.createElement(CameoModal,{ character:c,
         onClose:()=>setCameoOpen(false),

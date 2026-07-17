@@ -288,7 +288,12 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
           placeholder:"photoreal architectural cinematography, wide lens, natural light\u2026",onCommit:val=>onUpdate(l.id,{renderStyle:val})})),
 
       React.createElement(CardFold,{label:"Final prompt",defaultOpen:false},
-        React.createElement(CopyBox,{label:"Final prompt \u2014 sent to the image model",text:finalPrompt}),
+        React.createElement(CopyBox,{label:(gen.genUrl && gen.genMeta && gen.genMeta.prompt)
+            ? "Final prompt \u2014 generated the CURRENT plate" : "Final prompt \u2014 sent to the image model",
+          text:(gen.genUrl && gen.genMeta && gen.genMeta.prompt) || finalPrompt}),
+        (gen.genUrl && gen.genMeta && gen.genMeta.prompt && gen.genMeta.prompt!==finalPrompt) &&
+          React.createElement("div",{className:"prompt-drift-note"},
+            "The spec has changed since this plate was generated \u2014 Regenerate to bring it back in step."),
         React.createElement(SheetField,{label:"Negative prompt \u2014 exclude",value:l.negativePrompt||d.negativePrompt,multiline:true,
           onCommit:val=>onUpdate(l.id,{negativePrompt:val})}))));
 }

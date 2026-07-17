@@ -720,7 +720,12 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
         React.createElement(CopyBox,{label:"Turnaround sheet (front/side/back + detail column) \u2014 feed to your image tool",text:buildPropRefPrompt(p,project)}),
         React.createElement(SheetField,{label:"Negative prompt \u2014 exclude",value:p.negativePrompt||d.negativePrompt,multiline:true,
           onCommit:val=>onUpdate(p.id,{negativePrompt:val})}),
-        React.createElement(CopyBox,{label:"Final prompt \u2014 master + negative (sent to Nano Banana)",text:finalPrompt}))));
+        React.createElement(CopyBox,{label:(genForFrame.genUrl && genForFrame.genMeta && genForFrame.genMeta.prompt)
+            ? "Final prompt \u2014 generated the CURRENT sheet" : "Final prompt \u2014 master + negative (sent at generation)",
+          text:(genForFrame.genUrl && genForFrame.genMeta && genForFrame.genMeta.prompt) || finalPrompt}),
+        (genForFrame.genUrl && genForFrame.genMeta && genForFrame.genMeta.prompt && genForFrame.genMeta.prompt!==finalPrompt) &&
+          React.createElement("div",{className:"prompt-drift-note"},
+            "The spec has changed since this sheet was generated \u2014 Regenerate to bring the sheet back in step with it."))));
 }
 
 function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingIds, draftingAll, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId, onMergeProps, onPropsMaster, trashItems, onRestore, onPurge, onEnsureOwner, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
