@@ -1739,6 +1739,73 @@ async function agentConsistency(ctx){
       }
     }
 
+    /* 4b — WARDROBE DRIFT: a garment the script puts ON a character ("slides the
+       knife back into his apron pocket") that the sheet's wardrobe doesn't carry —
+       the sheet then renders the scene's continuity home missing. Deterministic:
+       possessive + garment lexicon, attributed to the nearest PRECEDING cast name
+       whose gender matches the possessive (the explicit-pronoun house rule makes
+       that reliable). Approval appends the garment to the wardrobe field(s);
+       regenerating the sheet stays the user's call (credits). */
+    {
+      const GARMENT_RX = /\b(his|her)\s+(?:[a-z][a-z-]*\s+){0,2}?(apron|hood|scarf|glove|gloves|mittens?|cap|hat|beanie|coat|overcoat|jacket|vest|waistcoat|boots|helmet|uniform|veil|cardigan|jumper|sweater|hoodie|overalls?|robe|cloak|gown|belt|sash|shawl|balaclava)\b/gi;
+      // name forms per cast member: full name + tokens UNIQUE to them (a shared
+      // family name must never claim the garment — the surname-safe rule)
+      const _tok = (n)=>String(n||"").toLowerCase().split(/[^a-z0-9]+/).filter(w=>w.length>=3);
+      const _tokCount = {}; cast.forEach(c=> Array.from(new Set(_tok(c.name))).forEach(w=>{ _tokCount[w]=(_tokCount[w]||0)+1; }));
+      const _forms = (c)=>{ const full=String(c.name||"").toLowerCase().trim();
+        return Array.from(new Set([full, ..._tok(full).filter(w=>_tokCount[w]===1)])).filter(Boolean); };
+      const lowText = scriptText.toLowerCase();
+      const seenWd = new Set();
+      let m2;
+      GARMENT_RX.lastIndex = 0;
+      while((m2 = GARMENT_RX.exec(scriptText))){
+        const wantG = m2[1].toLowerCase()==="his" ? "m" : "f";
+        const garment = m2[2].toLowerCase();
+        // nearest preceding cast name with the matching gender
+        let best = null;
+        cast.forEach(c=>{
+          if(!c.g || c.g!==wantG) return;
+          _forms(c).forEach(nm=>{
+            let from = 0, at = -1;
+            while(true){ const i = lowText.indexOf(nm, from); if(i<0 || i>=m2.index) break; at = i; from = i+1; }
+            if(at>=0 && (!best || at>best.at)) best = { at, c };
+          });
+        });
+        if(!best) continue;
+        const ch = ctx.model.characters.find(x=>x.id===best.c.id);
+        if(!ch) continue;
+        const stem = garment.replace(/s$/,"");
+        const key = ch.id+"#"+stem;
+        if(seenWd.has(key)) continue; seenWd.add(key);
+        const have = ((ch.wardrobe||"")+" "+(ch.wardrobeMask||"")+" "+(ch.accessories||"")+" "+(ch.look||"")).toLowerCase();
+        if(have.indexOf(stem)>=0) continue;
+        if(cards>=MAX_CARDS) break;
+        cards++;
+        const excerpt = scriptText.slice(Math.max(0,m2.index-60), m2.index+m2[0].length+20).trim();
+        const ok = await ctx.propose({
+          title:"Wardrobe drift — "+ch.name+" has no "+stem,
+          reason:"Sc "+scene.no+" puts a "+stem+" on "+ch.name+" (\u201c\u2026"+excerpt.slice(0,110)+"\u2026\u201d) but their sheet's wardrobe doesn't carry one — the sheet renders the script's continuity home missing.",
+          rationale:"Approve to append \u201ca worn "+stem+"\u201d to "+ch.name+"'s wardrobe so every future sheet and shot includes it. Regenerate the sheet when ready (not done automatically — it spends credits). Reject if the "+stem+" is scene-specific — then add it as an APPEARANCE STATE on the card instead.",
+          before:(ch.wardrobeMask||ch.wardrobe||"(no wardrobe yet)").slice(0,90),
+          after:"+ a worn "+stem });
+        if(ctx.cancelled()) return;
+        if(ok){
+          const add = ", a worn "+stem;
+          const i = ctx.model.characters.findIndex(x=>x.id===ch.id);
+          if(i>=0){
+            const cur = ctx.model.characters[i];
+            const patch = {};
+            if((cur.wardrobe||"").trim()) patch.wardrobe = cur.wardrobe.replace(/\.?\s*$/,"") + add;
+            else patch.wardrobe = "a worn "+stem;
+            if((cur.wardrobeMask||"").trim()) patch.wardrobeMask = cur.wardrobeMask.replace(/\.?\s*$/,"") + add;
+            ctx.model.characters[i] = { ...cur, ...patch };
+            ctx.sync(); fixes++;
+            ctx.emit({k:"ok", t:ch.name+"'s wardrobe now carries the "+stem+" — regenerate their sheet to see it."});
+          }
+        }
+      }
+    }
+
     /* 5 — SHOTS vs the script: the scene-3 stale-coverage bug. A shot's subjects come
        from who its action text names, so coverage drafted against an OLD script can
        silently drop a character, keep dead dialogue, or dress the wrong body. */
