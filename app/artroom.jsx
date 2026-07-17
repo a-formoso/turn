@@ -3423,6 +3423,11 @@ window.remasterInstruction = remasterInstruction;
 
 function ImageLightbox({ url, character, onClose }){
   const [res, setRes] = React.useState(()=> (typeof nbGetRes==="function") ? nbGetRes() : "2K");
+  // the VIEWED version's real size — the picker must follow the image, not the
+  // global generation setting (a 4K sheet was opening on "2K" and silently
+  // downloading downscaled). Stored meta wins; older sheets/uploads without a
+  // stored size get measured off the pixels.
+  const [nativeRes, setNativeRes] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   // VERSION STRIP — when the viewed entity has earlier sheet versions, a filmstrip
   // under the image navigates them (click a thumb, ‹ › buttons, or arrow keys).
@@ -3434,6 +3439,20 @@ function ImageLightbox({ url, character, onClose }){
   // Remaster button, which is only offered on versions produced by an Apply-edit
   const [metaByUrl, setMetaByUrl] = React.useState({});
   React.useEffect(()=>{ setCur(url); },[url]);
+  React.useEffect(()=>{
+    const label = (px)=> px>=3000 ? "4K" : px>=1600 ? "2K" : "1K";
+    const m = metaByUrl[cur];
+    if(m && m.size && (window.NB_RESOLUTIONS||["1K","2K","4K"]).indexOf(m.size)>=0){
+      setNativeRes(m.size); setRes(m.size); return;
+    }
+    let alive = true;
+    const img = new Image();
+    img.onload = ()=>{ if(!alive) return;
+      const l = label(Math.max(img.naturalWidth||0, img.naturalHeight||0));
+      setNativeRes(l); setRes(l); };
+    img.src = cur;
+    return ()=>{ alive = false; };
+  },[cur, metaByUrl]);
   React.useEffect(()=>{
     let alive = true;
     (async()=>{
@@ -3518,8 +3537,14 @@ function ImageLightbox({ url, character, onClose }){
             React.createElement(Icon.sparkles,{s:13}),"Remaster this version"),
         React.createElement("span",{className:"lb-foot-lab"},"Download"),
         React.createElement("div",{className:"nb-seg"},
-          resolutions.map(r=>React.createElement("button",{key:r,className:"nb-seg-btn "+(res===r?"on":""),
-            onClick:()=>setRes(r)},r))),
+          resolutions.map(r=>{
+            const ord = { "1K":1, "2K":2, "4K":3 };
+            const over = !!(nativeRes && ord[r] > ord[nativeRes]);
+            return React.createElement("button",{key:r,className:"nb-seg-btn "+(res===r?"on":""),
+              disabled:over,
+              title: over ? ("This image is "+nativeRes+" — downloads never upscale") : ("Download at "+r),
+              onClick:()=>setRes(r)},r);
+          })),
         React.createElement("button",{className:"lb-dl",onClick:download,disabled:busy},
           busy?React.createElement(React.Fragment,null,React.createElement("span",{className:"ns-spin dark"}),"Preparing\u2026")
               :React.createElement(React.Fragment,null,React.createElement(Icon.download,{s:14}),"Download "+res)))));
