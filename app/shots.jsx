@@ -849,6 +849,14 @@ function buildShotPrompt(sh, ctx){
   if(_scale) stage.push(_scale);
   const _objectScale = (typeof shotObjectScaleClause==="function") ? shotObjectScaleClause(subjects, [...propsAll, ...((ctx.carriedForward)||[])], loc) : "";
   if(_objectScale) stage.push(_objectScale);
+  // WHO IS IN FRAME — EXCLUSIVE: name the count so an attached reference face with
+  // no staged action can never become an invented extra figure. Skipped when the
+  // action itself stages unnamed people (a crowd, punters, customers).
+  const _crowdRx = /\b(crowd|crowds|punters?|customers?|bystanders?|passers|pedestrians?|queue|onlookers?|mob|patrons?|strangers?|extras)\b/i;
+  if(subjects.length && !_crowdRx.test(String(sh.action||"")+" "+String(sh.composition||""))){
+    stage.push("Exactly "+subjects.length+" "+(subjects.length===1?"person":"people")+" in frame — ONLY "
+      + subjects.map(c=>c.name).join(" and ")+"; no bystanders, no extras, no additional figures");
+  }
   // FIRST-FRAME BIAS: this still seeds the beat's VIDEO clip, so stage its opening
   // instant, not its peak — and never freeze a mouth mid-vowel (bad start frame,
   // bad lip-sync anchor; the audio drives the mouth once the clip moves).
@@ -1073,14 +1081,23 @@ window.deriveShotsHeuristic = deriveShotsHeuristic;
 function scanTextForChars(text, characters){
   const t = " "+String(text||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ")+" ";
   const ids = [];
+  const tokensOf = (name)=> String(name||"").toLowerCase().trim()
+    .split(/[^a-z0-9]+/).filter(w=> w.length>=3 && !/^[0-9]+$/.test(w));
+  // a token SHARED by 2+ cast members (a family name like KARAHAN) is AMBIGUOUS —
+  // "ADEM KARAHAN hauls the shutter" must never pull REECE KARAHAN into frame via
+  // the surname (that attached a third face and the generator invented a third man).
+  const tokCount = {};
+  (characters||[]).forEach(c=> Array.from(new Set(tokensOf(c.name))).forEach(w=>{ tokCount[w]=(tokCount[w]||0)+1; }));
   (characters||[]).forEach(c=>{
     const full = (c.name||"").toLowerCase().trim();
     if(!full) return;
     // split on ANY non-alphanumeric (not just whitespace) so a hyphenated/serial name like
     // "VANYA-71" yields the human token "vanya" — otherwise the whole "vanya-71" token never
     // matches the script's "Vanya" and the character is silently dropped from the frame.
-    const parts = full.split(/[^a-z0-9]+/).filter(w=> w.length>=3 && !/^[0-9]+$/.test(w));
-    const names = Array.from(new Set([full.replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ").trim(), ...parts])).filter(Boolean);
+    const parts = tokensOf(full).filter(w=> tokCount[w]===1);
+    const fullNorm = full.replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ").trim();
+    // the FULL name always matches (unambiguous even when every token is shared)
+    const names = Array.from(new Set([fullNorm, ...parts])).filter(Boolean);
     if(names.some(nm=> t.indexOf(" "+nm+" ")>=0)){ if(ids.indexOf(c.id)<0) ids.push(c.id); }
   });
   return ids;
