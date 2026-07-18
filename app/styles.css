@@ -5651,6 +5651,12 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .qa-rec-lab{font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-2);flex-shrink:0}
 .qa-rec-verb{font-size:12.5px;font-weight:600;color:var(--txt-0)}
 .qa-apply-btn{margin-top:8px;display:inline-flex;align-items:center;gap:6px}
+.linked-prop-gen{display:inline-flex;align-items:center;gap:4px;flex:0 0 auto;margin-left:6px;
+  padding:2px 8px;border-radius:6px;border:1px solid var(--line-2);background:var(--bg-2);
+  color:var(--txt-1);font-family:var(--f-ui);font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.linked-prop-gen:hover{border-color:var(--pos);color:var(--pos)}
+.linked-prop-gen:disabled{opacity:.5;cursor:default}
+.linked-prop-gen .ns-spin{width:10px;height:10px}
 .card-qa-row{display:flex;justify-content:flex-start;margin:2px 0 6px}
 .sb-qa-row{padding:0 2px;margin-top:6px}
 .prompt-drift-note{margin-top:6px;padding:7px 10px;border-radius:8px;font-size:11px;line-height:1.45;

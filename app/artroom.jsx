@@ -2625,7 +2625,7 @@ function StateRow({ c, st, index, project, scenes, props, baseGenUrl, onView, on
         scenes.map(s=>React.createElement("option",{key:s.id,value:s.id},"Sc "+s.no+" \u00b7 "+s.title)))));
 }
 
-function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, onDraft, drafting, onView, onSuggestStates, suggestingStates, onRemoveOwnedItem, onRenameOwnedItem, batchActiveId, onBatchDone, onDelete }){
+function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, onDraft, drafting, onView, onSuggestStates, suggestingStates, onRemoveOwnedItem, onRenameOwnedItem, onDraftProp, batchActiveId, onBatchDone, onDelete }){
   const drivenScenes = scenes.filter(s=>s.driver===c.id);
   const driven = drivenScenes.length;
   // ALL scenes this character appears in (drives OR is named in the script/summary), not
@@ -2733,6 +2733,9 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
   /* which owned props currently have a generated sheet (for the linked-props indicator) */
   const [ownedSheetMap, setOwnedSheetMap] = React.useState({});
   const [sheetTick, setSheetTick] = React.useState(0);   // bump to re-check sheet presence
+  // inline per-row prop generation (user ruling 2026-07-18: generate a linked prop's
+  // sheet right from the character card — no Props-tab hop). kind: "draft"|"gen".
+  const [propBusy, setPropBusy] = React.useState(null);   // {id, kind}
   const [prepProps, setPrepProps] = React.useState(null);   // {done,total,name} while generating props inline
   const preparingRef = React.useRef(false);
   React.useEffect(()=>{
@@ -3147,6 +3150,48 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
                 React.createElement("span",{className:"linked-prop-name"},row.name),
                 row.orphan && React.createElement("span",{className:"linked-prop-orphan-tag",
                   title:"Not in the worn/carried lists above \u2014 likely a leftover. Use \u201cRemove orphaned\u201d to clean up."},"not listed"),
+                // INLINE generation — the sheet is built against THIS character's own
+                // sheet (the owner reference), so it must exist first. Undrafted props
+                // draft first (separate press: the fresh fields must land in state
+                // before the image prompt is built from them).
+                (row.prop && !row.orphan) && (()=>{
+                  const pr = row.prop;
+                  const busy = propBusy && propBusy.id===pr.id;
+                  const pDrafted = (typeof propVisualsDrafted==="function") ? propVisualsDrafted(pr) : true;
+                  const lab = busy ? (propBusy.kind==="draft"?"Drafting\u2026":"Generating\u2026")
+                    : (!pDrafted ? "Draft details" : (ready ? "Regenerate" : "Generate"));
+                  return React.createElement("button",{className:"linked-prop-gen"+(busy?" busy":""),
+                    disabled: !!propBusy,
+                    title: !pDrafted
+                      ? "Write this prop's design spec (object, form & material) from the script \u2014 then Generate its sheet. Writing-model credits only."
+                      : (!gen.genUrl
+                        ? "Generate "+(c.name||"the character")+"'s sheet first \u2014 this prop references it so the design matches their look."
+                        : (carried
+                          ? "Generate this prop's reference sheet against "+(c.name||"the owner")+"'s sheet \u2014 it then attaches automatically at the shot level."
+                          : "Generate an optional CLOSE-UP macro sheet against "+(c.name||"the owner")+"'s sheet \u2014 used only on CU/MCU/ECU/INSERT shots; wides keep rendering it from the character sheet.")),
+                    onClick: async (e)=>{
+                      e.stopPropagation();
+                      if(propBusy) return;
+                      if(!pDrafted){
+                        if(!onDraftProp){ if(typeof window.appToast==="function") window.appToast("Draft this prop in the Props tab first.","info"); return; }
+                        setPropBusy({id:pr.id, kind:"draft"});
+                        try{ await onDraftProp(pr); }catch(err){}
+                        setPropBusy(null);
+                        return;   // fields land in state \u2014 the button now reads "Generate"
+                      }
+                      if(!gen.genUrl){ if(typeof window.appToast==="function") window.appToast("Generate "+(c.name||"the character")+"'s sheet first \u2014 the prop references it to match their look.","info"); return; }
+                      setPropBusy({id:pr.id, kind:"gen"});
+                      try{
+                        await window.generatePropSheet(pr, project);
+                        if(typeof window.appToast==="function") window.appToast("\u201c"+(pr.name||"Prop")+"\u201d sheet generated \u2014 "+(carried?"it now attaches at the shot level.":"tight shots can now lock its design."),"success");
+                      }catch(err){ if(typeof window.appToast==="function") window.appToast(String((err&&err.message)||"Prop generation failed."),"error"); }
+                      setPropBusy(null);
+                      setSheetTick(t=>t+1);
+                    }},
+                    busy ? React.createElement("span",{className:"ns-spin"}) : React.createElement(Icon.sparkles,{s:11}),
+                    lab,
+                    (pDrafted && !busy && typeof window.nbCostChip==="function") ? window.nbCostChip(1) : null);
+                })(),
                 React.createElement("span",{className:"linked-prop-status"},status));
             })))),
 
@@ -3624,7 +3669,7 @@ function ImageLightbox({ url, character, onClose }){
               :React.createElement(React.Fragment,null,React.createElement(Icon.download,{s:14}),"Download "+res)))));
 }
 
-function CharacterSheets({ project, characters, scenes, props, drafts, shots, beatsMap, onUpdate, onDraft, onDraftAll, draftingId, draftingAll, draftingIds, onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onAdd, onDelete, onCast, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
+function CharacterSheets({ project, characters, scenes, props, drafts, shots, beatsMap, onUpdate, onDraft, onDraftAll, draftingId, draftingAll, draftingIds, onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onDraftProp, onAdd, onDelete, onCast, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
   const [view, setView] = React.useState(null);   // {url, character}
   if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   // which characters actually speak (have dialogue) — used to flag the per-card Voice control
@@ -3812,7 +3857,7 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
       charPager.slice(shown).map(c=>React.createElement(CharacterSheet,{key:c.id,c,project,scenes,props,drafts,speaks:speakingSet.has(c.id),onUpdate,onDraft,
         drafting:draftingId===c.id||(draftingIds||[]).indexOf(c.id)>=0,onView:(url,ch)=>setView({url,character:ch}),
         batchActiveId,onBatchDone:batch.advance,onDelete:onDelete,
-        onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem,onRenameOwnedItem}))),
+        onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem,onRenameOwnedItem,onDraftProp}))),
     React.createElement(PagerBar,{pager:charPager,noun:"character"}),
     window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{items:trashItems,kind:"character",onRestore,onPurge}));
 }
@@ -4021,6 +4066,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
           onUpdate:onUpdateLookbook,onAdd:onAddLookbook,onDelete:onDeleteLookbook,onSetNote:onSetLookbookNote,onResearch,onClear:onClearLookbook})
     : artView==="characters"
       ? React.createElement(CharacterSheets,{project,characters,scenes,props,drafts,shots,beatsMap,onUpdate:onUpdateChar,
+          onDraftProp,
           onDraft:onDraftVisuals,onDraftAll:onDraftAllVisuals,draftingId:draftingVisualId,draftingAll:draftingAllVisuals,draftingIds:draftingVisualIds,
           trashItems:(trash&&trash.characters)||[],onRestore:onRestoreChar,onPurge:onPurgeChar,
           onSuggestStates,suggestingStatesId,onRemoveOwnedItem,onRenameOwnedItem,onAdd:onAddCharacter,onDelete:onDeleteCharacter,onCast,
