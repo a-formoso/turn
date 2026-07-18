@@ -782,6 +782,7 @@ const APP_FEATURES = [
   { name:"Argues (controlling idea, Inspector)", what:"every scene argues one side of the film's controlling idea. The Inspector's Scene tab has an 'Argues' control — Idea / Counter-idea / Neither — derived automatically from the closing charge (a positive close asserts the idea, a negative close the counter-idea) with a per-scene manual override (click your choice again to return to auto). The Story Doctor audits this: 4+ consecutive scenes arguing the same side gets flagged as a one-sided stretch ('a sermon, not an argument') and it proposes flipping the middle scene of the run for your approval. This makes the controlling idea operational, not decorative." },
   { name:"Script view", what:"each scene's screenplay, generated from its beats; the left gutter shows every beat and anchors it to the actual stored screenplay text for that beat, including a concise script excerpt and a visible missing-text state if a mapped beat has no screenplay block. The page follows shooting-script conventions: the scene number flanks the slugline in both margins, a speaker returning after intervening action gets (CONT'D) automatically, and transition lines (CUT TO:, FADE OUT.) are detected and set right. You can EDIT the screenplay directly: an 'Edit' button (pencil) in the script toolbar turns every block — slugline, action, character cue, parenthetical, dialogue, transition — into an editable line you type straight into; changes save when you click away from a block ('Done editing' leaves edit mode). Each edit is committed as a new version, so the Undo / Redo buttons step back and forth through your manual edits (and MUSE drafts/polishes) on one shared history." },
   { name:"Draft with MUSE", what:"drafts the ONE selected scene only. If that scene has no beats yet, it first authors the whole scene (title, description, value charge, beats) and then writes its script." },
+  { name:"Human truth (Cast panel)", what:"every character carries a HUMAN TRUTH — the one observation about human nature they embody, a DISTINCT stance on the film's controlling idea, grounded in behaviour the script shows — plus an ARGUES selector (The idea / The counter-idea / Complicates both). The cast is the argument's JURY: the protagonist prosecutes the idea through change, others hold opposing or complicating stances, and that difference is what makes dialogue unswappable. Both fields sit on the Cast panel under Desire; the character 'Draft with MUSE' button and the story build's cast-psychology pass draft them automatically (script-grounded — the truth must fit what the character actually DOES). The FREE Consistency Check audits the ARGUMENT MAP: it flags scene-driving characters with no human truth, and a unanimous jury (3+ stanced characters all arguing the same side)." },
   { name:"Auto-draft all (N left)", what:"drafts EVERY still-undrafted scene in order, threading continuity scene-to-scene. The (N left) counts scenes with no draft yet. Same engine as Draft with MUSE, just batched." },
   { name:"Redraft script from beats", what:"the ONE rebuild lever for a scene's screenplay, living in the Script view's toolbar (formerly 'Polish with MUSE' / 'Re-polish'; a duplicate in the Beats tab was removed). The scene's prose is rewritten fresh from its CURRENT beat cards (the old prose is never read \u2014 beats are the source), a CENTERED full-screen progress card shows while MUSE works, and the outgoing draft lands in version history so Undo restores it. Reshape the beats first to reshape the scene; press it on an untouched scene simply to elevate the structural draft into final prose. DRIVER RECAST: changing a scene's DRIVER (the Scene tab dropdown) syncs the Beats tab's labels instantly, and \u2014 because prose can't follow a dropdown \u2014 OFFERS to recast the scene's subtext for the new driver (a confirm, then MUSE rewrites the summary, objective, desire, antagonism and every beat's drive side for the new character, same beat count and escalation; a centered progress card shows while it runs). Review the recast beats, then 'Redraft script from beats' rebuilds the screenplay to match. Declining the recast keeps all text as it was." },
   { name:"Undo / Redo (version history)", what:"every draft, polish AND manual edit is kept on one linear per-scene history; the Undo / Redo buttons in the script toolbar move between those versions (so you can undo a manual screenplay edit just like reverting a MUSE polish). The button tooltips name the version each step lands on (e.g. 'Manual edit', 'MUSE polish', 'Original draft')." },
@@ -1849,16 +1850,21 @@ async function aiDraftCharacter(character, drivenScenes, project, canon){
     "Conscious desire = what they consciously pursue (the goal that drives their scenes). "+
     "Unconscious desire = the deeper, often contradictory need they may not admit. "+
     "Arc = their inner transformation in 3\u20135 words (e.g. \u201cDoubt \u2192 belief \u2192 self-realization\u201d), reflecting how their value charges turn across the scenes above. "+
+    "humanTruth = the ONE observation about HUMAN NATURE this character embodies \u2014 a distinct stance on the controlling idea, GROUNDED in behaviour the screenplay actually shows (cite no scene numbers, just distil the behaviour); one sentence, specific, no platitudes. "+
+    "argues = which side of the controlling idea that stance lands on: \"idea\", \"counter\", or \"complicates\" (it genuinely cuts both ways).\n"+
     "Keep each concise and specific to THIS story \u2014 no generic screenwriting platitudes.\n"+
-    'Return ONLY JSON: {"conscious":"one sentence","unconscious":"one sentence","arc":"3-5 word arc"}.';
+    'Return ONLY JSON: {"conscious":"one sentence","unconscious":"one sentence","arc":"3-5 word arc","humanTruth":"one sentence","argues":"idea|counter|complicates"}.';
   try{
     const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
     const j = extractJSON(res);
     if(!j) return null;
+    const _side = /^(idea|counter|complicates)$/.test(String(j.argues||"").toLowerCase().trim()) ? String(j.argues).toLowerCase().trim() : "";
     return {
       conscious: clipWords(scrubBrand((j.conscious||"").toString()),160),
       unconscious: clipWords(scrubBrand((j.unconscious||"").toString()),160),
       arc: clipWords(scrubBrand((j.arc||"").toString()),60),
+      humanTruth: clipWords(scrubBrand((j.humanTruth||"").toString()),180),
+      ...( _side ? { argues:_side } : {} ),
     };
   }catch(e){ return null; }
 }
@@ -1884,8 +1890,10 @@ async function aiCastPsychology(characters, scenes, project){
       "conscious = what they consciously pursue (the goal driving their scenes), one sentence. "+
       "unconscious = the deeper, often contradictory need they may not admit, one sentence. "+
       "arc = inner transformation in 3-5 words reflecting how their charges turn. "+
+      "humanTruth = the ONE observation about human nature this character embodies \u2014 a DISTINCT stance on the controlling idea (no two characters the same stance; even minor cast get one), one sentence grounded in their behaviour. "+
+      "argues = which side that stance lands on: \"idea\", \"counter\", or \"complicates\". Across the cast the stances should form an ARGUMENT MAP \u2014 not a unanimous jury. "+
       "Specific to THIS story, no platitudes.\n"+
-      'Return ONLY compact JSON: {"cast":[{"id":"...","conscious":"...","unconscious":"...","arc":"..."}]}';
+      'Return ONLY compact JSON: {"cast":[{"id":"...","conscious":"...","unconscious":"...","arc":"...","humanTruth":"...","argues":"idea|counter|complicates"}]}';
     try{
       const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
       const j = extractJSON(res);
@@ -1896,6 +1904,8 @@ async function aiCastPsychology(characters, scenes, project){
       const part = {};
       arr.forEach((e,i)=>{ const id = idOf(e.id) || (chars[i] && chars[i].id);
         if(id) part[id] = {
+          ...( /^(idea|counter|complicates)$/.test(String(e.argues||"").toLowerCase().trim()) ? { argues:String(e.argues).toLowerCase().trim() } : {} ),
+          humanTruth: scrubBrand((e.humanTruth||"").toString()).slice(0,180),
           conscious: scrubBrand((e.conscious||"").toString()).slice(0,160),
           unconscious: scrubBrand((e.unconscious||"").toString()).slice(0,160),
           arc: scrubBrand((e.arc||"").toString()).slice(0,60),

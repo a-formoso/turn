@@ -1849,6 +1849,23 @@ async function agentConsistency(ctx){
     if(!sceneIssues.length && !pronounBlocks.length) ctx.emit({k:"observe", t:"Scene "+scene.no+" — checked."});
   }
 
+  /* CAST ARGUMENT MAP — every scene-driving character should embody a HUMAN TRUTH
+     (a distinct stance on the controlling idea); a cast where only the lead argues
+     something produces swappable dialogue and function-only characters. Free check
+     on the authored fields; "Draft with MUSE" (Cast panel) fills them. */
+  {
+    const _cast = ctx.model.characters||[];
+    const _drivers = new Set((ctx.model.scenes||[]).map(s=>s.driver).filter(Boolean));
+    const significant = _cast.filter(c=> _drivers.has(c.id));
+    const missing = significant.filter(c=> !String(c.humanTruth||"").trim());
+    if(missing.length){ flags++; ctx.emit({k:"flag",
+      t: missing.length+" scene-driving character"+(missing.length===1?"":"s")+" ("+missing.slice(0,4).map(c=>c.name).join(", ")+(missing.length>4?"\u2026":"")+") "+(missing.length===1?"carries":"carry")+" no HUMAN TRUTH \u2014 each significant character should embody a distinct stance on the controlling idea (Cast panel \u25b8 Human truth; \u201cDraft with MUSE\u201d writes it)."}); }
+    const stanced = _cast.filter(c=> String(c.humanTruth||"").trim() && c.argues);
+    const sides = new Set(stanced.map(c=>c.argues));
+    if(stanced.length>=3 && sides.size===1){ flags++; ctx.emit({k:"flag",
+      t:"Every stanced character argues the SAME side of the controlling idea (\u201c"+[...sides][0]+"\u201d) \u2014 a unanimous jury makes no argument. Give at least one character the opposing stance, or one that complicates both."}); }
+  }
+
   /* prop spec truncation + missing sizes — film-wide, one summary flag each */
   const cut = bible.props.filter(p=> _consTruncated(p.form)||_consTruncated(p.material));
   if(cut.length){ flags++; ctx.emit({k:"flag", t:cut.length+" prop spec"+(cut.length===1?"":"s")+" end mid-sentence ("+cut.slice(0,4).map(p=>p.name).join(", ")+(cut.length>4?"…":"")+") — re-draft the card or finish the line."}); }

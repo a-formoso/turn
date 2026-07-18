@@ -85,7 +85,24 @@ function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJump
         React.createElement("div",{className:"char-field"},
           React.createElement("div",{className:"obj-lab"},"Unconscious need"),
           React.createElement(EditText,{value:c.unconscious,multiline:true,placeholder:"The deeper need they may not admit\u2026",
-            onCommit:v=>onUpdate(c.id,{unconscious:v})}))),
+            onCommit:v=>onUpdate(c.id,{unconscious:v})})),
+        // HUMAN TRUTH — the insight into human nature this character embodies, and
+        // which side of the film's controlling idea it argues. Every significant
+        // character should hold a DISTINCT stance (the cast is the argument's jury).
+        React.createElement("div",{className:"char-field"},
+          React.createElement("div",{className:"obj-lab",
+            title:"The one observation about human nature this character embodies \u2014 a distinct stance on the film's controlling idea, grounded in what the script shows them DO. Drafted by \u201cDraft with MUSE\u201d; the Consistency Check flags scene-drivers without one."},
+            "Human truth \u2014 the insight they embody"),
+          React.createElement(EditText,{value:c.humanTruth,multiline:true,
+            placeholder:"e.g. Dignity starves without witnesses \u2014 he'd rather refuse charity than be pitied\u2026",
+            onCommit:v=>onUpdate(c.id,{humanTruth:v})}),
+          React.createElement("div",{className:"char-argues-row"},
+            React.createElement("span",{className:"obj-lab",style:{marginBottom:0}},"Argues"),
+            React.createElement("select",{className:"insp-select",value:c.argues||"",
+              title:"Which side of the controlling idea this character's life argues",
+              onChange:e=>onUpdate(c.id,{argues:e.target.value})},
+              [["","\u2014 unset \u2014"],["idea","The idea"],["counter","The counter-idea"],["complicates","Complicates both"]].map(kv=>
+                React.createElement("option",{key:kv[0]||"u",value:kv[0]},kv[1])))))),
 
       // ARC (derived)
       React.createElement("div",{className:"insp-block"},
