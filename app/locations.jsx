@@ -504,6 +504,40 @@ function buildLocationRefPrompt(l, project, opts){
     // size relative to the space (the shot scale system reuses the same number)
     physical_size: clean(p.size) || undefined,
   }));
+  /* THE SCRIPT USES THIS SPACE FOR — functional AFFORDANCES aggregated across every
+     scene the script sets here (user ruling 2026-07-18): the plate must provide the
+     working positions and clearances the beats rely on (a till position on the
+     counter, queue room to the door, an operable shutter) WITHOUT staging any
+     action, people, or ephemeral state — the plate stays canonical for the whole
+     film. Deterministic: a lexicon scan over this location's scenes' summaries and
+     script text, plus a capacity ceiling from cast presence. */
+  const _AFFORD = [
+    [/\btill\b|cash register/i, "a working service counter with a clear till position"],
+    [/\bqueue|queuing|queueing\b/i, "open queueing room between the service point and the entrance"],
+    [/\bshutter/i, "the entrance's roller shutter readable from inside the space"],
+    [/\bdoor(way)?\b|entrance/i, "an unobstructed entrance / doorway sightline"],
+    [/\bwindow/i, "windows that read from inside the space"],
+    [/\bshel(f|ves)/i, "stocked shelving runs with aisle clearance"],
+    [/\bstairs?\b/i, "a stair connection"],
+    [/\bphone box|telephone|payphone\b/i, "a phone position"],
+    [/\bcounter\b/i, "a service counter with working room behind it"],
+  ];
+  const _C = window.turnContinuity || {};
+  const _locScenes = (Array.isArray(l.scenes) && l.scenes.length && Array.isArray(_C.scenes))
+    ? _C.scenes.filter(sc=> l.scenes.indexOf(sc.id)>=0) : [];
+  let _affordances = [], _capacity = 0;
+  if(_locScenes.length){
+    const _txt = _locScenes.map(sc=> [sc.summary, sc.objective, sc.turningPoint,
+      (typeof sceneScriptText==="function" && _C.drafts) ? sceneScriptText(sc.id, _C.drafts) : ""
+    ].filter(Boolean).join(" ")).join(" ");
+    _AFFORD.forEach(af=>{ if(af[0].test(_txt) && _affordances.indexOf(af[1])<0) _affordances.push(af[1]); });
+    _affordances = _affordances.slice(0,5);
+    if(_C.drafts && Array.isArray(_C.characters) && typeof scenesWhereCharacterAppears==="function"){
+      _locScenes.forEach(sc=>{ let n=0;
+        _C.characters.forEach(ch=>{ try{ if(scenesWhereCharacterAppears(ch.id, ch.name, [sc], _C.drafts).length) n++; }catch(e){} });
+        if(n>_capacity) _capacity=n; });
+    }
+  }
   const speciesCanon = (typeof locationSpeciesCanon==="function") ? locationSpeciesCanon(l) : [];
   const emptySetRules = (typeof locationNoCharactersRules==="function") ? locationNoCharactersRules(project, l) : ["no people","no characters","no animals"];
   const spec = {
@@ -518,6 +552,11 @@ function buildLocationRefPrompt(l, project, opts){
       time_of_day: time ? time.toLowerCase() : undefined,
       scale: clean(st.scaleClass) || undefined,
       reads_as: significance || undefined,
+      script_requirements: (_affordances.length || _capacity>1) ? {
+        note: "aggregated from every scene the script sets here — the space must AFFORD these working positions and clearances (present or clearly implied) while staging NO action, NO people and NO temporary state",
+        affordances: _affordances.length ? _affordances : undefined,
+        capacity: _capacity>1 ? ("the space must comfortably hold up to "+_capacity+" people at once when scenes play") : undefined,
+      } : undefined,
       tone: tone || undefined,
     },
     fixtures: fixtures.length ? fixtures : undefined,

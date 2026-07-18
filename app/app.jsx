@@ -581,7 +581,7 @@ function App(){
   React.useEffect(()=>{ window.turnCast = characters; },[characters]);
   // the CONTINUITY GRAPH, exposed for prompt builders that have no props/scenes/locations
   // params (e.g. the location plate folds in the environment props it owns — locations.jsx)
-  React.useEffect(()=>{ window.turnContinuity = { props, scenes, locations, characters }; },[props, scenes, locations, characters]);
+  React.useEffect(()=>{ window.turnContinuity = { props, scenes, locations, characters, drafts }; },[props, scenes, locations, characters, drafts]);
   const hydratingRef = React.useRef(false);
   // bumped when a hydration pass finishes — lets effects that are gated on
   // hydratingRef (auto-seed) re-run once the doc has settled, even if the user
