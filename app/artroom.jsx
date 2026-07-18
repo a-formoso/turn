@@ -2625,7 +2625,7 @@ function StateRow({ c, st, index, project, scenes, props, baseGenUrl, onView, on
         scenes.map(s=>React.createElement("option",{key:s.id,value:s.id},"Sc "+s.no+" \u00b7 "+s.title)))));
 }
 
-function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, onDraft, drafting, onView, onSuggestStates, suggestingStates, onRemoveOwnedItem, onRenameOwnedItem, onDraftProp, batchActiveId, onBatchDone, onDelete }){
+function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, onDraft, drafting, onView, onSuggestStates, suggestingStates, onRemoveOwnedItem, onRenameOwnedItem, onDraftProp, onCreateOwnedProp, batchActiveId, onBatchDone, onDelete }){
   const drivenScenes = scenes.filter(s=>s.driver===c.id);
   const driven = drivenScenes.length;
   // ALL scenes this character appears in (drives OR is named in the script/summary), not
@@ -2703,17 +2703,17 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
        exact bullet appears later in the list */
     // "none" / "n/a" are the drafter's placeholders for EMPTY, never items — without
     // this they render as phantom "none · NO SHEET YET" linked-prop rows
-    const bullets = [...split(c.accessories), ...split(c.props)]
-      .filter(it=>{ const n=normName(it); return n && !/^(none|n-?a|nothing|no-items?)$/.test(n); });
-    const match = bullets.map(it=>{
-      const exact = byNorm[normName(it)];
+    const bullets = [...split(c.accessories).map(t=>({ t, src:"worn" })), ...split(c.props).map(t=>({ t, src:"carried" }))]
+      .filter(b=>{ const n=normName(b.t); return n && !/^(none|n-?a|nothing|no-items?)$/.test(n); });
+    const match = bullets.map(b=>{
+      const exact = byNorm[normName(b.t)];
       if(exact && !claimed.has(exact.id)){ claimed.add(exact.id); return exact; }
       return null;
     });
-    bullets.forEach((it,i)=>{ if(match[i]) return;
-      const m = fuzzyProp(it); if(m){ claimed.add(m.id); match[i]=m; } });
-    const rows = bullets.map((it,i)=>(
-      { key:"b-"+normName(it)+"-"+i, name: match[i]?match[i].name:it, prop: match[i]||null, orphan:false }));
+    bullets.forEach((b,i)=>{ if(match[i]) return;
+      const m = fuzzyProp(b.t); if(m){ claimed.add(m.id); match[i]=m; } });
+    const rows = bullets.map((b,i)=>(
+      { key:"b-"+normName(b.t)+"-"+i, name: match[i]?match[i].name:b.t, prop: match[i]||null, orphan:false, src:b.src }));
     /* orphans = cast-derived cards no bullet claimed (even fuzzily) — true leftovers */
     const orphans = ownedProps.filter(p=> p.fromCast && !claimed.has(p.id));
     orphans.forEach(p=> rows.push({ key:"o-"+p.id, name:p.name, prop:p, orphan:true }));
@@ -3150,6 +3150,16 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
                 React.createElement("span",{className:"linked-prop-name"},row.name),
                 row.orphan && React.createElement("span",{className:"linked-prop-orphan-tag",
                   title:"Not in the worn/carried lists above \u2014 likely a leftover. Use \u201cRemove orphaned\u201d to clean up."},"not listed"),
+                // NO CARD YET (e.g. a character added after "Design all props" ran):
+                // one free press derives the prop card in place — then this same row
+                // offers Draft details / Generate.
+                (!row.prop && !row.orphan && onCreateOwnedProp) && React.createElement("button",{
+                  className:"linked-prop-gen",
+                  title:"Create this item's prop card (owner + worn/carried derived automatically) — free, no generation. The row then offers Draft details and Generate right here.",
+                  onClick:(e)=>{ e.stopPropagation();
+                    const made = onCreateOwnedProp(c.id, row.name, row.src);
+                    if(made && typeof window.appToast==="function") window.appToast("\u201c"+made.name+"\u201d card created ("+(made.kind==="dressing"?"set dressing":made.kind)+") \u2014 now Draft details, then Generate.","success"); }},
+                  React.createElement(Icon.plus,{s:11}),"Create card"),
                 // INLINE generation — the sheet is built against THIS character's own
                 // sheet (the owner reference), so it must exist first. Undrafted props
                 // draft first (separate press: the fresh fields must land in state
@@ -3669,7 +3679,7 @@ function ImageLightbox({ url, character, onClose }){
               :React.createElement(React.Fragment,null,React.createElement(Icon.download,{s:14}),"Download "+res)))));
 }
 
-function CharacterSheets({ project, characters, scenes, props, drafts, shots, beatsMap, onUpdate, onDraft, onDraftAll, draftingId, draftingAll, draftingIds, onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onDraftProp, onAdd, onDelete, onCast, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
+function CharacterSheets({ project, characters, scenes, props, drafts, shots, beatsMap, onUpdate, onDraft, onDraftAll, draftingId, draftingAll, draftingIds, onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onDraftProp, onCreateOwnedProp, onAdd, onDelete, onCast, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly }){
   const [view, setView] = React.useState(null);   // {url, character}
   if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   // which characters actually speak (have dialogue) — used to flag the per-card Voice control
@@ -3857,7 +3867,7 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
       charPager.slice(shown).map(c=>React.createElement(CharacterSheet,{key:c.id,c,project,scenes,props,drafts,speaks:speakingSet.has(c.id),onUpdate,onDraft,
         drafting:draftingId===c.id||(draftingIds||[]).indexOf(c.id)>=0,onView:(url,ch)=>setView({url,character:ch}),
         batchActiveId,onBatchDone:batch.advance,onDelete:onDelete,
-        onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem,onRenameOwnedItem,onDraftProp}))),
+        onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem,onRenameOwnedItem,onDraftProp,onCreateOwnedProp}))),
     React.createElement(PagerBar,{pager:charPager,noun:"character"}),
     window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{items:trashItems,kind:"character",onRestore,onPurge}));
 }
@@ -4022,7 +4032,7 @@ function ArtComingSoon({ tab }){
     React.createElement("div",{className:"art-soon-tag"},"Next increment"));
 }
 
-function ArtRoom({ artView, setArtView, project, characters, scenes, props, drafts, trash, onRestoreChar, onPurgeChar, onRestoreProp, onPurgeProp, onRestoreLoc, onPurgeLoc, onEnsureOwner, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds,
+function ArtRoom({ artView, setArtView, project, characters, scenes, props, drafts, trash, onRestoreChar, onPurgeChar, onRestoreProp, onPurgeProp, onRestoreLoc, onPurgeLoc, onEnsureOwner, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds, onCreateOwnedProp,
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropIds, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
   locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocIds, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onSetWorldScale, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId,
@@ -4066,7 +4076,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
           onUpdate:onUpdateLookbook,onAdd:onAddLookbook,onDelete:onDeleteLookbook,onSetNote:onSetLookbookNote,onResearch,onClear:onClearLookbook})
     : artView==="characters"
       ? React.createElement(CharacterSheets,{project,characters,scenes,props,drafts,shots,beatsMap,onUpdate:onUpdateChar,
-          onDraftProp,
+          onDraftProp,onCreateOwnedProp,
           onDraft:onDraftVisuals,onDraftAll:onDraftAllVisuals,draftingId:draftingVisualId,draftingAll:draftingAllVisuals,draftingIds:draftingVisualIds,
           trashItems:(trash&&trash.characters)||[],onRestore:onRestoreChar,onPurge:onPurgeChar,
           onSuggestStates,suggestingStatesId,onRemoveOwnedItem,onRenameOwnedItem,onAdd:onAddCharacter,onDelete:onDeleteCharacter,onCast,

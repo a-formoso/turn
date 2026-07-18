@@ -169,6 +169,7 @@ function classifyPropKind(name, opts){
   return hits.length===1 ? hits[0] : "";   // unknown or conflicting -> defer to the source
 }
 window.classifyPropKind = classifyPropKind;
+window.propSlug = propSlug;
 
 /* the location an ownerless object is a FIXTURE OF: the explicit link, else the one
    location every mapped scene resolves to (mobile objects spanning places get none). */

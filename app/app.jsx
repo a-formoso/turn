@@ -1309,6 +1309,20 @@ function App(){
 
   // ---- Art Room: LOOKBOOK (References) ----
   const updateLookbookCard = (id,patch)=>setLookbook(ls=>ls.map(c=>c.id===id?{...c,...patch}:c));
+  // create ONE owned prop card from a character-card item bullet that never got a
+  // card derived (e.g. a character added after "Design all props" ran) — same shape
+  // derivePropsFromCast builds, so the linked-prop row claims it by exact name.
+  const createOwnedProp = (charId, itemText, sourceKind)=>{
+    const ch = characters.find(x=>x.id===charId); if(!ch) return null;
+    const item = String(itemText||"").trim(); if(!item) return null;
+    const kind = ((typeof classifyPropKind==="function") && classifyPropKind(item)) || sourceKind || "carried";
+    const slug = (typeof window.propSlug==="function") ? window.propSlug(item)
+      : item.toLowerCase().replace(/[^a-z0-9]+/g,"-").slice(0,40);
+    const card = { id:"prop-"+(ch.id||"x")+"-"+kind+"-"+slug+"-"+Date.now().toString(36),
+      name:item, kind, ownerId:ch.id, ownerName:ch.name||"", fromCast:true };
+    setProps(ps=> ps.some(x=>x.id===card.id) ? ps : [...ps, card]);
+    return card;
+  };
   const addLookbookCard = ()=>{
     const id = "look-"+Date.now().toString(36);
     setLookbook(ls=>[...ls, { id, source:"New reference", category:"Palette", note:"", negativePrompt:"", manual:true }]);
@@ -2878,7 +2892,7 @@ function App(){
             onUpdateChar:updateCharacter,onDraftVisuals:draftCharacterVisuals,onDraftAllVisuals:draftAllVisuals,
             draftingVisualId,draftingAllVisuals,draftingVisualIds,onAddCharacter:addCharacter,onDeleteCharacter:deleteCharacter,
             onSuggestStates:suggestCharacterStates,suggestingStatesId,onRemoveOwnedItem:removeOwnedProp,onRenameOwnedItem:renameOwnedProp,
-            onUpdateProp:updateProp,onDraftProp:draftPropVisuals,onDraftAllProps:draftAllProps,
+            onUpdateProp:updateProp,onDraftProp:draftPropVisuals,onDraftAllProps:draftAllProps,onCreateOwnedProp:createOwnedProp,
             onAddProp:addProp,onDeleteProp:deleteProp,draftingPropId,draftingPropIds,draftingAllProps,onMergeProps:mergeProps,
             onSeedFromCast:seedPropsFromCast,castHasProps:(typeof castHasProps==="function" && castHasProps(characters)),
             scenes,onTagScenes:tagPropScenes,taggingScenes,onTagOne:tagOnePropScenes,taggingSceneId,
