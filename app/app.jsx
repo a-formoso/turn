@@ -1819,15 +1819,53 @@ function App(){
     setVoicingLines(null);
     if(failed && typeof window.appToast==="function") window.appToast(failed+" line"+(failed>1?"s":"")+" couldn't be voiced — check those characters have a locked voice.","error");
   };
-  const addShot = (sceneId)=>{
+  const addShot = (sceneId, beatN)=>{
     const loc = (typeof locationForScene==="function") ? locationForScene(locations, sceneId) : null;
     const sc = scenes.find(s=>s.id===sceneId);
     const peers = shots.filter(s=>s.sceneId===sceneId);
     const id = "shot-"+sceneId+"-m"+Date.now().toString(36);
-    setShots(ss=>[...ss, { id, sceneId, beatN:(peers.length+1), order:peers.length,
+    // with a beatN: a SUB-SHOT — joins that beat's coverage right after its last
+    // shot in the chain (fractional order keeps sceneShotsOrdered stable).
+    // Without: legacy behaviour — a new beat at the end of the scene.
+    const inBeat = Number(beatN)>0 ? peers.filter(x=>x.beatN===beatN) : [];
+    const bN = Number(beatN)>0 ? Number(beatN) : (peers.length+1);
+    const order = inBeat.length ? (Math.max(...inBeat.map(x=>x.order||0)) + 0.01)
+      : (Number(beatN)>0 ? (bN-1) : peers.length);
+    setShots(ss=>[...ss, { id, sceneId, beatN:bN, order,
       size:"MS", angle:"eye", move:"static", lens:"50", composition:"",
       subjects:(sc&&sc.driver)?[sc.driver]:[], locationId:loc?loc.id:"", props:[],
       action:"", dialogue:"", negativePrompt:"", manual:true }]);
+  };
+  // SPLIT A BEAT INTO COVERAGE — MUSE designs 2-3 shots for ONE beat (one per
+  // distinct visual event); the beat's current shot(s) are replaced (confirmed
+  // first). Writing-model credits only; frames render separately in chain order.
+  const [splittingBeat, setSplittingBeat] = React.useState(null);
+  const splitBeatCoverage = async (scene, beatN)=>{
+    if(splittingBeat || !scene) return;
+    const existing = shots.filter(x=>x.sceneId===scene.id && x.beatN===beatN);
+    let ok = true;
+    if(typeof window.appConfirm==="function")
+      ok = await window.appConfirm({ title:"Split beat "+beatN+" into coverage?",
+        body:"MUSE designs 2\u20133 shots for this beat \u2014 one per distinct visual event, in cut order. The beat's current "+existing.length+" shot"+(existing.length===1?"":"s")+" (including any generated frame's place in the chain) will be REPLACED; other beats are untouched. Writing-model credits only \u2014 frames render separately.",
+        confirmLabel:"Design coverage", cancelLabel:"Cancel" });
+    if(!ok) return;
+    setSplittingBeat(scene.id+"#"+beatN);
+    try{
+      const raw = (typeof aiDraftShots==="function")
+        ? await aiDraftShots(scene, beatsMap, drafts, locations, props, characters, lbProject("shots"), { beatN }) : null;
+      const rows = (raw||[]).filter(r=> String(r.beat)===String(beatN));
+      if(rows.length && typeof normalizeShot==="function"){
+        const baseOrder = existing.length ? Math.min(...existing.map(x=>x.order||0)) : (beatN-1);
+        const stamp = Date.now().toString(36);
+        const made = rows.slice(0,3).map((r,i)=>({
+          ...normalizeShot(r, scene, i, locations, props, characters, beatsMap),
+          id:"shot-"+scene.id+"-b"+beatN+String.fromCharCode(97+i)+"-"+stamp,
+          beatN, order: baseOrder + i*0.01 }));
+        setShots(ss=>[ ...ss.filter(x=>!(x.sceneId===scene.id && x.beatN===beatN)), ...made ]);
+        if(typeof window.appToast==="function") window.appToast("Beat "+beatN+" now has "+made.length+" shots ("+made.map((m,i)=>beatN+String.fromCharCode(65+i)).join(", ")+") \u2014 generate them in chain order.","success");
+      } else if(typeof window.appToast==="function") window.appToast("Coverage design returned nothing usable \u2014 try again.","error");
+    }catch(e){ if(typeof window.appToast==="function") window.appToast(String((e&&e.message)||"Coverage design failed."),"error"); }
+    setSplittingBeat(null);
   };
   // derive one scene's shots (AI, with heuristic fallback). replace=true wipes its old shots.
   const draftOneSceneShots = async (scene, replace)=>{
@@ -2903,7 +2941,7 @@ function App(){
             onSetWorldScale:setWorldScale,
             onAddStyleRefImages:addStyleRefImages,onRemoveStyleRefImage:removeStyleRefImage,
             onDraftStaging:draftLocationStaging,draftingStageId,
-            shots,beatsMap,onUpdateShot:updateShot,onAddShot:addShot,onDeleteShot:deleteShot,
+            shots,beatsMap,onUpdateShot:updateShot,onAddShot:addShot,onDeleteShot:deleteShot,onSplitBeat:splitBeatCoverage,splittingBeat,
             onDraftSceneShots:draftSceneShots,draftingSceneShots,onDraftAllShots:draftAllShots,draftingAllShots}))
         : React.createElement(React.Fragment,null,
       // scrim behind any open overlay drawer

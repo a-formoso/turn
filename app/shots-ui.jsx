@@ -58,45 +58,7 @@ function FrameToggles({ label, items, selected, onToggle, emptyHint }){
       })));
 }
 
-/* the scene's clip-sequence strip: every shot as a cell, grouped into CLIPS (one
-   generated video clip each, ≤15s — the Stage's render unit). Click a joint
-   between two shots to split/merge; hand edits make the scene manual, "Auto-pack"
-   returns it to duration packing. The partition itself lives in sceneSequences()
-   (shots.jsx) so the Storyboard's clip boards and the Stage read the same groups. */
-function ClipBar({ shots, onUpdate, clipMax }){
-  if(typeof sceneSequences!=="function" || (shots||[]).length<2) return null;
-  const MAX = clipMax || window.CLIP_MAX_SECONDS || 15;
-  const seqs = sceneSequences(shots, MAX);
-  const manual = !!(seqs.length && seqs[0].manual);
-  // toggle a clip boundary BEFORE shot index i — materializes explicit flags scene-wide
-  const toggleAt = (i)=>{
-    const starts = new Set(seqs.map(g=>g.start));
-    if(starts.has(i)) starts.delete(i); else starts.add(i);
-    shots.forEach((s,idx)=> onUpdate(s.id, { seqBreak: idx>0 && starts.has(idx) }));
-  };
-  const autoPack = ()=> shots.forEach(s=> onUpdate(s.id, { seqBreak:null }));
-  return _el("div",{className:"clip-bar"},
-    _el("span",{className:"clip-bar-lab",
-      title:"Each CLIP is one generated video clip on the Stage — at most "+MAX+" seconds. Durations are working estimates (dialogue shots from their line's length, else ≈5s); click a joint between shots to split or merge clips."},
-      _el(Icon.clapper,{s:11}),"Clips",
-      _el("span",{className:"clip-bar-sub"},"≤"+MAX+"s each · "+seqs.length+" clip"+(seqs.length!==1?"s":"")+(manual?" · hand-grouped":""))),
-    _el("div",{className:"clip-bar-strip"},
-      seqs.map((g,gi)=> _el(React.Fragment,{key:gi},
-        gi>0 && _el("button",{className:"clip-joint break",onClick:()=>toggleAt(g.start),
-          title:"Merge clip "+gi+" and clip "+(gi+1)+" into one clip"},"‖"),
-        _el("div",{className:"clip-seg"+(g.over?" over":"")},
-          _el("span",{className:"clip-seg-lab",
-            title:g.over?("≈"+g.dur+"s — over the "+MAX+"s clip budget; split it or shorten its shots"):("≈"+g.dur+"s of "+MAX+"s")},
-            "CLIP "+(g.index+1)+" · ≈"+g.dur+"s"),
-          g.shots.map((s,j)=> _el(React.Fragment,{key:s.id},
-            j>0 && _el("button",{className:"clip-joint",onClick:()=>toggleAt(g.start+j),
-              title:"Split here — start a new clip at shot "+(g.start+j+1)},"·"),
-            _el("span",{className:"clip-cell",title:"Shot "+(g.start+j+1)+" · "+shotGrammarLabel(s)+" · "+shotDur(s)+"s"},g.start+j+1)))) ))),
-    manual && _el("button",{className:"clip-auto",onClick:autoPack,
-      title:"Clear the hand grouping and re-pack the clips automatically by duration"},"Auto-pack"));
-}
-
-function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, laterShots, isHead, isFirst, onToggleHead, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, onRegenDownstream, onStopChain, clipNo }){
+function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, laterShots, isHead, isFirst, onToggleHead, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, onRegenDownstream, onStopChain, subLabel }){
   const loc = ctx.location;
   // who/what is in frame is DERIVED from the action text (single source of truth) — the
   // old manual tags are gone; this is what the prompt + references actually use.
@@ -281,7 +243,7 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
         // order, left-to-right: Beat · Clip · Head · (Approve, once a frame exists)
         _el("div",{className:"shot-head-right"},
           _el("div",{className:"shot-beat-tag"},beatLabel),
-          clipNo && _el("div",{className:"shot-beat-tag clip",title:"This shot is part of clip "+clipNo+" — one generated video clip on the Stage"},"Clip "+clipNo),
+          subLabel && _el("div",{className:"shot-beat-tag sub",title:"This beat has multiple shots (coverage) — this is setup "+subLabel+" in cut order"},"Shot "+subLabel),
           // chain head — the scene's first shot is always a head; flagging a later shot
           // starts a FRESH look (a hard cut that won't inherit the previous frame's state)
           _el("button",{className:"shot-anchor-btn"+(isHead?" on":""), disabled:isFirst,
@@ -387,7 +349,7 @@ function SceneStyleChip({ project, sceneId }){
 }
 
 function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, onUpdate, onDelete, onView,
-  onAddShot, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot, onRegenDownstream,
+  onAddShot, onSplitBeat, splittingBeat, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot, onRegenDownstream,
   onRenderScene, renderBusy, onStopChain }){
   const loc = ctx.location;
   const driver = scene.driver ? ctx.charById[scene.driver] : null;
@@ -405,8 +367,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
   // the scene's clip sequences (shared partition — Storyboard clip boards + the Stage);
   // the per-clip budget comes from the project FORMAT (clipMaxFor)
   const clipMax = (typeof clipMaxFor==="function") ? clipMaxFor(ctx.project) : 15;
-  const seqs = (typeof sceneSequences==="function") ? sceneSequences(shots, clipMax) : [];
-  const clipOf = {}; seqs.forEach(g=> g.shots.forEach(s=>{ clipOf[s.id] = g.index+1; }));
+
   // WHOLE-SCENE video prompt — the shared builder (shots.jsx sceneVideoPromptText):
   // the same text the Stage's whole-scene packing mode auto-fills its prompt box with.
   // Speaker attribution rides the Stage's resolver (no script drafts in this scope,
@@ -446,8 +407,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
         _el("div",{className:"shot-scene-style-row"},_el(SceneStyleChip,{project:ctx.project,sceneId:scene.id})),
         _el("div",{className:"shot-scene-sub"},
           (driver?("Driver: "+driver.name):"")+(driver&&loc?"  \u00b7  ":"")+(loc?("Location: "+loc.name):"")
-          +"   \u00b7   "+shots.length+" shot"+(shots.length!==1?"s":"")
-          +(seqs.length?("  \u00b7  "+seqs.length+" clip"+(seqs.length!==1?"s":"")):""))),
+          +"   \u00b7   "+shots.length+" shot"+(shots.length!==1?"s":""))),
       _el("div",{className:"shot-scene-acts"},
         onRenderScene && _el("button",{className:"char-draft-btn primary",disabled:!!renderBusy,onClick:()=>onRenderScene(scene),
           title:"Render this scene in order, each shot seeded by the previous frame, auto-approving each. Approved frames are retained as seeds."},
@@ -475,22 +435,53 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
             confLab && _el("span",{className:"ssx-conf-lab"},confLab),
             _el("div",{className:"ssx-pips"},
               [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")}))))))),
-    open && _el(ClipBar,{shots,onUpdate,clipMax}),
-    open && _el("div",{className:"sheet-grid"},
-      shots.map(sh=>{ const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
-        // the SCRIPT BEAT this shot covers — drive + reaction from the scene's beat map
-        const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(sh.beatN));
+
+    // BEAT LANES — the beat is the dramatic unit; each owns 1..N shots (coverage).
+    // Lanes render in chain order; a lane header carries the beat's verbs, turn and
+    // charge plus per-beat actions (Split into coverage / Add shot).
+    open && (()=>{
+      const lanes=[]; ordered.forEach(sh=>{ const n=sh.beatN||0; let L=lanes[lanes.length-1];
+        if(!L || L.n!==n){ L={ n, shots:[] }; lanes.push(L); } L.shots.push(sh); });
+      return _el(React.Fragment,null, lanes.map(L=>{
+        const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(L.n));
         const beatText = beatRow
           ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" — ")
           : "";
-        const _si = ordered.findIndex(x=>x.id===sh.id);
-        return _el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,beatText,
-          prevShot, laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
-          onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,clipNo:clipOf[sh.id]}); })));
+        const verbs = beatRow ? [ (beatRow.drive&&beatRow.drive.a||"").trim(), (beatRow.react&&beatRow.react.a||"").trim() ].filter(Boolean).join(" / ") : "";
+        const isTurn = String(bm.turnAt||"")===String(L.n);
+        const chg = beatRow && beatRow.charge!=null && beatRow.charge!=="" ? Number(beatRow.charge) : null;
+        const busyKey = scene.id+"#"+L.n;
+        return _el("div",{key:"lane-"+L.n,className:"beat-lane"+(isTurn?" turn":"")},
+          _el("div",{className:"beat-lane-head"},
+            _el("span",{className:"beat-lane-no"},"Beat "+L.n),
+            verbs && _el("span",{className:"beat-lane-verbs"},verbs),
+            isTurn && _el("span",{className:"beat-lane-turn"},_el(Icon.bolt,{s:10}),"Turning point"),
+            (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
+            _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")),
+            _el("div",{className:"beat-lane-acts"},
+              onSplitBeat && _el("button",{className:"beat-lane-btn",disabled:!!splittingBeat,
+                title:"MUSE designs 2-3 shots of real COVERAGE for this beat — one per distinct visual event (the drive and the reaction usually want separate setups; small continuity objects earn an INSERT). Replaces this beat's current shot(s); writing-model credits only — frames render separately.",
+                onClick:()=>onSplitBeat(scene, L.n)},
+                splittingBeat===busyKey ? _el("span",{className:"ns-spin"}) : _el(Icon.sparkles,{s:11}),
+                splittingBeat===busyKey ? "Designing…" : "Split into coverage"),
+              onAddShot && _el("button",{className:"beat-lane-btn ghost",
+                title:"Add one manual shot to this beat — it joins the rolling chain after the beat's last shot",
+                onClick:()=>onAddShot(scene.id, L.n)},
+                _el(Icon.plus,{s:11}),"Add shot"))),
+          _el("div",{className:"sheet-grid"},
+            L.shots.map((sh,li)=>{
+              const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
+              const _si = ordered.findIndex(x=>x.id===sh.id);
+              return _el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,beatText,
+                prevShot, laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
+                onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
+                subLabel: L.shots.length>1 ? String.fromCharCode(65+li) : null }); })));
+      }));
+    })());
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,
-  onUpdateShot, onAddShot, onDeleteShot, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onShoot }){
+  onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onShoot }){
   const [view, setView] = React.useState(null);
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
@@ -733,7 +724,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
         _el("div",{style:{flex:1}},
           _el("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Cinematographer (Shot Designer)",
             _el(window.InfoTip,{label:"About the Shot List",
-              text:"One shot per beat, grouped by scene. Every frame generation follows a rolling chain in scene order: the first shot renders from the locked sheets, and every later shot is seeded by the immediately previous generated frame. Generate the shots in order — if you click Generate on a later shot before an earlier one is rendered, TURN asks you to generate the earlier shot first (it's the anchor this frame builds on). 'Generate all shots' and 'Render Scene X in order' render the whole chain straight through, auto-approving each frame as the next shot's seed. The CLIPS strip groups the resulting shots into Stage video clips."}))),
+              text:"A BEAT owns 1\u2013N shots (coverage): every scene starts at one shot per beat, and any beat can be SPLIT INTO COVERAGE from its lane header \u2014 one shot per distinct visual event, labelled 3A/3B/3C in cut order. Shots are grouped by beat lane inside each scene. Every frame generation follows a rolling chain in scene order: the first shot renders from the locked sheets, and every later shot is seeded by the immediately previous generated frame. Generate the shots in order — if you click Generate on a later shot before an earlier one is rendered, TURN asks you to generate the earlier shot first (it's the anchor this frame builds on). 'Generate all shots' and 'Render Scene X in order' render the whole chain straight through, auto-approving each frame as the next shot's seed. Stage video clips are packed automatically from these shots \u2014 there is no manual clip grouping here; clips live on the Stage."}))),
         _el("div",{className:"art-intro-actions"},
           _el("button",{className:"art-draftall ghost",onClick:()=>exportShotList(scenesWithShots, shotsByScene, ctxFor, project, beatsMap),
             title:"Preview the shot list as a printable table, then print / save as PDF or download the HTML"},
@@ -765,7 +756,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     visibleScenes.map(scene=>_el(SceneShotGroup,{key:scene.id,scene,shots:shotsForGroup(scene.id),
       ctx:ctxFor(scene),characters:characters||[],beatsMap,propsAvail:(typeof propsForScene==="function")?propsForScene(props,scene.id):[],
       onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
-      onAddShot,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===scene.id,
+      onAddShot,onSplitBeat,splittingBeat,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===scene.id,
       batchActiveId,onBatchDone:handleBatchDone,onGenerateShot:startShot,onRegenDownstream,
       onRenderScene:startScene,renderBusy,onStopChain:stopChain,
       open:true,onToggle:()=>toggleScene(scene.id)})),
@@ -776,7 +767,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
         ctx:ctxFor(runnerScene),characters:characters||[],beatsMap,
         propsAvail:(typeof propsForScene==="function")?propsForScene(props,runnerScene.id):[],
         onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
-        onAddShot,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===runnerScene.id,
+        onAddShot,onSplitBeat,splittingBeat,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===runnerScene.id,
         batchActiveId,onBatchDone:handleBatchDone,onGenerateShot:startShot,onRegenDownstream,
         onRenderScene:startScene,renderBusy,onStopChain:stopChain,open:true,onToggle:()=>{}})));
 }

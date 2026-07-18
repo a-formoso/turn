@@ -192,7 +192,7 @@ window.shotGrammarLabel = shotGrammarLabel;
 /* A SEQUENCE is a contiguous run of a scene's shots that becomes ONE generated
    video clip (the Stage's video model renders up to ~15 seconds per clip). The
    grouping lives on the shots themselves — an automatic duration estimate
-   (shotDur) and `seqBreak` (this shot STARTS a new clip) — so the Shot List,
+   (shotDur) — so the Shot List,
    the Storyboard's clip boards and the future Stage all read the SAME partition. */
 const CLIP_MAX_SECONDS = 15;   // one generated clip's budget (Seedance-class video models)
 window.CLIP_MAX_SECONDS = CLIP_MAX_SECONDS;
@@ -226,8 +226,7 @@ function seqDuration(list){ return (list||[]).reduce((t,s)=>t+shotDur(s),0); }
 window.seqDuration = seqDuration;
 
 /* Partition a scene's ORDERED shots into clip sequences.
-   MANUAL: any shot (beyond the first) carrying an explicit boolean `seqBreak`
-   makes the scene hand-grouped — a new clip starts at every seqBreak:true.
+   Packing is always automatic (manual seqBreak grouping was retired).
    AUTO (the default): greedy packing — a new clip starts whenever the next shot
    would push the running clip past the DURATION budget, past the SHOT-COUNT cap
    (default 3 — keeps per-shot frames + identity refs inside Seedance's 9-image
@@ -242,18 +241,18 @@ function sceneSequences(sceneShots, clipMax, opts){
   const capDlg = (opts && "maxDialogue" in opts) ? (Number(opts.maxDialogue)>0 ? Number(opts.maxDialogue) : Infinity) : CLIP_MAX_DIALOGUE;
   const list = sceneShots || [];
   if(!list.length) return [];
-  // WHOLE-SCENE mode: one clip = the entire scene, ignoring budgets AND manual
-  // seqBreak splits (that's the point). `over` still flags when the scene runs past
-  // the per-clip budget so the console can warn that pacing will compress.
+  // WHOLE-SCENE mode: one clip = the entire scene, ignoring budgets. `over` still
+  // flags when the scene runs past the per-clip budget so the console can warn
+  // that pacing will compress.
   if(opts && opts.wholeScene){
     const dur = seqDuration(list);
     return [{ index:0, start:0, shots:list.slice(), dur, over: dur>MAX, manual:false }];
   }
-  const manual = list.some((s,i)=> i>0 && typeof s.seqBreak==="boolean");
+  // clips are ALWAYS auto-packed (manual seqBreak hand-grouping was removed with
+  // the Shots tab's clip bar — the Shots tab is pure coverage; clips are a Stage
+  // concern). Any legacy seqBreak flags on old shots are simply ignored.
   const groups = [];
-  if(manual){
-    list.forEach((s,i)=>{ if(i===0 || s.seqBreak===true) groups.push([]); groups[groups.length-1].push(s); });
-  } else {
+  {
     let cur=[], t=0, dlg=0;
     list.forEach(s=>{ const d=shotDur(s); const line=!!String(s.dialogue||"").trim();
       if(cur.length && (t+d>MAX || cur.length>=capShots || (line && dlg>=capDlg))){ groups.push(cur); cur=[]; t=0; dlg=0; }
