@@ -366,17 +366,14 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
   const lanes = (()=>{ const Ls=[]; ordered.forEach(sh=>{ const n=sh.beatN||0;
     let L=Ls[Ls.length-1]; if(!L || L.n!==n){ L={ n, shots:[] }; Ls.push(L); } L.shots.push(sh); });
     return Ls; })();
-  // fold state per beat + per-lane ‹ › SHOT paging (the shots inside a beat render
-  // as a horizontal strip; the arrows scroll it one card at a time — every card
-  // stays MOUNTED, so the scene runner's queue is never stalled). While a BATCH
-  // runs, folding is suspended for the same mounted-cards reason.
-  const [foldedBeats, setFoldedBeats] = React.useState({});
+  // ONE BEAT AT A TIME (user ruling 2026-07-20): the group shows a single beat
+  // lane with a scene-pager-style ‹ › beat pager — no stacked lanes, no folding.
+  // EXCEPTION: while a BATCH renders, ALL lanes mount — the scene runner advances
+  // by watching MOUNTED cards, and an unmounted card would stall the queue.
+  const [beatIdx, setBeatIdx] = React.useState(0);
   const stripRefs = React.useRef({});
-  const foldSuspended = !!batchActiveId;
-  const isFolded = (n)=> !foldSuspended && !!foldedBeats[n];
-  const toggleFold = (n)=> setFoldedBeats(f=>({ ...f, [n]: !f[n] }));
-  const allFolded = lanes.length>0 && lanes.every(L=>foldedBeats[L.n]);
-  const foldAll = (fold)=>{ const f={}; lanes.forEach(L=>{ f[L.n]=fold; }); setFoldedBeats(f); };
+  const showAllLanes = !!batchActiveId;
+  const _bi = Math.max(0, Math.min(beatIdx, lanes.length-1));
   const pageShots = (n, dir)=>{
     const el = stripRefs.current[n]; if(!el) return;
     const cell = el.querySelector(".beat-shot-cell");
@@ -457,16 +454,23 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
             _el("div",{className:"ssx-pips"},
               [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")}))))))),
 
+    // BEAT PAGER — one beat on screen at a time, scene-navigator styling
+    open && !showAllLanes && lanes.length>1 && (()=>{
+      const L = lanes[_bi]; const beatRow=(bm.rows||[]).find(r=>String(r.n)===String(L.n));
+      const verbs = beatRow ? [ (beatRow.drive&&beatRow.drive.a||"").trim(), (beatRow.react&&beatRow.react.a||"").trim() ].filter(Boolean).join(" / ") : "";
+      return _el("div",{className:"scene-pager beat-pager"},
+        _el("button",{className:"scene-pager-arrow",disabled:_bi<=0,title:"Previous beat",
+          onClick:()=>setBeatIdx(Math.max(0,_bi-1))},_el(Icon.chevL,{s:15})),
+        _el("div",{className:"scene-pager-mid"},
+          _el("div",{className:"beat-pager-eyebrow"},"BEAT "+L.n+" OF "+lanes.length+" \u00b7 "+ordered.length+" shot"+(ordered.length!==1?"s":"")),
+          verbs && _el("div",{className:"beat-pager-verbs"},verbs)),
+        _el("button",{className:"scene-pager-arrow",disabled:_bi>=lanes.length-1,title:"Next beat",
+          onClick:()=>setBeatIdx(Math.min(lanes.length-1,_bi+1))},_el(Icon.chevR,{s:15})));
+    })(),
     // BEAT LANES — the beat is the dramatic unit; each owns 1..N shots (coverage)
-    // rendered as a HORIZONTAL strip: the lane's ‹ › arrows page through its shots
-    // one card at a time (all cards stay mounted — overflow scroll, no unmounting).
-    open && lanes.length>1 && _el("div",{className:"beat-nav"},
-      _el("span",{className:"beat-nav-lab"},lanes.length+" beats \u00b7 "+ordered.length+" shot"+(ordered.length!==1?"s":"")),
-      _el("button",{className:"beat-nav-fold",disabled:foldSuspended,
-        title: foldSuspended ? "Lanes stay open while the scene renders (the queue watches the cards)"
-          : (allFolded?"Open every beat lane":"Collapse every beat lane to its header"),
-        onClick:()=>foldAll(!allFolded)}, allFolded?"Unfold all":"Fold all")),
-    open && _el(React.Fragment,null, lanes.map(L=>{
+    // rendered as a HORIZONTAL strip with edge-pinned ‹ › shot arrows. Normally
+    // only the paged beat renders; a running batch mounts every lane.
+    open && _el(React.Fragment,null, (showAllLanes ? lanes : lanes.slice(_bi,_bi+1)).map(L=>{
       const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(L.n));
       const beatText = beatRow
         ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" — ")
@@ -475,18 +479,14 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
       const isTurn = String(bm.turnAt||"")===String(L.n);
       const chg = beatRow && beatRow.charge!=null && beatRow.charge!=="" ? Number(beatRow.charge) : null;
       const busyKey = scene.id+"#"+L.n;
-      const folded = isFolded(L.n);
-      return _el("div",{key:"lane-"+L.n,
-        className:"beat-lane"+(isTurn?" turn":"")+(folded?" folded":"")},
-        _el("div",{className:"beat-lane-head",onClick:()=>toggleFold(L.n),style:{cursor:"pointer"},
-          title:folded?"Unfold this beat's shots":"Fold this beat to its header"},
-          _el("span",{className:"beat-lane-chev"+(folded?"":" open")},_el(Icon.chevR,{s:12})),
+      return _el("div",{key:"lane-"+L.n,className:"beat-lane"+(isTurn?" turn":"")},
+        _el("div",{className:"beat-lane-head"},
           _el("span",{className:"beat-lane-no"},"Beat "+L.n),
           verbs && _el("span",{className:"beat-lane-verbs"},verbs),
           isTurn && _el("span",{className:"beat-lane-turn"},_el(Icon.bolt,{s:10}),"Turning point"),
           (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
           _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")),
-          _el("div",{className:"beat-lane-acts",onClick:(e)=>e.stopPropagation()},
+          _el("div",{className:"beat-lane-acts"},
             onSplitBeat && _el("button",{className:"beat-lane-btn",disabled:!!splittingBeat,
               title:"MUSE designs 2-4 shots of real COVERAGE for this beat — one per distinct visual event, never more than the beat's text supports (the drive and the reaction usually want separate setups; small continuity objects earn an INSERT). Replaces this beat's current shot(s); writing-model credits only — frames render separately. A beat that wants 5+ setups is usually two beats — split it in the Beats tab first.",
               onClick:()=>onSplitBeat(scene, L.n)},
@@ -498,13 +498,13 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
               _el(Icon.plus,{s:11}),"Add shot"))),
         // SIDE ARROWS (scene-navigator style): pinned at the lane's edges so the
         // eye stays in place while paging through this beat's shots
-        !folded && L.shots.length>1 && _el("button",{className:"beat-lane-side prev",
+        L.shots.length>1 && _el("button",{className:"beat-lane-side prev",
           title:"Previous shot in this beat",onClick:(e)=>{ e.stopPropagation(); pageShots(L.n,-1); }},
           _el(Icon.chevL,{s:16})),
-        !folded && L.shots.length>1 && _el("button",{className:"beat-lane-side next",
+        L.shots.length>1 && _el("button",{className:"beat-lane-side next",
           title:"Next shot in this beat",onClick:(e)=>{ e.stopPropagation(); pageShots(L.n,1); }},
           _el(Icon.chevR,{s:16})),
-        !folded && _el("div",{className:"beat-lane-strip",ref:(el)=>{ stripRefs.current[L.n]=el; }},
+        _el("div",{className:"beat-lane-strip",ref:(el)=>{ stripRefs.current[L.n]=el; }},
           L.shots.map((sh,li)=>{
             const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
             const _si = ordered.findIndex(x=>x.id===sh.id);

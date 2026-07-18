@@ -5702,7 +5702,6 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-lane-btn.ghost{background:transparent}
 .beat-lane-btn:disabled{opacity:.5;cursor:default}
 .beat-lane .sheet-grid{margin-bottom:8px}
-.beat-lane.folded{padding-bottom:10px}
 /* the beat's shots as a horizontal strip — ‹ › arrows page one card at a time */
 .beat-lane-strip{display:flex;gap:18px;overflow-x:auto;scroll-snap-type:x proximity;
   padding:2px 2px 10px;-webkit-overflow-scrolling:touch}
@@ -5716,17 +5715,10 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-lane-side:hover{border-color:var(--pos);color:var(--pos)}
 .beat-lane-side.prev{left:-6px}
 .beat-lane-side.next{right:-6px}
-.beat-lane-chev{display:inline-flex;color:var(--txt-3);transition:transform .15s}
-.beat-lane-chev.open{transform:rotate(90deg)}
-.beat-nav{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:6px 10px;
-  border:1px solid var(--line-2);border-radius:9px;background:var(--bg-3);width:fit-content}
-.beat-nav-btn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;
-  border:1px solid var(--line-2);border-radius:7px;background:var(--bg-1);color:var(--txt-1);cursor:pointer}
-.beat-nav-btn:hover{border-color:var(--pos);color:var(--pos)}
-.beat-nav-lab{font-family:var(--f-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-2);min-width:120px;text-align:center}
-.beat-nav-fold{border:0;background:transparent;color:var(--txt-2);font-family:var(--f-ui);font-size:11px;font-weight:600;cursor:pointer;padding:2px 6px;border-radius:6px}
-.beat-nav-fold:hover{background:var(--bg-1);color:var(--txt-0)}
-.beat-nav-fold:disabled{opacity:.45;cursor:default}
+/* beat pager rides the scene-pager base styles; only sizing differs */
+.beat-pager{margin:0 0 14px}
+.beat-pager-eyebrow{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-3)}
+.beat-pager-verbs{font-family:var(--f-display);font-size:14px;font-weight:600;color:var(--txt-0);margin-top:2px}
 .shot-beat-tag.sub{border-color:oklch(0.62 0.12 285 / .45);color:oklch(0.74 0.1 285)}
 [data-theme="light"] .shot-beat-tag.sub{color:oklch(0.44 0.12 285)}
 .char-argues-row{display:flex;align-items:center;gap:8px;margin-top:6px}
