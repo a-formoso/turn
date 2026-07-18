@@ -362,6 +362,31 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
   // shot is always the chain HEAD; a shot flagged .anchor is an explicit FRESH START (a hard
   // cut mid-scene that won't inherit the previous frame). toggleHead flips that flag.
   const ordered = (typeof sceneShotsOrdered==="function") ? sceneShotsOrdered(shots) : shots;
+  // BEAT LANES model: contiguous chain-order groups by beat number
+  const lanes = (()=>{ const Ls=[]; ordered.forEach(sh=>{ const n=sh.beatN||0;
+    let L=Ls[Ls.length-1]; if(!L || L.n!==n){ L={ n, shots:[] }; Ls.push(L); } L.shots.push(sh); });
+    return Ls; })();
+  // fold state per beat + the ‹ › beat stepper. While a BATCH runs every lane is
+  // forced open — the scene runner advances by watching MOUNTED cards, and a
+  // folded (unmounted) card would stall the queue.
+  const [foldedBeats, setFoldedBeats] = React.useState({});
+  const [beatFocus, setBeatFocus] = React.useState(null);
+  const laneRefs = React.useRef({});
+  const foldSuspended = !!batchActiveId;
+  const isFolded = (n)=> !foldSuspended && !!foldedBeats[n];
+  const toggleFold = (n)=> setFoldedBeats(f=>({ ...f, [n]: !f[n] }));
+  const allFolded = lanes.length>0 && lanes.every(L=>foldedBeats[L.n]);
+  const foldAll = (fold)=>{ const f={}; lanes.forEach(L=>{ f[L.n]=fold; }); setFoldedBeats(f); };
+  const goBeat = (dir)=>{
+    if(!lanes.length) return;
+    const idx = lanes.findIndex(L=>L.n===beatFocus);
+    const next = idx<0 ? (dir>0 ? 0 : lanes.length-1) : Math.max(0, Math.min(lanes.length-1, idx+dir));
+    const n = lanes[next].n;
+    setBeatFocus(n);
+    setFoldedBeats(f=> f[n] ? { ...f, [n]:false } : f);   // stepping to a folded beat opens it
+    const el = laneRefs.current[n];
+    if(el && el.scrollIntoView) setTimeout(()=>el.scrollIntoView({ block:"start", behavior:"smooth" }), 30);
+  };
   const firstId = ordered[0] && ordered[0].id;
   const toggleHead = (target)=> { if(target && target.id!==firstId) onUpdate(target.id, { anchor: !target.anchor }); };
   // the scene's clip sequences (shared partition — Storyboard clip boards + the Stage);
@@ -436,48 +461,58 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
             _el("div",{className:"ssx-pips"},
               [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")}))))))),
 
+    // BEAT NAV — step beat by beat with ‹ ›; fold/unfold all for scanning
+    open && lanes.length>1 && _el("div",{className:"beat-nav"},
+      _el("button",{className:"beat-nav-btn",onClick:()=>goBeat(-1),title:"Previous beat"},_el(Icon.chevL,{s:14})),
+      _el("span",{className:"beat-nav-lab"},
+        beatFocus!=null && lanes.some(L=>L.n===beatFocus)
+          ? ("Beat "+beatFocus+" of "+lanes.length)
+          : (lanes.length+" beats \u00b7 "+ordered.length+" shot"+(ordered.length!==1?"s":""))),
+      _el("button",{className:"beat-nav-btn",onClick:()=>goBeat(1),title:"Next beat"},_el(Icon.chevR,{s:14})),
+      _el("button",{className:"beat-nav-fold",disabled:foldSuspended,
+        title: foldSuspended ? "Lanes stay open while the scene renders (the queue watches the cards)"
+          : (allFolded?"Open every beat lane":"Collapse every beat lane to its header"),
+        onClick:()=>foldAll(!allFolded)}, allFolded?"Unfold all":"Fold all")),
     // BEAT LANES — the beat is the dramatic unit; each owns 1..N shots (coverage).
-    // Lanes render in chain order; a lane header carries the beat's verbs, turn and
-    // charge plus per-beat actions (Split into coverage / Add shot).
-    open && (()=>{
-      const lanes=[]; ordered.forEach(sh=>{ const n=sh.beatN||0; let L=lanes[lanes.length-1];
-        if(!L || L.n!==n){ L={ n, shots:[] }; lanes.push(L); } L.shots.push(sh); });
-      return _el(React.Fragment,null, lanes.map(L=>{
-        const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(L.n));
-        const beatText = beatRow
-          ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" — ")
-          : "";
-        const verbs = beatRow ? [ (beatRow.drive&&beatRow.drive.a||"").trim(), (beatRow.react&&beatRow.react.a||"").trim() ].filter(Boolean).join(" / ") : "";
-        const isTurn = String(bm.turnAt||"")===String(L.n);
-        const chg = beatRow && beatRow.charge!=null && beatRow.charge!=="" ? Number(beatRow.charge) : null;
-        const busyKey = scene.id+"#"+L.n;
-        return _el("div",{key:"lane-"+L.n,className:"beat-lane"+(isTurn?" turn":"")},
-          _el("div",{className:"beat-lane-head"},
-            _el("span",{className:"beat-lane-no"},"Beat "+L.n),
-            verbs && _el("span",{className:"beat-lane-verbs"},verbs),
-            isTurn && _el("span",{className:"beat-lane-turn"},_el(Icon.bolt,{s:10}),"Turning point"),
-            (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
-            _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")),
-            _el("div",{className:"beat-lane-acts"},
-              onSplitBeat && _el("button",{className:"beat-lane-btn",disabled:!!splittingBeat,
-                title:"MUSE designs 2-3 shots of real COVERAGE for this beat — one per distinct visual event (the drive and the reaction usually want separate setups; small continuity objects earn an INSERT). Replaces this beat's current shot(s); writing-model credits only — frames render separately.",
-                onClick:()=>onSplitBeat(scene, L.n)},
-                splittingBeat===busyKey ? _el("span",{className:"ns-spin"}) : _el(Icon.sparkles,{s:11}),
-                splittingBeat===busyKey ? "Designing…" : "Split into coverage"),
-              onAddShot && _el("button",{className:"beat-lane-btn ghost",
-                title:"Add one manual shot to this beat — it joins the rolling chain after the beat's last shot",
-                onClick:()=>onAddShot(scene.id, L.n)},
-                _el(Icon.plus,{s:11}),"Add shot"))),
-          _el("div",{className:"sheet-grid"},
-            L.shots.map((sh,li)=>{
-              const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
-              const _si = ordered.findIndex(x=>x.id===sh.id);
-              return _el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,beatText,
-                prevShot, laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
-                onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
-                subLabel: L.shots.length>1 ? String.fromCharCode(65+li) : null }); })));
-      }));
-    })());
+    open && _el(React.Fragment,null, lanes.map(L=>{
+      const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(L.n));
+      const beatText = beatRow
+        ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" — ")
+        : "";
+      const verbs = beatRow ? [ (beatRow.drive&&beatRow.drive.a||"").trim(), (beatRow.react&&beatRow.react.a||"").trim() ].filter(Boolean).join(" / ") : "";
+      const isTurn = String(bm.turnAt||"")===String(L.n);
+      const chg = beatRow && beatRow.charge!=null && beatRow.charge!=="" ? Number(beatRow.charge) : null;
+      const busyKey = scene.id+"#"+L.n;
+      const folded = isFolded(L.n);
+      return _el("div",{key:"lane-"+L.n,ref:(el)=>{ laneRefs.current[L.n]=el; },
+        className:"beat-lane"+(isTurn?" turn":"")+(folded?" folded":"")+(beatFocus===L.n?" focus":"")},
+        _el("div",{className:"beat-lane-head",onClick:()=>toggleFold(L.n),style:{cursor:"pointer"},
+          title:folded?"Unfold this beat's shots":"Fold this beat to its header"},
+          _el("span",{className:"beat-lane-chev"+(folded?"":" open")},_el(Icon.chevR,{s:12})),
+          _el("span",{className:"beat-lane-no"},"Beat "+L.n),
+          verbs && _el("span",{className:"beat-lane-verbs"},verbs),
+          isTurn && _el("span",{className:"beat-lane-turn"},_el(Icon.bolt,{s:10}),"Turning point"),
+          (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
+          _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")),
+          _el("div",{className:"beat-lane-acts",onClick:(e)=>e.stopPropagation()},
+            onSplitBeat && _el("button",{className:"beat-lane-btn",disabled:!!splittingBeat,
+              title:"MUSE designs 2-3 shots of real COVERAGE for this beat — one per distinct visual event (the drive and the reaction usually want separate setups; small continuity objects earn an INSERT). Replaces this beat's current shot(s); writing-model credits only — frames render separately.",
+              onClick:()=>onSplitBeat(scene, L.n)},
+              splittingBeat===busyKey ? _el("span",{className:"ns-spin"}) : _el(Icon.sparkles,{s:11}),
+              splittingBeat===busyKey ? "Designing…" : "Split into coverage"),
+            onAddShot && _el("button",{className:"beat-lane-btn ghost",
+              title:"Add one manual shot to this beat — it joins the rolling chain after the beat's last shot",
+              onClick:()=>onAddShot(scene.id, L.n)},
+              _el(Icon.plus,{s:11}),"Add shot"))),
+        !folded && _el("div",{className:"sheet-grid"},
+          L.shots.map((sh,li)=>{
+            const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
+            const _si = ordered.findIndex(x=>x.id===sh.id);
+            return _el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,beatText,
+              prevShot, laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
+              onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
+              subLabel: L.shots.length>1 ? String.fromCharCode(65+li) : null }); })));
+    })));
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,
