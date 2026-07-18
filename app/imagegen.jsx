@@ -916,11 +916,19 @@ async function proxyGenerate(prompt, opts, provider){
   const isNetworkBlip = (err)=> !statusOf(err)
     && /failed to send|name_not_resolved|network|fetch|timeout|load failed/i.test(((err&&err.message)||"")+"");
   let data, error;
+  // HARD CLIENT CAP: functions.invoke has no timeout of its own, so a hung provider
+  // connection used to spin "Generating…" forever with no error ever surfacing.
+  // 3 minutes is beyond any successful generation; after that we abandon the wait
+  // and say so. (Wording deliberately avoids isNetworkBlip's trigger words so an
+  // abandoned wait is never auto-retried.)
+  const _capped = (pr)=> Promise.race([ pr,
+    new Promise((_,rej)=> setTimeout(()=>{ const e=new Error("The image server didn't answer within 3 minutes — the request was abandoned. If this keeps happening on Nano Banana models, the Google account may be out of prepaid credits or the image-proxy needs a redeploy."); e.__timedOut=true; rej(e); }, 180000)) ]);
   for(let attempt=0; attempt<2; attempt++){
     error = null;
-    try{ ({ data, error } = await sb.functions.invoke(fnName, { body })); }
+    try{ ({ data, error } = await _capped(sb.functions.invoke(fnName, { body }))); }
     catch(e){ error = e; }
     if(!error) break;
+    if(error.__timedOut) break;
     if(attempt<1 && isNetworkBlip(error)){ await new Promise(r=>setTimeout(r, 600)); continue; }
     break;
   }

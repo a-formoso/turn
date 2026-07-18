@@ -580,7 +580,10 @@ Deno.serve(async (req) => {
     try {
       const gRes = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(gkey)}`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reqBody) },
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reqBody),
+          // never hold the connection open forever — a hung Google call used to hang
+          // the whole invoke and the client spun "Generating…" with no error
+          signal: AbortSignal.timeout(120000) },
       );
       if (!gRes.ok) {
         let detail = "";
@@ -598,6 +601,8 @@ Deno.serve(async (req) => {
       const grounded = !!(gm && ((chunks && chunks.length) || gm.webSearchQueries || gm.searchEntryPoint));
       return json({ b64: img.inlineData.data, mime: img.inlineData.mimeType || "image/png", grounded });
     } catch (e) {
+      if ((e as any)?.name === "TimeoutError")
+        return json({ error: "Google took too long to answer (over 2 minutes) — the request was cancelled server-side. Try again; if it persists the Google account may be rate-limited or out of prepaid credits." }, 200);
       return json({ error: "Proxy failed to reach Google: " + (e?.message || e) }, 502);
     }
   }
@@ -633,10 +638,12 @@ Deno.serve(async (req) => {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
+        signal: AbortSignal.timeout(120000),
       });
     } else {
       oaiRes = await fetch("https://api.openai.com/v1/images/generations", {
         method: "POST",
+        signal: AbortSignal.timeout(120000),
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model, prompt, size, quality, n: 1 }),
       });
