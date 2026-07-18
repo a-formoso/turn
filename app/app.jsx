@@ -3216,6 +3216,10 @@ function App(){
     (typeof MuseDock!=="undefined") && React.createElement(MuseDock,{
       scenes, selScene:sel, signedIn: !!session, onSignIn:()=>setAuthOpen(true),
       aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
+    // the floating WRITING-engine dock (mirror of the Art Room's image dock) —
+    // wherever text models run: the Writers' Room and the Art Room
+    (room==="writers"||room==="art") && scenes.length>0 && (typeof window.WritingDock==="function")
+      && React.createElement(window.WritingDock),
 
     // Undo affordance — persists whether the Writers' Room is open or closed.
     // Suppressed for Adaptation (full build-from-scratch): the toast is easy to miss

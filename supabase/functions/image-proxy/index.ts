@@ -251,6 +251,25 @@ Deno.serve(async (req) => {
         return json({ text: (((data.choices || [])[0] || {}).message || {}).content || "", vision: images.length > 0 });
       } catch (e) { return json({ error: "Proxy failed to reach OpenAI: " + (e?.message || e) }, 502); }
     }
+    if (provider === "moonshot") {
+      // Kimi (Moonshot AI) — OpenAI-compatible chat completions
+      const mKey = providerKey("moonshot", "MOONSHOT_API_KEY");
+      if (!mKey) return json({ error: missingKey("Moonshot (Kimi)", "MOONSHOT_API_KEY") }, 500);
+      try {
+        const r = await fetch("https://api.moonshot.ai/v1/chat/completions", {
+          method: "POST",
+          signal: AbortSignal.timeout(120000),
+          headers: { Authorization: `Bearer ${mKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model, messages: messages.map((m: any) => ({ role: m.role || "user", content: String(m.content || "") })) }),
+        });
+        if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `Moonshot error (${r.status}).`, status: r.status }, 200); }
+        const data = await r.json();
+        return json({ text: (((data.choices || [])[0] || {}).message || {}).content || "", vision: false });
+      } catch (e) {
+        if ((e as any)?.name === "TimeoutError") return json({ error: "Kimi took too long to answer (over 2 minutes) — the request was cancelled server-side." }, 200);
+        return json({ error: "Proxy failed to reach Moonshot: " + (e?.message || e) }, 502);
+      }
+    }
     if (provider === "anthropic") {
       const apiKey = providerKey("anthropic", "ANTHROPIC_API_KEY");
       if (!apiKey) return json({ error: missingKey("Anthropic", "ANTHROPIC_API_KEY") }, 500);

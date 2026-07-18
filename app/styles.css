@@ -2673,6 +2673,19 @@ html[data-theme="dark"] .dt-viewing svg{color:oklch(0.82 0.09 296)}
    on small screens instead of becoming a large in-flow panel. */
 .art-scroll .nb-controls{display:none}
 .nb-dock{display:block;position:fixed;right:22px;top:50%;transform:translateY(-50%);z-index:120}
+/* the writing-engine dock sits ABOVE the image dock on the same edge */
+.write-dock{top:50%;transform:translateY(calc(-50% - 118px))}
+.write-dock-panel{width:min(280px,calc(100vw - 92px));padding:10px}
+.write-dock-title{font-family:var(--f-mono);font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-3);margin:0 0 8px}
+.write-dock-row{display:block;width:100%;text-align:left;border:1px solid var(--line);border-radius:8px;background:var(--bg-2);
+  padding:7px 9px;margin:0 0 6px;cursor:pointer}
+.write-dock-row:hover{border-color:var(--line-3)}
+.write-dock-row.on{border-color:var(--pos);box-shadow:0 0 0 1px var(--pos)}
+.write-dock-name{display:flex;align-items:center;gap:6px;font-family:var(--f-ui);font-size:12px;font-weight:600;color:var(--txt-0)}
+.write-dock-rec{font-style:normal;font-family:var(--f-mono);font-size:8px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--pos);border:1px solid var(--pos);border-radius:999px;padding:0 6px}
+.write-dock-note{display:block;font-size:10.5px;color:var(--txt-3);margin-top:2px;line-height:1.35}
+.write-dock-foot{font-size:9.5px;color:var(--txt-3);margin-top:4px;line-height:1.4}
 .nb-dock-toggle{display:flex;flex-direction:column;align-items:stretch;gap:5px;width:54px;
   padding:7px 6px;cursor:pointer;background:var(--bg-2);border:1px solid var(--line-2);
   border-radius:999px;box-shadow:0 8px 28px rgba(15,16,18,.14);transition:.15s}
@@ -3823,6 +3836,7 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   /* the floating model dock (GPT · 16:9 · 2K) sat mid-screen over card
      actions on a phone — drop it to the lower right, clear of the MUSE fab */
   .nb-dock{top:auto;bottom:150px;transform:none;right:10px}
+  .write-dock{top:auto;bottom:252px;transform:none;right:10px}
 
   .canvas-head{padding:12px 14px 0}
   .canvas-title{font-size:14px}
