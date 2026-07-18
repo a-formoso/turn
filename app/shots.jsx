@@ -849,6 +849,32 @@ function buildShotPrompt(sh, ctx){
   if(_scale) stage.push(_scale);
   const _objectScale = (typeof shotObjectScaleClause==="function") ? shotObjectScaleClause(subjects, [...propsAll, ...((ctx.carriedForward)||[])], loc) : "";
   if(_objectScale) stage.push(_objectScale);
+  // SCENE LOOK-AHEAD — stage for what's COMING (user ruling 2026-07-18): this frame
+  // (especially the chain HEAD that seeds every later frame) must accommodate what
+  // later beats of the same continuous scene will need — fixtures a later beat uses
+  // (the till), objects that change hands (the groceries), characters who enter or
+  // queue. Derived from the LATER shots' own action text; guidance only — the clause
+  // forbids depicting later people/actions in THIS frame.
+  const later = Array.isArray(ctx.laterShots) ? ctx.laterShots : [];
+  if(later.length){
+    const curCast = new Set(subjects.map(c=>c.id));
+    const curProps = new Set(propsAll.map(p=>p.id));
+    const upProps=[], upCast=[], seenP=new Set(), seenC=new Set();
+    later.forEach(ls=>{
+      ((typeof inFrameProps==="function") ? inFrameProps(ls, scene, charById, propById) : (ls.props||[])).forEach(pid=>{
+        if(curProps.has(pid)||seenP.has(pid)) return; seenP.add(pid);
+        const pp=propById[pid]; if(pp) upProps.push(pp); });
+      ((typeof inFrameCast==="function") ? inFrameCast(ls, scene, _chars) : (ls.subjects||[])).forEach(cid=>{
+        if(curCast.has(cid)||seenC.has(cid)) return; seenC.add(cid);
+        const cc=charById[cid]; if(cc) upCast.push(cc); });
+    });
+    const bits=[];
+    if(upProps.length) bits.push("these objects/fixtures: "+upProps.slice(0,6).map(pp=>pp.name+(pp.kind==="dressing"?" (part of the set)":"")).join("; ")+(upProps.length>6?" (and more)":""));
+    if(upCast.length) bits.push(upCast.slice(0,3).map(cc=>cc.name).join(" and ")+" entering or queuing into this space");
+    if(bits.length) stage.push("SCENE CONTINUITY \u2014 STAGE FOR WHAT'S COMING: later beats of this same continuous scene will show "
+      + bits.join("; and ")
+      + ". Compose THIS frame so the space accommodates them \u2014 the relevant counter/fixtures visible or clearly implied, objects staged where the action will find them, open room where the later blocking happens \u2014 but depict ONLY this beat's own action and people, nothing from later beats");
+  }
   // WHO IS IN FRAME — EXCLUSIVE: name the count so an attached reference face with
   // no staged action can never become an invented extra figure. Skipped when the
   // action itself stages unnamed people (a crowd, punters, customers).
@@ -1008,7 +1034,10 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   for(const s of orderedSpecs){ const u=await grab(s.id); if(u) refs.push({ url:u, note:s.note }); }
   // buildShotPrompt now emits the STYLE SPINE + staging + the named reference stack itself
   // (it reads ctx.carriedForward + ctx.prevFrameRole), so we don't re-list references here.
+  const _ordAll = (typeof sceneShotsOrdered==="function") ? sceneShotsOrdered(sceneShots) : (sceneShots||[]);
+  const _selfIdx = _ordAll.findIndex(x=>x.id===sh.id);
   ctx = { ...ctx, carriedForward: carried.map(id=>(ctx.propById||{})[id]).filter(Boolean),
+    laterShots: _selfIdx>=0 ? _ordAll.slice(_selfIdx+1) : [],
     prevFrameRole: !!seed, prevShot:seed?prevSh:null };
   let prompt = combinedShotPrompt(sh, ctx);
   if(opts.correction) prompt += "\n\nCORRECTIONS (the previous attempt failed visual QC): "+opts.correction.replace(/\.$/,"")+".";

@@ -96,7 +96,7 @@ function ClipBar({ shots, onUpdate, clipMax }){
       title:"Clear the hand grouping and re-pack the clips automatically by duration"},"Auto-pack"));
 }
 
-function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, isHead, isFirst, onToggleHead, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, onRegenDownstream, onStopChain, clipNo }){
+function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, laterShots, isHead, isFirst, onToggleHead, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, onRegenDownstream, onStopChain, clipNo }){
   const loc = ctx.location;
   // who/what is in frame is DERIVED from the action text (single source of truth) — the
   // old manual tags are gone; this is what the prompt + references actually use.
@@ -113,7 +113,7 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
   const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
   // the "Shot prompt" preview reflects what WILL generate: a non-head shot chains from the
   // previous frame (continuity_anchor present); the head renders fresh from the sheets.
-  const promptCtx = { ...ctx, prevShot:prevShot||null };
+  const promptCtx = { ...ctx, prevShot:prevShot||null, laterShots:laterShots||[] };
   const finalPrompt = combinedShotPrompt(sh, promptCtx);
   const chainPrompt = (typeof buildShotPrompt==="function") ? buildShotPrompt(sh, { ...promptCtx, prevFrameRole:true }) : finalPrompt;
   const previewPrompt = isHead ? finalPrompt : chainPrompt;
@@ -483,8 +483,9 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
         const beatText = beatRow
           ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" — ")
           : "";
+        const _si = ordered.findIndex(x=>x.id===sh.id);
         return _el(ShotCard,{key:sh.id,sh,scene,ctx,characters,propsAvail,beatText,
-          prevShot, isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
+          prevShot, laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
           onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,clipNo:clipOf[sh.id]}); })));
 }
 
