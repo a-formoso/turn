@@ -1806,6 +1806,23 @@ async function agentConsistency(ctx){
       }
     }
 
+    /* 4c — DEVELOPMENT-METADATA LEAK: app vocabulary that belongs in the beat map,
+       not on the page — charge notation, beat numbers, turn flags. The screenplay
+       must read clean to someone who never saw the app. Report-only. */
+    {
+      const LEAK_RX = [
+        [/\((?:[+\u2212\-]\d)\)/, "value-charge notation like \u201c(+2)\u201d"],
+        [/\bbeat\s+\d+\b/i, "a beat number (\u201cbeat 3\u201d)"],
+        [/\bturning point\b/i, "the app term \u201cturning point\u201d"],
+        [/\bcontrolling idea\b/i, "the app term \u201ccontrolling idea\u201d"],
+        [/\bvalue charge\b/i, "the app term \u201cvalue charge\u201d"],
+      ];
+      LEAK_RX.forEach(rx=>{
+        const m = scriptText.match(rx[0]);
+        if(m){ flags++; ctx.emit({k:"flag", t:"Sc "+scene.no+" \u00b7 the script contains "+rx[1]+" (\u201c\u2026"+scriptText.slice(Math.max(0,m.index-30), m.index+m[0].length+20).trim()+"\u2026\u201d) \u2014 development metadata never appears on the page; rewrite the line so the meaning is rendered as behavior."}); }
+      });
+    }
+
     /* 5 — SHOTS vs the script: the scene-3 stale-coverage bug. A shot's subjects come
        from who its action text names, so coverage drafted against an OLD script can
        silently drop a character, keep dead dialogue, or dress the wrong body. */
