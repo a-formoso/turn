@@ -62,15 +62,33 @@ function WritingDock(){
       React.createElement("span",{className:"nb-dock-chip"},"TEXT")),
     open && React.createElement("div",{className:"nb-dock-panel write-dock-panel"},
       React.createElement("div",{className:"write-dock-title"},"Writing engine"),
-      React.createElement("button",{className:"write-dock-row"+(pick?"":" on"),onClick:()=>choose("")},
-        React.createElement("span",{className:"write-dock-name"},"Auto — recommended per task"),
-        React.createElement("span",{className:"write-dock-note"},"story \u2192 "+labelOf(recStory)+" \u00b7 specs \u2192 "+labelOf(recSpecs))),
-      models.map(m=>React.createElement("button",{key:m.id,className:"write-dock-row"+(pick===m.id?" on":""),
-        title:m.note||"",onClick:()=>choose(m.id)},
-        React.createElement("span",{className:"write-dock-name"},m.label,
-          m.id===recStory && React.createElement("i",{className:"write-dock-rec"},"story rec"),
-          m.id===recSpecs && React.createElement("i",{className:"write-dock-rec"},"specs rec")),
-        React.createElement("span",{className:"write-dock-note"},m.note||""))),
+      // MODE — Auto mirrors the image dock's labelled-control style
+      React.createElement("div",{className:"nb-ctl"},
+        React.createElement("span",{className:"nb-ctl-lab"},"Mode"),
+        React.createElement("div",{className:"nb-seg"},
+          React.createElement("button",{className:"nb-seg-btn "+(pick?"":"on"),
+            title:"Follow the per-task recommendation — story prose runs on "+labelOf(recStory)+", Art-Room specs on "+labelOf(recSpecs),
+            onClick:()=>choose("")},"Auto · per task")),
+        !pick && React.createElement("div",{className:"write-dock-note"},"story → "+labelOf(recStory)+" · specs → "+labelOf(recSpecs))),
+      // MODELS — grouped by provider, compact segmented buttons like the image models
+      (()=>{
+        const PROV = { anthropic:"Anthropic", google:"Google", openai:"OpenAI", moonshot:"Moonshot" };
+        const groups=[]; models.forEach(m=>{ let g=groups.find(x=>x.p===m.provider);
+          if(!g){ g={p:m.provider, items:[]}; groups.push(g); } g.items.push(m); });
+        return groups.map(g=>React.createElement("div",{key:g.p,className:"nb-ctl"},
+          React.createElement("span",{className:"nb-ctl-lab"},PROV[g.p]||g.p),
+          React.createElement("div",{className:"nb-seg"},
+            g.items.map(m=>React.createElement("button",{key:m.id,
+              className:"nb-seg-btn "+(pick===m.id?"on":""),
+              title:(m.note||"")+((m.id===recStory)?" · recommended for story":"")+((m.id===recSpecs)?" · recommended for specs":""),
+              onClick:()=>choose(m.id)},
+              m.label,
+              (m.id===recStory||m.id===recSpecs) && React.createElement("span",{className:"write-seg-rec",
+                title:(m.id===recStory?"story":"specs")+" recommendation"},"★"))))));
+      })(),
+      // the ACTIVE engine's note, so the pick is informed without hovering
+      pick && React.createElement("div",{className:"write-dock-note sel"},
+        labelOf(pick)+" — "+(((models.find(m=>m.id===pick)||{}).note)||"")),
       React.createElement("div",{className:"write-dock-foot"},"A pick applies for THIS session; every new session starts on Auto.")));
 }
 window.WritingDock = WritingDock;
