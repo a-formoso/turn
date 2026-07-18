@@ -256,17 +256,22 @@ Deno.serve(async (req) => {
       const mKey = providerKey("moonshot", "MOONSHOT_API_KEY");
       if (!mKey) return json({ error: missingKey("Moonshot (Kimi)", "MOONSHOT_API_KEY") }, 500);
       try {
+        // K3 is a 2.8T deep reasoner (launched 2026-07-16): long drafts are SLOW,
+        // especially under launch-week load. 145s keeps our clean timeout message
+        // ahead of the gateway's ~150s kill; max_tokens bounds the completion so
+        // generation time can't run unbounded.
         const r = await fetch("https://api.moonshot.ai/v1/chat/completions", {
           method: "POST",
-          signal: AbortSignal.timeout(120000),
+          signal: AbortSignal.timeout(145000),
           headers: { Authorization: `Bearer ${mKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model, messages: messages.map((m: any) => ({ role: m.role || "user", content: String(m.content || "") })) }),
+          body: JSON.stringify({ model, max_tokens: 4096,
+            messages: messages.map((m: any) => ({ role: m.role || "user", content: String(m.content || "") })) }),
         });
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `Moonshot error (${r.status}).`, status: r.status }, 200); }
         const data = await r.json();
         return json({ text: (((data.choices || [])[0] || {}).message || {}).content || "", vision: false });
       } catch (e) {
-        if ((e as any)?.name === "TimeoutError") return json({ error: "Kimi took too long to answer (over 2 minutes) — the request was cancelled server-side." }, 200);
+        if ((e as any)?.name === "TimeoutError") return json({ error: "Kimi took too long to answer — K3 is a brand-new deep-reasoning flagship and long drafts can outrun the server window, especially at peak. Try again, keep K3 for shorter tasks (analysis, alt lines), or switch the writing dock back to Auto for heavy drafting." }, 200);
         return json({ error: "Proxy failed to reach Moonshot: " + (e?.message || e) }, 502);
       }
     }
