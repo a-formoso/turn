@@ -191,7 +191,7 @@ function ScriptBlock({ b, contd, sceneNo, flash }){
    contentEditable — React never manages its text (no children in the vdom), so
    re-renders mid-typing can't reset the caret; the raw text is pushed in via a ref
    effect on mount and after each committed change. Commits on blur only when changed. */
-function EditableBlock({ b, onCommit, flash }){
+function EditableBlock({ b, onCommit, flash, sceneNo }){
   const ref = React.useRef(null);
   const raw = b.text || "";
   React.useEffect(()=>{ if(ref.current && ref.current.innerText !== raw) ref.current.innerText = raw; },[raw]);
@@ -203,11 +203,41 @@ function EditableBlock({ b, onCommit, flash }){
   };
   // single-line block types blur on Enter; action/dialogue allow line breaks
   const oneLine = b.type==="scene" || b.type==="char" || b.type==="paren" || b.type==="trans";
-  return React.createElement("div",{
-    ref, className:cls, contentEditable:true, suppressContentEditableWarning:true,
+  const editableProps = {
+    ref, contentEditable:true, suppressContentEditableWarning:true,
     spellCheck:true, "data-ph":"…", onBlur:commit,
     onKeyDown:(e)=>{ if(oneLine && e.key==="Enter"){ e.preventDefault(); e.currentTarget.blur(); } }
-  });
+  };
+  // industry formatting holds while EDITING too: the first slugline keeps its
+  // scene-number flanks (only the text between them stays editable)
+  if(b.type==="scene" && sceneNo!=null){
+    return React.createElement("div",{className:BLOCK_CLASS.scene+" numbered"+(flash?" spb-flash":"")},
+      React.createElement("span",{className:"spb-scnum"},sceneNo),
+      React.createElement("span",{...editableProps, className:"spb-sctext sp-editable"}),
+      React.createElement("span",{className:"spb-scnum"},sceneNo));
+  }
+  return React.createElement("div",{...editableProps, className:cls});
+}
+
+/* EDIT MODE: insert a new screenplay element into a beat — the industry parts
+   (action, character cue + line, parenthetical, mini-slugline, transition). */
+function AddBlockRow({ onAdd }){
+  const [open, setOpen] = React.useState(false);
+  const OPTS = [
+    ["action","Action"],
+    ["charline","Character + line"],
+    ["paren","Parenthetical"],
+    ["scene","Mini-slugline"],
+    ["trans","Transition"],
+  ];
+  return React.createElement("div",{className:"sp-addrow"},
+    !open
+      ? React.createElement("button",{className:"sp-add-btn",title:"Insert a screenplay element into this beat",
+          onClick:()=>setOpen(true)}, "+ Add")
+      : React.createElement(React.Fragment,null,
+          OPTS.map(o=>React.createElement("button",{key:o[0],className:"sp-add-chip",
+            onClick:()=>{ setOpen(false); onAdd(o[0]); }},o[1])),
+          React.createElement("button",{className:"sp-add-chip ghost",onClick:()=>setOpen(false)},"\u00d7")));
 }
 
 /* the (CONT'D) bookkeeping the main page does, reusable for any block list */
@@ -431,6 +461,20 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       onEditScene(scene.id, { ...screenplay, blocks:nextBlocks, edited:true, polished:false, ai:false, auto:false });
     };
 
+    // EDIT MODE: insert new element(s) at the END of a beat's blocks. "charline"
+    // = a character cue plus an empty dialogue line in one press.
+    const insertBlock = (beatN, kind)=>{
+      if(!onEditScene) return;
+      const blocks = screenplay.blocks.slice();
+      let at = -1;
+      for(let j=0;j<blocks.length;j++){ if((blocks[j].beat||1)===beatN) at = j; }
+      if(at<0){ for(let j=0;j<blocks.length;j++){ if((blocks[j].beat||1)<beatN) at = j; } }
+      const fresh = kind==="charline"
+        ? [ { beat:beatN, type:"char", text:"" }, { beat:beatN, type:"dia", text:"" } ]
+        : [ { beat:beatN, type:kind, text:"" } ];
+      blocks.splice(at+1, 0, ...fresh);
+      onEditScene(scene.id, { ...screenplay, blocks, edited:true, polished:false, ai:false, auto:false });
+    };
     const beatRow = (n)=> beats && beats.rows.find(r=>r.n===n);
     body = React.createElement(React.Fragment,null,
       polishWait && React.createElement("div",{className:"polish-note"},
@@ -454,9 +498,10 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
               React.createElement("div",{className:"sp-page-inner"},
                 (fg[n]||[]).length
                   ? (fg[n]||[]).map((b,i)=> editing
-                  ? React.createElement(EditableBlock,{key:i,b,onCommit:(t)=>commitEdit(b,t),flash:!!(verFlash&&verFlash.has(b))})
+                  ? React.createElement(EditableBlock,{key:i,b,onCommit:(t)=>commitEdit(b,t),sceneNo:(b===firstSlugBlock?scene.no:null),flash:!!(verFlash&&verFlash.has(b))})
                   : React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:(b===firstSlugBlock?scene.no:null),flash:!!(verFlash&&verFlash.has(b))}))
-                  : React.createElement("div",{className:"spb-action spb-missing"},"No screenplay text assigned to this beat."))));
+                  : React.createElement("div",{className:"spb-action spb-missing"},"No screenplay text assigned to this beat."),
+                editing && React.createElement(AddBlockRow,{onAdd:(kind)=>insertBlock(n, kind)}))));
         })),
       transOut && React.createElement(TransitionBar,{trans:transOut,out:true,
         fromTo:`to Sc.${String(nextScene.no).padStart(2,"0")} ${nextScene.title}`}));

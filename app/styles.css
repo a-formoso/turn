@@ -891,7 +891,17 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 
 /* EDIT MODE — each screenplay block becomes a directly-editable line (the page stays
    on its paper colours, so these are dark-on-light regardless of the app theme) */
-.sp-editable{outline:0;border-radius:5px;padding:2px 6px;margin-left:-6px;cursor:text;white-space:pre-wrap;min-height:1.25em;transition:background .12s,box-shadow .12s}
+/* longhand padding so each block type's INDUSTRY indent (char 42% / paren 34% /
+   dia 24%) survives in edit mode — the old shorthand clobbered padding-left and
+   every element rendered flush-left while editing */
+.sp-editable{outline:0;border-radius:5px;padding-top:2px;padding-bottom:2px;padding-right:6px;cursor:text;white-space:pre-wrap;min-height:1.25em;transition:background .12s,box-shadow .12s}
+.spb-action.sp-editable,.spb-scene.sp-editable{padding-left:6px;margin-left:-6px}
+.spb-sctext.sp-editable{display:inline-block;min-width:60px;padding-left:4px}
+.sp-addrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0 2px}
+.sp-add-btn,.sp-add-chip{border:1px dashed var(--line-3,#c9c2b4);border-radius:7px;background:transparent;
+  color:#8a8371;font-family:var(--f-mono);font-size:10px;letter-spacing:.04em;padding:3px 9px;cursor:pointer}
+.sp-add-btn:hover,.sp-add-chip:hover{border-style:solid;color:#111;border-color:#111}
+.sp-add-chip.ghost{border-style:solid;padding:3px 7px}
 .sp-editable:hover{background:rgba(0,0,0,.04)}
 .sp-editable:focus{background:#fff;box-shadow:0 0 0 2px var(--brand)}
 .sp-editable:empty::before{content:attr(data-ph);color:#b9b2a3;pointer-events:none}
