@@ -404,7 +404,9 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
     // carries the same label here. The centered overlay mirrors the Beats tab's.
     if(live) polishUI = React.createElement(React.Fragment,null,
       React.createElement("button",
-        {className:`draft-btn sm ${isPolished?"ghost":""}`,onClick:runPolish,disabled:polishing,
+        // always the accent style — the primary action must read consistently orange
+        // whether or not the current draft is already polished (user ruling 2026-07-19)
+        {className:"draft-btn sm",onClick:runPolish,disabled:polishing,
          title:"Rewrite this scene's screenplay from its CURRENT beat cards — the previous draft stays in version history (Undo restores it)"},
         React.createElement(Icon.wand,{s:14}),
         polishWait ? "Redrafting\u2026" : "Redraft script from beats"),

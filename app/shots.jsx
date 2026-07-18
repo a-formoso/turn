@@ -262,7 +262,7 @@ function sceneSequences(sceneShots, clipMax, opts){
   let start=0;
   return groups.map((shots,index)=>{
     const dur = seqDuration(shots);
-    const g = { index, start, shots, dur, over: dur>MAX, manual };
+    const g = { index, start, shots, dur, over: dur>MAX, manual:false };
     start += shots.length;
     return g;
   });

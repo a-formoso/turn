@@ -487,9 +487,6 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
           (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
           _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")),
           _el("div",{className:"beat-lane-acts",onClick:(e)=>e.stopPropagation()},
-            !folded && L.shots.length>1 && _el(React.Fragment,null,
-              _el("button",{className:"beat-lane-arrow",title:"Previous shot in this beat",onClick:()=>pageShots(L.n,-1)},_el(Icon.chevL,{s:13})),
-              _el("button",{className:"beat-lane-arrow",title:"Next shot in this beat",onClick:()=>pageShots(L.n,1)},_el(Icon.chevR,{s:13}))),
             onSplitBeat && _el("button",{className:"beat-lane-btn",disabled:!!splittingBeat,
               title:"MUSE designs 2-4 shots of real COVERAGE for this beat — one per distinct visual event, never more than the beat's text supports (the drive and the reaction usually want separate setups; small continuity objects earn an INSERT). Replaces this beat's current shot(s); writing-model credits only — frames render separately. A beat that wants 5+ setups is usually two beats — split it in the Beats tab first.",
               onClick:()=>onSplitBeat(scene, L.n)},
@@ -499,6 +496,14 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
               title:"Add one manual shot to this beat — it joins the rolling chain after the beat's last shot",
               onClick:()=>onAddShot(scene.id, L.n)},
               _el(Icon.plus,{s:11}),"Add shot"))),
+        // SIDE ARROWS (scene-navigator style): pinned at the lane's edges so the
+        // eye stays in place while paging through this beat's shots
+        !folded && L.shots.length>1 && _el("button",{className:"beat-lane-side prev",
+          title:"Previous shot in this beat",onClick:(e)=>{ e.stopPropagation(); pageShots(L.n,-1); }},
+          _el(Icon.chevL,{s:16})),
+        !folded && L.shots.length>1 && _el("button",{className:"beat-lane-side next",
+          title:"Next shot in this beat",onClick:(e)=>{ e.stopPropagation(); pageShots(L.n,1); }},
+          _el(Icon.chevR,{s:16})),
         !folded && _el("div",{className:"beat-lane-strip",ref:(el)=>{ stripRefs.current[L.n]=el; }},
           L.shots.map((sh,li)=>{
             const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
