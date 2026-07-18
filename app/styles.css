@@ -5675,7 +5675,14 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-lane-btn:disabled{opacity:.5;cursor:default}
 .beat-lane .sheet-grid{margin-bottom:8px}
 .beat-lane.folded{padding-bottom:10px}
-.beat-lane.focus{box-shadow:0 0 0 2px oklch(0.62 0.16 45 / .45)}
+/* the beat's shots as a horizontal strip — ‹ › arrows page one card at a time */
+.beat-lane-strip{display:flex;gap:18px;overflow-x:auto;scroll-snap-type:x proximity;
+  padding:2px 2px 10px;-webkit-overflow-scrolling:touch}
+.beat-shot-cell{flex:0 0 clamp(320px, 30vw, 430px);scroll-snap-align:start;min-width:0}
+@media (max-width:700px){ .beat-shot-cell{flex-basis:86vw} }
+.beat-lane-arrow{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;
+  border:1px solid var(--line-2);border-radius:7px;background:var(--bg-1);color:var(--txt-1);cursor:pointer}
+.beat-lane-arrow:hover{border-color:var(--pos);color:var(--pos)}
 .beat-lane-chev{display:inline-flex;color:var(--txt-3);transition:transform .15s}
 .beat-lane-chev.open{transform:rotate(90deg)}
 .beat-nav{display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:6px 10px;

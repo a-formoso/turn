@@ -1846,7 +1846,7 @@ function App(){
     let ok = true;
     if(typeof window.appConfirm==="function")
       ok = await window.appConfirm({ title:"Split beat "+beatN+" into coverage?",
-        body:"MUSE designs 2\u20133 shots for this beat \u2014 one per distinct visual event, in cut order. The beat's current "+existing.length+" shot"+(existing.length===1?"":"s")+" (including any generated frame's place in the chain) will be REPLACED; other beats are untouched. Writing-model credits only \u2014 frames render separately.",
+        body:"MUSE designs 2\u20134 shots for this beat \u2014 one per distinct visual event, in cut order. The beat's current "+existing.length+" shot"+(existing.length===1?"":"s")+" (including any generated frame's place in the chain) will be REPLACED; other beats are untouched. Writing-model credits only \u2014 frames render separately.",
         confirmLabel:"Design coverage", cancelLabel:"Cancel" });
     if(!ok) return;
     setSplittingBeat(scene.id+"#"+beatN);
@@ -1857,7 +1857,7 @@ function App(){
       if(rows.length && typeof normalizeShot==="function"){
         const baseOrder = existing.length ? Math.min(...existing.map(x=>x.order||0)) : (beatN-1);
         const stamp = Date.now().toString(36);
-        const made = rows.slice(0,3).map((r,i)=>({
+        const made = rows.slice(0,4).map((r,i)=>({
           ...normalizeShot(r, scene, i, locations, props, characters, beatsMap),
           id:"shot-"+scene.id+"-b"+beatN+String.fromCharCode(97+i)+"-"+stamp,
           beatN, order: baseOrder + i*0.01 }));
