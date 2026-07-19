@@ -500,11 +500,9 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
           (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
           _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")),
           _el("div",{className:"beat-lane-acts"},
-            onSplitBeat && _el("button",{className:"beat-lane-btn",disabled:!!splittingBeat,
-              title:"Map this beat into shots: MUSE designs 2-4 shots of real coverage for it — one per distinct visual event, never more than the beat's text supports (the drive and the reaction usually want separate setups; small continuity objects earn an INSERT). Replaces this beat's current shot(s); writing-model credits only — frames render separately. A beat that wants 5+ setups is usually two beats — split it in the Beats tab first.",
-              onClick:()=>onSplitBeat(scene, L.n)},
-              splittingBeat===busyKey ? _el("span",{className:"ns-spin"}) : _el(Icon.sparkles,{s:11}),
-              splittingBeat===busyKey ? "Designing…" : "Break into shots"),
+            // per-beat design button retired (user ruling 2026-07-19): the beat-by-beat
+            // mapping is AUTOMATIC — aiDraftShots designs 1-4 shots per beat on
+            // "Design all shots" / "Re-draft shots". "Add shot" stays as the manual hatch.
             onAddShot && _el("button",{className:"beat-lane-btn ghost",
               title:"Add one manual shot to this beat — it joins the rolling chain after the beat's last shot",
               onClick:()=>onAddShot(scene.id, L.n)},
