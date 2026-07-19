@@ -3706,9 +3706,18 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
      caption are flexed into horizontal slivers and Regenerate becomes untappable
      (this is the "can't regenerate props on mobile" bug). Gate on :has(genwrap). */
   .sheet-frame{border-right:0;border-bottom:1px solid var(--line)}
-  .sheet-frame:not(:has(.sheet-genwrap)){flex:0 0 auto;flex-direction:row;align-items:center}
+  /* …and ONLY for small image-slot refs — a wide .sheet-dropzone (shot frames,
+     scale sheet) must stay a COLUMN or the zone + Generate + caption crush into
+     one unreadable row (the mobile shot-card bug). */
+  .sheet-frame:not(:has(.sheet-genwrap)):not(:has(.sheet-dropzone)){flex:0 0 auto;flex-direction:row;align-items:center}
   image-slot[id^="charref-"], image-slot[id^="propref-"]{height:120px;width:120px;flex:0 0 120px;aspect-ratio:auto}
-  .sheet-frame:not(:has(.sheet-genwrap)) .sheet-frame-cap{margin-top:0;margin-left:12px}
+  .sheet-frame:not(:has(.sheet-genwrap)):not(:has(.sheet-dropzone)) .sheet-frame-cap{margin-top:0;margin-left:12px}
+  /* Shots tab scene header: title/meta keep the full first row, the action
+     buttons wrap onto their own full-width row (they were crushing the meta) */
+  .shot-scene-head{flex-wrap:wrap;gap:10px}
+  .shot-scene-meta{flex:1 1 0;min-width:0}
+  .shot-scene-acts{flex:1 1 100%}
+  .shot-scene-acts>*{flex:1 1 auto;justify-content:center}
   .art-scroll{padding:18px 14px 50px}
 }
 
