@@ -467,7 +467,7 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
           // NO hand-adding (product rule 2026-07-13): locations derive from the
           // script's sluglines — write the place into the screenplay and
           // 'Design all locations' pulls it in; the Art Room never invents places.
-          React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!scriptHasLocs),onClick:onDraftAll,
+          React.createElement("button",{className:"art-draftall ghost",disabled:draftingAll||(!list.length&&!scriptHasLocs),onClick:onDraftAll,
             title:"Build every location from the story in one pass \u2014 pull any missing places from the script's sluglines, draft each spec (the space, significance, look dev), and stage its depth grid"},
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all locations"),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,

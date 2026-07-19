@@ -930,7 +930,7 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
           // NO hand-adding (product rule 2026-07-13): props derive from the script —
           // name an object in the screenplay (worn, carried or set dressing) and
           // 'Design all props' pulls it in; the Art Room never invents story objects.
-          React.createElement("button",{className:"art-draftall",disabled:draftingAll||(!list.length&&!castHasProps),onClick:onDraftAll,
+          React.createElement("button",{className:"art-draftall ghost",disabled:draftingAll||(!list.length&&!castHasProps),onClick:onDraftAll,
             title:"Build every prop from the story in one pass \u2014 pull missing items from the cast, draft each spec (object, significance, look dev) from the script, and map every prop to the scenes it appears in"},
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all props"),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,

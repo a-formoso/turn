@@ -430,9 +430,6 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
   };
   return _el("div",{className:"shot-scene-group"+(open?"":" collapsed")},
     _el("div",{className:"shot-scene-head"},
-      _el("button",{className:"shot-scene-fold",onClick:onToggle,
-        title:open?"Collapse this scene":"Expand this scene","aria-expanded":open?"true":"false"},
-        _el(Icon.chevR,{s:15})),
       _el("div",{className:"shot-scene-no"},String(scene.no).padStart(2,"0")),
       _el("div",{className:"shot-scene-meta",onClick:onToggle,style:{cursor:"pointer"}},
         _el("div",{className:"shot-scene-title"},scene.title||"Untitled scene"),

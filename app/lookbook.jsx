@@ -290,17 +290,16 @@ function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSe
             React.createElement(window.InfoTip,{label:"About the Lookbook",
               text:"The film's visual north star, built first so it can steer everything downstream. A short visual statement plus reference touchstones — palette, lighting, lens, texture — each can have a mood frame in that visual language (original frames, never copies of the named films). 'Research the look' writes the statement and gathers/dedupes the references. 'Generate all frames' renders the mood frames afterwards."}))),
         React.createElement("div",{className:"art-intro-actions"},
-          React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
-            React.createElement(Icon.plus,{s:14}),"Add reference"),
-          onResearch && React.createElement("button",{className:"art-draftall",onClick:onResearch,
+          React.createElement("button",{className:"art-draftall ghost",onClick:onAdd,title:"Add a reference by hand"},
+            React.createElement(Icon.plus,{s:14})),
+          onResearch && React.createElement("button",{className:"art-draftall ghost",onClick:onResearch,
             title:"Visual Researcher — writes the look statement and gathers reference touchstones. Use Generate all frames when you want to render the mood frames."},
             React.createElement(Icon.robot,{s:14}),"Research the look"),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Render (or re-render) the mood frame for every reference that has a note"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Rendering…":"Generate all frames", typeof window.nbCostChip==="function" && window.nbCostChip(1)),
-          onClear && (list.length || (note||"").trim()) && React.createElement("button",{className:"art-draftall ghost",onClick:onClear,
-            title:"Remove every reference and the visual statement — Art Room only, never touches your story"},
-            React.createElement(Icon.trash,{s:13}),"Clear")))),
+          // (Clear-all removed — user ruling 2026-07-19; delete references per card)
+          null))),
 
     // the north-star visual statement
     React.createElement("div",{className:"lb-statement"},

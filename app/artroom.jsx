@@ -3277,6 +3277,9 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
 }
 
 function NbKeyBar(){
+  // key-status bar retired (user ruling 2026-07-19): server-side keys are the norm,
+  // the banner was noise on every tab. Component kept for compatibility.
+  return null;
   const [model, setModelState] = React.useState(()=> (typeof nbGetModel==="function") ? nbGetModel() : "");
   React.useEffect(()=>{
     const h = ()=> setModelState((typeof nbGetModel==="function") ? nbGetModel() : "");
@@ -3819,13 +3822,13 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
           // written into scenes; the Art Room designs what the story establishes.
           // ONE primary per stage: "Design the cast" leads while specs are missing,
           // "Generate all" leads once everything is drafted; the rest are ghosts.
-          onCast && React.createElement("button",{className:"art-draftall"+(castStage==="draft"?"":" ghost"),disabled:!characters.length,onClick:onCast,
+          onCast && React.createElement("button",{className:"art-draftall ghost",disabled:!characters.length,onClick:onCast,
             title:"Casting Director — drafts each character's look, finds their appearance changes, and generates the master sheet + every state variant, on its own"},
             React.createElement(Icon.robot,{s:14}),"Design the cast"),
           someUndrafted && React.createElement("button",{className:"art-draftall ghost",disabled:draftingAll,onClick:onDraftAll,
             title:"Draft the spec for any character that doesn't have one yet \u2014 identity, wardrobe, props & accessories, continuity and look dev (the master reference prompt builds from these). Specs only \u2014 no images; the manual alternative to Design the cast."},
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":(eligibleAll>0?"Draft remaining":"Draft all (specs only)")),
-          castStage!=="draft" && React.createElement("button",{className:"art-draftall"+(castStage==="generate"?"":" ghost"),disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
+          castStage!=="draft" && React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the reference sheet for every drafted character \u2014 you choose whether to redo ones that already have a sheet"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all characters", typeof window.nbCostChip==="function" && window.nbCostChip(1))))),
     list.length>0 && React.createElement("div",{className:"prop-toolbar"},
@@ -4069,8 +4072,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
     // fixed engine dock — Model / Aspect / Resolution, always reachable while
     // scrolling at every viewport
     React.createElement(NbDock,null),
-    // #1 — pre-production readiness strip, visible across every tab
-    React.createElement(PreProductionStatus,{project,characters,props,locations,shots,scenes,setArtView}),
+    // (pre-production readiness strip removed — user ruling 2026-07-19)
     artView==="lookbook" && LookbookView
       ? React.createElement(LookbookView,{project,lookbook,note:lookbookNote,
           onUpdate:onUpdateLookbook,onAdd:onAddLookbook,onDelete:onDeleteLookbook,onSetNote:onSetLookbookNote,onResearch,onClear:onClearLookbook})
