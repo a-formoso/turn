@@ -1011,6 +1011,9 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 .st-group.b .draft-btn.sm{height:32px}
 .st-group.b .script-scenestep{height:32px;border:1px solid var(--line-2);border-radius:9px;background:var(--bg-3);padding:0 8px}
 
+/* Redraft button drops its middle word on very narrow screens: "Redraft from beats" */
+@media (max-width:400px){ .draft-btn .redraft-long{display:none} }
+
 /* EDIT MODE: per-element remove control — deleting commits a version (Undo restores) */
 .sp-editwrap{position:relative}
 .sp-del-btn{position:absolute;right:0;top:1px;width:20px;height:20px;display:grid;place-items:center;

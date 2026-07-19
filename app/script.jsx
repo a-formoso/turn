@@ -423,7 +423,10 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
         {className:"draft-btn sm",onClick:runPolish,disabled:polishing,
          title:"Rewrite this scene's screenplay from its CURRENT beat cards — the previous draft stays in version history (Undo restores it)"},
         React.createElement(Icon.wand,{s:14}),
-        polishWait ? "Redrafting\u2026" : "Redraft script from beats"),
+        polishWait ? "Redrafting\u2026"
+          // full label on desktop; CSS shortens the middle word out at <=400px
+          : React.createElement(React.Fragment,null,"Redraft ",
+              React.createElement("span",{className:"redraft-long"},"script "),"from beats")),
       polishWait && ReactDOM.createPortal(
         React.createElement("div",{className:"redraft-overlay"},
           React.createElement("div",{className:"redraft-card"},
