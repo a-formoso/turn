@@ -205,6 +205,19 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
               onClick:()=> onIeClick && onIeClick(l.intExt||"INT"),
               onKeyDown:(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); onIeClick && onIeClick(l.intExt||"INT"); } }},
               l.intExt||"INT"),
+            // resolved WORLD SCALE badge — makes the Auto derivation legible per card
+            // (hidden at plain human scale; tooltip says what set it)
+            (typeof locationScaleClass==="function") && (()=>{
+              const cls = locationScaleClass(l, project||{});
+              if(cls==="A") return null;
+              const M = ({B:["\ud83d\udc01","Critter world"],C:["\ud83d\uddff","Giant world"],D:["\ud83d\udd2c","Microscopic world"]})[cls]||["",("Class "+cls)];
+              const forced = String((project||{}).worldScale||"").trim();
+              return React.createElement("span",{className:"loc-scale-badge",
+                title:M[1]+" (Class "+cls+") \u2014 "+((forced && !/^auto$/i.test(forced))
+                  ? "forced project-wide by the World scale control."
+                  : "derived automatically from the characters who drive this place's scenes.")
+                  +" Plates here render at this scale."},
+                M[0]+" "+cls); })(),
             React.createElement(EditText,{value:l.name,placeholder:"Location name\u2026",onCommit:val=>onUpdate(l.id,{name:val})})),
           React.createElement("div",{className:"prop-scenes"},
             React.createElement("span",{className:"prop-scenes-lab"},"Scenes"),
@@ -500,11 +513,11 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
         React.createElement("span",{className:"char-style-all-lab"},"World scale"),
         React.createElement("select",{className:"char-style-select",value:(project&&project.worldScale)||"",
           onChange:e=>onSetWorldScale(e.target.value)},
-          React.createElement("option",{value:""},"Auto (by occupant)"),
-          React.createElement("option",{value:"A"},"Human scale (Class A)"),
-          React.createElement("option",{value:"B"},"Critter scale (Class B)"),
-          React.createElement("option",{value:"C"},"Giant scale (Class C)"),
-          React.createElement("option",{value:"D"},"Microscopic scale (Class D)"))),
+          React.createElement("option",{value:""},"\u2728 Auto (by occupant)"),
+          React.createElement("option",{value:"A"},"\ud83e\uddcd Human scale (Class A)"),
+          React.createElement("option",{value:"B"},"\ud83d\udc01 Critter scale (Class B)"),
+          React.createElement("option",{value:"C"},"\ud83d\uddff Giant scale (Class C)"),
+          React.createElement("option",{value:"D"},"\ud83d\udd2c Microscopic scale (Class D)"))),
       list.length>1 && React.createElement("div",{className:"kind-filterbar"},
         React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Show"),
         [["","All"],["INT","INT"],["EXT","EXT"],["INT/EXT","INT/EXT"]].map(kv=>{

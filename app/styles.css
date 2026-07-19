@@ -2884,6 +2884,10 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .loc-intext-badge{display:inline-block;padding:1px 7px;border-radius:4px;font-family:var(--f-mono);
   font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;vertical-align:middle}
 .loc-name-row{display:flex;align-items:center;gap:8px}
+/* resolved world-scale badge (Auto derivation made visible; hidden at human scale) */
+.loc-scale-badge{flex:0 0 auto;display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:4px;
+  font-family:var(--f-mono);font-size:9px;font-weight:700;letter-spacing:.05em;
+  border:1px solid var(--pos-line);background:var(--pos-soft);color:var(--pos);cursor:help}
 .loc-name-row .loc-intext-badge{flex:0 0 auto}
 .loc-name-row .edit-in{flex:1;min-width:0}
 .loc-intext-badge.int{background:oklch(0.6 0.08 250 / .18);color:oklch(0.8 0.08 250);border:1px solid oklch(0.6 0.08 250 / .35)}
@@ -3359,6 +3363,13 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 .shot-scene-head{display:flex;align-items:center;gap:14px;margin:0 0 14px;padding:10px 14px;
   background:var(--bg-1);border:1px solid var(--line-2);border-radius:10px}
 .shot-scene-group.collapsed .shot-scene-head{margin-bottom:0}
+/* MERGED scene card (2026-07-19): navigator + head + context share ONE box */
+.shot-scene-card{border:1px solid var(--line-2);border-radius:12px;background:var(--bg-1);margin:0 0 16px;overflow:visible}
+.shot-scene-card .shot-scene-head{margin:0;border:0;background:transparent;border-bottom:1px solid var(--line);border-radius:0}
+.shot-scene-card .shot-scene-ctx{margin:0;border:0;background:transparent;border-radius:0}
+.shot-scene-head .scene-pager-arrow{flex:0 0 auto}
+.shot-scene-meta .scene-pager-no{position:relative;display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-bottom:2px}
+.shot-scene-meta .scene-pager-no:hover{color:var(--txt-1)}
 .shot-scene-fold{flex:0 0 auto;display:grid;place-items:center;width:26px;height:26px;border-radius:7px;cursor:pointer;
   border:1px solid var(--line-2);background:var(--bg-3);color:var(--txt-2);transition:.12s}
 .shot-scene-fold:hover{color:var(--txt-0);background:var(--bg-4)}
@@ -3716,7 +3727,9 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
      buttons wrap onto their own full-width row (they were crushing the meta) */
   .shot-scene-head{flex-wrap:wrap;gap:10px}
   .shot-scene-meta{flex:1 1 0;min-width:0}
-  .shot-scene-acts{flex:1 1 100%}
+  /* order keeps the merged navigator's ‹ › arrows flanking the meta on row 1;
+     the action buttons drop to their own full-width row below */
+  .shot-scene-acts{flex:1 1 100%;order:3}
   .shot-scene-acts>*{flex:1 1 auto;justify-content:center}
   .art-scroll{padding:18px 14px 50px}
 }

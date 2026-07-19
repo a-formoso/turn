@@ -348,7 +348,7 @@ function SceneStyleChip({ project, sceneId }){
       pal.map((c,i)=>_el("span",{key:i,className:"shot-style-swatch",style:{background:c}}))));
 }
 
-function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, onUpdate, onDelete, onView,
+function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, pager, onUpdate, onDelete, onView,
   onAddShot, onSplitBeat, splittingBeat, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot, onRegenDownstream,
   onRenderScene, renderBusy, onStopChain }){
   const loc = ctx.location;
@@ -372,6 +372,11 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
   // by watching MOUNTED cards, and an unmounted card would stall the queue.
   const [beatIdx, setBeatIdx] = React.useState(0);
   const stripRefs = React.useRef({});
+  // merged scene navigator (user ruling 2026-07-19): the pager lives IN this header
+  const [jumpOpen, setJumpOpen] = React.useState(false);
+  React.useEffect(()=>{ if(!jumpOpen) return;
+    const close=(e)=>{ if(!e.target.closest || !e.target.closest(".ssg-jump")) setJumpOpen(false); };
+    document.addEventListener("mousedown", close); return ()=>document.removeEventListener("mousedown", close); },[jumpOpen]);
   const showAllLanes = !!batchActiveId;
   const _bi = Math.max(0, Math.min(beatIdx, lanes.length-1));
   const pageShots = (n, dir)=>{
@@ -429,28 +434,37 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
     else window.prompt("Copy the scene video prompt:", t);
   };
   return _el("div",{className:"shot-scene-group"+(open?"":" collapsed")},
-    _el("div",{className:"shot-scene-head"},
-      _el("div",{className:"shot-scene-no"},String(scene.no).padStart(2,"0")),
-      _el("div",{className:"shot-scene-meta",onClick:onToggle,style:{cursor:"pointer"}},
+    // ONE merged card (user ruling 2026-07-19): scene navigator + title/style/meta +
+    // context grid, redundancy removed (number/driver/location each said once).
+    // "Copy video prompt" retired (clips live on the Stage); scene-level "Add shot"
+    // retired (every beat lane header has its own "Add shot").
+    _el("div",{className:"shot-scene-card"},
+    _el("div",{className:"shot-scene-head merged"},
+      pager && _el("button",{className:"scene-pager-arrow",disabled:pager.idx<=0,onClick:pager.onPrev,
+        title:"Previous scene (\u2190)","aria-label":"Previous scene"},_el(Icon.chevL,{s:18})),
+      _el("div",{className:"shot-scene-meta"},
+        pager && _el("span",{className:"scene-pager-no ssg-jump",role:"button",tabIndex:0,title:"Jump to a scene",
+          onClick:()=>setJumpOpen(o=>!o)},
+          "Scene "+(pager.idx+1)+" of "+pager.total, _el(Icon.chevD,{s:10}),
+          jumpOpen && _el("div",{className:"scene-pager-menu",onClick:(e)=>e.stopPropagation()},
+            pager.scenes.map((sx,i)=>_el("button",{key:sx.id||i,className:"scene-pager-menu-item"+(i===pager.idx?" on":""),
+              onClick:()=>{ pager.onJump(i); setJumpOpen(false); }},
+              _el("span",{className:"scene-pager-menu-no"},String(sx.no||(i+1)).padStart(2,"0")),
+              _el("span",{className:"scene-pager-menu-t"},sx.title||"Untitled scene"),
+              i===pager.idx && _el(Icon.check,{s:13}))))),
         _el("div",{className:"shot-scene-title"},scene.title||"Untitled scene"),
         _el("div",{className:"shot-scene-style-row"},_el(SceneStyleChip,{project:ctx.project,sceneId:scene.id})),
         _el("div",{className:"shot-scene-sub"},
-          (driver?("Driver: "+driver.name):"")+(driver&&loc?"  \u00b7  ":"")+(loc?("Location: "+loc.name):"")
-          +"   \u00b7   "+shots.length+" shot"+(shots.length!==1?"s":""))),
+          (loc?("Location: "+loc.name+"   \u00b7   "):"")+shots.length+" shot"+(shots.length!==1?"s":""))),
       _el("div",{className:"shot-scene-acts"},
         onRenderScene && _el("button",{className:"char-draft-btn primary",disabled:!!renderBusy,onClick:()=>onRenderScene(scene),
           title:"Render this scene in order, each shot seeded by the previous frame, auto-approving each. Approved frames are retained as seeds."},
           _el(Icon.sparkles,{s:12}), renderBusy?"Rendering\u2026":("Render Scene "+String(scene.no).padStart(2,"0")+" in order")),
-        _el("button",{className:"char-draft-btn ghost",onClick:copyScenePrompt,
-          title:"Copy the WHOLE-SCENE video prompt — every shot's action and dialogue in order, plus the camera arc and the scene's grade. Paste it into an external video tool or a Stage clip's prompt box. (The Stage still renders per clip — one Seedance render can't exceed the format's clip ceiling.)"},
-          _el(Icon.copy,{s:12}),"Copy video prompt"),
         _el("button",{className:"char-draft-btn ghost"+(draftingScene?" busy":""),disabled:!!draftingScene,onClick:()=>onDraftScene(scene),
           title:"Re-derive this scene's shot list from its beats (replaces the current shots)"},
-          _el(Icon.layers,{s:12}), draftingScene?"Drafting\u2026":"Re-draft shots"),
-        _el("button",{className:"char-draft-btn",onClick:()=>onAddShot(scene.id),
-          title:"Add a shot to this scene by hand"},
-          _el(Icon.plus,{s:12}),"Add shot")),
-    ),
+          _el(Icon.layers,{s:12}), draftingScene?"Drafting\u2026":"Re-draft shots")),
+      pager && _el("button",{className:"scene-pager-arrow",disabled:pager.idx>=pager.total-1,onClick:pager.onNext,
+        title:"Next scene (\u2192)","aria-label":"Next scene"},_el(Icon.chevR,{s:18}))),
     open && _el("div",{className:"shot-scene-ctx"},
       scene.summary && _el("div",{className:"ssx-desc"},scene.summary),
       _el("div",{className:"ssx-grid"},
@@ -463,8 +477,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
           _el("div",{className:"ssx-conf"},
             confLab && _el("span",{className:"ssx-conf-lab"},confLab),
             _el("div",{className:"ssx-pips"},
-              [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")}))))))),
-
+              [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")})))))))),
     // (the separate beat-pager bar was REMOVED — user ruling 2026-07-19: the
     // lane's own side arrows walk the shots and then step beats)
     // BEAT LANES — the beat is the dramatic unit; each owns 1..N shots (coverage)
@@ -793,11 +806,10 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
           _el("span",{className:"shot-design-lab"},"Designing shots — scene "+Math.min(done+1,designTotal)+" of "+designTotal+"…")),
         _el("div",{className:"shot-design-track"}, _el("div",{className:"shot-design-fill",style:{width:pct+"%"}})));
     })(),
-    ((typeof ScenePager!=="undefined") && scenesWithShots.length>0) && (()=>{ const cs=scenesWithShots[visibleIdx]; const cl=cs&&ctxFor(cs).location;
-      return _el(ScenePager,{ idx:visibleIdx, total:scenesWithShots.length, title:cs&&cs.title, sub:cl&&cl.name, scenes:scenesWithShots,
-        onJump:setPIdx,
-        onPrev:()=>setPIdx(i=>Math.max(0,i-1)), onNext:()=>setPIdx(i=>Math.min(scenesWithShots.length-1,i+1)) }); })(),
+    // (standalone ScenePager removed — the navigator is merged into each scene card head)
     visibleScenes.map(scene=>_el(SceneShotGroup,{key:scene.id,scene,shots:shotsForGroup(scene.id),
+      pager:{ idx:visibleIdx, total:scenesWithShots.length, scenes:scenesWithShots, onJump:setPIdx,
+        onPrev:()=>setPIdx(i=>Math.max(0,i-1)), onNext:()=>setPIdx(i=>Math.min(scenesWithShots.length-1,i+1)) },
       ctx:ctxFor(scene),characters:characters||[],beatsMap,propsAvail:(typeof propsForScene==="function")?propsForScene(props,scene.id):[],
       onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
       onAddShot,onSplitBeat,splittingBeat,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===scene.id,
