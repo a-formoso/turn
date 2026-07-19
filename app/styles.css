@@ -1098,12 +1098,6 @@ textarea.edit-in{line-height:1.5;min-height:36px;font-family:var(--f-ui);box-siz
 .beat-edit-head .bn{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-family:var(--f-mono);font-size:10px;font-weight:700;background:var(--bg-4);color:var(--txt-1);flex:0 0 auto}
 .beat-edit.turn .bn{background:var(--neg);color:#08272e}
 .beat-turn-btn{display:inline-flex;align-items:center;gap:5px;font-family:var(--f-mono);font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-3);background:transparent;border:1px solid var(--line-2);border-radius:5px;padding:3px 7px;cursor:pointer;transition:.1s}
-.beat-charge-sel{appearance:none;margin-left:2px;padding:1px 6px;border-radius:5px;border:1px solid var(--line);
-  background:var(--bg-2);color:var(--txt-3);font-family:var(--f-mono);font-size:9px;font-weight:700;cursor:pointer}
-.beat-charge-sel.pos{color:oklch(0.62 0.13 150);border-color:oklch(0.62 0.13 150 / .4)}
-.beat-charge-sel.neg{color:oklch(0.6 0.16 30);border-color:oklch(0.6 0.16 30 / .4)}
-[data-theme="light"] .beat-charge-sel.pos{color:oklch(0.45 0.13 150)}
-[data-theme="light"] .beat-charge-sel.neg{color:oklch(0.48 0.16 30)}
 
 .beat-turn-btn:hover{color:var(--txt-1)}
 .beat-edit.turn .beat-turn-btn{color:var(--neg);border-color:var(--neg-line)}
@@ -3875,10 +3869,16 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 
   /* script view fluid */
   .script-head{flex-direction:column;align-items:stretch;gap:10px;padding:14px 14px 0}
-  .script-tools{flex-wrap:wrap;justify-content:center;row-gap:8px}
+  /* toolbar un-glues into an evenly stretched button grid on phones — wrapped glue
+     rows leave ragged square corners; children vary (Edit/polish are conditional) */
+  .script-tools{flex-wrap:wrap;justify-content:center;gap:6px}
+  .script-tools>*{flex:1 1 auto;justify-content:center;border-radius:8px}
+  .script-tools>*+*{margin-left:0}
   .script-scroll{padding:0 12px 30px}
+  /* story-state ledger: label centered on its own row, cells share ONE line */
   .sp-carry{justify-content:center}
   .sp-carry .clab2{justify-content:center}
+  .sp-carry .cell{flex:1 1 0;min-width:0}
   .sp-seg{flex-direction:column}
   .sp-gut{width:auto;flex:0 0 auto;flex-direction:row;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);border-right:0}
   .sp-gut .bsub{margin-left:auto}
