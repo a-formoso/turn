@@ -989,16 +989,20 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 .cont-btn.warn{background:var(--alert-soft);color:var(--alert);border:1px solid var(--alert)}
 .cont-btn:hover{filter:brightness(1.08)}
 
-/* the Script toolbar reads as ONE strip: every cell the same 32px height, glued
-   with shared borders, rounded only at the two ends */
-.script-tools{gap:0;align-items:stretch}
-.script-tools>*{height:32px;border-radius:0}
-.script-tools>*+*{margin-left:-1px}
-.script-tools>*:first-child{border-radius:8px 0 0 8px}
-.script-tools>*:last-child{border-radius:0 8px 8px 0}
-.script-tools>.ver-ctl{padding:0 3px}
-.script-tools>.draft-btn{border:1px solid transparent}
-.script-tools>.script-scenestep{border:1px solid var(--line);background:var(--bg-3);padding:0 7px}
+/* the Script toolbar is ONE glued strip inside a housing container: the container
+   carries the border + radius, cells are 32px with hairline dividers between them.
+   Identical on desktop and mobile — a narrow phone scrolls the strip sideways. */
+.script-tools{gap:0;align-items:stretch;flex-wrap:nowrap;width:max-content;max-width:100%;
+  border:1px solid var(--line-2);border-radius:9px;background:var(--bg-3);
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.script-tools::-webkit-scrollbar{display:none}
+.script-tools>*{height:32px;border:0;border-radius:0;flex:0 0 auto}
+.script-tools>*+*{border-left:1px solid var(--line-2)}
+.script-tools>.cont-btn{border:0}
+.script-tools>.cont-btn.ok,.script-tools>.cont-btn.warn{border:0;border-radius:0}
+.script-tools>.ver-ctl{border:0;border-radius:0;background:transparent;padding:0 3px}
+.script-tools>.ver-ctl+*{border-left:1px solid var(--line-2)}
+.script-tools>.script-scenestep{background:transparent;padding:0 7px}
 
 .cont-report{max-width:1000px;margin:0 auto 14px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:var(--r-l);overflow:hidden}
 .cont-report-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
@@ -3857,11 +3861,11 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   .canvas-sub{font-size:10px}
   .canvas-scroll{padding:8px 12px 80px}
 
-  /* WRITERS' ROOM editors reflow: the Beats tab's drive/react two-column grid and
-     the inspector's opening/closing charge boxes stack on a phone */
+  /* WRITERS' ROOM editors reflow: the Beats tab's drive/react two-column grid
+     stacks on a phone. The opening/closing charge boxes stay SIDE BY SIDE like
+     desktop (user ruling 2026-07-19) — the cells flex-shrink instead. */
   .beat-edit-cols{grid-template-columns:1fr}
   .beat-labels{grid-template-columns:1fr}
-  .charge-grid{flex-direction:column}
 
   /* MUSE + tweaks as bottom sheets */
   .ai-fab{right:12px}
@@ -3869,11 +3873,9 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 
   /* script view fluid */
   .script-head{flex-direction:column;align-items:stretch;gap:10px;padding:14px 14px 0}
-  /* toolbar un-glues into an evenly stretched button grid on phones — wrapped glue
-     rows leave ragged square corners; children vary (Edit/polish are conditional) */
-  .script-tools{flex-wrap:wrap;justify-content:center;gap:6px}
-  .script-tools>*{flex:1 1 auto;justify-content:center;border-radius:8px}
-  .script-tools>*+*{margin-left:0}
+  /* toolbar keeps the SAME glued housed strip as desktop; centered, and it
+     scrolls sideways when the phone is narrower than the strip */
+  .script-tools{margin:0 auto}
   .script-scroll{padding:0 12px 30px}
   /* story-state ledger: label centered on its own row, cells share ONE line */
   .sp-carry{justify-content:center}
