@@ -557,12 +557,12 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
     React.createElement("div",{className:"script-tools"},
       React.createElement("div",{className:"st-group a"}, contBtn, versionUI, editBtn),
       React.createElement("div",{className:"st-group b"}, polishUI, control,
-        React.createElement("div",{className:"script-scenestep"},
+        React.createElement("div",{className:"script-scenestep",title:"Step through the screenplay scene by scene"},
           React.createElement("button",{className:"panel-collapse",onClick:()=>go(-1),disabled:idx<=0,
-            style:{opacity:idx<=0?.4:1}},React.createElement(Icon.chevL,{s:14})),
-          `${idx+1} / ${scenes.length}`,
+            title:"Previous scene",style:{opacity:idx<=0?.4:1}},React.createElement(Icon.chevL,{s:14})),
+          `Scene ${idx+1} / ${scenes.length}`,
           React.createElement("button",{className:"panel-collapse",onClick:()=>go(1),disabled:idx>=scenes.length-1,
-            style:{opacity:idx>=scenes.length-1?.4:1}},React.createElement(Icon.chevR,{s:14}))))));
+            title:"Next scene",style:{opacity:idx>=scenes.length-1?.4:1}},React.createElement(Icon.chevR,{s:14}))))));
 
   // inline per-scene continuity flag
   const inlineFlag = sceneConflicts.length ? React.createElement("div",
