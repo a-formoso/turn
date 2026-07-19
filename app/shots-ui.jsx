@@ -380,6 +380,20 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
     const w = cell ? (cell.getBoundingClientRect().width + 18) : 420;
     try{ el.scrollBy({ left: dir*w, behavior:"smooth" }); }catch(e){ el.scrollLeft += dir*w; }
   };
+  // ONE pair of side arrows per lane (the pager bar is gone — user ruling 2026-07-19):
+  // they walk this beat's shots first, and at the strip's edge they STEP TO the
+  // previous/next beat. While a batch mounts all lanes they only page shots.
+  const stepSide = (L, dir)=>{
+    const el = stripRefs.current[L.n];
+    const canScroll = el && el.scrollWidth > el.clientWidth + 8;
+    if(canScroll){
+      const atEnd   = el.scrollLeft + el.clientWidth >= el.scrollWidth - 8;
+      const atStart = el.scrollLeft <= 8;
+      if(dir>0 ? !atEnd : !atStart) return pageShots(L.n, dir);
+    }
+    if(showAllLanes) return;
+    setBeatIdx(dir>0 ? Math.min(lanes.length-1, _bi+1) : Math.max(0, _bi-1));
+  };
   const firstId = ordered[0] && ordered[0].id;
   const toggleHead = (target)=> { if(target && target.id!==firstId) onUpdate(target.id, { anchor: !target.anchor }); };
   // the scene's clip sequences (shared partition — Storyboard clip boards + the Stage);
@@ -454,19 +468,8 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
             _el("div",{className:"ssx-pips"},
               [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")}))))))),
 
-    // BEAT PAGER — one beat on screen at a time, scene-navigator styling
-    open && !showAllLanes && lanes.length>1 && (()=>{
-      const L = lanes[_bi]; const beatRow=(bm.rows||[]).find(r=>String(r.n)===String(L.n));
-      const verbs = beatRow ? [ (beatRow.drive&&beatRow.drive.a||"").trim(), (beatRow.react&&beatRow.react.a||"").trim() ].filter(Boolean).join(" / ") : "";
-      return _el("div",{className:"scene-pager beat-pager"},
-        _el("button",{className:"scene-pager-arrow",disabled:_bi<=0,title:"Previous beat",
-          onClick:()=>setBeatIdx(Math.max(0,_bi-1))},_el(Icon.chevL,{s:15})),
-        _el("div",{className:"scene-pager-mid"},
-          _el("div",{className:"beat-pager-eyebrow"},"BEAT "+L.n+" OF "+lanes.length+" \u00b7 "+ordered.length+" shot"+(ordered.length!==1?"s":"")),
-          verbs && _el("div",{className:"beat-pager-verbs"},verbs)),
-        _el("button",{className:"scene-pager-arrow",disabled:_bi>=lanes.length-1,title:"Next beat",
-          onClick:()=>setBeatIdx(Math.min(lanes.length-1,_bi+1))},_el(Icon.chevR,{s:15})));
-    })(),
+    // (the separate beat-pager bar was REMOVED — user ruling 2026-07-19: the
+    // lane's own side arrows walk the shots and then step beats)
     // BEAT LANES — the beat is the dramatic unit; each owns 1..N shots (coverage)
     // rendered as a HORIZONTAL strip with edge-pinned ‹ › shot arrows. Normally
     // only the paged beat renders; a running batch mounts every lane.
@@ -481,7 +484,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
       const busyKey = scene.id+"#"+L.n;
       return _el("div",{key:"lane-"+L.n,className:"beat-lane"+(isTurn?" turn":"")},
         _el("div",{className:"beat-lane-head"},
-          _el("span",{className:"beat-lane-no"},"Beat "+L.n),
+          _el("span",{className:"beat-lane-no"},"Beat "+L.n+(lanes.length>1?(" of "+lanes.length):"")),
           verbs && _el("span",{className:"beat-lane-verbs"},verbs),
           isTurn && _el("span",{className:"beat-lane-turn"},_el(Icon.bolt,{s:10}),"Turning point"),
           (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
@@ -498,11 +501,15 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, o
               _el(Icon.plus,{s:11}),"Add shot"))),
         // SIDE ARROWS (scene-navigator style): pinned at the lane's edges so the
         // eye stays in place while paging through this beat's shots
-        L.shots.length>1 && _el("button",{className:"beat-lane-side prev",
-          title:"Previous shot in this beat",onClick:(e)=>{ e.stopPropagation(); pageShots(L.n,-1); }},
+        (showAllLanes ? L.shots.length>1 : (lanes.length>1 || L.shots.length>1)) && _el("button",{
+          className:"beat-lane-side prev", disabled:!showAllLanes && _bi<=0 && L.shots.length<=1,
+          title:"Previous shot — at the first shot, steps to the previous beat",
+          onClick:(e)=>{ e.stopPropagation(); stepSide(L,-1); }},
           _el(Icon.chevL,{s:16})),
-        L.shots.length>1 && _el("button",{className:"beat-lane-side next",
-          title:"Next shot in this beat",onClick:(e)=>{ e.stopPropagation(); pageShots(L.n,1); }},
+        (showAllLanes ? L.shots.length>1 : (lanes.length>1 || L.shots.length>1)) && _el("button",{
+          className:"beat-lane-side next", disabled:!showAllLanes && _bi>=lanes.length-1 && L.shots.length<=1,
+          title:"Next shot — at the last shot, steps to the next beat",
+          onClick:(e)=>{ e.stopPropagation(); stepSide(L,1); }},
           _el(Icon.chevR,{s:16})),
         _el("div",{className:"beat-lane-strip",ref:(el)=>{ stripRefs.current[L.n]=el; }},
           L.shots.map((sh,li)=>{

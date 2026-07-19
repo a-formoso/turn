@@ -5764,9 +5764,9 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-lane-side.prev{left:-6px}
 .beat-lane-side.next{right:-6px}
 /* beat pager rides the scene-pager base styles; only sizing differs */
-.beat-pager{margin:0 0 14px}
-.beat-pager-eyebrow{font-family:var(--f-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-3)}
-.beat-pager-verbs{font-family:var(--f-display);font-size:14px;font-weight:600;color:var(--txt-0);margin-top:2px}
+/* (beat-pager bar removed 2026-07-19 — the lane's side arrows step beats now) */
+.beat-lane-side:disabled{opacity:.35;cursor:default}
+.beat-lane-side:disabled:hover{border-color:var(--line-2);color:var(--txt-2)}
 .shot-beat-tag.sub{border-color:oklch(0.62 0.12 285 / .45);color:oklch(0.74 0.1 285)}
 [data-theme="light"] .shot-beat-tag.sub{color:oklch(0.44 0.12 285)}
 .char-argues-row{display:flex;align-items:center;gap:8px;margin-top:6px}
