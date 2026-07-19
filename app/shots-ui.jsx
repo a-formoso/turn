@@ -604,6 +604,12 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     Object.values(m).forEach(arr=>arr.sort((a,b)=>(a.order||0)-(b.order||0) || (a.beatN||0)-(b.beatN||0))); return m; },[shots]);
   const scenesWithShots = ordered.filter(s=>(shotsByScene[s.id]||[]).length);
 
+  // "Export shot list" moved into the top bar's ⋮ menu (user ruling 2026-07-19).
+  // Register the trigger while this tab is mounted — no deps, so the closure
+  // always sees the current shots; the menu shows the item only when this exists.
+  React.useEffect(()=>{ window.turnExportShotList = ()=>exportShotList(scenesWithShots, shotsByScene, ctxFor, project, beatsMap);
+    return ()=>{ delete window.turnExportShotList; }; });
+
   // Always show ONE user-selected scene. A generating scene may remain mounted
   // off-screen so its request can finish while the arrows browse elsewhere.
   const [pIdx, setPIdx] = useScenePager(scenesWithShots.length);
@@ -762,9 +768,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
             _el(window.InfoTip,{label:"About the Shot List",
               text:"A BEAT owns 1\u2013N shots (coverage): every scene starts at one shot per beat, and any beat can be SPLIT INTO COVERAGE from its lane header \u2014 one shot per distinct visual event, labelled 3A/3B/3C in cut order. Shots are grouped by beat lane inside each scene. Every frame generation follows a rolling chain in scene order: the first shot renders from the locked sheets, and every later shot is seeded by the immediately previous generated frame. Generate the shots in order — if you click Generate on a later shot before an earlier one is rendered, TURN asks you to generate the earlier shot first (it's the anchor this frame builds on). 'Generate all shots' and 'Render Scene X in order' render the whole chain straight through, auto-approving each frame as the next shot's seed. Stage video clips are packed automatically from these shots \u2014 there is no manual clip grouping here; clips live on the Stage."}))),
         _el("div",{className:"art-intro-actions"},
-          _el("button",{className:"art-draftall ghost",onClick:()=>exportShotList(scenesWithShots, shotsByScene, ctxFor, project, beatsMap),
-            title:"Preview the shot list as a printable table, then print / save as PDF or download the HTML"},
-            _el(Icon.download,{s:14}),"Export shot list"),
+          // "Export shot list" lives in the top bar's ⋮ menu now (window.turnExportShotList)
           _el("button",{className:"art-draftall ghost",disabled:draftingAllShots||!ordered.length,onClick:handleDesignAll,
             title:"Break any scene that has no shots yet into full coverage \u2014 size, angle, move and lens per beat"},
             _el(Icon.sparkles,{s:14}), draftingAllShots?"Designing\u2026":"Design all shots"),

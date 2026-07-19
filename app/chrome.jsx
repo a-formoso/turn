@@ -81,6 +81,15 @@ function OverflowMenu({ onNewStory, project, scenes, drafts, onReset, room }){
           React.createElement("span",{className:"export-item-ic"},React.createElement(Ic,{s:15})),
           React.createElement("span",{className:"export-item-t"},
             React.createElement("span",{className:"t"},title)))),
+      // Art Room: the Shots tab registers window.turnExportShotList while mounted —
+      // "Export shot list" lives HERE, not on the Art Room screen (user ruling 2026-07-19)
+      room==="art" && typeof window.turnExportShotList==="function" && React.createElement(React.Fragment,null,
+        React.createElement("div",{className:"export-subhead"},"Export"),
+        React.createElement("button",{className:"export-item",onClick:()=>{ setOpen(false); window.turnExportShotList(); }},
+          React.createElement("span",{className:"export-item-ic"},React.createElement(Icon.download,{s:15})),
+          React.createElement("span",{className:"export-item-t"},
+            React.createElement("span",{className:"t"},"Export shot list"),
+            React.createElement("span",{className:"s"},"Printable AD-style table")))),
       // admin-only (app.jsx passes onReset only for the admin account)
       onReset && React.createElement("div",{className:"export-foot"},
         React.createElement("button",{className:"export-item reset",
@@ -491,7 +500,9 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
       // theme · Brief · New Story · Export · account). Its only unique item is the
       // admin Reset; New Story and the export formats already live in the visible
       // whitelisted controls, so users lose nothing.
-      window.turnIsAdmin && React.createElement(OverflowMenu,{onNewStory,project,scenes,drafts,onReset,room}),
+      // EXCEPTION (user ruling 2026-07-19): in the ART ROOM the ⋮ shows for everyone —
+      // it carries "Export shot list" (moved off the Shots screen); admin extras stay gated.
+      (window.turnIsAdmin || room==="art") && React.createElement(OverflowMenu,{onNewStory,project,scenes,drafts,onReset,room}),
       // 'Agents' moved to the ViewNav's right zone (Writers' Room), mirroring the Art Room's
       // 'Run pre-production' — both sit to the right of their centered tab strip.
       authSlot || React.createElement("div",{className:"avatar"},"MV")),
