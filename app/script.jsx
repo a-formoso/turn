@@ -7,9 +7,15 @@ const BLOCK_CLASS = { scene:"spb-scene", action:"spb-action", char:"spb-char", p
 const ROMAN = ["I","II","III"];
 
 function parseSlug(loc){
-  const parts = String(loc).split("\u00b7");
-  const time = (parts[1]||"").trim();
-  const left = (parts[0]||"").trim();
+  let left = String(loc||"").trim();
+  let time = "";
+  /* time of day = trailing segment after the LAST separator, when it reads like a
+     time. A "\u00b7"-only split misses industry hyphen slugs (INT. SHOP - DAWN). */
+  const tm = left.match(/[\u00b7\u2013\u2014,\-]\s*([A-Za-z][A-Za-z'\u2019 ]{1,26})\s*$/);
+  if(tm && /\b(night|day|dawn|dusk|morning|evening|afternoon|noon|midday|midnight|sunset|sunrise|twilight|magic hour|golden hour|continuous|later|moments? later|same time)\b/i.test(tm[1])){
+    time = tm[1].trim();
+    left = left.slice(0, tm.index).replace(/[\u00b7\u2013\u2014,\-\s]+$/,"").trim();
+  }
   const intext = /^EXT/.test(left) ? "EXT" : /^INT\/EXT/.test(left) ? "INT/EXT" : "INT";
   const place = left.replace(/^(INT\/EXT\.|INT\.|EXT\.)\s*/,"").trim();
   return { intext, place, time };

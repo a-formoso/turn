@@ -263,9 +263,10 @@ html[data-theme="light"] .lb-stale-btn:hover{background:oklch(0.72 0.13 60 / .28
 html[data-theme="light"] .lb-stale-btn.ghost{background:transparent}
 html[data-theme="light"] .lb-stale-btn.ghost:hover{background:oklch(0.72 0.13 60 / .14)}
 html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
-/* truly narrow screens: icon-only tabs, scroll from the left (no centre-clip) */
+/* truly narrow screens: icon-only tabs, centered ("safe" falls back to
+   start-alignment when the strip overflows, so nothing clips off-screen) */
 @media (max-width:640px){
-  .viewnav{justify-content:flex-start;padding:6px 12px}
+  .viewnav{justify-content:center;justify-content:safe center;padding:6px 12px}
   .viewnav .vn-side{flex:0 0 auto}
   .viewnav .seg{gap:0;padding:6px 9px}
   .viewnav .seg .seg-lab{display:none}
@@ -987,6 +988,17 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 .cont-btn.ok{background:var(--pos-soft);color:var(--pos);border:1px solid var(--pos-line)}
 .cont-btn.warn{background:var(--alert-soft);color:var(--alert);border:1px solid var(--alert)}
 .cont-btn:hover{filter:brightness(1.08)}
+
+/* the Script toolbar reads as ONE strip: every cell the same 32px height, glued
+   with shared borders, rounded only at the two ends */
+.script-tools{gap:0;align-items:stretch}
+.script-tools>*{height:32px;border-radius:0}
+.script-tools>*+*{margin-left:-1px}
+.script-tools>*:first-child{border-radius:8px 0 0 8px}
+.script-tools>*:last-child{border-radius:0 8px 8px 0}
+.script-tools>.ver-ctl{padding:0 3px}
+.script-tools>.draft-btn{border:1px solid transparent}
+.script-tools>.script-scenestep{border:1px solid var(--line);background:var(--bg-3);padding:0 7px}
 
 .cont-report{max-width:1000px;margin:0 auto 14px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:var(--r-l);overflow:hidden}
 .cont-report-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
@@ -3863,8 +3875,10 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 
   /* script view fluid */
   .script-head{flex-direction:column;align-items:stretch;gap:10px;padding:14px 14px 0}
-  .script-tools{flex-wrap:wrap;gap:8px}
+  .script-tools{flex-wrap:wrap;justify-content:center;row-gap:8px}
   .script-scroll{padding:0 12px 30px}
+  .sp-carry{justify-content:center}
+  .sp-carry .clab2{justify-content:center}
   .sp-seg{flex-direction:column}
   .sp-gut{width:auto;flex:0 0 auto;flex-direction:row;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);border-right:0}
   .sp-gut .bsub{margin-left:auto}
