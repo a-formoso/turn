@@ -989,20 +989,30 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 .cont-btn.warn{background:var(--alert-soft);color:var(--alert);border:1px solid var(--alert)}
 .cont-btn:hover{filter:brightness(1.08)}
 
-/* the Script toolbar is ONE glued strip inside a housing container: the container
-   carries the border + radius, cells are 32px with hairline dividers between them.
-   Identical on desktop and mobile — a narrow phone scrolls the strip sideways. */
-.script-tools{gap:0;align-items:stretch;flex-wrap:nowrap;width:max-content;max-width:100%;
-  border:1px solid var(--line-2);border-radius:9px;background:var(--bg-3);
+/* the Script toolbar = two groups, so mobile can stack them as two lines with the
+   SAME desktop look. Group A is a glued strip inside a housing container (border +
+   radius on the container, 32px cells, hairline dividers); group B is the accent
+   Redraft button beside the housed scene pager. */
+.st-group{display:flex;align-items:stretch;flex:0 0 auto}
+.st-group.a{border:1px solid var(--line-2);border-radius:9px;background:var(--bg-3);
   overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
-.script-tools::-webkit-scrollbar{display:none}
-.script-tools>*{height:32px;border:0;border-radius:0;flex:0 0 auto}
-.script-tools>*+*{border-left:1px solid var(--line-2)}
-.script-tools>.cont-btn{border:0}
-.script-tools>.cont-btn.ok,.script-tools>.cont-btn.warn{border:0;border-radius:0}
-.script-tools>.ver-ctl{border:0;border-radius:0;background:transparent;padding:0 3px}
-.script-tools>.ver-ctl+*{border-left:1px solid var(--line-2)}
-.script-tools>.script-scenestep{background:transparent;padding:0 7px}
+.st-group.a::-webkit-scrollbar{display:none}
+.st-group.a>*{height:32px;border:0;border-radius:0;flex:0 0 auto}
+.st-group.a>*+*{border-left:1px solid var(--line-2)}
+.st-group.a>.cont-btn.ok,.st-group.a>.cont-btn.warn{border:0;border-radius:0}
+.st-group.a>.ver-ctl{border:0;border-radius:0;background:transparent;padding:0 3px}
+.st-group.a>.ver-ctl+*{border-left:1px solid var(--line-2)}
+.st-group.b{gap:8px;align-items:center}
+.st-group.b .draft-btn.sm{height:32px}
+.st-group.b .script-scenestep{height:32px;border:1px solid var(--line-2);border-radius:9px;background:var(--bg-3);padding:0 8px}
+
+/* EDIT MODE: per-element remove control — deleting commits a version (Undo restores) */
+.sp-editwrap{position:relative}
+.sp-del-btn{position:absolute;right:0;top:1px;width:20px;height:20px;display:grid;place-items:center;
+  border:1px solid var(--line-2);border-radius:6px;background:var(--bg-2);color:var(--txt-3);
+  font-size:13px;line-height:1;cursor:pointer;opacity:.35;transition:.12s}
+.sp-editwrap:hover .sp-del-btn,.sp-editwrap:focus-within .sp-del-btn{opacity:1}
+.sp-del-btn:hover{color:var(--neg);border-color:var(--neg)}
 
 .cont-report{max-width:1000px;margin:0 auto 14px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:var(--r-l);overflow:hidden}
 .cont-report-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
@@ -3873,9 +3883,10 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
 
   /* script view fluid */
   .script-head{flex-direction:column;align-items:stretch;gap:10px;padding:14px 14px 0}
-  /* toolbar keeps the SAME glued housed strip as desktop; centered, and it
-     scrolls sideways when the phone is narrower than the strip */
-  .script-tools{margin:0 auto}
+  /* toolbar groups stack as TWO centered lines on phones, each keeping the exact
+     desktop look (housed strip / Redraft + pager); group A scrolls if ever wider */
+  .script-tools{flex-direction:column;align-items:center;gap:8px}
+  .st-group{max-width:100%}
   .script-scroll{padding:0 12px 30px}
   /* story-state ledger: label centered on its own row, cells share ONE line */
   .sp-carry{justify-content:center}

@@ -197,7 +197,7 @@ function ScriptBlock({ b, contd, sceneNo, flash }){
    contentEditable — React never manages its text (no children in the vdom), so
    re-renders mid-typing can't reset the caret; the raw text is pushed in via a ref
    effect on mount and after each committed change. Commits on blur only when changed. */
-function EditableBlock({ b, onCommit, flash, sceneNo }){
+function EditableBlock({ b, onCommit, onRemove, flash, sceneNo }){
   const ref = React.useRef(null);
   const raw = b.text || "";
   React.useEffect(()=>{ if(ref.current && ref.current.innerText !== raw) ref.current.innerText = raw; },[raw]);
@@ -222,7 +222,13 @@ function EditableBlock({ b, onCommit, flash, sceneNo }){
       React.createElement("span",{...editableProps, className:"spb-sctext sp-editable"}),
       React.createElement("span",{className:"spb-scnum"},sceneNo));
   }
-  return React.createElement("div",{...editableProps, className:cls});
+  // every other element carries a remove control while editing — deleting commits
+  // a version like any manual edit, so Undo restores the element
+  return React.createElement("div",{className:"sp-editwrap"},
+    React.createElement("div",{...editableProps, className:cls}),
+    onRemove && React.createElement("button",{className:"sp-del-btn",
+      title:"Remove this element (Undo restores it)",
+      onMouseDown:(e)=>e.preventDefault(), onClick:onRemove},"×"));
 }
 
 /* EDIT MODE: insert a new screenplay element into a beat — the industry parts
@@ -469,6 +475,16 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       onEditScene(scene.id, { ...screenplay, blocks:nextBlocks, edited:true, polished:false, ai:false, auto:false });
     };
 
+    // EDIT MODE: remove one element outright (the direct undo for an added box).
+    // Commits as a version like any edit, so Undo brings it back.
+    const removeBlock = (b)=>{
+      if(!onEditScene) return;
+      const gi = screenplay.blocks.indexOf(b);
+      if(gi<0) return;
+      const blocks = screenplay.blocks.filter((x,j)=> j!==gi);
+      onEditScene(scene.id, { ...screenplay, blocks, edited:true, polished:false, ai:false, auto:false });
+    };
+
     // EDIT MODE: insert new element(s) at the END of a beat's blocks. "charline"
     // = a character cue plus an empty dialogue line in one press.
     const insertBlock = (beatN, kind)=>{
@@ -506,7 +522,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
               React.createElement("div",{className:"sp-page-inner"},
                 (fg[n]||[]).length
                   ? (fg[n]||[]).map((b,i)=> editing
-                  ? React.createElement(EditableBlock,{key:i,b,onCommit:(t)=>commitEdit(b,t),sceneNo:(b===firstSlugBlock?scene.no:null),flash:!!(verFlash&&verFlash.has(b))})
+                  ? React.createElement(EditableBlock,{key:i,b,onCommit:(t)=>commitEdit(b,t),onRemove:()=>removeBlock(b),sceneNo:(b===firstSlugBlock?scene.no:null),flash:!!(verFlash&&verFlash.has(b))})
                   : React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:(b===firstSlugBlock?scene.no:null),flash:!!(verFlash&&verFlash.has(b))}))
                   : React.createElement("div",{className:"spb-action spb-missing"},"No screenplay text assigned to this beat."),
                 editing && React.createElement(AddBlockRow,{onAdd:(kind)=>insertBlock(n, kind)}))));
@@ -534,14 +550,17 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
           "Missing: "+missing.join(", ")),
       noteText &&
         React.createElement("div",{className:"script-note"},React.createElement(Icon.layers,{s:12}),noteText)),
+    // two groups so mobile can stack them as two lines with the SAME desktop look:
+    // A = the housed glued strip (Continuity/Undo/Redo/Edit), B = Redraft + pager
     React.createElement("div",{className:"script-tools"},
-      contBtn, versionUI, editBtn, polishUI, control,
-      React.createElement("div",{className:"script-scenestep"},
-        React.createElement("button",{className:"panel-collapse",onClick:()=>go(-1),disabled:idx<=0,
-          style:{opacity:idx<=0?.4:1}},React.createElement(Icon.chevL,{s:14})),
-        `${idx+1} / ${scenes.length}`,
-        React.createElement("button",{className:"panel-collapse",onClick:()=>go(1),disabled:idx>=scenes.length-1,
-          style:{opacity:idx>=scenes.length-1?.4:1}},React.createElement(Icon.chevR,{s:14})))));
+      React.createElement("div",{className:"st-group a"}, contBtn, versionUI, editBtn),
+      React.createElement("div",{className:"st-group b"}, polishUI, control,
+        React.createElement("div",{className:"script-scenestep"},
+          React.createElement("button",{className:"panel-collapse",onClick:()=>go(-1),disabled:idx<=0,
+            style:{opacity:idx<=0?.4:1}},React.createElement(Icon.chevL,{s:14})),
+          `${idx+1} / ${scenes.length}`,
+          React.createElement("button",{className:"panel-collapse",onClick:()=>go(1),disabled:idx>=scenes.length-1,
+            style:{opacity:idx>=scenes.length-1?.4:1}},React.createElement(Icon.chevR,{s:14}))))));
 
   // inline per-scene continuity flag
   const inlineFlag = sceneConflicts.length ? React.createElement("div",
