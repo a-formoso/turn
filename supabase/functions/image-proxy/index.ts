@@ -257,12 +257,14 @@ Deno.serve(async (req) => {
       if (!mKey) return json({ error: missingKey("Moonshot (Kimi)", "MOONSHOT_API_KEY") }, 500);
       try {
         // K3 is a 2.8T deep reasoner (launched 2026-07-16): long drafts are SLOW,
-        // especially under launch-week load. 145s keeps our clean timeout message
-        // ahead of the gateway's ~150s kill; max_tokens bounds the completion so
-        // generation time can't run unbounded.
+        // especially under launch-week load. 380s (user ruling 2026-07-19) fits under
+        // the paid-plan 400s function ceiling so medium drafts (~700 words at ~2 w/s)
+        // can finish; if the platform gateway still kills at ~150s the client sees a
+        // generic fetch error instead of this clean message. max_tokens bounds the
+        // completion so generation time can't run unbounded.
         const r = await fetch("https://api.moonshot.ai/v1/chat/completions", {
           method: "POST",
-          signal: AbortSignal.timeout(145000),
+          signal: AbortSignal.timeout(380000),
           headers: { Authorization: `Bearer ${mKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({ model, max_tokens: 4096,
             messages: messages.map((m: any) => ({ role: m.role || "user", content: String(m.content || "") })) }),
@@ -271,7 +273,7 @@ Deno.serve(async (req) => {
         const data = await r.json();
         return json({ text: (((data.choices || [])[0] || {}).message || {}).content || "", vision: false });
       } catch (e) {
-        if ((e as any)?.name === "TimeoutError") return json({ error: "Kimi took too long to answer — K3 is a brand-new deep-reasoning flagship and long drafts can outrun the server window, especially at peak. Try again, keep K3 for shorter tasks (analysis, alt lines), or switch the writing dock back to Auto for heavy drafting." }, 200);
+        if ((e as any)?.name === "TimeoutError") return json({ error: "Kimi took too long to answer — K3 is a brand-new deep-reasoning flagship, and this draft outran even the extended 6-minute server window. Try again, keep K3 for shorter tasks (analysis, alt lines), or switch the writing dock back to Auto for heavy drafting." }, 200);
         return json({ error: "Proxy failed to reach Moonshot: " + (e?.message || e) }, 502);
       }
     }
