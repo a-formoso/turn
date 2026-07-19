@@ -1852,9 +1852,9 @@ function App(){
     const existing = shots.filter(x=>x.sceneId===scene.id && x.beatN===beatN);
     let ok = true;
     if(typeof window.appConfirm==="function")
-      ok = await window.appConfirm({ title:"Split beat "+beatN+" into coverage?",
+      ok = await window.appConfirm({ title:"Break beat "+beatN+" into shots?",
         body:"MUSE designs 2\u20134 shots for this beat \u2014 one per distinct visual event, in cut order. The beat's current "+existing.length+" shot"+(existing.length===1?"":"s")+" (including any generated frame's place in the chain) will be REPLACED; other beats are untouched. Writing-model credits only \u2014 frames render separately.",
-        confirmLabel:"Design coverage", cancelLabel:"Cancel" });
+        confirmLabel:"Break into shots", cancelLabel:"Cancel" });
     if(!ok) return;
     setSplittingBeat(scene.id+"#"+beatN);
     try{
