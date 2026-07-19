@@ -3887,6 +3887,13 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
      desktop look (housed strip / Redraft + pager); group A scrolls if ever wider */
   .script-tools{flex-direction:column;align-items:center;gap:8px}
   .st-group{max-width:100%}
+  /* on phones the Redraft button GLUES to the pager in one housed strip, and the
+     pager arrows stay smaller than their 32px container (user ruling 2026-07-19) */
+  .st-group.b{gap:0;border:1px solid var(--line-2);border-radius:9px;background:var(--bg-3);overflow:hidden;align-items:stretch}
+  .st-group.b>*{height:32px;border:0;border-radius:0}
+  .st-group.b>*+*{border-left:1px solid var(--line-2)}
+  .st-group.b .script-scenestep{border:0;border-radius:0;background:transparent}
+  .st-group.b .script-scenestep .panel-collapse{width:22px;height:22px;min-width:22px;min-height:22px;align-self:center}
   .script-scroll{padding:0 12px 30px}
   /* story-state ledger: label centered on its own row, cells share ONE line */
   .sp-carry{justify-content:center}
