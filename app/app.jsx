@@ -60,7 +60,10 @@ function TurnAudit({ scenes, selId, onSelect }){
       React.createElement("div",{className:"divider"},
         React.createElement("span",{className:"eyebrow"},"Turn Audit · every scene must turn"),
         React.createElement("span",{className:"ln"})),
-      React.createElement("div",{style:{border:"1px solid var(--line)",borderRadius:"var(--r-l)",overflow:"hidden"}},
+      // the table keeps its desktop column widths and scrolls SIDEWAYS inside its
+      // own container on narrow screens (minWidth stops the columns crushing)
+      React.createElement("div",{className:"audit-tablewrap"},
+      React.createElement("div",{style:{border:"1px solid var(--line)",borderRadius:"var(--r-l)",overflow:"hidden",minWidth:620}},
         React.createElement("div",{style:{display:"grid",gridTemplateColumns:"44px 1fr 120px 150px 110px",
           background:"var(--bg-2)",borderBottom:"1px solid var(--line)"}},
           ["#","Scene","Charge","Value shift","Verdict"].map((h,i)=>
@@ -90,7 +93,7 @@ function TurnAudit({ scenes, selId, onSelect }){
                     (typeof fwAuditOf==="function" && fwAuditOf().flagBadge)||"No turn")
                 : React.createElement("span",{className:"turn-badge ok"},React.createElement(Icon.check,{s:10}),
                     (typeof fwAuditOf==="function" && fwAuditOf().okBadge)||"Turns")));
-        }))));
+        })))));
 }
 
 /* ---- alternate view: Board (acts as columns) ---- */
@@ -1199,6 +1202,10 @@ function App(){
     // auto-opening it would hijack the canvas on every browsing tap.
     if(!inspDrawer) setInspOpen(true);
   };
+  // canvas views (Spine / Audit / Board): tapping a scene MEANS "show me its
+  // details", so on mobile this variant ALSO opens the inspector drawer
+  // (user ruling 2026-07-19 — the Script view keeps the non-hijacking selectScene).
+  const selectSceneDetail = (id)=>{ selectScene(id); if(inspDrawer) setInspOpen(true); };
 
   // Art Room: draft a character's visual layer (look/wardrobe/props) from the script
   // per-card character drafts run CONCURRENTLY (reuse the drafting-ids set the cards
@@ -2989,7 +2996,7 @@ function App(){
         view==="spine" && scenes.length>0 && characters.length>0 && React.createElement(FollowStrip,{
           characters,scenes,beatsMap,followId:followChar,onFollow:setFollowChar}),
         view==="spine" && scenes.length>0 && React.createElement(DragScroll,{className:"canvas-scroll spine-pan"},
-          React.createElement(SpineCanvas,{scenes,selId,onSelect:selectScene,showFramework:t.framework,
+          React.createElement(SpineCanvas,{scenes,selId,onSelect:selectSceneDetail,showFramework:t.framework,
             onReorder:reorderScenes,onAddScene:addScene,runtimes:runtimeMap,
             follow:(()=>{ if(!followChar) return null;
               const c = characters.find(x=>x.id===followChar); if(!c) return null;
@@ -3000,8 +3007,8 @@ function App(){
         // clean-canvas onboarding: a new/empty project has no scenes yet (shown for
         // ANY view so the data-assuming spine/audit/board/script never render empty).
         scenes.length===0 && emptyCanvas(),
-        view==="beats" && scenes.length>0 && React.createElement(TurnAudit,{scenes,selId,onSelect:selectScene}),
-        view==="board" && scenes.length>0 && React.createElement(Board,{scenes,selId,onSelect:selectScene}),
+        view==="beats" && scenes.length>0 && React.createElement(TurnAudit,{scenes,selId,onSelect:selectSceneDetail}),
+        view==="board" && scenes.length>0 && React.createElement(Board,{scenes,selId,onSelect:selectSceneDetail}),
         view==="script" && scenes.length>0 && React.createElement(ScriptView,{scene:sel,beats,
           drafts, scenes, onSelectScene:selectScene, onPolish:polishScene,
           onDraftOne:draftOne, onDraftAll:draftAll, drafting, total:scenes.length,
