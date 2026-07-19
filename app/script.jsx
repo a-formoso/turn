@@ -36,7 +36,9 @@ function sceneTransition(prev, cur){
   if(a.place === b.place)
     return { type:"CONTINUOUS", cls:"", gloss:"Same space \u2014 the action flows on without a real break." };
   if(a.time !== b.time)
-    return { type:"TIME CUT", cls:"", gloss:`Time moves: ${a.time||"\u2014"} \u2192 ${b.time||"\u2014"}.` };
+    // NBSPs keep "DAWN \u2192 DAY." one unbreakable unit \u2014 on a narrow phone the wrap
+    // falls after "Time moves:" instead of splitting the two times apart
+    return { type:"TIME CUT", cls:"", gloss:`Time moves: ${a.time||"\u2014"}\u00a0\u2192\u00a0${b.time||"\u2014"}.` };
   return { type:"HARD CUT", cls:"", gloss:`New location \u2014 ${b.place}.` };
 }
 
