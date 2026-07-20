@@ -1339,6 +1339,17 @@ function normalizeShot(raw, scene, idx, locations, props, characters, beats){
     props: resolveProps(raw.props),
     action: action,
     dialogue: (typeof clipWords==="function") ? clipWords((raw.dialogue||"").toString(),200) : (raw.dialogue||"").toString().slice(0,200),
+    // micro-beat mapping (pre-production layer): which of the beat's discrete
+    // filmable actions this shot covers, why it exists, and whether it carries
+    // the beat's protected emotional core. The per-beat plan (micro list +
+    // protect line) rides denormalized on every shot of its beat.
+    covers: Array.isArray(raw.covers) ? raw.covers.map(Number).filter(n=>Number.isFinite(n)&&n>0&&n<=20).slice(0,12) : [],
+    purpose: (typeof clipWords==="function") ? clipWords((raw.purpose||"").toString(),160) : (raw.purpose||"").toString().slice(0,160),
+    priority: !!raw.priority,
+    beatPlan: (raw.beatPlan && Array.isArray(raw.beatPlan.micro) && raw.beatPlan.micro.length)
+      ? { micro: raw.beatPlan.micro.map(t=>String(t||"").slice(0,90)).slice(0,10),
+          protect: String(raw.beatPlan.protect||"").slice(0,220) }
+      : undefined,
     // no dur: a drafted shot stays on AUTO — its length can't be predicted, only
     // budgeted (dialogue-anchored estimate via shotDur); the user pins by hand
     negativePrompt:""

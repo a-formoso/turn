@@ -244,6 +244,9 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
         _el("div",{className:"shot-head-right"},
           _el("div",{className:"shot-beat-tag"},beatLabel),
           subLabel && _el("div",{className:"shot-beat-tag sub",title:"This beat has multiple shots (coverage) — this is setup "+subLabel+" in cut order"},"Shot "+subLabel),
+          sh.priority && _el("span",{className:"shot-priority-badge",
+            title:"Priority — the setup carrying this beat's emotional core (the protected moment). Spend your regeneration attention here first, and approve it carefully as a seed."},
+            _el(Icon.bolt,{s:10}),"Priority"),
           // chain head — the scene's first shot is always a head; flagging a later shot
           // starts a FRESH look (a hard cut that won't inherit the previous frame's state)
           _el("button",{className:"shot-anchor-btn"+(isHead?" on":""), disabled:isFirst,
@@ -271,6 +274,13 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
         title:"The script beat this shot covers (drive — reaction), from this scene's beat map. Read-only here — edit beats in the Writers' Room inspector."},
         _el("span",{className:"shot-beat-script-lab"},"Script beat"),
         _el("span",{className:"shot-beat-script-body"},beatText)),
+
+      // WHY this shot exists (the designer's purpose) + which micro-beats it covers
+      (sh.purpose || (Array.isArray(sh.covers)&&sh.covers.length>0)) && _el("div",{className:"shot-purpose"},
+        (Array.isArray(sh.covers)&&sh.covers.length>0) && _el("span",{className:"shot-covers-chip",
+          title:"The micro-beats of this beat that this shot covers (see the numbered rail above the shots)"},
+          "covers "+sh.covers.map(_circ).join(" ")),
+        sh.purpose && _el("span",{className:"shot-purpose-t"},sh.purpose)),
 
       // cinematographer grammar
       _el("div",{className:"shot-grammar-grid"},
@@ -348,6 +358,8 @@ function SceneStyleChip({ project, sceneId }){
       pal.map((c,i)=>_el("span",{key:i,className:"shot-style-swatch",style:{background:c}}))));
 }
 
+/* circled micro-beat numerals: 1..20 -> \u2460.. ; beyond that "#n" */
+function _circ(n){ return (n>=1&&n<=20) ? String.fromCharCode(0x245F+n) : ("#"+n); }
 function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, pager, onUpdate, onDelete, onView,
   onAddShot, onSplitBeat, splittingBeat, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot, onRegenDownstream,
   onRenderScene, renderBusy, onStopChain }){
@@ -374,6 +386,10 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
   const stripRefs = React.useRef({});
   // merged scene navigator (user ruling 2026-07-19): the pager lives IN this header
   const [jumpOpen, setJumpOpen] = React.useState(false);
+  // micro-beat <-> shot hover linking (per visible lane): hovering a micro chip
+  // glows the shots that cover it; hovering a shot glows its micro chips
+  const [hiMicro, setHiMicro] = React.useState(null);      // {laneN, n}
+  const [hiCovers, setHiCovers] = React.useState(null);    // {laneN, covers:[..]}
   React.useEffect(()=>{ if(!jumpOpen) return;
     const close=(e)=>{ if(!e.target.closest || !e.target.closest(".ssg-jump")) setJumpOpen(false); };
     document.addEventListener("mousedown", close); return ()=>document.removeEventListener("mousedown", close); },[jumpOpen]);
@@ -507,6 +523,27 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
               title:"Add one manual shot to this beat — it joins the rolling chain after the beat's last shot",
               onClick:()=>onAddShot(scene.id, L.n)},
               _el(Icon.plus,{s:11}),"Add shot"))),
+        // MICRO-BEAT LAYER (designed with the shots): what the camera must PROTECT,
+        // then the beat's discrete filmable actions — amber = not covered by any shot
+        (()=>{ const plan = L.shots.map(x=>x.beatPlan).find(Boolean);
+          if(!plan || !plan.micro || !plan.micro.length) return null;
+          return _el(React.Fragment,null,
+            plan.protect && _el("div",{className:"beat-protect",
+              title:"The beat's emotional core — the moment the coverage is built to protect. The \u2605 Priority shot carries it."},
+              _el(Icon.bolt,{s:10}), _el("b",null,"Protect:"), " "+plan.protect),
+            _el("div",{className:"beat-micro-rail"},
+              plan.micro.map((m,i)=>{ const n=i+1;
+                const covered = L.shots.some(x=>Array.isArray(x.covers)&&x.covers.includes(n));
+                const on = (hiCovers && hiCovers.laneN===L.n && hiCovers.covers.includes(n))
+                        || (hiMicro && hiMicro.laneN===L.n && hiMicro.n===n);
+                return _el("span",{key:n,
+                  className:"beat-micro-chip"+(covered?"":" uncovered")+(on?" on":""),
+                  onMouseEnter:()=>setHiMicro({laneN:L.n,n}), onMouseLeave:()=>setHiMicro(null),
+                  title: covered
+                    ? "Micro-beat "+n+" \u2014 hover to see the shot(s) covering it"
+                    : "No shot covers this action yet \u2014 add a shot to this beat or re-draft the scene's shots"},
+                  _circ(n)+" "+m); })));
+        })(),
         // SIDE ARROWS (scene-navigator style): pinned at the lane's edges so the
         // eye stays in place while paging through this beat's shots
         (showAllLanes ? L.shots.length>1 : (lanes.length>1 || L.shots.length>1)) && _el("button",{
@@ -523,7 +560,10 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
           L.shots.map((sh,li)=>{
             const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
             const _si = ordered.findIndex(x=>x.id===sh.id);
-            return _el("div",{key:sh.id,className:"beat-shot-cell"},
+            const _hi = hiMicro && hiMicro.laneN===L.n && Array.isArray(sh.covers) && sh.covers.includes(hiMicro.n);
+            return _el("div",{key:sh.id,className:"beat-shot-cell"+(_hi?" hi":""),
+              onMouseEnter:()=>{ if(Array.isArray(sh.covers)&&sh.covers.length) setHiCovers({laneN:L.n,covers:sh.covers}); },
+              onMouseLeave:()=>setHiCovers(null)},
               _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,
                 prevShot, laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
                 onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,

@@ -5783,6 +5783,28 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 /* (beat-pager bar removed 2026-07-19 — the lane's side arrows step beats now) */
 .beat-lane-side:disabled{opacity:.35;cursor:default}
 .beat-lane-side:disabled:hover{border-color:var(--line-2);color:var(--txt-2)}
+
+/* MICRO-BEAT LAYER — protect line + numbered rail of the beat's discrete actions */
+.beat-protect{display:flex;align-items:center;gap:6px;margin:2px 0 8px;font-size:11.5px;color:var(--txt-1);line-height:1.4}
+.beat-protect svg{color:var(--pos);flex:0 0 auto}
+.beat-protect b{color:var(--pos);font-weight:700}
+.beat-micro-rail{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.beat-micro-chip{display:inline-flex;align-items:center;padding:3px 9px;border-radius:14px;
+  border:1px solid var(--line-2);background:var(--bg-2);color:var(--txt-2);
+  font-family:var(--f-mono);font-size:10px;letter-spacing:.02em;cursor:default;transition:.12s}
+.beat-micro-chip.on{border-color:var(--pos);color:var(--pos);background:var(--pos-soft)}
+.beat-micro-chip.uncovered{border-color:var(--alert);color:var(--alert);background:var(--alert-soft)}
+.beat-shot-cell{transition:.12s;border-radius:14px}
+.beat-shot-cell.hi{box-shadow:0 0 0 2px var(--pos);border-radius:14px}
+
+/* why the shot exists + which micro-beats it covers */
+.shot-purpose{display:flex;align-items:baseline;gap:8px;margin:8px 0 0;font-size:11px;line-height:1.45;color:var(--txt-2)}
+.shot-covers-chip{flex:0 0 auto;font-family:var(--f-mono);font-size:9.5px;letter-spacing:.03em;color:var(--txt-3);
+  border:1px solid var(--line-2);border-radius:10px;padding:1px 7px;cursor:help}
+.shot-purpose-t{font-style:italic}
+.shot-priority-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;
+  border:1px solid var(--pos-line);background:var(--pos-soft);color:var(--pos);
+  font-family:var(--f-mono);font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;cursor:help}
 .shot-beat-tag.sub{border-color:oklch(0.62 0.12 285 / .45);color:oklch(0.74 0.1 285)}
 [data-theme="light"] .shot-beat-tag.sub{color:oklch(0.44 0.12 285)}
 .char-argues-row{display:flex;align-items:center;gap:8px;margin-top:6px}
