@@ -5788,14 +5788,18 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-protect{display:flex;align-items:center;gap:6px;margin:2px 0 8px;font-size:11.5px;color:var(--txt-1);line-height:1.4}
 .beat-protect svg{color:var(--pos);flex:0 0 auto}
 .beat-protect b{color:var(--pos);font-weight:700}
-.beat-micro-rail{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
-.beat-micro-chip{display:inline-flex;align-items:center;padding:3px 9px;border-radius:14px;
-  border:1px solid var(--line-2);background:var(--bg-2);color:var(--txt-2);
-  font-family:var(--f-mono);font-size:10px;letter-spacing:.02em;cursor:default;transition:.12s}
-.beat-micro-chip.on{border-color:var(--pos);color:var(--pos);background:var(--pos-soft)}
-.beat-micro-chip.uncovered{border-color:var(--alert);color:var(--alert);background:var(--alert-soft)}
-.beat-shot-cell{transition:.12s;border-radius:14px}
-.beat-shot-cell.hi{box-shadow:0 0 0 2px var(--pos);border-radius:14px}
+/* the beat HOUSES its micro-beats: one labelled group per discrete action inside
+   the strip, each holding the shot card(s) that cover it; amber = uncovered lint */
+.beat-micro-group{display:flex;flex-direction:column;flex:0 0 auto;gap:8px}
+.beat-micro-group+.beat-micro-group{margin-left:16px;padding-left:16px;border-left:1px dashed var(--line-2)}
+.beat-micro-group-head{align-self:flex-start;max-width:clamp(320px,30vw,430px);
+  padding:4px 10px;border-radius:8px;border:1px solid var(--line-2);background:var(--bg-2);
+  font-family:var(--f-mono);font-size:10px;line-height:1.5;letter-spacing:.02em;color:var(--txt-1);cursor:default}
+.beat-micro-group-head.uncovered{border-color:var(--alert);color:var(--alert);background:var(--alert-soft)}
+.beat-micro-group-shots{display:flex;gap:18px}
+.beat-micro-empty{display:grid;place-items:center;width:clamp(240px,22vw,320px);min-height:150px;
+  border:1px dashed var(--alert);border-radius:12px;color:var(--alert);
+  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.03em}
 
 /* why the shot exists + which micro-beats it covers */
 .shot-purpose{display:flex;align-items:baseline;gap:8px;margin:8px 0 0;font-size:11px;line-height:1.45;color:var(--txt-2)}

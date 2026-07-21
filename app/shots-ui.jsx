@@ -386,10 +386,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
   const stripRefs = React.useRef({});
   // merged scene navigator (user ruling 2026-07-19): the pager lives IN this header
   const [jumpOpen, setJumpOpen] = React.useState(false);
-  // micro-beat <-> shot hover linking (per visible lane): hovering a micro chip
-  // glows the shots that cover it; hovering a shot glows its micro chips
-  const [hiMicro, setHiMicro] = React.useState(null);      // {laneN, n}
-  const [hiCovers, setHiCovers] = React.useState(null);    // {laneN, covers:[..]}
+
   React.useEffect(()=>{ if(!jumpOpen) return;
     const close=(e)=>{ if(!e.target.closest || !e.target.closest(".ssg-jump")) setJumpOpen(false); };
     document.addEventListener("mousedown", close); return ()=>document.removeEventListener("mousedown", close); },[jumpOpen]);
@@ -523,26 +520,13 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
               title:"Add one manual shot to this beat — it joins the rolling chain after the beat's last shot",
               onClick:()=>onAddShot(scene.id, L.n)},
               _el(Icon.plus,{s:11}),"Add shot"))),
-        // MICRO-BEAT LAYER (designed with the shots): what the camera must PROTECT,
-        // then the beat's discrete filmable actions — amber = not covered by any shot
+        // MICRO-BEAT LAYER: the beat's PROTECT line; the micro-beats themselves
+        // render as GROUPS inside the strip below (each houses its covering shots)
         (()=>{ const plan = L.shots.map(x=>x.beatPlan).find(Boolean);
-          if(!plan || !plan.micro || !plan.micro.length) return null;
-          return _el(React.Fragment,null,
-            plan.protect && _el("div",{className:"beat-protect",
-              title:"The beat's emotional core — the moment the coverage is built to protect. The \u2605 Priority shot carries it."},
-              _el(Icon.bolt,{s:10}), _el("b",null,"Protect:"), " "+plan.protect),
-            _el("div",{className:"beat-micro-rail"},
-              plan.micro.map((m,i)=>{ const n=i+1;
-                const covered = L.shots.some(x=>Array.isArray(x.covers)&&x.covers.includes(n));
-                const on = (hiCovers && hiCovers.laneN===L.n && hiCovers.covers.includes(n))
-                        || (hiMicro && hiMicro.laneN===L.n && hiMicro.n===n);
-                return _el("span",{key:n,
-                  className:"beat-micro-chip"+(covered?"":" uncovered")+(on?" on":""),
-                  onMouseEnter:()=>setHiMicro({laneN:L.n,n}), onMouseLeave:()=>setHiMicro(null),
-                  title: covered
-                    ? "Micro-beat "+n+" \u2014 hover to see the shot(s) covering it"
-                    : "No shot covers this action yet \u2014 add a shot to this beat or re-draft the scene's shots"},
-                  _circ(n)+" "+String(m).replace(/^\s*\d+[\.\)]\s*/,"")); })));
+          if(!plan || !plan.protect) return null;
+          return _el("div",{className:"beat-protect",
+            title:"The beat's emotional core — the moment the coverage is built to protect. The \u2605 Priority shot carries it."},
+            _el(Icon.bolt,{s:10}), _el("b",null,"Protect:"), " "+plan.protect);
         })(),
         // SIDE ARROWS (scene-navigator style): pinned at the lane's edges so the
         // eye stays in place while paging through this beat's shots
@@ -557,17 +541,43 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
           onClick:(e)=>{ e.stopPropagation(); stepSide(L,1); }},
           _el(Icon.chevR,{s:16})),
         _el("div",{className:"beat-lane-strip",ref:(el)=>{ stripRefs.current[L.n]=el; }},
-          L.shots.map((sh,li)=>{
-            const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
-            const _si = ordered.findIndex(x=>x.id===sh.id);
-            const _hi = hiMicro && hiMicro.laneN===L.n && Array.isArray(sh.covers) && sh.covers.includes(hiMicro.n);
-            return _el("div",{key:sh.id,className:"beat-shot-cell"+(_hi?" hi":""),
-              onMouseEnter:()=>{ if(Array.isArray(sh.covers)&&sh.covers.length) setHiCovers({laneN:L.n,covers:sh.covers}); },
-              onMouseLeave:()=>setHiCovers(null)},
-              _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,
-                prevShot, laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
-                onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
-                subLabel: L.shots.length>1 ? String.fromCharCode(65+li) : null })); })));
+          (()=>{
+            const cellFor = (sh)=>{
+              const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
+              const _si = ordered.findIndex(x=>x.id===sh.id);
+              const li = L.shots.findIndex(x=>x.id===sh.id);
+              return _el("div",{key:sh.id,className:"beat-shot-cell"},
+                _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,
+                  prevShot, laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
+                  onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
+                  subLabel: L.shots.length>1 ? String.fromCharCode(65+li) : null }));
+            };
+            const plan = L.shots.map(x=>x.beatPlan).find(Boolean);
+            if(!plan || !Array.isArray(plan.micro) || !plan.micro.length)
+              return L.shots.map(cellFor);   // no plan (older data / manual shots): flat strip
+            // THE BEAT HOUSES ITS MICRO-BEATS: one labelled group per discrete action,
+            // each holding the shot(s) that cover it (a shot covering several actions
+            // lives under its FIRST one — its "covers ①②" chip tells the rest).
+            // An action no shot covers renders as an amber EMPTY group: the lint.
+            const prim = (sh)=>{ const c=(Array.isArray(sh.covers)?sh.covers:[]).filter(n=>n>=1&&n<=plan.micro.length);
+              return c.length ? Math.min.apply(null,c) : 0; };
+            const groups = plan.micro.map((m,i)=>({ n:i+1, text:String(m).replace(/^\s*\d+[\.\)]\s*/,""), shots:[] }));
+            const unmapped = { n:0, text:"", shots:[] };
+            L.shots.forEach(sh=>{ const p=prim(sh); (p ? groups[p-1] : unmapped).shots.push(sh); });
+            return [...groups, ...(unmapped.shots.length?[unmapped]:[])].map(g=>
+              _el("div",{key:"mg"+L.n+"-"+g.n,className:"beat-micro-group"+(g.shots.length?"":" empty")},
+                _el("div",{className:"beat-micro-group-head"+(g.shots.length?"":" uncovered"),
+                  title: g.n===0
+                    ? "Shots not yet mapped to one of this beat's micro-beats (added by hand, or drafted before the micro-beat layer)"
+                    : (g.shots.length
+                      ? "Micro-beat "+g.n+" of this beat — the discrete filmable action these shots cover"
+                      : "No shot covers this action yet — Add shot, then name this action in its Action line (or re-draft the scene's shots)")},
+                  g.n===0 ? "Unmapped shots" : _circ(g.n)+" "+g.text),
+                _el("div",{className:"beat-micro-group-shots"},
+                  g.shots.length
+                    ? g.shots.map(cellFor)
+                    : _el("div",{className:"beat-micro-empty"},"No coverage yet"))));
+          })()));
     })));
 }
 
