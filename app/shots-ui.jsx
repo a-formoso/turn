@@ -542,7 +542,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
                   title: covered
                     ? "Micro-beat "+n+" \u2014 hover to see the shot(s) covering it"
                     : "No shot covers this action yet \u2014 add a shot to this beat or re-draft the scene's shots"},
-                  _circ(n)+" "+m); })));
+                  _circ(n)+" "+String(m).replace(/^\s*\d+[\.\)]\s*/,"")); })));
         })(),
         // SIDE ARROWS (scene-navigator style): pinned at the lane's edges so the
         // eye stays in place while paging through this beat's shots

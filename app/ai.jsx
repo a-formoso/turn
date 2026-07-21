@@ -2996,7 +2996,7 @@ async function aiDraftShots(scene, beats, drafts, locations, props, characters, 
     const planByBeat = {};
     if(j && Array.isArray(j.beats)) j.beats.forEach(bp=>{
       if(bp && bp.beat!=null && Array.isArray(bp.micro)) planByBeat[String(bp.beat)] = {
-        micro: bp.micro.map(t=>scrubBrand(String(t||"")).slice(0,90)).filter(Boolean).slice(0,10),
+        micro: bp.micro.map(t=>scrubBrand(String(t||"")).replace(/^\s*\d+[\.\)]\s*/,"").slice(0,90)).filter(Boolean).slice(0,10),
         protect: scrubBrand(String(bp.protect||"")).slice(0,220) };
     });
     return arr.map(r=>({ ...r, action: scrubBrand((r.action||"").toString()),
