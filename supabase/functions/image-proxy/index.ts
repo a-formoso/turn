@@ -609,7 +609,7 @@ Deno.serve(async (req) => {
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reqBody),
           // never hold the connection open forever — a hung Google call used to hang
           // the whole invoke and the client spun "Generating…" with no error
-          signal: AbortSignal.timeout(120000) },
+          signal: AbortSignal.timeout(380000) },
       );
       if (!gRes.ok) {
         let detail = "";
@@ -664,12 +664,12 @@ Deno.serve(async (req) => {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(380000),
       });
     } else {
       oaiRes = await fetch("https://api.openai.com/v1/images/generations", {
         method: "POST",
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(380000),
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model, prompt, size, quality, n: 1 }),
       });

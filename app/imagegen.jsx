@@ -922,7 +922,7 @@ async function proxyGenerate(prompt, opts, provider){
   // and say so. (Wording deliberately avoids isNetworkBlip's trigger words so an
   // abandoned wait is never auto-retried.)
   const _capped = (pr)=> Promise.race([ pr,
-    new Promise((_,rej)=> setTimeout(()=>{ const e=new Error("The image server didn't answer within 3 minutes — the request was abandoned. If this keeps happening on Nano Banana models, the Google account may be out of prepaid credits or the image-proxy needs a redeploy."); e.__timedOut=true; rej(e); }, 180000)) ]);
+    new Promise((_,rej)=> setTimeout(()=>{ const e=new Error("The image server didn't answer within 6\u00bd minutes — the request was abandoned. If this keeps happening on Nano Banana models, the Google account may be out of prepaid credits or the image-proxy needs a redeploy."); e.__timedOut=true; rej(e); }, 390000)) ]);
   for(let attempt=0; attempt<2; attempt++){
     error = null;
     try{ ({ data, error } = await _capped(sb.functions.invoke(fnName, { body }))); }
@@ -938,7 +938,7 @@ async function proxyGenerate(prompt, opts, provider){
     const _safe = window.turnSafeError || (x=>x);
     if(status===404) throw new Error(_safe("The image proxy isn't deployed yet. Deploy supabase/functions/image-proxy and set imageProxy:true in supabase-config.js."));
     if(status===504) throw new Error("The image generation exceeded the server time limit. Cinema Machine preserved your selected quality and resolution; try again, or manually choose a faster setting if you prefer.");
-    if(status===502 || status===503) throw new Error("The image proxy is temporarily unavailable. Try again in a moment.");
+    if(status===502 || status===503) throw new Error("The image server took too long or is temporarily unavailable. High-quality GPT Image renders can take several minutes — try again, or drop the quality/resolution a notch for a faster render.");
     throw new Error(_safe("Couldn't reach the image proxy: "+((error && error.message) || "unknown error")+"."));
   }
   if(data && data.error) throw new Error((window.turnSafeError||(x=>x))(data.error));          // provider error relayed by the proxy
