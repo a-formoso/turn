@@ -5800,6 +5800,10 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-micro-empty{display:grid;place-items:center;width:clamp(240px,22vw,320px);min-height:150px;
   border:1px dashed var(--alert);border-radius:12px;color:var(--alert);
   font-family:var(--f-mono);font-size:10.5px;letter-spacing:.03em}
+/* action filmed INSIDE a multi-cover shot housed under an earlier micro-beat */
+.beat-micro-xref{display:grid;place-items:center;width:clamp(200px,18vw,280px);min-height:72px;padding:10px;
+  border:1px dashed var(--line-2);border-radius:12px;color:var(--txt-3);
+  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.03em;cursor:help}
 
 /* why the shot exists + which micro-beats it covers */
 .shot-purpose{display:flex;align-items:baseline;gap:8px;margin:8px 0 0;font-size:11px;line-height:1.45;color:var(--txt-2)}

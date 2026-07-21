@@ -564,19 +564,33 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
             const groups = plan.micro.map((m,i)=>({ n:i+1, text:String(m).replace(/^\s*\d+[\.\)]\s*/,""), shots:[] }));
             const unmapped = { n:0, text:"", shots:[] };
             L.shots.forEach(sh=>{ const p=prim(sh); (p ? groups[p-1] : unmapped).shots.push(sh); });
-            return [...groups, ...(unmapped.shots.length?[unmapped]:[])].map(g=>
-              _el("div",{key:"mg"+L.n+"-"+g.n,className:"beat-micro-group"+(g.shots.length?"":" empty")},
-                _el("div",{className:"beat-micro-group-head"+(g.shots.length?"":" uncovered"),
+            return [...groups, ...(unmapped.shots.length?[unmapped]:[])].map(g=>{
+              // a micro-beat with no HOUSED shot may still be FILMED — inside a shot
+              // that covers several actions and lives under an earlier one. That is
+              // a cross-reference, not a lint; only a truly unfilmed action is amber.
+              const coveredBy = (g.n>0 && !g.shots.length)
+                ? L.shots.map((sh,i)=>({sh,i})).filter(x=>Array.isArray(x.sh.covers)&&x.sh.covers.includes(g.n))
+                : [];
+              const lint = g.n>0 && !g.shots.length && !coveredBy.length;
+              return _el("div",{key:"mg"+L.n+"-"+g.n,className:"beat-micro-group"+(g.shots.length?"":" nocover")},
+                _el("div",{className:"beat-micro-group-head"+(lint?" uncovered":""),
                   title: g.n===0
                     ? "Shots not yet mapped to one of this beat's micro-beats (added by hand, or drafted before the micro-beat layer)"
                     : (g.shots.length
                       ? "Micro-beat "+g.n+" of this beat — the discrete filmable action these shots cover"
-                      : "No shot covers this action yet — Add shot, then name this action in its Action line (or re-draft the scene's shots)")},
+                      : (coveredBy.length
+                        ? "This action is filmed INSIDE another setup — the shot named below covers several of this beat's actions"
+                        : "No shot covers this action yet — Add shot, then name this action in its Action line (or re-draft the scene's shots)"))},
                   g.n===0 ? "Unmapped shots" : _circ(g.n)+" "+g.text),
                 _el("div",{className:"beat-micro-group-shots"},
                   g.shots.length
                     ? g.shots.map(cellFor)
-                    : _el("div",{className:"beat-micro-empty"},"No coverage yet"))));
+                    : (coveredBy.length
+                      ? _el("div",{className:"beat-micro-xref",
+                          title:"Filmed inside that shot's frame — see its 'covers' chip"},
+                          "\u2192 filmed in Shot "+coveredBy.map(x=>String.fromCharCode(65+x.i)).join(" & "))
+                      : _el("div",{className:"beat-micro-empty"},"No coverage yet"))));
+            });
           })()));
     })));
 }
