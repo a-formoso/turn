@@ -1968,7 +1968,7 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
           "Prompt advice — amends the card's spec (not an Edit instruction)"),
         React.createElement("div",{className:"qa-quote"},r.promptFix),
         React.createElement("div",{className:"qa-apply-row"},
-          (specFields && onApplySpec) && React.createElement("button",{className:"ns-btn ghost qa-apply-btn",disabled:applying||gening,
+          (specFields && onApplySpec) && React.createElement("button",{className:"ns-btn qa-apply-btn "+(r.action==="regenerate"?"primary":"ghost"),disabled:applying||gening,
             title:"Fold this advice into the card's drafted spec fields (one writing-model call, previewed first), then REGENERATE immediately so the sheet always matches its spec — the current image stays in version history",
             onClick:applyAdvice},
             applying ? React.createElement("span",{className:"ns-spin"}) : React.createElement(Icon.sparkles,{s:12}),
@@ -1981,11 +1981,10 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
           title:"Apply the suggested edit to this image now — one generation; the current version stays in history",
           onClick:()=>{ onRunEdit(r.editInstruction); onClose(); }},
           React.createElement(Icon.wand,{s:13}),"Run suggested edit"),
-        (!r.promptFix) && _editBtn,
-        r.action==="regenerate" && React.createElement("button",{className:"ns-btn primary",disabled:gening,
-          title:"Regenerate this image from its spec now — one generation; the current version stays in history",
-          onClick:()=>{ onRegen(); onClose(); }},
-          React.createElement(Icon.sparkles,{s:13}),"Regenerate now"))));
+        // ("Regenerate now" removed, user ruling 2026-07-21: it duplicated the card's
+        // own Regenerate button and re-rolled the SAME spec the report just faulted —
+        // the modal offers only the two INFORMED repairs: amend the spec, or edit.)
+        (!r.promptFix) && _editBtn)));
 }
 
 /* ---- QA button — lives on the card face next to "Draft details" (chars, props,
