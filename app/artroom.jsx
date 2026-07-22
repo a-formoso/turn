@@ -1914,6 +1914,16 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
   };
   const sev = r.verdict==="pass" ? "pass" : r.verdict==="major" ? "major" : "minor";
   const clean = r.deviations.length===0 && r.inventions.length===0;
+  // "Edit current image" — a targeted one-generation edit of the EXISTING frame,
+  // built from the findings (or the model's own instruction). Sits to the RIGHT of
+  // "Apply to spec & regenerate" (user ruling 2026-07-21); on edit verdicts the
+  // primary Run-suggested-edit in the footer carries it instead.
+  const _editBtn = (r.action!=="edit" && !!(r.editInstruction || _qaDerivedEditInstruction(r)))
+    ? React.createElement("button",{className:"ns-btn ghost qa-apply-btn",disabled:gening,
+        title:"Make a TARGETED EDIT to the current image that fixes the findings above — one generation; this exact framing is kept and the current version stays in history. (Apply to spec & regenerate is the deeper fix when the drift is systemic.)",
+        onClick:()=>{ onRunEdit(r.editInstruction || _qaDerivedEditInstruction(r)); onClose(); }},
+        React.createElement(Icon.wand,{s:12}),"Edit current image")
+    : null;
   const finding = (d,i,invented)=> React.createElement("div",{key:i,className:"qa-item"},
     React.createElement("span",{className:"qa-dot "+(invented?"invent":(d.severity==="major"?"major":"minor")),
       title: invented?"Invented — not in the prompt":(d.severity==="major"?"Major deviation":"Minor deviation")}),
@@ -1957,11 +1967,13 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
           title:"This amends the WRITTEN SPEC, not the image: Apply to spec folds it into the card's drafted fields for you, then Regenerate the sheet. It is not an Edit instruction — for a quick image fix, use Run suggested edit instead."},
           "Prompt advice — amends the card's spec (not an Edit instruction)"),
         React.createElement("div",{className:"qa-quote"},r.promptFix),
-        (specFields && onApplySpec) && React.createElement("button",{className:"ns-btn ghost qa-apply-btn",disabled:applying||gening,
-          title:"Fold this advice into the card's drafted spec fields (one writing-model call, previewed first), then REGENERATE immediately so the sheet always matches its spec — the current image stays in version history",
-          onClick:applyAdvice},
-          applying ? React.createElement("span",{className:"ns-spin"}) : React.createElement(Icon.sparkles,{s:12}),
-          applying ? "Folding into the spec…" : "Apply to spec & regenerate")),
+        React.createElement("div",{className:"qa-apply-row"},
+          (specFields && onApplySpec) && React.createElement("button",{className:"ns-btn ghost qa-apply-btn",disabled:applying||gening,
+            title:"Fold this advice into the card's drafted spec fields (one writing-model call, previewed first), then REGENERATE immediately so the sheet always matches its spec — the current image stays in version history",
+            onClick:applyAdvice},
+            applying ? React.createElement("span",{className:"ns-spin"}) : React.createElement(Icon.sparkles,{s:12}),
+            applying ? "Folding into the spec…" : "Apply to spec & regenerate"),
+          _editBtn)),
       React.createElement("div",{className:"qa-foot"},
         React.createElement("span",{className:"qa-foot-note"},"1 vision read · no image credits spent"),
         React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Close"),
@@ -1969,10 +1981,7 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
           title:"Apply the suggested edit to this image now — one generation; the current version stays in history",
           onClick:()=>{ onRunEdit(r.editInstruction); onClose(); }},
           React.createElement(Icon.wand,{s:13}),"Run suggested edit"),
-        (r.action!=="edit" && !!(r.editInstruction || _qaDerivedEditInstruction(r))) && React.createElement("button",{className:"ns-btn ghost",disabled:gening,
-          title:"Make a TARGETED EDIT to the current image that fixes the findings above — one generation; this exact framing is kept and the current version stays in history. (Apply to spec & regenerate is the deeper fix when the drift is systemic.)",
-          onClick:()=>{ onRunEdit(r.editInstruction || _qaDerivedEditInstruction(r)); onClose(); }},
-          React.createElement(Icon.wand,{s:13}),"Edit current image"),
+        (!r.promptFix) && _editBtn,
         r.action==="regenerate" && React.createElement("button",{className:"ns-btn primary",disabled:gening,
           title:"Regenerate this image from its spec now — one generation; the current version stays in history",
           onClick:()=>{ onRegen(); onClose(); }},
