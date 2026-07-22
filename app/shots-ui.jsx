@@ -395,7 +395,7 @@ function BeatShotRow({ sh, letter, open, onToggle }){
    video clips — nothing about clip packing changes. */
 function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered, firstId, toggleHead,
   onAddShot, onUpdate, onDelete, onView, onGenerateShot, onRegenDownstream, onStopChain, onBatchDone,
-  openShotId, setOpenShotId }){
+  batchActiveId, openShotId, setOpenShotId }){
   const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(L.n));
   const beatText = beatRow
     ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" \u2014 ")
@@ -449,13 +449,13 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
               const _si=ordered.findIndex(x=>x.id===sh.id);
               return _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,prevShot,
                 laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
-                onUpdate,onDelete,onView,batchActiveId:null,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
+                onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
                 subLabel:(L.shots.length>1?letterOf(i):null)}); })()))))));
 }
 
 function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, pager, onUpdate, onDelete, onView,
   onAddShot, onSplitBeat, splittingBeat, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot, onRegenDownstream,
-  onRenderScene, renderBusy, onStopChain }){
+  onRenderScene, renderBusy, queueMode, onStopChain }){
   const loc = ctx.location;
   const driver = scene.driver ? ctx.charById[scene.driver] : null;
   // scene-level context (driver/reactor/antagonism/goal/conflict) — driver+goal+conflict from the
@@ -476,7 +476,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
   // beat — the scene runner advances by watching MOUNTED ShotCards, and the compact
   // rows don't mount them. openShotId = the one shot expanded into its full editor.
   const [openShotId, setOpenShotId] = React.useState(null);
-  const batchMode = !!batchActiveId || !!renderBusy;
+  const batchMode = !!queueMode;
   // merged scene navigator: the click-to-jump scene list in this card's header
   const [jumpOpen, setJumpOpen] = React.useState(false);
   React.useEffect(()=>{ if(!jumpOpen) return;
@@ -584,7 +584,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
       : _el("div",{className:"beat-card-grid"},
           lanes.map(L=> _el(BeatCard,{key:"bc"+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
             ordered, firstId, toggleHead, onAddShot, onUpdate, onDelete, onView,
-            onGenerateShot, onRegenDownstream, onStopChain, onBatchDone, openShotId, setOpenShotId })))));
+            onGenerateShot, onRegenDownstream, onStopChain, onBatchDone, batchActiveId, openShotId, setOpenShotId })))));
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,
@@ -693,6 +693,10 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   const curScene = scenesWithShots[visibleIdx];
   const visibleScenes = [curScene].filter(Boolean);
   const renderBusy = !!batchActiveId || !!chain;
+  // a SOLO run (chain of exactly one — a card's Regenerate / QA apply-and-regenerate)
+  // keeps the beat-card UI: the expanded card drives it. Only QUEUE runs (Render
+  // Scene in order / Generate all shots) mount the legacy full-card lanes.
+  const queueMode = (chain && chain.total===1) ? false : (!!batchActiveId || !!chain);
   const runnerScene = activeSceneIdx>=0 && activeSceneIdx!==visibleIdx ? scenesWithShots[activeSceneIdx] : null;
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s ? s.no : sid; };
 
@@ -868,7 +872,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
       onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
       onAddShot,onSplitBeat,splittingBeat,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===scene.id,
       batchActiveId,onBatchDone:handleBatchDone,onGenerateShot:startShot,onRegenDownstream,
-      onRenderScene:startScene,renderBusy,onStopChain:stopChain,
+      onRenderScene:startScene,renderBusy,queueMode,onStopChain:stopChain,
       open:true,onToggle:()=>toggleScene(scene.id)})),
     // Keep only the active runner mounted when the user browses away. display:none
     // preserves its generation/completion effects without showing a second scene.
@@ -879,7 +883,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
         onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
         onAddShot,onSplitBeat,splittingBeat,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===runnerScene.id,
         batchActiveId,onBatchDone:handleBatchDone,onGenerateShot:startShot,onRegenDownstream,
-        onRenderScene:startScene,renderBusy,onStopChain:stopChain,open:true,onToggle:()=>{}})));
+        onRenderScene:startScene,renderBusy,queueMode,onStopChain:stopChain,open:true,onToggle:()=>{}})));
 }
 window.ShotList = ShotList;
 
