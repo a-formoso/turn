@@ -839,6 +839,9 @@ function buildShotPrompt(sh, ctx){
   if(clean(sh.action))      stage.push(cap(clean(sh.action)));
   if(clean(screenDir.composition)) stage.push(cap(clean(screenDir.composition)));
   if(clean(screenDir.clause)) stage.push(clean(screenDir.clause));
+  // the director's OWN words (the card's Director's-notes field): appended as their
+  // own clause so they COMPOSE with the derived prompt, never replacing any part of it
+  if(clean(sh.directives)) stage.push("DIRECTOR'S NOTES (binding): "+clean(sh.directives));
   const _depth = (typeof shotFramingClause==="function") ? clean(shotFramingClause(loc, sh.size)) : "";
   if(_depth) stage.push(_depth);
   // SCALE / POV — when an in-frame subject isn't human-scale, recontextualize the world
@@ -976,6 +979,9 @@ function deriveShotPrompt(sh, ctx){
     action: clean(sh.action) || undefined,
     dialogue_mid_line: clean(sh.dialogue).replace(/^["\u201c]|["\u201d]$/g,"") || undefined,
     composition: clean(sh.composition) || undefined,
+    // the director's OWN words (authored on the card): they COMPOSE with the
+    // derived spec — never replace it — and survive every prompt re-derive
+    custom_directives: clean(sh.directives) || undefined,
     keep_identical_to_base: [
       "the set's architecture, surfaces, signage and layout",
       "the light sources and colour grade",

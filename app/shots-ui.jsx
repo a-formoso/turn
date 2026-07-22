@@ -303,6 +303,12 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
       _el(SheetField,{label:"Dialogue (optional)",value:sh.dialogue,multiline:true,
         placeholder:"A short line spoken in this beat\u2026",onCommit:v=>onUpdate(sh.id,{dialogue:v})}),
 
+      // the director's own prompt words — compiled into the spec as custom_directives
+      // on every rebuild, so they survive sheet/style changes and never fork the prompt
+      _el(SheetField,{label:"Director's notes \u2014 extra prompt directives (optional)",value:sh.directives,multiline:true,
+        placeholder:"Your own words for the generator \u2014 atmosphere, camera nuance, performance notes\u2026 These compose INTO the prompt; the derived spec (references, cast, style) stays intact.",
+        onCommit:v=>onUpdate(sh.id,{directives:v})}),
+
       _el(CardFold,{label:"In frame",defaultOpen:false},
         // read-only: derived from the action text, the single source the prompt uses —
         // no manual toggles to drift out of sync. Edit the ACTION to change who's in frame.
