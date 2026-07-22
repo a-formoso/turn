@@ -360,6 +360,99 @@ function SceneStyleChip({ project, sceneId }){
 
 /* circled micro-beat numerals: 1..20 -> \u2460.. ; beyond that "#n" */
 function _circ(n){ return (n>=1&&n<=20) ? String.fromCharCode(0x245F+n) : ("#"+n); }
+/* live keyframe url for a shot id: sync cache, async IDB hydrate, adopt fresh gens */
+function useShotKeyframe(shotId){
+  const [url,setUrl]=React.useState(()=> shotId && (typeof nbGetImage==="function") ? nbGetImage(shotId) : "");
+  React.useEffect(()=>{ let alive=true;
+    if(!shotId) return;
+    setUrl((typeof nbGetImage==="function")?nbGetImage(shotId):"");
+    if(typeof nbLoadImage==="function") nbLoadImage(shotId).then(u=>{ if(alive&&u) setUrl(u); });
+    const onDone=(e)=>{ if(alive&&e.detail&&e.detail.id===shotId&&e.detail.url) setUrl(e.detail.url); };
+    const onPre=(e)=>{ if(alive&&e.detail&&e.detail.ids&&e.detail.ids.indexOf(shotId)>=0){ const u=(typeof nbGetImage==="function")?nbGetImage(shotId):""; if(u) setUrl(u); } };
+    window.addEventListener("nb-gen-done",onDone); window.addEventListener("nb-prefetched",onPre);
+    return ()=>{ alive=false; window.removeEventListener("nb-gen-done",onDone); window.removeEventListener("nb-prefetched",onPre); };
+  },[shotId]);
+  return url;
+}
+
+/* one compact row per shot inside a BEAT CARD — click to expand the full editor */
+function BeatShotRow({ sh, letter, open, onToggle }){
+  const url = useShotKeyframe(sh.id);
+  return _el("div",{className:"bc-shot-row"+(open?" on":""),role:"button",tabIndex:0,onClick:onToggle,
+    title:open?"Collapse this shot":"Open this shot (frame, references, grammar, action)"},
+    url ? _el("img",{className:"bc-shot-thumb",src:url,alt:""}) : _el("span",{className:"bc-shot-thumb ph"}),
+    _el("span",{className:"bc-shot-letter"},letter),
+    sh.priority && _el("span",{className:"bc-shot-pri",title:"Priority — carries the beat's protected moment"},"\u2605"),
+    _el("span",{className:"bc-shot-gram"},String(sh.size||"")+" \u00b7 "+String(sh.angle||"")+" \u00b7 "+String(sh.lens||"")+"mm"),
+    _el("span",{className:"bc-shot-act"},String(sh.action||"")),
+    (Array.isArray(sh.covers)&&sh.covers.length>0) && _el("span",{className:"bc-shot-covers"},"covers "+sh.covers.map(_circ).join(" ")),
+    _el("span",{className:"bc-shot-chev"+(open?" open":"")},_el(Icon.chevR,{s:13})));
+}
+
+/* ONE CARD PER BEAT (user ruling 2026-07-21): the beat's first-shot keyframe as the
+   card image, then Protect, the micro-beat checklist, and compact shot rows that
+   expand into the full ShotCard editor. The Stage keeps consuming these shots for
+   video clips — nothing about clip packing changes. */
+function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered, firstId, toggleHead,
+  onAddShot, onUpdate, onDelete, onView, onGenerateShot, onRegenDownstream, onStopChain, onBatchDone,
+  openShotId, setOpenShotId }){
+  const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(L.n));
+  const beatText = beatRow
+    ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" \u2014 ")
+    : "";
+  const verbs = beatRow ? [ (beatRow.drive&&beatRow.drive.a||"").trim(), (beatRow.react&&beatRow.react.a||"").trim() ].filter(Boolean).join(" / ") : "";
+  const isTurn = String(bm.turnAt||"")===String(L.n);
+  const chg = beatRow && beatRow.charge!=null && beatRow.charge!=="" ? Number(beatRow.charge) : null;
+  const plan = L.shots.map(x=>x.beatPlan).find(Boolean);
+  const kf = useShotKeyframe(L.shots[0] ? L.shots[0].id : "");
+  const letterOf = (i)=>String.fromCharCode(65+i);
+  return _el("div",{className:"beat-card"+(isTurn?" turn":"")},
+    kf
+      ? _el("img",{className:"beat-card-img",src:kf,alt:"Beat "+L.n+" keyframe",
+          title:"This beat's opening keyframe (its first shot's frame) — click to enlarge",
+          onClick:()=>onView&&onView(kf,{name:scene.title+" \u2014 Beat "+L.n})})
+      : _el("div",{className:"beat-card-img ph"},
+          "No keyframe yet \u2014 'Render Scene "+String(scene.no).padStart(2,"0")+" in order' renders the chain"),
+    _el("div",{className:"beat-card-body"},
+      _el("div",{className:"beat-card-head"},
+        _el("span",{className:"beat-lane-no"},"Beat "+L.n+(lanesLen>1?(" of "+lanesLen):"")),
+        verbs && _el("span",{className:"beat-lane-verbs"},verbs),
+        isTurn && _el("span",{className:"beat-lane-turn"},_el(Icon.bolt,{s:10}),"Turning point"),
+        (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
+        _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")),
+        onAddShot && _el("button",{className:"beat-lane-btn ghost bc-add",
+          title:"Add one manual shot to this beat — it joins the rolling chain after the beat's last shot",
+          onClick:()=>onAddShot(scene.id, L.n)},_el(Icon.plus,{s:11}),"Add shot")),
+      plan && plan.protect && _el("div",{className:"beat-protect",
+        title:"The beat's emotional core — the moment the coverage is built to protect. The \u2605 Priority shot carries it."},
+        _el(Icon.bolt,{s:10}), _el("b",null,"Protect:"), " "+plan.protect),
+      plan && Array.isArray(plan.micro) && plan.micro.length>0 && _el("div",{className:"bc-micro"},
+        _el("div",{className:"bc-sec-lab"},"Micro-beats \u00b7 "+plan.micro.length),
+        plan.micro.map((m,i)=>{ const n=i+1;
+          const covering = L.shots.map((sh,idx)=>({sh,idx})).filter(x=>Array.isArray(x.sh.covers)&&x.sh.covers.includes(n));
+          return _el("div",{key:n,className:"bc-micro-row"+(covering.length?"":" uncovered")},
+            _el("span",{className:"bc-micro-t"},_circ(n)+" "+String(m).replace(/^\s*\d+[\.\)]\s*/,"")),
+            covering.length
+              ? _el("span",{className:"bc-micro-shots"},covering.map(x=>_el("button",{key:x.sh.id,className:"bc-micro-shotlink",
+                  title:"Filmed in Shot "+letterOf(x.idx)+" \u2014 click to open it",
+                  onClick:()=>setOpenShotId(x.sh.id)},letterOf(x.idx))))
+              : _el("span",{className:"bc-micro-none",
+                  title:"No shot films this action yet \u2014 Add shot, then name the action in its Action line"},"uncovered"));
+        })),
+      _el("div",{className:"bc-shots"},
+        _el("div",{className:"bc-sec-lab"},"Shots \u00b7 "+L.shots.length),
+        L.shots.map((sh,i)=> _el(React.Fragment,{key:sh.id},
+          _el(BeatShotRow,{sh,letter:letterOf(i),open:openShotId===sh.id,
+            onToggle:()=>setOpenShotId(openShotId===sh.id?null:sh.id)}),
+          openShotId===sh.id && _el("div",{className:"bc-shot-expand"},
+            (()=>{ const prevShot=(typeof prevShotOf==="function")?prevShotOf(sh,ordered):null;
+              const _si=ordered.findIndex(x=>x.id===sh.id);
+              return _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,prevShot,
+                laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
+                onUpdate,onDelete,onView,batchActiveId:null,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
+                subLabel:(L.shots.length>1?letterOf(i):null)}); })()))))));
+}
+
 function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, pager, onUpdate, onDelete, onView,
   onAddShot, onSplitBeat, splittingBeat, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot, onRegenDownstream,
   onRenderScene, renderBusy, onStopChain }){
@@ -378,40 +471,17 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
   const lanes = (()=>{ const Ls=[]; ordered.forEach(sh=>{ const n=sh.beatN||0;
     let L=Ls[Ls.length-1]; if(!L || L.n!==n){ L={ n, shots:[] }; Ls.push(L); } L.shots.push(sh); });
     return Ls; })();
-  // ONE BEAT AT A TIME (user ruling 2026-07-20): the group shows a single beat
-  // lane with a scene-pager-style ‹ › beat pager — no stacked lanes, no folding.
-  // EXCEPTION: while a BATCH renders, ALL lanes mount — the scene runner advances
-  // by watching MOUNTED cards, and an unmounted card would stall the queue.
-  const [beatIdx, setBeatIdx] = React.useState(0);
-  const stripRefs = React.useRef({});
-  // merged scene navigator (user ruling 2026-07-19): the pager lives IN this header
+  // ONE CARD PER BEAT (user ruling 2026-07-21): all beats list vertically as cards.
+  // EXCEPTION: while a BATCH renders, the legacy full-card lanes mount for every
+  // beat — the scene runner advances by watching MOUNTED ShotCards, and the compact
+  // rows don't mount them. openShotId = the one shot expanded into its full editor.
+  const [openShotId, setOpenShotId] = React.useState(null);
+  const batchMode = !!batchActiveId || !!renderBusy;
+  // merged scene navigator: the click-to-jump scene list in this card's header
   const [jumpOpen, setJumpOpen] = React.useState(false);
-
   React.useEffect(()=>{ if(!jumpOpen) return;
     const close=(e)=>{ if(!e.target.closest || !e.target.closest(".ssg-jump")) setJumpOpen(false); };
     document.addEventListener("mousedown", close); return ()=>document.removeEventListener("mousedown", close); },[jumpOpen]);
-  const showAllLanes = !!batchActiveId;
-  const _bi = Math.max(0, Math.min(beatIdx, lanes.length-1));
-  const pageShots = (n, dir)=>{
-    const el = stripRefs.current[n]; if(!el) return;
-    const cell = el.querySelector(".beat-shot-cell");
-    const w = cell ? (cell.getBoundingClientRect().width + 18) : 420;
-    try{ el.scrollBy({ left: dir*w, behavior:"smooth" }); }catch(e){ el.scrollLeft += dir*w; }
-  };
-  // ONE pair of side arrows per lane (the pager bar is gone — user ruling 2026-07-19):
-  // they walk this beat's shots first, and at the strip's edge they STEP TO the
-  // previous/next beat. While a batch mounts all lanes they only page shots.
-  const stepSide = (L, dir)=>{
-    const el = stripRefs.current[L.n];
-    const canScroll = el && el.scrollWidth > el.clientWidth + 8;
-    if(canScroll){
-      const atEnd   = el.scrollLeft + el.clientWidth >= el.scrollWidth - 8;
-      const atStart = el.scrollLeft <= 8;
-      if(dir>0 ? !atEnd : !atStart) return pageShots(L.n, dir);
-    }
-    if(showAllLanes) return;
-    setBeatIdx(dir>0 ? Math.min(lanes.length-1, _bi+1) : Math.max(0, _bi-1));
-  };
   const firstId = ordered[0] && ordered[0].id;
   const toggleHead = (target)=> { if(target && target.id!==firstId) onUpdate(target.id, { anchor: !target.anchor }); };
   // the scene's clip sequences (shared partition — Storyboard clip boards + the Stage);
@@ -491,108 +561,30 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
             confLab && _el("span",{className:"ssx-conf-lab"},confLab),
             _el("div",{className:"ssx-pips"},
               [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")})))))))),
-    // (the separate beat-pager bar was REMOVED — user ruling 2026-07-19: the
-    // lane's own side arrows walk the shots and then step beats)
-    // BEAT LANES — the beat is the dramatic unit; each owns 1..N shots (coverage)
-    // rendered as a HORIZONTAL strip with edge-pinned ‹ › shot arrows. Normally
-    // only the paged beat renders; a running batch mounts every lane.
-    open && _el(React.Fragment,null, (showAllLanes ? lanes : lanes.slice(_bi,_bi+1)).map(L=>{
-      const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(L.n));
-      const beatText = beatRow
-        ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" — ")
-        : "";
-      const verbs = beatRow ? [ (beatRow.drive&&beatRow.drive.a||"").trim(), (beatRow.react&&beatRow.react.a||"").trim() ].filter(Boolean).join(" / ") : "";
-      const isTurn = String(bm.turnAt||"")===String(L.n);
-      const chg = beatRow && beatRow.charge!=null && beatRow.charge!=="" ? Number(beatRow.charge) : null;
-      const busyKey = scene.id+"#"+L.n;
-      return _el("div",{key:"lane-"+L.n,className:"beat-lane"+(isTurn?" turn":"")},
-        _el("div",{className:"beat-lane-head"},
-          _el("span",{className:"beat-lane-no"},"Beat "+L.n+(lanes.length>1?(" of "+lanes.length):"")),
-          verbs && _el("span",{className:"beat-lane-verbs"},verbs),
-          isTurn && _el("span",{className:"beat-lane-turn"},_el(Icon.bolt,{s:10}),"Turning point"),
-          (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
-          _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")),
-          _el("div",{className:"beat-lane-acts"},
-            // per-beat design button retired (user ruling 2026-07-19): the beat-by-beat
-            // mapping is AUTOMATIC — aiDraftShots designs 1-4 shots per beat on
-            // "Design all shots" / "Re-draft shots". "Add shot" stays as the manual hatch.
-            onAddShot && _el("button",{className:"beat-lane-btn ghost",
-              title:"Add one manual shot to this beat — it joins the rolling chain after the beat's last shot",
-              onClick:()=>onAddShot(scene.id, L.n)},
-              _el(Icon.plus,{s:11}),"Add shot"))),
-        // MICRO-BEAT LAYER: the beat's PROTECT line; the micro-beats themselves
-        // render as GROUPS inside the strip below (each houses its covering shots)
-        (()=>{ const plan = L.shots.map(x=>x.beatPlan).find(Boolean);
-          if(!plan || !plan.protect) return null;
-          return _el("div",{className:"beat-protect",
-            title:"The beat's emotional core — the moment the coverage is built to protect. The \u2605 Priority shot carries it."},
-            _el(Icon.bolt,{s:10}), _el("b",null,"Protect:"), " "+plan.protect);
-        })(),
-        // SIDE ARROWS (scene-navigator style): pinned at the lane's edges so the
-        // eye stays in place while paging through this beat's shots
-        (showAllLanes ? L.shots.length>1 : (lanes.length>1 || L.shots.length>1)) && _el("button",{
-          className:"beat-lane-side prev", disabled:!showAllLanes && _bi<=0 && L.shots.length<=1,
-          title:"Previous shot — at the first shot, steps to the previous beat",
-          onClick:(e)=>{ e.stopPropagation(); stepSide(L,-1); }},
-          _el(Icon.chevL,{s:16})),
-        (showAllLanes ? L.shots.length>1 : (lanes.length>1 || L.shots.length>1)) && _el("button",{
-          className:"beat-lane-side next", disabled:!showAllLanes && _bi>=lanes.length-1 && L.shots.length<=1,
-          title:"Next shot — at the last shot, steps to the next beat",
-          onClick:(e)=>{ e.stopPropagation(); stepSide(L,1); }},
-          _el(Icon.chevR,{s:16})),
-        _el("div",{className:"beat-lane-strip",ref:(el)=>{ stripRefs.current[L.n]=el; }},
-          (()=>{
-            const cellFor = (sh)=>{
-              const prevShot = (typeof prevShotOf==="function") ? prevShotOf(sh, ordered) : null;
-              const _si = ordered.findIndex(x=>x.id===sh.id);
-              const li = L.shots.findIndex(x=>x.id===sh.id);
-              return _el("div",{key:sh.id,className:"beat-shot-cell"},
-                _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,
-                  prevShot, laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
-                  onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
-                  subLabel: L.shots.length>1 ? String.fromCharCode(65+li) : null }));
-            };
-            const plan = L.shots.map(x=>x.beatPlan).find(Boolean);
-            if(!plan || !Array.isArray(plan.micro) || !plan.micro.length)
-              return L.shots.map(cellFor);   // no plan (older data / manual shots): flat strip
-            // THE BEAT HOUSES ITS MICRO-BEATS: one labelled group per discrete action,
-            // each holding the shot(s) that cover it (a shot covering several actions
-            // lives under its FIRST one — its "covers ①②" chip tells the rest).
-            // An action no shot covers renders as an amber EMPTY group: the lint.
-            const prim = (sh)=>{ const c=(Array.isArray(sh.covers)?sh.covers:[]).filter(n=>n>=1&&n<=plan.micro.length);
-              return c.length ? Math.min.apply(null,c) : 0; };
-            const groups = plan.micro.map((m,i)=>({ n:i+1, text:String(m).replace(/^\s*\d+[\.\)]\s*/,""), shots:[] }));
-            const unmapped = { n:0, text:"", shots:[] };
-            L.shots.forEach(sh=>{ const p=prim(sh); (p ? groups[p-1] : unmapped).shots.push(sh); });
-            return [...groups, ...(unmapped.shots.length?[unmapped]:[])].map(g=>{
-              // a micro-beat with no HOUSED shot may still be FILMED — inside a shot
-              // that covers several actions and lives under an earlier one. That is
-              // a cross-reference, not a lint; only a truly unfilmed action is amber.
-              const coveredBy = (g.n>0 && !g.shots.length)
-                ? L.shots.map((sh,i)=>({sh,i})).filter(x=>Array.isArray(x.sh.covers)&&x.sh.covers.includes(g.n))
-                : [];
-              const lint = g.n>0 && !g.shots.length && !coveredBy.length;
-              return _el("div",{key:"mg"+L.n+"-"+g.n,className:"beat-micro-group"+(g.shots.length?"":" nocover")},
-                _el("div",{className:"beat-micro-group-head"+(lint?" uncovered":""),
-                  title: g.n===0
-                    ? "Shots not yet mapped to one of this beat's micro-beats (added by hand, or drafted before the micro-beat layer)"
-                    : (g.shots.length
-                      ? "Micro-beat "+g.n+" of this beat — the discrete filmable action these shots cover"
-                      : (coveredBy.length
-                        ? "This action is filmed INSIDE another setup — the shot named below covers several of this beat's actions"
-                        : "No shot covers this action yet — Add shot, then name this action in its Action line (or re-draft the scene's shots)"))},
-                  g.n===0 ? "Unmapped shots" : _circ(g.n)+" "+g.text),
-                _el("div",{className:"beat-micro-group-shots"},
-                  g.shots.length
-                    ? g.shots.map(cellFor)
-                    : (coveredBy.length
-                      ? _el("div",{className:"beat-micro-xref",
-                          title:"Filmed inside that shot's frame — see its 'covers' chip"},
-                          "\u2192 filmed in Shot "+coveredBy.map(x=>String.fromCharCode(65+x.i)).join(" & "))
-                      : _el("div",{className:"beat-micro-empty"},"No coverage yet"))));
-            });
-          })()));
-    })));
+    // BEAT CARDS — one card per beat (all beats listed); during a batch render the
+    // legacy full-card lanes mount instead so the queue can watch its cards.
+    open && (batchMode
+      ? _el(React.Fragment,null, lanes.map(L=>{
+          const beatRow=(bm.rows||[]).find(r=>String(r.n)===String(L.n));
+          const beatText=beatRow?[ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" \u2014 "):"";
+          return _el("div",{key:"lane-"+L.n,className:"beat-lane"},
+            _el("div",{className:"beat-lane-head"},
+              _el("span",{className:"beat-lane-no"},"Beat "+L.n),
+              _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")+" \u00b7 rendering\u2026")),
+            _el("div",{className:"beat-lane-strip"},
+              L.shots.map((sh,li)=>{
+                const prevShot=(typeof prevShotOf==="function")?prevShotOf(sh,ordered):null;
+                const _si=ordered.findIndex(x=>x.id===sh.id);
+                return _el("div",{key:sh.id,className:"beat-shot-cell"},
+                  _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,prevShot,
+                    laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
+                    onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
+                    subLabel:(L.shots.length>1?String.fromCharCode(65+li):null)})); })));
+        }))
+      : _el("div",{className:"beat-card-grid"},
+          lanes.map(L=> _el(BeatCard,{key:"bc"+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
+            ordered, firstId, toggleHead, onAddShot, onUpdate, onDelete, onView,
+            onGenerateShot, onRegenDownstream, onStopChain, onBatchDone, openShotId, setOpenShotId })))));
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,

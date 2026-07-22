@@ -3726,6 +3726,7 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   .sheet-frame:not(:has(.sheet-genwrap)):not(:has(.sheet-dropzone)){flex:0 0 auto;flex-direction:row;align-items:center}
   image-slot[id^="charref-"], image-slot[id^="propref-"]{height:120px;width:120px;flex:0 0 120px;aspect-ratio:auto}
   .sheet-frame:not(:has(.sheet-genwrap)):not(:has(.sheet-dropzone)) .sheet-frame-cap{margin-top:0;margin-left:12px}
+  .beat-card-grid{grid-template-columns:1fr}
   /* Shots tab scene header: title/meta keep the full first row, the action
      buttons wrap onto their own full-width row (they were crushing the meta) */
   .shot-scene-head{flex-wrap:wrap;gap:10px}
@@ -5788,22 +5789,45 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-protect{display:flex;align-items:center;gap:6px;margin:2px 0 8px;font-size:11.5px;color:var(--txt-1);line-height:1.4}
 .beat-protect svg{color:var(--pos);flex:0 0 auto}
 .beat-protect b{color:var(--pos);font-weight:700}
-/* the beat HOUSES its micro-beats: one labelled group per discrete action inside
-   the strip, each holding the shot card(s) that cover it; amber = uncovered lint */
-.beat-micro-group{display:flex;flex-direction:column;flex:0 0 auto;gap:8px}
-.beat-micro-group+.beat-micro-group{margin-left:16px;padding-left:16px;border-left:1px dashed var(--line-2)}
-.beat-micro-group-head{align-self:flex-start;max-width:clamp(320px,30vw,430px);
-  padding:4px 10px;border-radius:8px;border:1px solid var(--line-2);background:var(--bg-2);
-  font-family:var(--f-mono);font-size:10px;line-height:1.5;letter-spacing:.02em;color:var(--txt-1);cursor:default}
-.beat-micro-group-head.uncovered{border-color:var(--alert);color:var(--alert);background:var(--alert-soft)}
-.beat-micro-group-shots{display:flex;gap:18px}
-.beat-micro-empty{display:grid;place-items:center;width:clamp(240px,22vw,320px);min-height:150px;
-  border:1px dashed var(--alert);border-radius:12px;color:var(--alert);
-  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.03em}
-/* action filmed INSIDE a multi-cover shot housed under an earlier micro-beat */
-.beat-micro-xref{display:grid;place-items:center;width:clamp(200px,18vw,280px);min-height:72px;padding:10px;
-  border:1px dashed var(--line-2);border-radius:12px;color:var(--txt-3);
-  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.03em;cursor:help}
+/* ONE CARD PER BEAT (2026-07-21): first-shot keyframe as the card image, Protect,
+   micro-beat checklist, compact shot rows expanding into the full editor */
+.beat-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(430px,1fr));gap:18px}
+.beat-card{border:1px solid var(--line);border-radius:12px;background:var(--bg-1);overflow:hidden;
+  display:flex;flex-direction:column;align-self:start}
+.beat-card.turn{border-color:var(--pos-line)}
+.beat-card-img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;background:var(--bg-3);cursor:zoom-in}
+.beat-card-img.ph{display:grid;place-items:center;cursor:default;padding:0 34px;text-align:center;
+  color:var(--txt-3);font-family:var(--f-mono);font-size:10.5px;line-height:1.6;border-bottom:1px dashed var(--line-2)}
+.beat-card-body{padding:12px 14px 14px;display:flex;flex-direction:column;gap:11px}
+.beat-card-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.beat-card-head .bc-add{margin-left:auto}
+.bc-sec-lab{font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-3);margin-bottom:5px}
+.bc-micro-row{display:flex;align-items:baseline;gap:8px;padding:2.5px 0;font-size:11.5px;line-height:1.5;color:var(--txt-1)}
+.bc-micro-t{flex:1;min-width:0}
+.bc-micro-row.uncovered .bc-micro-t{color:var(--alert)}
+.bc-micro-none{flex:0 0 auto;font-family:var(--f-mono);font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--alert);border:1px solid var(--alert);border-radius:8px;padding:1px 7px;cursor:help}
+.bc-micro-shots{flex:0 0 auto;display:inline-flex;gap:4px}
+.bc-micro-shotlink{border:1px solid var(--line-2);background:var(--bg-3);color:var(--txt-1);
+  font-family:var(--f-mono);font-size:9.5px;font-weight:700;border-radius:6px;padding:1px 7px;cursor:pointer;transition:.12s}
+.bc-micro-shotlink:hover{border-color:var(--pos);color:var(--pos)}
+.bc-shots{display:flex;flex-direction:column;gap:6px}
+.bc-shot-row{display:flex;align-items:center;gap:9px;padding:6px 9px;border:1px solid var(--line-2);
+  border-radius:9px;background:var(--bg-2);cursor:pointer;transition:.12s;min-width:0}
+.bc-shot-row:hover{border-color:var(--line-3);background:var(--bg-3)}
+.bc-shot-row.on{border-color:var(--pos)}
+.bc-shot-thumb{width:53px;height:30px;border-radius:5px;object-fit:cover;flex:0 0 auto;background:var(--bg-4);display:block}
+.bc-shot-thumb.ph{border:1px dashed var(--line-2)}
+.bc-shot-letter{flex:0 0 auto;font-family:var(--f-mono);font-weight:700;font-size:10.5px;color:var(--txt-0)}
+.bc-shot-pri{flex:0 0 auto;color:var(--pos);font-size:11px;cursor:help}
+.bc-shot-gram{flex:0 0 auto;font-family:var(--f-mono);font-size:9.5px;color:var(--txt-3);white-space:nowrap}
+.bc-shot-act{flex:1;min-width:0;font-size:11px;color:var(--txt-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bc-shot-covers{flex:0 0 auto;font-family:var(--f-mono);font-size:9px;color:var(--txt-3);white-space:nowrap}
+.bc-shot-chev{flex:0 0 auto;color:var(--txt-3);display:grid;place-items:center}
+.bc-shot-chev svg{transition:.15s}
+.bc-shot-chev.open svg{transform:rotate(90deg)}
+.bc-shot-expand{border:1px solid var(--pos-line);border-radius:12px;background:var(--bg-2);padding:10px}
+.bc-shot-expand .sheet-card{width:100%}
 
 /* why the shot exists + which micro-beats it covers */
 .shot-purpose{display:flex;align-items:baseline;gap:8px;margin:8px 0 0;font-size:11px;line-height:1.45;color:var(--txt-2)}
