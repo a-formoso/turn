@@ -1826,7 +1826,7 @@ function App(){
     setVoicingLines(null);
     if(failed && typeof window.appToast==="function") window.appToast(failed+" line"+(failed>1?"s":"")+" couldn't be voiced — check those characters have a locked voice.","error");
   };
-  const addShot = (sceneId, beatN)=>{
+  const addShot = (sceneId, beatN, seed)=>{
     const loc = (typeof locationForScene==="function") ? locationForScene(locations, sceneId) : null;
     const sc = scenes.find(s=>s.id===sceneId);
     const peers = shots.filter(s=>s.sceneId===sceneId);
@@ -1838,10 +1838,13 @@ function App(){
     const bN = Number(beatN)>0 ? Number(beatN) : (peers.length+1);
     const order = inBeat.length ? (Math.max(...inBeat.map(x=>x.order||0)) + 0.01)
       : (Number(beatN)>0 ? (bN-1) : peers.length);
+    // seed (optional): pre-fill from an UNCOVERED micro-beat — the action text is
+    // that discrete action and covers slots the shot into its checklist row.
     setShots(ss=>[...ss, { id, sceneId, beatN:bN, order,
       size:"MS", angle:"eye", move:"static", lens:"50", composition:"",
       subjects:(sc&&sc.driver)?[sc.driver]:[], locationId:loc?loc.id:"", props:[],
-      action:"", dialogue:"", negativePrompt:"", manual:true }]);
+      action:(seed&&seed.action)||"", covers:(seed&&Array.isArray(seed.covers))?seed.covers:[],
+      dialogue:"", negativePrompt:"", manual:true }]);
   };
   // SPLIT A BEAT INTO COVERAGE — MUSE designs 2-3 shots for ONE beat (one per
   // distinct visual event); the beat's current shot(s) are replaced (confirmed

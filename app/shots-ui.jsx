@@ -436,8 +436,10 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
               ? _el("span",{className:"bc-micro-shots"},covering.map(x=>_el("button",{key:x.sh.id,className:"bc-micro-shotlink",
                   title:"Filmed in Shot "+letterOf(x.idx)+" \u2014 click to open it",
                   onClick:()=>setOpenShotId(x.sh.id)},letterOf(x.idx))))
-              : _el("span",{className:"bc-micro-none",
-                  title:"No shot films this action yet \u2014 Add shot, then name the action in its Action line"},"uncovered"));
+              : _el("button",{className:"bc-micro-none",
+                  title:"No shot films this action yet \u2014 click to ADD A SHOT pre-filled with this action (it joins the chain after the beat's last shot; the frame renders separately)",
+                  onClick:()=> onAddShot && onAddShot(scene.id, L.n, { action:String(m).replace(/^\s*\d+[\.\)]\s*/,""), covers:[n] })},
+                  "uncovered \u2014 add shot"));
         })),
       _el("div",{className:"bc-shots"},
         _el("div",{className:"bc-sec-lab"},"Shots \u00b7 "+L.shots.length),
