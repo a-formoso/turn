@@ -1878,6 +1878,17 @@ function _qaWhereChips(where){
   if(parts.length>1 && parts.every(p=>p.length>2 && !/^\d+$/.test(p))) return parts;
   return [parts.join(", ")].filter(Boolean);
 }
+/* build a targeted edit instruction from the QA findings when the model didn't
+   supply one — so "edit the current image" is ALWAYS on offer, not only when the
+   verdict itself recommends an edit. */
+function _qaDerivedEditInstruction(r){
+  const parts = [
+    ...(Array.isArray(r.deviations)?r.deviations.map(d=>d&&d.what).filter(Boolean):[]),
+    ...(Array.isArray(r.inventions)?r.inventions.map(x=>x?("remove: "+x):"").filter(Boolean):[]) ];
+  if(!parts.length) return "";
+  return "Targeted correction \u2014 change NOTHING else about the image (framing, faces, lighting and style stay exactly as they are): "
+    + parts.slice(0,6).join("; ") + ".";
+}
 function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, specFields, onApplySpec }){
   const r = report;
   const [applying, setApplying] = React.useState(false);
@@ -1958,6 +1969,10 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
           title:"Apply the suggested edit to this image now — one generation; the current version stays in history",
           onClick:()=>{ onRunEdit(r.editInstruction); onClose(); }},
           React.createElement(Icon.wand,{s:13}),"Run suggested edit"),
+        (r.action!=="edit" && !!(r.editInstruction || _qaDerivedEditInstruction(r))) && React.createElement("button",{className:"ns-btn ghost",disabled:gening,
+          title:"Make a TARGETED EDIT to the current image that fixes the findings above — one generation; this exact framing is kept and the current version stays in history. (Apply to spec & regenerate is the deeper fix when the drift is systemic.)",
+          onClick:()=>{ onRunEdit(r.editInstruction || _qaDerivedEditInstruction(r)); onClose(); }},
+          React.createElement(Icon.wand,{s:13}),"Edit current image"),
         r.action==="regenerate" && React.createElement("button",{className:"ns-btn primary",disabled:gening,
           title:"Regenerate this image from its spec now — one generation; the current version stays in history",
           onClick:()=>{ onRegen(); onClose(); }},
