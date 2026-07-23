@@ -58,18 +58,48 @@ function buildPropRefPrompt(p, project){
        || (window.PROP_RENDER_TEXT||{}).photoreal || "hyper realistic photography, photorealistic 8k");
   // off-white / light-neutral background with a soft contact shadow (matches the cast sheets)
   const bg = "flat off-white / very light neutral panel background, even and clean, with a simple soft contact shadow beneath the object";
-  const d1 = detail   ? ("its signature feature \u2014 "+((typeof clipWords==="function")?clipWords(detail,90):detail.slice(0,90)))   : "its most story-relevant feature";
-  const d2 = material ? ("the material & finish in macro \u2014 "+((typeof clipWords==="function")?clipWords(material,90):material.slice(0,90))) : "the material & finish in macro";
-  const d3 = "its construction \u2014 fastenings, joins, edges and wear marks";
-  let s = "Prop concept art sheet, "+name+(form?(", "+form):"")
-    +", full 360-degree turnaround, front view center, side view middle, back view right, "+bg
-    +", no text, no labels, no watermarks, no annotations";
-  if(material) s += ", made of "+material;
-  s += ", approximately "+scale;
-  s += ", right side: 3 close-up detail shots in a vertical grid showing "+d1+", "+d2+", "+d3;
-  s += ", no text, no labels, "+styleText+", accurate material rendering, natural surface textures, soft studio lighting, "
-    + bg + ", ultra detailed, clean layout, no typography, no captions";
-  return s;
+  // 3-PANEL reference sheet \u2014 the SAME structure the cast sheets use (buildCharRefPrompt):
+  // a wider hero panel + two clean orthographic panels, thin dividers, 16:9, no baked text.
+  // The old "360 turnaround + 3-up detail column" is folded into binding CONTINUITY fields
+  // (material / signature feature) so every panel stays faithful without extra panels.
+  const spec = {
+    subject: name + (form ? (", "+form) : ""),
+    object: {
+      form: form || undefined,
+      material: material || undefined,
+      signature_feature: detail || undefined,
+      scale: scale,
+    },
+    layout: {
+      format: "a 3-panel object reference sheet in 16:9 landscape: three tall vertical panels divided by thin clean vertical lines; the FIRST panel is wider and holds a large hero view, the other two hold orthographic views; the SAME object throughout",
+      panels_left_to_right: [
+        "PANEL 1 \u2014 large HERO three-quarter view of the object, its most identifying angle, filling most of the panel, the exact identity anchor (approximately "+scale+")",
+        "PANEL 2 \u2014 straight-on FRONT elevation of the whole object at EXACTLY the same size and vertical alignment as the back view in panel 3 (same headroom, resting on the same line)",
+        "PANEL 3 \u2014 BACK view of the whole object, head-on from behind, same size, alignment, materials and finish"
+      ],
+      one_object_rule: "EXACTLY ONE object per panel \u2014 no duplicates, no exploded parts, no alternate colourways, no accessories that aren't part of the object itself",
+      scale_rule: "the front and back views are the SAME size and vertically aligned across panels 2 and 3",
+      no_extra_views: "do not add side/profile or three-quarter turnaround columns, exploded diagrams, detail-callout insets, rulers, dimension lines, captions, labels, title text, measurement text, or ANY info box (no name, size or material printed on the image \u2014 that metadata travels in the prompt, never baked into pixels)",
+      background: bg
+    },
+    continuity: {
+      identity_rule: "the SAME identical object \u2014 form, colour, materials, wear and construction \u2014 in every view",
+      material_rule: material ? ("rendered in "+material+", with accurate surface texture and finish in every panel") : "accurate, consistent material and finish in every panel",
+      feature_rule: detail ? ("its signature feature \u2014 "+((typeof clipWords==="function")?clipWords(detail,90):detail.slice(0,90))+" \u2014 present and consistent in every view") : undefined,
+    },
+    render: {
+      style: styleText,
+      aspect: "16:9",
+      rules: ["no text, labels, watermarks, annotations, typography or captions",
+              "accurate material rendering, natural surface textures, soft studio lighting",
+              "consistent object design, materials and lighting across all panels",
+              "clean, evenly divided panel layout"],
+    },
+    style_name: ((p.renderStyleKey==="surprise" && p.surpriseRender && p.surpriseRender.label)
+      ? p.surpriseRender.label
+      : ((window.RENDER_STYLE_LABELS||{})[_styleKey||"photoreal"] || undefined)),
+  };
+  return "Render this object reference sheet EXACTLY as specified by this JSON spec (continuity fields are binding):\n"+JSON.stringify(spec, null, 1);
 }
 window.buildPropRefPrompt = buildPropRefPrompt;
 
@@ -367,7 +397,7 @@ function buildSimplePropPrompt(p){
     "Prop reference \u2014 "+(p.name||"object"),
     form||"",
     material ? (material) : "",
-    "front view, side view, and close-up detail",
+    "3-panel object sheet: hero three-quarter view, front elevation, and back view",
     "plain light grey background, studio product lighting, "
       +((String(p.renderStyle||((typeof window.renderStyleText==="function")?window.renderStyleText("prop",p.renderStyleKey||propInheritedStyleKey(p)):"")).split(/[;,]/)[0].trim())||"photoreal")
       +", sharp focus, no people"
@@ -536,7 +566,7 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
       "Edit this prop reference sheet for "+(p.name||"the object")+". "
       +"Apply ONLY this change: "+instr+". "
       +"Preserve everything else without alteration \u2014 the exact same object shape, proportions and identity "
-      +"across all panels. Keep the same 3\u00d72 grid of views on a neutral grey background. "
+      +"across all panels. Keep the same 3-panel layout (hero \u00b7 front \u00b7 back) on a neutral grey background. "
       +"Do not replace or re-imagine the object.",
   });
 
@@ -718,7 +748,7 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
           placeholder:"photoreal product reference, 85mm, soft studio lighting\u2026",onCommit:val=>onUpdate(p.id,{renderStyle:val})})),
 
       React.createElement(CardFold,{label:"Master reference prompt",defaultOpen:false},
-        React.createElement(CopyBox,{label:"Turnaround sheet (front/side/back + detail column) \u2014 feed to your image tool",text:buildPropRefPrompt(p,project)}),
+        React.createElement(CopyBox,{label:"3-panel object sheet (hero \u00b7 front \u00b7 back) \u2014 feed to your image tool",text:buildPropRefPrompt(p,project)}),
         React.createElement(SheetField,{label:"Negative prompt \u2014 exclude",value:p.negativePrompt||d.negativePrompt,multiline:true,
           onCommit:val=>onUpdate(p.id,{negativePrompt:val})}),
         React.createElement(CopyBox,{label:(genForFrame.genUrl && genForFrame.genMeta && genForFrame.genMeta.prompt)
