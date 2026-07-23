@@ -148,6 +148,12 @@ Deno.serve(async (req) => {
   const aspect = body.aspect || "16:9";
   const quality = body.quality || "high";
   const imageSize = body.imageSize || "2K";
+  // OpenAI's SUPPORTED moderation-sensitivity control for gpt-image models: "low" is the
+  // least-restrictive ALLOWED setting (fewer false positives on legitimate creative
+  // content) — it does NOT disable safety; genuinely prohibited content is still blocked.
+  const moderation = (typeof body.moderation === "string" && /^(low|auto)$/.test(body.moderation))
+    ? body.moderation
+    : (/^gpt-image/.test(model) ? "low" : "");
   const groundSearch = !!body.groundSearch;
   const groundImageSearch = !!body.groundImageSearch;
   const images: string[] = Array.isArray(body.images) ? body.images : [];
@@ -655,6 +661,7 @@ Deno.serve(async (req) => {
       form.append("prompt", prompt);
       form.append("size", size);
       form.append("quality", quality);
+      if (moderation) form.append("moderation", moderation);
       let i = 0;
       for (const src of images) {
         const blob = dataUrlToBlob(src);
@@ -671,7 +678,7 @@ Deno.serve(async (req) => {
         method: "POST",
         signal: AbortSignal.timeout(380000),
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model, prompt, size, quality, n: 1 }),
+        body: JSON.stringify({ model, prompt, size, quality, n: 1, ...(moderation ? { moderation } : {}) }),
       });
     }
 
