@@ -1884,6 +1884,27 @@ function App(){
       const raw = await aiDraftShots(scene, beatsMap, drafts, locations, props, characters, lbProject("shots"));
       if(raw && raw.length && typeof normalizeShot==="function"){
         made = raw.map((r,i)=>normalizeShot(r, scene, i, locations, props, characters, beatsMap));
+        // VERBATIM ENFORCEMENT (the script is canon): models paraphrase scripted
+        // lines no matter the instruction — snap each shot's dialogue to the
+        // closest line in the scene's screenplay when they clearly match. Exact
+        // lines matter downstream: the Stage voices and clocks clips with them.
+        const _dlines = ((drafts[scene.id]&&drafts[scene.id].blocks)||[])
+          .filter(b=>b.type==="dia").map(b=>String(b.text||"").replace(/\s+/g," ").trim()).filter(Boolean);
+        if(_dlines.length){
+          const _toks=(t)=>String(t||"").toLowerCase().replace(/[^a-z0-9' ]/g," ").split(/\s+/).filter(w=>w.length>2);
+          made.forEach(sh=>{
+            if(!sh.dialogue) return;
+            // strip a leading speaker cue ("OLIVIA:", "REECE (O.S.):") and curly
+            // quotes — the field holds ONLY the spoken words (the Stage voices it)
+            sh.dialogue = String(sh.dialogue).replace(/^[A-Z][A-Z .''()\-]{1,34}:\s*/,"").replace(/^["\u201c]|["\u201d]$/g,"").trim();
+            const st=new Set(_toks(sh.dialogue)); if(!st.size) return;
+            let best=null, bestScore=0;
+            _dlines.forEach(l=>{ const lt=_toks(l); if(!lt.length) return;
+              const overlap=lt.filter(w=>st.has(w)).length/Math.max(lt.length,st.size);
+              if(overlap>bestScore){ bestScore=overlap; best=l; } });
+            if(best && bestScore>=0.35) sh.dialogue=best;
+          });
+        }
       }
     }
     if(!made && typeof deriveShotsHeuristic==="function"){

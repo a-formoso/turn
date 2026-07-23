@@ -5808,6 +5808,17 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .qa-apply-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
 .qa-apply-row .qa-apply-btn{margin-top:0}
 
+/* REDRAFT IN PROGRESS — the whole canvas says so, not just the button */
+.beat-grid-wrap{position:relative}
+.beat-grid-wrap.drafting .beat-card-grid{opacity:.32;filter:saturate(.5);pointer-events:none;transition:opacity .25s}
+.beat-redraft-note{position:sticky;top:12px;z-index:8;display:flex;align-items:center;gap:12px;
+  margin:0 auto 14px;width:min(560px,94%);padding:13px 16px;border-radius:14px;
+  background:var(--bg-1);border:1px solid var(--pos-line);
+  box-shadow:0 12px 42px rgba(0,0,0,.28)}
+.beat-redraft-note .ns-spin{flex:0 0 auto}
+.brn-t{font-family:var(--f-display);font-size:13.5px;font-weight:600;color:var(--txt-0)}
+.brn-d{font-size:11.5px;line-height:1.5;color:var(--txt-2);margin-top:2px}
+
 /* ONE CARD PER BEAT (2026-07-21): first-shot keyframe as the card image, Protect,
    micro-beat checklist, compact shot rows expanding into the full editor */
 .beat-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(430px,1fr));gap:18px}

@@ -589,10 +589,18 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
                     onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
                     subLabel:(L.shots.length>1?String.fromCharCode(65+li):null)})); })));
         }))
-      : _el("div",{className:"beat-card-grid"},
-          lanes.map(L=> _el(BeatCard,{key:"bc"+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
-            ordered, firstId, toggleHead, onAddShot, onUpdate, onDelete, onView,
-            onGenerateShot, onRegenDownstream, onStopChain, onBatchDone, batchActiveId, openShotId, setOpenShotId })))));
+      : _el("div",{className:"beat-grid-wrap"+(draftingScene?" drafting":"")},
+          // REDRAFT IN PROGRESS — visible on the canvas, not just the button: the
+          // current cards dim (they stay until the new list lands) under a status card
+          draftingScene && _el("div",{className:"beat-redraft-note"},
+            _el("span",{className:"ns-spin"}),
+            _el("div",{className:"brn-txt"},
+              _el("div",{className:"brn-t"},"MUSE is re-designing Scene "+String(scene.no).padStart(2,"0")+"'s shots"),
+              _el("div",{className:"brn-d"},"Beat-by-beat coverage from the beats + script \u2014 about a minute. The current shots stay until the new list lands (a failed draft changes nothing)."))),
+          _el("div",{className:"beat-card-grid"},
+            lanes.map(L=> _el(BeatCard,{key:"bc"+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
+              ordered, firstId, toggleHead, onAddShot, onUpdate, onDelete, onView,
+              onGenerateShot, onRegenDownstream, onStopChain, onBatchDone, batchActiveId, openShotId, setOpenShotId }))))));
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,
