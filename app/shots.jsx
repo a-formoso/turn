@@ -926,18 +926,22 @@ function buildShotPrompt(sh, ctx){
   // (wide → set first; tight → cast first), then props, then carried-forward. ----
   const imgs = [];
   if(ctx.prevFrameRole) imgs.push("the PREVIOUS approved frame — carry its colour grade, lighting and every established physical state (wardrobe wear, wetness, dirt, damage) forward exactly, but do NOT copy its framing");
+  // user-unticked reference sheets (sh.refOff) drop out of the image map ONLY — the
+  // entity stays in the staging text; just its sheet isn't attached (labels must
+  // mirror the real attachment list or the numbered map mislabels the files)
+  const _refOff = (sh && Array.isArray(sh.refOff)) ? sh.refOff : [];
   const _locPanel = (typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
-  const _locLabel = loc ? ((loc.name||"the location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+", one full-frame view of this ONE set — "
+  const _locLabel = (loc && _refOff.indexOf(loc.id)<0) ? ((loc.name||"the location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+", one full-frame view of this ONE set — "
     + (locWeight==="ambient" ? "a background reference for the grade and surfaces only; the character fills this tight frame" : "reproduce its architecture, surfaces, fixtures and signage exactly")) : null;
-  const _castLabels = subjects.map(c=> {
+  const _castLabels = subjects.filter(c=>_refOff.indexOf(c.id)<0).map(c=> {
     const scale = (typeof canonicalScaleLabel==="function") ? canonicalScaleLabel(c) : (c.name||"character");
     return c.name+"'s character sheet — match the face, build, hair and wardrobe exactly; canonical scale: "+scale;
   });
-  const _propLabels = props.map(p=> {
+  const _propLabels = props.filter(p=>_refOff.indexOf(p.id)<0).map(p=> {
     const scale = (typeof propPhysicalScaleLabel==="function") ? propPhysicalScaleLabel(p) : (p.name||"prop");
     return "the "+p.name+" (prop sheet"+(p.ownerName?(", "+((p.kind==="worn")?"worn by ":"carried by ")+p.ownerName):"")+") — match it exactly as designed; physical scale: "+scale;
   });
-  const _carriedLabels = (ctx.carriedForward||[]).map(p=> {
+  const _carriedLabels = (ctx.carriedForward||[]).filter(p=>_refOff.indexOf(p.id)<0).map(p=> {
     const scale = (typeof propPhysicalScaleLabel==="function") ? propPhysicalScaleLabel(p) : (p.name||"prop");
     return "the "+p.name+" (prop sheet) — still in frame from an earlier beat; keep it present, matching its sheet; physical scale: "+scale;
   });
@@ -1064,9 +1068,13 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
     if(!p || !shotPropAttachable(p, sh)) return null;   // worn attach only on tight shots WITH a generated close-up sheet
     return { id, note:p.name+" prop sheet" }; }).filter(Boolean);
   const carrySpec= carried.map(id=>{ const p=(ctx.propById||{})[id]; return p?{ id, note:p.name+" prop sheet (carried over from an earlier beat)" }:null; }).filter(Boolean);
-  const orderedSpecs = (locWeight==="ambient")
+  // user-unticked sheets (sh.refOff) drop out here AND in buildShotPrompt's image
+  // map together — the numbered labels always match the attached files
+  const _refOff = Array.isArray(sh.refOff) ? sh.refOff : [];
+  const orderedSpecs = ((locWeight==="ambient")
     ? [...castSpec, ...locSpec, ...propSpec, ...carrySpec]   // tight: the cast leads, the set recedes
-    : [...locSpec, ...castSpec, ...propSpec, ...carrySpec];  // wide: the set leads
+    : [...locSpec, ...castSpec, ...propSpec, ...carrySpec])  // wide: the set leads
+    .filter(s=> _refOff.indexOf(s.id)<0);
   const refs = [];
   for(const s of orderedSpecs){ let u=await grab(s.id);
     if(u && s.locPanelQ!=null && typeof shotLocPanelCrop==="function"){ const cu=await shotLocPanelCrop(u, s.locPanelQ); if(cu) u=cu; }

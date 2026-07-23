@@ -4499,6 +4499,14 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   border-radius:7px;font-size:9px;text-align:center;font-weight:700;color:#fff;
   background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.25)}
 .shot-ref-seedtag.ok{background:var(--pos,#5aa469);border-color:transparent}
+/* tickable sheet refs — the corner tick attaches/excludes the sheet for generation */
+.shot-ref-tick{position:absolute;bottom:2px;right:2px;width:15px;height:15px;line-height:13px;padding:0;
+  display:grid;place-items:center;border-radius:5px;font-size:9px;font-weight:700;cursor:pointer;
+  color:#fff;background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.3)}
+.shot-ref-tick.on{background:var(--pos,#5aa469);border-color:transparent}
+.shot-ref-tick:hover{filter:brightness(1.2)}
+.shot-ref-thumb.off img{opacity:.32;filter:grayscale(.85)}
+.shot-ref-thumb.off{border-style:dashed;border-color:var(--line-2)}
 
 /* approve / lock a frame as the seed the next shot chains from */
 .shot-lock-btn{display:inline-flex;align-items:center;gap:4px;cursor:pointer;border:1px solid var(--line-2);
@@ -5809,38 +5817,6 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-protect{display:flex;align-items:center;gap:6px;margin:2px 0 8px;font-size:11.5px;color:var(--txt-1);line-height:1.4}
 .beat-protect svg{color:var(--pos);flex:0 0 auto}
 .beat-protect b{color:var(--pos);font-weight:700}
-/* Orbit the set — plate -> orbit clip -> pick 4 frames -> 2x2 plate */
-.orbit-modal{width:min(720px,94vw)}
-.orbit-body{display:flex;flex-direction:column;gap:12px;margin-top:4px}
-.orbit-note{font-size:12px;line-height:1.6;color:var(--txt-2)}
-.orbit-err{margin:6px 0;padding:9px 12px;border:1px solid var(--neg-line);background:var(--neg-soft);
-  border-radius:9px;color:var(--neg);font-size:11.5px;line-height:1.5}
-.orbit-wait{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--txt-1);padding:10px 0}
-.orbit-frames{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-@media (max-width:640px){ .orbit-frames{grid-template-columns:repeat(2,1fr)} }
-.orbit-frame{position:relative;padding:0;border:2px solid var(--line-2);border-radius:9px;overflow:hidden;
-  cursor:pointer;background:var(--bg-3);transition:.12s}
-.orbit-frame img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover}
-.orbit-frame:hover{border-color:var(--line-3)}
-.orbit-frame.on{border-color:var(--pos)}
-.orbit-frame-n{position:absolute;top:5px;left:5px;width:20px;height:20px;display:grid;place-items:center;
-  background:var(--pos);color:var(--ink-on-accent);font-family:var(--f-mono);font-size:11px;font-weight:700;border-radius:50%}
-.orbit-frame-zoom{position:absolute;bottom:5px;right:5px;width:22px;height:22px;display:grid;place-items:center;
-  border:1px solid var(--line-3);border-radius:6px;background:color-mix(in oklab, var(--bg-0) 72%, transparent);
-  color:var(--txt-1);font-size:13px;line-height:1;cursor:zoom-in;padding:0;opacity:0;transition:.12s}
-.orbit-frame:hover .orbit-frame-zoom{opacity:1}
-@media (hover:none){ .orbit-frame-zoom{opacity:1} }
-.orbit-frame-zoom:hover{color:var(--txt-0);border-color:var(--line-3);background:var(--bg-2)}
-
-/* ORBIT ZOOM PREVIEW — full-size single-angle overlay above the picker modal */
-.orbit-preview{position:fixed;inset:0;z-index:400;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:14px;padding:24px;background:rgba(0,0,0,.78);cursor:zoom-out}
-.orbit-preview img{max-width:min(1200px,92vw);max-height:72vh;border-radius:12px;border:1px solid var(--line-3);
-  box-shadow:0 24px 80px rgba(0,0,0,.5);cursor:default}
-.orbit-preview-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;cursor:default;
-  padding:10px 14px;border-radius:12px;background:var(--bg-1);border:1px solid var(--line-2)}
-.orbit-preview-n{font-family:var(--f-mono);font-size:11.5px;color:var(--txt-2);letter-spacing:.04em}
-
 /* QA modal: Apply-to-spec + Edit-current-image side by side */
 .qa-apply-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
 .qa-apply-row .qa-apply-btn{margin-top:0}

@@ -114,7 +114,10 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
     const propSpec = inPr.map(id=>{ const p=ctx.propById[id];
       if(!p || (typeof shotPropAttachable==="function" && !shotPropAttachable(p, sh))) return null;
       return { id, note:p.name+" prop sheet" }; }).filter(Boolean);
-    const ordered = (locWeight==="ambient") ? [...castSpec, ...locSpec, ...propSpec] : [...locSpec, ...castSpec, ...propSpec];
+    // same untick filter as generateShotFrame/buildShotPrompt — labels match files
+    const _refOff = Array.isArray(sh.refOff) ? sh.refOff : [];
+    const ordered = ((locWeight==="ambient") ? [...castSpec, ...locSpec, ...propSpec] : [...locSpec, ...castSpec, ...propSpec])
+      .filter(s=> _refOff.indexOf(s.id)<0);
     const out = [];
     for(const s of ordered){ let u = await grab(s.id);
       if(u && s.locPanelQ!=null && typeof shotLocPanelCrop==="function"){ const cu=await shotLocPanelCrop(u, s.locPanelQ); if(cu) u=cu; }
@@ -202,9 +205,9 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
         if(u && typeof shotLocPanel==="function" && typeof shotLocPanelCrop==="function"){
           const p=shotLocPanel(sh); const cu=await shotLocPanelCrop(u, p.q);
           if(cu){ u=cu; lab=(loc.name||"Location")+" — "+p.label; } }
-        if(u) locItems.push({ url:u, label:lab, kind:"location" }); }
-      const castItems = []; for(const c of subjects){ const u=await grab(c.id); if(u) castItems.push({ url:u, label:c.name, kind:"character" }); }
-      const propItems = []; for(const p of inProps){ const u=await grab(p.id); if(u) propItems.push({ url:u, label:p.name, kind:"prop" }); }
+        if(u) locItems.push({ url:u, label:lab, kind:"location", refId:loc.id }); }
+      const castItems = []; for(const c of subjects){ const u=await grab(c.id); if(u) castItems.push({ url:u, label:c.name, kind:"character", refId:c.id }); }
+      const propItems = []; for(const p of inProps){ const u=await grab(p.id); if(u) propItems.push({ url:u, label:p.name, kind:"prop", refId:p.id }); }
       const sheetOrder = (locWeight==="ambient") ? [...castItems, ...locItems, ...propItems] : [...locItems, ...castItems, ...propItems];
       if(alive) setRefImgs([...seed, ...sheetOrder]);
     })();
@@ -242,11 +245,26 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
       // Click a thumb to enlarge. Read-only: who/what is in frame is auto-read from the Action.
       refImgs.length>0 && _el("div",{className:"shot-refs"},
         _el("div",{className:"shot-refs-row"},
-          refImgs.map((r,i)=>_el("button",{key:"a"+i,className:"shot-ref-thumb "+r.kind+(r.kind==="seed"&&r.approved===false?" provisional":""),
-            title:(r.kind==="seed" ? (r.label+" — "+(r.approved?"approved seed":"provisional seed (not yet approved)")) : r.label)+" — click to enlarge",
-            onClick:()=>onView&&onView(r.url,{name:r.label})},
-            _el("img",{src:r.url,alt:r.label,loading:"lazy"}),
-            r.kind==="seed" && _el("span",{className:"shot-ref-seedtag"+(r.approved?" ok":"")}, r.approved?"✓":"·"))))),
+          refImgs.map((r,i)=>{
+            // sheet refs are TICKABLE: unticked ids live on sh.refOff and drop out of the
+            // attachment list + the prompt's image map together (the entity stays in the
+            // staging text — only its sheet is withheld). The seed isn't tickable: skipping
+            // the chain seed is what the "Fresh start" head toggle is for.
+            const off = r.refId!=null && (sh.refOff||[]).indexOf(r.refId)>=0;
+            return _el("div",{key:"a"+i,role:"button",tabIndex:0,
+              className:"shot-ref-thumb "+r.kind+(r.kind==="seed"&&r.approved===false?" provisional":"")+(off?" off":""),
+              title:(r.kind==="seed" ? (r.label+" — "+(r.approved?"approved seed":"provisional seed (not yet approved)")) : r.label)
+                +(off?" — EXCLUDED from generation":"")+" — click to enlarge",
+              onClick:()=>onView&&onView(r.url,{name:r.label}),
+              onKeyDown:(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); onView&&onView(r.url,{name:r.label}); } }},
+              _el("img",{src:r.url,alt:r.label,loading:"lazy"}),
+              r.kind==="seed" && _el("span",{className:"shot-ref-seedtag"+(r.approved?" ok":"")}, r.approved?"✓":"·"),
+              r.refId!=null && _el("button",{className:"shot-ref-tick"+(off?"":" on"),
+                title: off ? "Excluded — this sheet is NOT attached to the generation. Click to re-attach it."
+                  : "Attached as a reference. Click to exclude this sheet from the generation (the "+(r.kind==="location"?"set":r.kind)+" stays in the prompt text; only the image is withheld).",
+                onClick:(e)=>{ e.stopPropagation(); const cur=sh.refOff||[];
+                  onUpdate(sh.id,{ refOff: off ? cur.filter(x=>x!==r.refId) : [...cur, r.refId] }); }},
+                off ? "✕" : "✓")); }))),
       _el("div",{className:"shot-head"},
         // order, left-to-right: Beat · Clip · Head · (Approve, once a frame exists)
         _el("div",{className:"shot-head-right"},

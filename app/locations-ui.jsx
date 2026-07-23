@@ -9,129 +9,6 @@ function locSwatch(intExt){
     : "linear-gradient(135deg,#4a5a78,#222c3e)";     // interior — slate
 }
 
-/* ---- ORBIT THE SET (user idea 2026-07-23): master plate -> Seedance partial-orbit
-   clip -> extract frames in-browser -> user picks 4 -> composite into the standard
-   2x2 coverage plate. Downstream consumers keep the exact plate contract; the
-   orbit's temporal coherence supplies real same-space geometry across angles. */
-async function _orbitExtractFrames(url, n){
-  const v=document.createElement("video");
-  v.crossOrigin="anonymous"; v.muted=true; v.playsInline=true; v.preload="auto"; v.src=url;
-  await new Promise((res,rej)=>{ v.onloadedmetadata=()=>res(); v.onerror=()=>rej(new Error("Couldn't load the orbit video for frame extraction.")); });
-  const dur=v.duration||8, cw=1280, ch=720;
-  const canvas=document.createElement("canvas"); canvas.width=cw; canvas.height=ch;
-  const ctx=canvas.getContext("2d");
-  const out=[];
-  for(let i=0;i<n;i++){
-    const t=Math.max(0, Math.min(dur-0.05, (dur*(i+0.5))/n));
-    await new Promise((res,rej)=>{ v.onseeked=()=>res(); v.onerror=()=>rej(new Error("Frame seek failed.")); v.currentTime=t; });
-    ctx.drawImage(v,0,0,cw,ch);
-    out.push(canvas.toDataURL("image/jpeg",0.92));
-  }
-  return out;
-}
-async function _orbitCompose(frameUrls){
-  const imgs=await Promise.all(frameUrls.map(u=>new Promise((res,rej)=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>rej(new Error("Couldn't load a picked frame.")); im.src=u; })));
-  const tw=1280, th=720;
-  const canvas=document.createElement("canvas"); canvas.width=tw*2; canvas.height=th*2;
-  const ctx=canvas.getContext("2d");
-  ctx.fillStyle="#e8e6e1"; ctx.fillRect(0,0,tw*2,th*2);
-  imgs.forEach((im,i)=>{ ctx.drawImage(im,(i%2)*tw,Math.floor(i/2)*th,tw,th); });
-  ctx.fillStyle="rgba(255,255,255,.92)";
-  ctx.fillRect(tw-2,0,4,th*2); ctx.fillRect(0,th-2,tw*2,4);
-  return canvas.toDataURL("image/jpeg",0.92);
-}
-function OrbitSetModal({ l, plateUrl, onClose }){
-  const [step,setStep]=React.useState("idle");         // idle | rendering | pick | compositing
-  const [status,setStatus]=React.useState("");
-  const [err,setErr]=React.useState("");
-  const [frames,setFrames]=React.useState([]);
-  const [picked,setPicked]=React.useState([]);          // frame indices, selection order = TL,TR,BL,BR
-  const [previewIdx,setPreviewIdx]=React.useState(null); // zoomed frame (null = closed)
-  const cancelRef=React.useRef(false);
-  const renderOrbit=async ()=>{
-    setErr(""); cancelRef.current=false; setStep("rendering"); setStatus("IN_QUEUE");
-    try{
-      const r=await window.seedanceGenerate("orbit-"+l.id,{
-        frameUrl:plateUrl,
-        prompt:"Slow, smooth 180-degree orbital camera move through this exact space at a locked eye-level height. The architecture, surfaces, materials, fixtures and light stay EXACTLY as in the start frame \u2014 the same one real place from every angle, no new rooms invented, no people, no text. Continuous steady motion, no cuts.",
-        duration:8, resolution:"1080p", aspectRatio:"16:9", generateAudio:false, force:true,
-        onStatus:setStatus, shouldCancel:()=>cancelRef.current });
-      setStatus("Extracting frames\u2026");
-      const fr=await _orbitExtractFrames(r.videoUrl, 8);
-      setFrames(fr); setPicked([]); setStep("pick");
-    }catch(e){ setErr(String((e&&e.message)||e)); setStep("idle"); }
-  };
-  const toggle=(i)=> setPicked(ps=> ps.indexOf(i)>=0 ? ps.filter(x=>x!==i) : (ps.length>=4?ps:[...ps,i]));
-  const commitPlate=async ()=>{
-    setErr(""); setStep("compositing");
-    try{
-      const sheet=await _orbitCompose(picked.map(i=>frames[i]));
-      const now=new Date();
-      const meta={ modelLabel:"Orbit composite", modelId:"orbit-composite", mode:"orbit",
-        aspect:"16:9", size:"2K", pixelW:2560, pixelH:1440,
-        date:now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
-        time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}), iso:now.toISOString(), version:1 };
-      const kind=(typeof slotAssetKind==="function")?slotAssetKind("locref-"+l.id):"location";
-      await window.nbCommit(l.id, sheet, meta, [], kind);
-      try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{detail:{id:l.id,url:sheet}})); }catch(e){}
-      if(window.appToast) window.appToast("Orbit coverage plate committed \u2014 4 orbit angles in the standard 2\u00d72 grid. The previous plate stays in version history.");
-      onClose();
-    }catch(e){ setErr(String((e&&e.message)||e)); setStep("pick"); }
-  };
-  // PORTAL to <body>: rendered inside the card, an ancestor transform would make
-  // position:fixed card-relative and strand the modal off-center/off-screen
-  return ReactDOM.createPortal(React.createElement("div",{className:"ag-overlay",onClick:(e)=>{ if(e.target===e.currentTarget && step!=="rendering") onClose(); }},
-    React.createElement("div",{className:"qa-modal orbit-modal"},
-      React.createElement("div",{className:"qa-head"},
-        React.createElement("span",{className:"qa-orb"},React.createElement(Icon.globe||Icon.camera||Icon.image,{s:16})),
-        React.createElement("div",{className:"qa-head-txt"},
-          React.createElement("div",{className:"qa-title"},"Orbit the set \u2014 "+(l.name||"location")),
-          React.createElement("div",{className:"qa-sub"},"one video render orbits the plate; you pick 4 frames; they become the standard 2\u00d72 coverage plate")),
-        React.createElement("button",{className:"ag-x",onClick:onClose,disabled:step==="rendering"},React.createElement(Icon.x,{s:16}))),
-      err && React.createElement("div",{className:"orbit-err"},err),
-      step==="idle" && React.createElement("div",{className:"orbit-body"},
-        React.createElement("div",{className:"orbit-note"},
-          "Seedance orbits the CURRENT master plate through a slow 180\u00b0 move \u2014 temporal coherence keeps it the SAME real space at every angle (the thing a prompted grid can only approximate). You then pick the 4 best angles and they composite into the standard 2\u00d72 plate; every downstream consumer (shots, storyboards, depth grid) keeps working unchanged. The previous plate stays in version history."),
-        React.createElement("div",{className:"qa-apply-row"},
-          React.createElement("button",{className:"ns-btn primary",onClick:renderOrbit},
-            React.createElement(Icon.sparkles,{s:13}),"Render the orbit (1 video render)"),
-          React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Cancel"))),
-      step==="rendering" && React.createElement("div",{className:"orbit-body"},
-        React.createElement("div",{className:"orbit-wait"},
-          React.createElement("span",{className:"ns-spin"}),
-          React.createElement("span",null,"Orbiting the set\u2026 "+(status||"")+" \u2014 a minute or two"),
-          React.createElement("button",{className:"ns-btn ghost",onClick:()=>{ cancelRef.current=true; setStep("idle"); }},"Stop"))),
-      step==="pick" && React.createElement("div",{className:"orbit-body"},
-        React.createElement("div",{className:"qa-sec-lab"},"Pick 4 angles \u2014 selection order fills the grid: top-left, top-right, bottom-left, bottom-right"),
-        React.createElement("div",{className:"orbit-frames"},
-          frames.map((f,i)=>{ const at=picked.indexOf(i);
-            return React.createElement("div",{key:i,className:"orbit-frame"+(at>=0?" on":""),role:"button",tabIndex:0,onClick:()=>toggle(i),
-              title:at>=0?("Picked \u2014 position "+(at+1)+" of 4 (click to unpick)"):"Pick this angle"},
-              React.createElement("img",{src:f,alt:"orbit frame "+(i+1)}),
-              at>=0 && React.createElement("span",{className:"orbit-frame-n"},at+1),
-              React.createElement("button",{className:"orbit-frame-zoom",title:"Preview this angle full-size",
-                onClick:(e)=>{ e.stopPropagation(); setPreviewIdx(i); }},"\u2315")); })),
-        React.createElement("div",{className:"qa-apply-row"},
-          React.createElement("button",{className:"ns-btn primary",disabled:picked.length!==4,onClick:commitPlate,
-            title:picked.length===4?"Composite the 4 picked frames into the 2\u00d72 coverage plate and commit it":"Pick exactly 4 frames first"},
-            React.createElement(Icon.sparkles,{s:13}),"Compose into coverage plate"),
-          React.createElement("button",{className:"ns-btn ghost",onClick:renderOrbit},"Re-render the orbit"),
-          React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Cancel"))),
-      step==="compositing" && React.createElement("div",{className:"orbit-body"},
-        React.createElement("div",{className:"orbit-wait"},React.createElement("span",{className:"ns-spin"}),"Compositing the plate\u2026")),
-      // ZOOM PREVIEW: full-size look at one extracted angle, with pick controls
-      (previewIdx!=null && frames[previewIdx]) && React.createElement("div",{className:"orbit-preview",onClick:(e)=>{ if(e.target===e.currentTarget) setPreviewIdx(null); }},
-        React.createElement("img",{src:frames[previewIdx],alt:"orbit frame preview"}),
-        React.createElement("div",{className:"orbit-preview-bar"},
-          React.createElement("button",{className:"ns-btn ghost",disabled:previewIdx<=0,onClick:()=>setPreviewIdx(previewIdx-1)},"\u2039 Prev"),
-          React.createElement("span",{className:"orbit-preview-n"},"Angle "+(previewIdx+1)+" of "+frames.length),
-          React.createElement("button",{className:"ns-btn "+(picked.indexOf(previewIdx)>=0?"ghost":"primary"),
-            onClick:()=>toggle(previewIdx)},
-            picked.indexOf(previewIdx)>=0 ? "Unpick (was #"+(picked.indexOf(previewIdx)+1)+")" : "Pick this angle"),
-          React.createElement("button",{className:"ns-btn ghost",disabled:previewIdx>=frames.length-1,onClick:()=>setPreviewIdx(previewIdx+1)},"Next \u203a"),
-          React.createElement("button",{className:"ns-btn ghost",onClick:()=>setPreviewIdx(null)},"Close"))))), document.body);
-}
-
 function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage, onIeClick }){
   const d = locVisualDefaults(l);
   const scenePresets = (typeof locScenePresets==="function") ? locScenePresets(l, project) : [];
@@ -267,7 +144,6 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
   const locScenes = (l.scenes||[]).map(id=>sceneById[id]).filter(Boolean).sort((a,b)=>(a.no||0)-(b.no||0));
 
   // time-of-day / weather variants
-  const [orbitOpen, setOrbitOpen] = React.useState(false);
   const addVariant = ()=>{
     const used = (l.variants||[]).map(v=>v.time);
     const suggest = (l.times||[]).find(t=>used.indexOf(t)<0) || "Night";
@@ -303,7 +179,6 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
         title:"Change just ONE view of the multi-angle plate, leaving the others untouched",
         onClick:()=> setPanelEdit(pe=> pe ? null : { idx:null, text:"" }) }] : null,
       onDelete:()=>onDelete(l.id), deleteLabel:"Delete location" }),
-    orbitOpen && React.createElement(OrbitSetModal,{ l, plateUrl:gen.genUrl, onClose:()=>setOrbitOpen(false) }),
     panelEdit && gen.genUrl && React.createElement("div",{className:"sheet-edit-panel loc-panel-edit"},
       React.createElement("div",{className:"loc-panel-pick"},
         LOC_PANELS.map((p,i)=>React.createElement("button",{key:i,
@@ -364,12 +239,6 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
         React.createElement("div",{className:"sheet-head-actions"},
           React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(l)},
             React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft details"),
-          React.createElement("button",{className:"char-draft-btn ghost",disabled:!gen.genUrl,
-            title: gen.genUrl
-              ? "Seedance orbits the current plate (one video render); you pick 4 frames and they composite into the standard 2\u00d72 coverage plate \u2014 real same-space geometry across angles."
-              : "Generate the location plate first \u2014 the orbit starts from it.",
-            onClick:()=> gen.genUrl && setOrbitOpen(true)},
-            React.createElement(Icon.film||Icon.image,{s:12}),"Orbit the set"),
           window.QaCheckButton && React.createElement(window.QaCheckButton,{ gen, name:l.name, noun:"location plate",
             specFields:()=>({ architecture:(l.architecture||""), materials:(l.materials||""), lighting:(l.lighting||"") }),
             onApplySpec:(patch)=>onUpdate(l.id, patch) }))),
