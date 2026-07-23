@@ -1065,9 +1065,10 @@ function buildCharRefPrompt(c, project, props){
       format: "a 3-panel casting reference sheet in 16:9 landscape: three tall vertical panels divided by thin clean vertical lines; the first panel is wider and contains a large hero portrait, the other two panels contain full-body views; the SAME character throughout",
       panels_left_to_right: [
         "PANEL 1 — large close-up hero FACE PORTRAIT, front-facing, neutral controlled expression, shoulders/chest crop, face fills most of the panel, exact identity anchor",
-        "PANEL 2 — full-body FRONT view, head-to-toe, facing camera, "+(_heldItem?("one hand on the "+_heldItem+", the other relaxed at side"):"arms relaxed at sides")+", clean silhouette",
-        "PANEL 3 — full-body BACK view, head-to-toe, facing away, same wardrobe and proportions"
+        "PANEL 2 — full-body FRONT view framed from the NECK DOWN: the head is cropped out of frame entirely, the top edge of the panel cuts at the base of the neck/shoulders; body facing camera, "+(_heldItem?("one hand on the "+_heldItem+", the other relaxed at side"):"arms relaxed at sides")+", clean silhouette",
+        "PANEL 3 — full-body BACK view, head-to-toe, facing away (hair/back of head visible, no face), same wardrobe and proportions"
       ],
+      one_face_rule: "EXACTLY ONE face appears on this sheet — the hero portrait in panel 1. The front panel is headless BY DESIGN: a second rendered face causes downstream video generators to blend or hallucinate identity.",
       no_extra_views: "do not add side/profile or three-quarter views, expression rows, inset detail shots, rulers, captions, labels, title text, measurement text, or ANY info box / character-data panel (no name, height, age or traits printed on the image — that metadata travels in the prompt, never baked into pixels)",
       background: "solid warm off-white or light-grey studio sweep, even and clean across all three panels"
     },
@@ -1110,7 +1111,7 @@ function buildRefFromPhotoPrompt(c, project){
   if(tone) s += tone+" tone. ";
   s += "Character is "+v.height+" tall ("+v.scaleClass+"). ";
   s += "RENDER STYLE: "+style.replace(/\.$/,"")+". ";
-  s += "LAYOUT: a clean 3-panel casting reference sheet in 16:9 landscape with three tall vertical panels divided by thin clean vertical lines. Panel 1 is wider: a large close-up hero FACE PORTRAIT, front-facing, neutral controlled expression, shoulders/chest crop, face fills most of the panel. Panel 2: full-body FRONT view, head-to-toe, arms relaxed. Panel 3: full-body BACK view, head-to-toe, facing away. No text, captions or info boxes anywhere on the image. ";
+  s += "LAYOUT: a clean 3-panel casting reference sheet in 16:9 landscape with three tall vertical panels divided by thin clean vertical lines. Panel 1 is wider: a large close-up hero FACE PORTRAIT, front-facing, neutral controlled expression, shoulders/chest crop, face fills most of the panel. Panel 2: full-body FRONT view framed from the NECK DOWN — the head cropped out of frame entirely, top edge cutting at the base of the neck; arms relaxed. Panel 3: full-body BACK view, head-to-toe, facing away (no face visible). EXACTLY ONE face on the sheet — the panel-1 portrait. No text, captions or info boxes anywhere on the image. ";
   s += "Do NOT add side/profile views, expression rows, inset detail shots, rulers, captions, labels, title text, measurement text, annotations or watermarks. Solid warm off-white or light-grey studio background, soft even studio lighting, the SAME identical face/build/wardrobe in every panel, sharp focus.";
   return s;
 }
