@@ -285,10 +285,7 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
       ],
       specGate:{ ready:(drafted || !l.manual), hint:"Draft the design spec first \u2014 architecture, materials & light are what the plate is built from." },
       // edit ONE view of the plate (works on generated or uploaded plates)
-      menuExtra: gen.genUrl ? [{ label:"Orbit the set\u2026",
-        title:"Seedance orbits the current plate (one video render); you pick 4 frames and they composite into the standard 2\u00d72 coverage plate \u2014 real same-space geometry across angles.",
-        onClick:()=>setOrbitOpen(true) },
-      { label: panelEdit?"Close panel edit":"Edit a panel\u2026",
+      menuExtra: gen.genUrl ? [{ label: panelEdit?"Close panel edit":"Edit a panel\u2026",
         title:"Change just ONE view of the multi-angle plate, leaving the others untouched",
         onClick:()=> setPanelEdit(pe=> pe ? null : { idx:null, text:"" }) }] : null,
       onDelete:()=>onDelete(l.id), deleteLabel:"Delete location" }),
@@ -353,6 +350,12 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
         React.createElement("div",{className:"sheet-head-actions"},
           React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(l)},
             React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft details"),
+          React.createElement("button",{className:"char-draft-btn ghost",disabled:!gen.genUrl,
+            title: gen.genUrl
+              ? "Seedance orbits the current plate (one video render); you pick 4 frames and they composite into the standard 2\u00d72 coverage plate \u2014 real same-space geometry across angles."
+              : "Generate the location plate first \u2014 the orbit starts from it.",
+            onClick:()=> gen.genUrl && setOrbitOpen(true)},
+            React.createElement(Icon.film||Icon.image,{s:12}),"Orbit the set"),
           window.QaCheckButton && React.createElement(window.QaCheckButton,{ gen, name:l.name, noun:"location plate",
             specFields:()=>({ architecture:(l.architecture||""), materials:(l.materials||""), lighting:(l.lighting||"") }),
             onApplySpec:(patch)=>onUpdate(l.id, patch) }))),
