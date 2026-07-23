@@ -46,6 +46,7 @@ function OrbitSetModal({ l, plateUrl, onClose }){
   const [err,setErr]=React.useState("");
   const [frames,setFrames]=React.useState([]);
   const [picked,setPicked]=React.useState([]);          // frame indices, selection order = TL,TR,BL,BR
+  const [previewIdx,setPreviewIdx]=React.useState(null); // zoomed frame (null = closed)
   const cancelRef=React.useRef(false);
   const renderOrbit=async ()=>{
     setErr(""); cancelRef.current=false; setStep("rendering"); setStatus("IN_QUEUE");
@@ -104,10 +105,12 @@ function OrbitSetModal({ l, plateUrl, onClose }){
         React.createElement("div",{className:"qa-sec-lab"},"Pick 4 angles \u2014 selection order fills the grid: top-left, top-right, bottom-left, bottom-right"),
         React.createElement("div",{className:"orbit-frames"},
           frames.map((f,i)=>{ const at=picked.indexOf(i);
-            return React.createElement("button",{key:i,className:"orbit-frame"+(at>=0?" on":""),onClick:()=>toggle(i),
+            return React.createElement("div",{key:i,className:"orbit-frame"+(at>=0?" on":""),role:"button",tabIndex:0,onClick:()=>toggle(i),
               title:at>=0?("Picked \u2014 position "+(at+1)+" of 4 (click to unpick)"):"Pick this angle"},
               React.createElement("img",{src:f,alt:"orbit frame "+(i+1)}),
-              at>=0 && React.createElement("span",{className:"orbit-frame-n"},at+1)); })),
+              at>=0 && React.createElement("span",{className:"orbit-frame-n"},at+1),
+              React.createElement("button",{className:"orbit-frame-zoom",title:"Preview this angle full-size",
+                onClick:(e)=>{ e.stopPropagation(); setPreviewIdx(i); }},"\u2315")); })),
         React.createElement("div",{className:"qa-apply-row"},
           React.createElement("button",{className:"ns-btn primary",disabled:picked.length!==4,onClick:commitPlate,
             title:picked.length===4?"Composite the 4 picked frames into the 2\u00d72 coverage plate and commit it":"Pick exactly 4 frames first"},
@@ -115,7 +118,18 @@ function OrbitSetModal({ l, plateUrl, onClose }){
           React.createElement("button",{className:"ns-btn ghost",onClick:renderOrbit},"Re-render the orbit"),
           React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Cancel"))),
       step==="compositing" && React.createElement("div",{className:"orbit-body"},
-        React.createElement("div",{className:"orbit-wait"},React.createElement("span",{className:"ns-spin"}),"Compositing the plate\u2026")))), document.body);
+        React.createElement("div",{className:"orbit-wait"},React.createElement("span",{className:"ns-spin"}),"Compositing the plate\u2026")),
+      // ZOOM PREVIEW: full-size look at one extracted angle, with pick controls
+      (previewIdx!=null && frames[previewIdx]) && React.createElement("div",{className:"orbit-preview",onClick:(e)=>{ if(e.target===e.currentTarget) setPreviewIdx(null); }},
+        React.createElement("img",{src:frames[previewIdx],alt:"orbit frame preview"}),
+        React.createElement("div",{className:"orbit-preview-bar"},
+          React.createElement("button",{className:"ns-btn ghost",disabled:previewIdx<=0,onClick:()=>setPreviewIdx(previewIdx-1)},"\u2039 Prev"),
+          React.createElement("span",{className:"orbit-preview-n"},"Angle "+(previewIdx+1)+" of "+frames.length),
+          React.createElement("button",{className:"ns-btn "+(picked.indexOf(previewIdx)>=0?"ghost":"primary"),
+            onClick:()=>toggle(previewIdx)},
+            picked.indexOf(previewIdx)>=0 ? "Unpick (was #"+(picked.indexOf(previewIdx)+1)+")" : "Pick this angle"),
+          React.createElement("button",{className:"ns-btn ghost",disabled:previewIdx>=frames.length-1,onClick:()=>setPreviewIdx(previewIdx+1)},"Next \u203a"),
+          React.createElement("button",{className:"ns-btn ghost",onClick:()=>setPreviewIdx(null)},"Close"))))), document.body);
 }
 
 function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage, onIeClick }){

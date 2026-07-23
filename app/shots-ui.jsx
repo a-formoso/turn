@@ -99,7 +99,9 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
   const collectShotRefs = async (gopts)=>{
     const grab = async (id)=>{ let u = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
       if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(id); }catch(e){} } return u; };
-    const locSpec = loc ? [{ id:loc.id, note:(loc.name||"location")+" location coverage sheet (multiple views of ONE set)" }] : [];
+    const _locPanel = (loc && typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
+    const locSpec = loc ? [{ id:loc.id, locPanelQ:(_locPanel?_locPanel.q:null),
+      note:(loc.name||"location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+" (one full-frame view)" }] : [];
     // identity anchors for the cast & props actually in THIS frame — derived from the
     // action text (inFrameCast/inFrameProps), never the fragile manual tags.
     const _chars = Object.values(ctx.charById||{});
@@ -114,7 +116,9 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
       return { id, note:p.name+" prop sheet" }; }).filter(Boolean);
     const ordered = (locWeight==="ambient") ? [...castSpec, ...locSpec, ...propSpec] : [...locSpec, ...castSpec, ...propSpec];
     const out = [];
-    for(const s of ordered){ const u = await grab(s.id); if(u) out.push({ url:u, note:s.note, refId:s.id }); }
+    for(const s of ordered){ let u = await grab(s.id);
+      if(u && s.locPanelQ!=null && typeof shotLocPanelCrop==="function"){ const cu=await shotLocPanelCrop(u, s.locPanelQ); if(cu) u=cu; }
+      if(u) out.push({ url:u, note:s.note, refId:s.id }); }
     return out;
   };
 
@@ -194,7 +198,11 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
       // the rolling SEED leads (the previous shot's frame), then the canon sheets ordered by weight
       const seedU = prevShot ? await grab(prevShot.id) : "";
       const seed = (prevShot && seedU) ? [{ url:seedU, label:"Previous shot · Beat "+(prevShot.beatN||"—"), kind:"seed", approved:!!prevShot.locked }] : [];
-      const locItems = []; if(loc){ const u=await grab(loc.id); if(u) locItems.push({ url:u, label:(loc.name||"Location")+" plate", kind:"location" }); }
+      const locItems = []; if(loc){ let u=await grab(loc.id); let lab=(loc.name||"Location")+" plate";
+        if(u && typeof shotLocPanel==="function" && typeof shotLocPanelCrop==="function"){
+          const p=shotLocPanel(sh); const cu=await shotLocPanelCrop(u, p.q);
+          if(cu){ u=cu; lab=(loc.name||"Location")+" — "+p.label; } }
+        if(u) locItems.push({ url:u, label:lab, kind:"location" }); }
       const castItems = []; for(const c of subjects){ const u=await grab(c.id); if(u) castItems.push({ url:u, label:c.name, kind:"character" }); }
       const propItems = []; for(const p of inProps){ const u=await grab(p.id); if(u) propItems.push({ url:u, label:p.name, kind:"prop" }); }
       const sheetOrder = (locWeight==="ambient") ? [...castItems, ...locItems, ...propItems] : [...locItems, ...castItems, ...propItems];

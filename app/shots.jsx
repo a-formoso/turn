@@ -182,6 +182,32 @@ function locWeightForSize(sizeId){
 }
 window.locWeightForSize = locWeightForSize;
 
+/* PANEL-SPLIT LOCATION REFERENCE (user idea 2026-07-23): a 2x2 grid confuses the
+   image model (it must parse four views at quarter resolution, and sometimes blends
+   their geometry). Shots attach ONE panel, cropped client-side from the plate,
+   chosen by the shot's grammar — full-frame, unambiguous conditioning. */
+function shotLocPanel(sh){
+  const size=String((sh&&sh.size)||"").toUpperCase();
+  const angle=String((sh&&sh.angle)||"").toLowerCase();
+  if(angle==="high"||angle==="top") return { q:1, label:"high-angle three-quarter overview" };
+  if(["MCU","CU","ECU","INSERT"].indexOf(size)>=0) return { q:2, label:"key-station close view" };
+  return { q:0, label:"wide establishing front view" };
+}
+window.shotLocPanel = shotLocPanel;
+async function shotLocPanelCrop(url, q){
+  try{
+    const im=await new Promise((res,rej)=>{ const i=new Image(); i.crossOrigin="anonymous";
+      i.onload=()=>res(i); i.onerror=()=>rej(new Error("plate load")); i.src=url; });
+    const w=im.naturalWidth, h=im.naturalHeight; if(!w||!h) return "";
+    const ar=w/h; if(ar<1.55||ar>2.1) return "";   // not a standard 16:9 sheet — ride whole
+    const tw=Math.floor(w/2), th=Math.floor(h/2);
+    const c=document.createElement("canvas"); c.width=tw; c.height=th;
+    c.getContext("2d").drawImage(im,(q%2)*tw,Math.floor(q/2)*th,tw,th,0,0,tw,th);
+    return c.toDataURL("image/jpeg",0.92);
+  }catch(e){ return ""; }
+}
+window.shotLocPanelCrop = shotLocPanelCrop;
+
 /* a one-line human label for a shot's grammar, e.g. "MS · Low angle · Push in · 50mm" */
 function shotGrammarLabel(sh){
   return [sizeOf(sh.size).label, angleOf(sh.angle).label, moveOf(sh.move).label, lensOf(sh.lens).label].join(" · ");
@@ -900,7 +926,8 @@ function buildShotPrompt(sh, ctx){
   // (wide → set first; tight → cast first), then props, then carried-forward. ----
   const imgs = [];
   if(ctx.prevFrameRole) imgs.push("the PREVIOUS approved frame — carry its colour grade, lighting and every established physical state (wardrobe wear, wetness, dirt, damage) forward exactly, but do NOT copy its framing");
-  const _locLabel = loc ? ((loc.name||"the location")+" location plate — "
+  const _locPanel = (typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
+  const _locLabel = loc ? ((loc.name||"the location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+", one full-frame view of this ONE set — "
     + (locWeight==="ambient" ? "a background reference for the grade and surfaces only; the character fills this tight frame" : "reproduce its architecture, surfaces, fixtures and signage exactly")) : null;
   const _castLabels = subjects.map(c=> {
     const scale = (typeof canonicalScaleLabel==="function") ? canonicalScaleLabel(c) : (c.name||"character");
@@ -924,6 +951,9 @@ function buildShotPrompt(sh, ctx){
   if(wornProps.length){
     MAP += " Worn items have no separate sheets — each is part of its owner's character sheet and must match exactly as designed there: "
       + wornProps.map(p=> p.name+" (on "+(p.ownerName||"its owner")+")").join("; ")+".";
+  }
+  if(_locLabel){
+    MAP += " If the framing reveals space beyond the attached location view, extend the SAME set consistently — the reference is one angle of ONE real set.";
   }
 
   // ---- ASSEMBLE: image map, then the style spine, then the staging line, then constraints ----
@@ -987,7 +1017,7 @@ function deriveShotPrompt(sh, ctx){
       "the light sources and colour grade",
       "every character's face, hair and wardrobe",
     ],
-    if_new_space_revealed: "extend the SAME set consistently"+(loc?" using the attached location coverage sheet (multiple views of this ONE set)":""),
+    if_new_space_revealed: "extend the SAME set consistently"+(loc?" from the attached location view — it is one angle of ONE real set":""),
     format: {
       frame: "a single "+(_asp==="9:16"?"VERTICAL 9:16 (phone)":_asp)+" frame",
       rules: ["photoreal, filmic","no text, no watermark, no split panels"],
@@ -1025,7 +1055,9 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   try{ const ledger = sceneContinuityLedger(ctx.scene, sceneShots, ctx.charById, ctx.propById);
     carried = (ledger[sh.id]||[]).filter(pid=> inPr.indexOf(pid)<0); }catch(e){}
   // build the sheet-reference specs, then ORDER by location weight
-  const locSpec  = ctx.location ? [{ id:ctx.location.id, note:(ctx.location.name||"location")+" location coverage sheet (multiple views of ONE set)" }] : [];
+  const _locPanel = (ctx.location && typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
+  const locSpec  = ctx.location ? [{ id:ctx.location.id, locPanelQ:(_locPanel?_locPanel.q:null),
+    note:(ctx.location.name||"location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+" (one full-frame view)" }] : [];
   const castSpec = inCast.map(id=>{ const c=(ctx.charById||{})[id]; return c?{ id, note:c.name+" character sheet" }:null; }).filter(Boolean);
   // same dressing gate as buildShotPrompt/collectShotRefs — labels must match files
   const propSpec = inPr.map(id=>{ const p=(ctx.propById||{})[id];
@@ -1036,7 +1068,9 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
     ? [...castSpec, ...locSpec, ...propSpec, ...carrySpec]   // tight: the cast leads, the set recedes
     : [...locSpec, ...castSpec, ...propSpec, ...carrySpec];  // wide: the set leads
   const refs = [];
-  for(const s of orderedSpecs){ const u=await grab(s.id); if(u) refs.push({ url:u, note:s.note }); }
+  for(const s of orderedSpecs){ let u=await grab(s.id);
+    if(u && s.locPanelQ!=null && typeof shotLocPanelCrop==="function"){ const cu=await shotLocPanelCrop(u, s.locPanelQ); if(cu) u=cu; }
+    if(u) refs.push({ url:u, note:s.note }); }
   // buildShotPrompt now emits the STYLE SPINE + staging + the named reference stack itself
   // (it reads ctx.carriedForward + ctx.prevFrameRole), so we don't re-list references here.
   const _ordAll = (typeof sceneShotsOrdered==="function") ? sceneShotsOrdered(sceneShots) : (sceneShots||[]);

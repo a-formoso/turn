@@ -5820,6 +5820,21 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .orbit-frame.on{border-color:var(--pos)}
 .orbit-frame-n{position:absolute;top:5px;left:5px;width:20px;height:20px;display:grid;place-items:center;
   background:var(--pos);color:var(--ink-on-accent);font-family:var(--f-mono);font-size:11px;font-weight:700;border-radius:50%}
+.orbit-frame-zoom{position:absolute;bottom:5px;right:5px;width:22px;height:22px;display:grid;place-items:center;
+  border:1px solid var(--line-3);border-radius:6px;background:color-mix(in oklab, var(--bg-0) 72%, transparent);
+  color:var(--txt-1);font-size:13px;line-height:1;cursor:zoom-in;padding:0;opacity:0;transition:.12s}
+.orbit-frame:hover .orbit-frame-zoom{opacity:1}
+@media (hover:none){ .orbit-frame-zoom{opacity:1} }
+.orbit-frame-zoom:hover{color:var(--txt-0);border-color:var(--line-3);background:var(--bg-2)}
+
+/* ORBIT ZOOM PREVIEW — full-size single-angle overlay above the picker modal */
+.orbit-preview{position:fixed;inset:0;z-index:400;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;padding:24px;background:rgba(0,0,0,.78);cursor:zoom-out}
+.orbit-preview img{max-width:min(1200px,92vw);max-height:72vh;border-radius:12px;border:1px solid var(--line-3);
+  box-shadow:0 24px 80px rgba(0,0,0,.5);cursor:default}
+.orbit-preview-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;cursor:default;
+  padding:10px 14px;border-radius:12px;background:var(--bg-1);border:1px solid var(--line-2)}
+.orbit-preview-n{font-family:var(--f-mono);font-size:11.5px;color:var(--txt-2);letter-spacing:.04em}
 
 /* QA modal: Apply-to-spec + Edit-current-image side by side */
 .qa-apply-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
