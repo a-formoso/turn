@@ -77,7 +77,9 @@ function OrbitSetModal({ l, plateUrl, onClose }){
       onClose();
     }catch(e){ setErr(String((e&&e.message)||e)); setStep("pick"); }
   };
-  return React.createElement("div",{className:"ag-overlay",onClick:(e)=>{ if(e.target===e.currentTarget && step!=="rendering") onClose(); }},
+  // PORTAL to <body>: rendered inside the card, an ancestor transform would make
+  // position:fixed card-relative and strand the modal off-center/off-screen
+  return ReactDOM.createPortal(React.createElement("div",{className:"ag-overlay",onClick:(e)=>{ if(e.target===e.currentTarget && step!=="rendering") onClose(); }},
     React.createElement("div",{className:"qa-modal orbit-modal"},
       React.createElement("div",{className:"qa-head"},
         React.createElement("span",{className:"qa-orb"},React.createElement(Icon.globe||Icon.camera||Icon.image,{s:16})),
@@ -113,7 +115,7 @@ function OrbitSetModal({ l, plateUrl, onClose }){
           React.createElement("button",{className:"ns-btn ghost",onClick:renderOrbit},"Re-render the orbit"),
           React.createElement("button",{className:"ns-btn ghost",onClick:onClose},"Cancel"))),
       step==="compositing" && React.createElement("div",{className:"orbit-body"},
-        React.createElement("div",{className:"orbit-wait"},React.createElement("span",{className:"ns-spin"}),"Compositing the plate\u2026"))));
+        React.createElement("div",{className:"orbit-wait"},React.createElement("span",{className:"ns-spin"}),"Compositing the plate\u2026")))), document.body);
 }
 
 function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage, onIeClick }){
