@@ -5832,6 +5832,13 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-card-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .beat-card-head .bc-add{margin-left:auto}
 .bc-sec-lab{font-family:var(--f-mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt-3);margin-bottom:5px}
+/* the beat itself: driver action | reactor reaction (from the Writers' Room map) */
+.bc-beat{border:1px solid var(--line-1,var(--line-2));border-radius:10px;background:var(--bg-2);padding:9px 11px}
+.bc-beat-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px}
+.bc-beat-name{font-family:var(--f-mono);font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-3)}
+.bc-beat-verb{font-family:var(--f-mono);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-0);margin:2px 0 3px}
+.bc-beat-d{font-size:11px;line-height:1.5;color:var(--txt-2)}
+@media (max-width:420px){ .bc-beat-grid{grid-template-columns:1fr} }
 .bc-micro-row{display:flex;align-items:baseline;gap:8px;padding:2.5px 0;font-size:11.5px;line-height:1.5;color:var(--txt-1)}
 .bc-micro-t{flex:1;min-width:0}
 .bc-micro-row.uncovered .bc-micro-t{color:var(--alert)}
