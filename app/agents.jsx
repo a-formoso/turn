@@ -1229,6 +1229,20 @@ async function agentVisualResearcher(ctx){
   }
   if(ctx.cancelled()) return;
 
+  // DUPLICATION GUARD — completed research is never re-run: the look statement stands
+  // and every category already holds a noted touchstone, so a re-run would only spend a
+  // writing call re-proposing the same wall (and re-offer the render style the user has
+  // already settled). This also covers every "Run pre-production" re-run, which chains
+  // this agent first. To research from scratch, clear the look statement first.
+  if(typeof lb.researched==="function" && lb.researched()){
+    let todo=[]; try{ todo = await lb.toGenerate(); }catch(e){}
+    ctx.emit({k:"observe", t:"This lookbook is already researched — the look statement is written and every category holds a noted touchstone. Skipping re-research so nothing duplicates."});
+    ctx.emit({k:"done", t:"Visual research already complete — nothing re-run."
+      +(todo.length?(" “Generate all frames” will render "+todo.length+" missing mood frame"+(todo.length!==1?"s":"")+"."):" Every mood frame is rendered.")
+      +" To research the look from scratch, clear the look statement in the Lookbook and run again."});
+    return;
+  }
+
   // 1) research: statement + reference entries, written through to the Colorist
   ctx.emit({k:"act", t:"Reading the story, writing the look statement, gathering references…"});
   let res;

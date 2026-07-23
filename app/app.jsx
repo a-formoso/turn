@@ -2590,6 +2590,14 @@ function App(){
     // Frame rendering is the explicit "Generate all frames" button in the Lookbook.
     let _lbWork = (typeof dedupeLookbookCards==="function") ? dedupeLookbookCards(lookbook||[]) : (lookbook||[]).slice();
     const lookbookSurface = {
+      // TRUE when the visual research is already DONE: the look statement is written and
+      // every touchstone category holds a noted reference. The agent checks this FIRST —
+      // a re-run would only spend a writing call re-proposing the wall that's already up.
+      researched: ()=>{
+        if(!(lookbookNote||"").trim()) return false;
+        const covered = new Set(_lbWork.filter(c=>(c.note||"").trim()).map(c=>c.category||"Palette"));
+        return (window.LOOKBOOK_CATEGORIES||[]).every(cat=>covered.has(cat));
+      },
       // write the visual statement + reference touchstones, then write them through to the
       // Colorist's references (project.styleBible.refs) so the look propagates downstream.
       research: async ()=>{
