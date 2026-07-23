@@ -47,6 +47,14 @@ function writingStamp(){
 }
 window.writingStamp = writingStamp;
 window.getWritingPick = ()=> _writingPick;   // null = Auto (per-task recommendation)
+// The writing engine a given task resolves to right now, as a display object:
+// { label, id, auto } — auto=true means it's the per-task recommendation (no manual pick).
+// Used by the Art Room engine dock to show which TEXT model drafting/agents will use.
+window.writingModelInfo = function(task){
+  const id = getWritingModelId(task);
+  const m = WRITING_MODELS.find(x=>x.id===id) || WRITING_MODELS[0];
+  return { label:(m&&m.label)||"AI", id:(m&&m.id)||"", auto: !_writingPick };
+};
 window.recommendedWritingModelId = recommendedWritingModelId;
 // Scope helper: run fn with a task hint so complete() resolves that task's default
 // (same idiom as __forceWritingModel, which still wins when set — agent pins intact).
@@ -900,7 +908,7 @@ if(_imageFeature) _imageFeature.what = _imageFeature.what
     "When that proxy is deployed and enabled (the imageProxy flag in supabase-config.js), it routes BOTH providers server-side for signed-in users: GPT Image appears as a model, and Nano Banana is routed through the proxy too. The proxy uses a user-saved provider key from API Keys when present, otherwise it falls back to the platform's server secret.")
   .replace("If the proxy isn't enabled, GPT Image simply isn't offered and Nano Banana uses your local Google key.",
     "If the proxy isn't enabled, GPT Image simply isn't offered and Nano Banana uses your locally saved Google key.");
-if(_imageFeature) _imageFeature.what += " The image-engine controls stay in a compact floating right-edge dock at every viewport; clicking it opens the model, quality, aspect and resolution controls without inserting a large panel into the Art Room layout.";
+if(_imageFeature) _imageFeature.what += " The image-engine controls stay in a compact floating right-edge dock at every viewport; clicking it opens the model, quality, aspect and resolution controls without inserting a large panel into the Art Room layout. The dock also shows a TXT chip naming the TEXT (writing) model the Art Room uses to draft specs, bibles, staging and run the agents — so you can see the writer, not just the illustrator, at a glance (its tooltip says whether that's the app's Auto recommendation or your session pick); opening the dock reveals a Text-engine dropdown to change it right there.";
 APP_FEATURES.push({ name:"Screenplay craft: moving sequences, INTERCUT & shooting-script exports", what:"The scene drafter writes with professional shooting-script craft: action in lean 1\u20133 line paragraphs with standalone one-line stingers for percussion; every principal introduced with CAPS plus one characterizing clause; significant SOUNDS in CAPS. When a scene's action physically MOVES (a chase, an escape), the drafter cuts locations with SECONDARY SLUGLINES inside the scene (INT. HALL \u2192 EXT. FIRE ESCAPE \u2192 EXT. ROOF) instead of narrating travel under one heading \u2014 and those mid-scene places automatically become Location cards in the Art Room (the Location Scout and 'Pull from script' read them too). Two-ended phone or comm conversations use the INTERCUT convention: the second place is slugged once, then 'INTERCUT \u2014 A / B' lets the script cut freely between both speakers without (V.O.) on every cue. In the Script view only the scene's opening slugline carries the shooting-script scene number in the margins; secondary slugs render as plain headings. EXPORTS are shooting-script formatted: the PDF numbers every slugline in both margins, and the .fountain export tags each scene's opening slugline with its number (#N#) so professional screenwriting apps import the numbering." });
 
 APP_FEATURES.push({ name:"Provider keys (no key needed)", what:"Subscribers never enter any API key. All generation — text, image, voice and video — runs on Cinema Machine's own keys held as server secrets and reached through the server-side proxy, so no provider key ever lives in your browser and there is nothing for you to configure. Your plan's credits cover the provider costs. (An API Keys panel exists for platform administrators only, to manage those server keys; regular accounts don't see it.)" });

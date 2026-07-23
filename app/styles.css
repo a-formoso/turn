@@ -2744,6 +2744,15 @@ html[data-theme="dark"] .dt-viewing svg{color:oklch(0.82 0.09 296)}
   letter-spacing:.03em;text-align:center;color:var(--txt-2);background:var(--bg-3);
   border:1px solid var(--line);border-radius:999px;padding:5px 0;white-space:nowrap}
 .nb-dock-chip.model{background:var(--txt-0);color:var(--bg-2);border-color:var(--txt-0)}
+/* TEXT-engine chip — the writing model Art Room drafting/agents use (distinct accent tint) */
+.nb-dock-chip.txt{background:var(--accent-soft,rgba(216,166,87,.16));color:var(--accent,#b7852f);
+  border-color:var(--accent-line,rgba(216,166,87,.4));font-size:8px;overflow:hidden;text-overflow:ellipsis}
+/* text-engine read-out + picker inside the dock flyout */
+.nb-dock-txt{margin-top:12px;padding-top:12px;border-top:1px solid var(--line-2)}
+.nb-dock-txt-lab{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-2);margin-bottom:6px}
+.nb-txt-select{width:100%;font-size:12px;padding:6px 8px;border-radius:8px;border:1px solid var(--line-2);
+  background:var(--bg-3);color:var(--txt-0)}
+.nb-dock-txt-hint{font-size:10.5px;line-height:1.5;color:var(--txt-3);margin-top:6px}
 .nb-dock-panel{position:absolute;right:64px;top:50%;transform:translateY(-50%);width:min(236px,calc(100vw - 92px));
   max-height:calc(100vh - 24px);overflow:auto;background:var(--bg-2);border:1px solid var(--line-2);border-radius:14px;
   padding:14px 14px 16px;box-shadow:var(--shadow-pop)}

@@ -3513,7 +3513,10 @@ function NbDock(){
   React.useEffect(()=>{
     const h = ()=> force(x=>x+1);
     window.addEventListener("nb-model-changed", h);
-    return ()=>window.removeEventListener("nb-model-changed", h);
+    // also refresh when the TEXT (writing) engine changes, so the TXT chip stays current
+    window.addEventListener("turn-writing-model-changed", h);
+    return ()=>{ window.removeEventListener("nb-model-changed", h);
+      window.removeEventListener("turn-writing-model-changed", h); };
   },[]);
   React.useEffect(()=>{
     if(!open) return;
@@ -3529,15 +3532,31 @@ function NbDock(){
   const aspect = (typeof nbGetAspect==="function") ? nbGetAspect() : "16:9";
   const resv   = (typeof nbGetRes==="function") ? nbGetRes() : "2K";
   const short  = /pro/i.test(model) ? "PRO" : /gpt/i.test(model) ? "GPT" : "NB2";
-  return React.createElement("div",{className:"nb-dock"+(open?" open":""),ref:ref,"aria-label":"Image engine settings"},
+  // the TEXT engine Art Room drafting & agents use ("specs" task) — so users can see
+  // which writing model is producing their specs/bibles/staging, not just the illustrator.
+  const txt = (typeof window.writingModelInfo==="function") ? window.writingModelInfo("specs") : null;
+  const txtShort = txt ? txt.label.replace(/^Claude\s+/,"").replace(/^Gemini\s+/,"G ").replace(/\s+/g," ") : "—";
+  return React.createElement("div",{className:"nb-dock"+(open?" open":""),ref:ref,"aria-label":"Art Room engines — image & text"},
     React.createElement("button",{className:"nb-dock-toggle","aria-expanded":open?"true":"false",
-      title:"Image engine — model, aspect & resolution",onClick:()=>setOpen(o=>!o)},
+      title:"Art Room engines — image model, aspect & resolution, plus the TEXT model drafting uses. Click to change.",onClick:()=>setOpen(o=>!o)},
       React.createElement("span",{className:"nb-dock-chip model"},short),
       React.createElement("span",{className:"nb-dock-chip"},aspect),
-      React.createElement("span",{className:"nb-dock-chip"},resv)),
+      React.createElement("span",{className:"nb-dock-chip"},resv),
+      txt && React.createElement("span",{className:"nb-dock-chip txt",
+        title:"TEXT engine: "+txt.label+(txt.auto?" (Auto — the app's recommendation for Art Room specs)":" (your pick this session)")+". This is the writing model drafting specs, bibles, staging and the agents use."},
+        "TXT "+txtShort)),
     // clicks inside the panel re-render the dock so the summary chips stay fresh
     open && React.createElement("div",{className:"nb-dock-panel",onClick:()=>force(x=>x+1)},
-      React.createElement(NbControls,null)));
+      React.createElement(NbControls,null),
+      // TEXT engine — read-out + picker, so the writing model is visible AND changeable here
+      txt && React.createElement("div",{className:"nb-dock-txt"},
+        React.createElement("div",{className:"nb-dock-txt-lab"},"Text engine — drafting & agents"),
+        React.createElement("select",{className:"nb-txt-select",value:txt.id,
+          onClick:(e)=>e.stopPropagation(),
+          onChange:(e)=>{ if(typeof window.setWritingModelId==="function") window.setWritingModelId(e.target.value); force(x=>x+1); }},
+          (window.WRITING_MODELS||[]).map(m=>React.createElement("option",{key:m.id,value:m.id,title:m.note||""},m.label))),
+        React.createElement("div",{className:"nb-dock-txt-hint"},
+          txt.auto ? "Auto — the app's recommended engine for Art Room specs. Your pick applies for this session." : "Your pick for this session; a fresh session returns to the recommended engine."))));
 }
 
 /* ONE-LINE scene-chip pager — 4 chips per page, ‹ › arrows, a "12–16 (10)" counter
