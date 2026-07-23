@@ -271,8 +271,8 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
       // the SCRIPT BEAT this shot covers — straight from the scene's beat map, so the
       // shot's source text is on the card (read-only; edit beats in the Writers' Room)
       beatText && _el("div",{className:"shot-beat-script",
-        title:"The script beat this shot covers (drive — reaction), from this scene's beat map. Read-only here — edit beats in the Writers' Room inspector."},
-        _el("span",{className:"shot-beat-script-lab"},"Script beat"),
+        title:"This beat's SCREENPLAY text — the canon these shots film (until the scene is drafted, the beat summary stands in). Read-only here — edit the script in the Writers' Room."},
+        _el("span",{className:"shot-beat-script-lab"},"Scripted"),
         _el("span",{className:"shot-beat-script-body"},beatText)),
 
       // WHY this shot exists (the designer's purpose) + which micro-beats it covers
@@ -364,6 +364,20 @@ function SceneStyleChip({ project, sceneId }){
       pal.map((c,i)=>_el("span",{key:i,className:"shot-style-swatch",style:{background:c}}))));
 }
 
+/* the beat's SCREENPLAY text (action lines + cued dialogue) — the canon the
+   shots film. Empty when the scene isn't drafted yet (callers fall back to the
+   beat-map summary). Blocks are beat-tagged by the drafters. */
+function beatScriptText(sceneId, n){
+  const C=window.turnContinuity||{}; const d=(C.drafts||{})[sceneId];
+  if(!d||!Array.isArray(d.blocks)) return "";
+  const parts=[]; const blocks=d.blocks.filter(b=>Number(b.beat)===Number(n));
+  for(let i=0;i<blocks.length;i++){ const b=blocks[i]; const t=String(b.text||"").replace(/\s+/g," ").trim(); if(!t) continue;
+    if(b.type==="scene"||b.type==="trans"||b.type==="paren"||b.type==="dia") continue;
+    if(b.type==="char"){ const nx=blocks[i+1]; if(nx&&nx.type==="dia"&&String(nx.text||"").trim()){ parts.push(t+": \u201c"+String(nx.text).replace(/\s+/g," ").trim()+"\u201d"); i++; } continue; }
+    parts.push(t); }
+  return parts.join("  ");
+}
+
 /* circled micro-beat numerals: 1..20 -> \u2460.. ; beyond that "#n" */
 function _circ(n){ return (n>=1&&n<=20) ? String.fromCharCode(0x245F+n) : ("#"+n); }
 /* live keyframe url for a shot id: sync cache, async IDB hydrate, adopt fresh gens */
@@ -403,9 +417,10 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
   onAddShot, onUpdate, onDelete, onView, onGenerateShot, onRegenDownstream, onStopChain, onBatchDone,
   batchActiveId, openShotId, setOpenShotId }){
   const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(L.n));
-  const beatText = beatRow
-    ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" \u2014 ")
-    : "";
+  // the card quotes the SCREENPLAY (canon) for this beat; the beat-map summary
+  // only stands in until the scene is drafted
+  const beatText = beatScriptText(scene.id, L.n)
+    || (beatRow ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" \u2014 ") : "");
   const verbs = beatRow ? [ (beatRow.drive&&beatRow.drive.a||"").trim(), (beatRow.react&&beatRow.react.a||"").trim() ].filter(Boolean).join(" / ") : "";
   const isTurn = String(bm.turnAt||"")===String(L.n);
   const chg = beatRow && beatRow.charge!=null && beatRow.charge!=="" ? Number(beatRow.charge) : null;
@@ -574,7 +589,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
     open && (batchMode
       ? _el(React.Fragment,null, lanes.map(L=>{
           const beatRow=(bm.rows||[]).find(r=>String(r.n)===String(L.n));
-          const beatText=beatRow?[ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" \u2014 "):"";
+          const beatText=beatScriptText(scene.id, L.n) || (beatRow?[ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" \u2014 "):"");
           return _el("div",{key:"lane-"+L.n,className:"beat-lane"},
             _el("div",{className:"beat-lane-head"},
               _el("span",{className:"beat-lane-no"},"Beat "+L.n),
