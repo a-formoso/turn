@@ -239,8 +239,11 @@ function LookbookCard({ c, project, onUpdate, onDelete, onView, batchActiveId, o
             React.createElement(EditText,{value:c.source,placeholder:"Reference — film, cinematographer, palette…",onCommit:val=>onUpdate(c.id,{source:val})})),
           React.createElement("div",{className:"sheet-role"}, c.category||"Palette"))),
 
-      gen.genUrl && window.QaCheckButton && React.createElement("div",{className:"card-qa-row"},
-        React.createElement(window.QaCheckButton,{ gen, name:c.source||"Reference", noun:"mood frame",
+      // always rendered (showWhenEmpty): the lookbook grid mixes rendered and unrendered
+      // cards side by side, so a vanishing QA button read as inconsistent — frameless
+      // cards now show it disabled with the unlock reason instead
+      window.QaCheckButton && React.createElement("div",{className:"card-qa-row"},
+        React.createElement(window.QaCheckButton,{ gen, name:c.source||"Reference", noun:"mood frame", showWhenEmpty:true,
           specFields:()=>({ category:(c.category||""), note:(c.note||"") }),
           onApplySpec:(patch)=>onUpdate(c.id, patch) })),
 

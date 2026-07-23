@@ -1991,7 +1991,7 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
 /* ---- QA button — lives on the card face next to "Draft details" (chars, props,
    locations) and in the shot head row. Self-contained: busy state, the vision
    read, and the report modal. Hidden until the card has a generated image. */
-function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec }){
+function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec, showWhenEmpty }){
   const [busy, setBusy] = React.useState(false);
   const [report, setReport] = React.useState(null);
   // Apply-to-spec REGENERATES immediately (user ruling 2026-07-18: the current sheet
@@ -2004,7 +2004,16 @@ function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec }){
     setPendingRegen(false);
     gen.generate();
   },[pendingRegen]);
-  if(!gen || !gen.genUrl) return null;
+  if(!gen) return null;
+  // no image yet: normally the button just isn't there (nothing to judge). Surfaces
+  // whose grids MIX rendered and unrendered cards (the Lookbook) pass showWhenEmpty
+  // so the control reads as locked-with-a-reason instead of randomly missing.
+  if(!gen.genUrl){
+    if(!showWhenEmpty) return null;
+    return React.createElement("button",{className:(className||"char-draft-btn ghost")+" qa-empty",disabled:true,
+      title:"QA check unlocks once this card has a generated image — it reads the "+(noun||"sheet")+" against the prompt that made it. Generate the "+(noun||"image")+" first."},
+      React.createElement(Icon.eye,{s:12}),"QA check");
+  }
   const run = async ()=>{
     if(busy || gen.gening) return;
     // the contract: the version's stored generation prompt — or, for UPLOADED /

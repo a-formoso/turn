@@ -5825,6 +5825,9 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-protect{display:flex;align-items:center;gap:6px;margin:2px 0 8px;font-size:11.5px;color:var(--txt-1);line-height:1.4}
 .beat-protect svg{color:var(--pos);flex:0 0 auto}
 .beat-protect b{color:var(--pos);font-weight:700}
+/* QA check while the card has no image yet (Lookbook) — locked with a reason, not missing */
+.char-draft-btn.qa-empty{opacity:.45;cursor:not-allowed}
+
 /* QA modal: Apply-to-spec + Edit-current-image side by side */
 .qa-apply-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}
 .qa-apply-row .qa-apply-btn{margin-top:0}
