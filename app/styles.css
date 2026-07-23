@@ -891,6 +891,14 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 .spb-scene{font-weight:700;text-transform:uppercase;letter-spacing:.02em;margin:4px 0 12px;color:#111}
 .spb-action{margin:0 0 11px;color:#26241e}
 .spb-missing{color:#8d7f63;font-style:italic}
+/* the one-click fix under a "no screenplay text" gap — writes just that beat's prose */
+.spb-missing-wrap{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.spb-write-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;cursor:pointer;
+  border:1px solid var(--line-2);border-radius:8px;background:var(--bg-2);color:var(--txt-1);
+  font-size:11.5px;font-weight:600;transition:border-color .12s ease,color .12s ease,background .12s ease}
+.spb-write-btn:hover:not(:disabled){border-color:var(--accent,#d8a657);color:var(--txt-0)}
+.spb-write-btn:disabled{opacity:.55;cursor:default}
+.spb-write-btn .ns-spin{width:11px;height:11px}
 .spb-char{margin:10px 0 0;padding-left:42%;text-transform:uppercase;color:#111;font-weight:700;letter-spacing:.02em}
 .spb-paren{padding-left:34%;color:#6b6657;margin:0}
 .spb-dia{padding-left:24%;padding-right:8%;margin:0 0 2px;color:#1b1a16}

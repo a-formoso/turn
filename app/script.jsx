@@ -324,11 +324,12 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
   const [polishWait, setPolishWait] = React.useState(false);
   const [justPolished, setJustPolished] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
+  const [beatWriting, setBeatWriting] = React.useState(null);   // beat # being AI-written into a gap
   // Undo/Redo flash — the Set of blocks (of the version being restored) that DIFFER
   // from what's on screen, so the user sees exactly what the undo changed.
   const [verFlash, setVerFlash] = React.useState(null);
   const verFlashTimer = React.useRef(null);
-  React.useEffect(()=>{ setActiveBeat(null); setPolishing(false); setPolishWait(false); setJustPolished(false); setEditing(false); setVerFlash(null); },[scene && scene.id]);
+  React.useEffect(()=>{ setActiveBeat(null); setPolishing(false); setPolishWait(false); setJustPolished(false); setEditing(false); setVerFlash(null); setBeatWriting(null); },[scene && scene.id]);
   // once the restored version renders, bring the first changed block into view if it's
   // off-screen (essential on mobile, where the change is usually below the fold)
   React.useEffect(()=>{
@@ -513,6 +514,26 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       onEditScene(scene.id, { ...screenplay, blocks, edited:true, polished:false, ai:false, auto:false, by:null });
     };
     const beatRow = (n)=> beats && beats.rows.find(r=>r.n===n);
+    // WRITE A MISSING BEAT: the map defines beat N but no screenplay block dramatizes it.
+    // One click AI-writes just that beat's prose (neighbouring text as read-only context),
+    // splices it in beat order and commits a NEW version (Undo restores the gap).
+    const writeMissingBeat = async (n)=>{
+      if(beatWriting || !live || !onEditScene) return;
+      setBeatWriting(n);
+      try{
+        const res = (typeof aiWriteBeatText==="function") ? await aiWriteBeatText(scene, beats, n, screenplay, prevScene) : null;
+        if(res && res.blocks && res.blocks.length){
+          const blocks = screenplay.blocks.slice();
+          let at = -1;   // after the last block belonging to an EARLIER beat (slug rides as beat 1)
+          for(let j=0;j<blocks.length;j++){ if((Number(blocks[j].beat)||1) < n) at = j; }
+          blocks.splice(at+1, 0, ...res.blocks);
+          onEditScene(scene.id, { ...screenplay, blocks, ai:true, auto:false, edited:false, by:res.by||null });
+          setVerFlash(new Set(res.blocks));
+          clearTimeout(verFlashTimer.current);
+          verFlashTimer.current = setTimeout(()=>setVerFlash(null), 2600);
+        } else if(window.appToast) window.appToast("Couldn't write this beat — try again.","error");
+      } finally { setBeatWriting(null); }
+    };
     body = React.createElement(React.Fragment,null,
       polishWait && React.createElement("div",{className:"polish-note"},
         React.createElement(Icon.wand,{s:12}),"MUSE is rewriting the prose \u2014 beats stay locked, only the words change\u2026"),
@@ -537,7 +558,16 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
                   ? (fg[n]||[]).map((b,i)=> editing
                   ? React.createElement(EditableBlock,{key:i,b,onCommit:(t)=>commitEdit(b,t),onRemove:()=>removeBlock(b),sceneNo:(b===firstSlugBlock?scene.no:null),flash:!!(verFlash&&verFlash.has(b))})
                   : React.createElement(ScriptBlock,{key:i,b,contd:contdSet.has(b),sceneNo:(b===firstSlugBlock?scene.no:null),flash:!!(verFlash&&verFlash.has(b))}))
-                  : React.createElement("div",{className:"spb-action spb-missing"},"No screenplay text assigned to this beat."),
+                  : React.createElement("div",{className:"spb-missing-wrap"},
+                      React.createElement("div",{className:"spb-action spb-missing"},"No screenplay text assigned to this beat."),
+                      // one-click gap fix — only when the beat map defines this beat and MUSE is live
+                      r && live && onEditScene && React.createElement("button",{className:"spb-write-btn",
+                        disabled: beatWriting!=null,
+                        title:"MUSE writes JUST this beat's prose from its beat-map action/reaction ("+((r.drive&&r.drive.a)||"Action")+" / "+((r.react&&r.react.a)||"Reaction")+"), bridging the surrounding text — committed as a new version, Undo restores the gap.",
+                        onClick:()=>writeMissingBeat(n)},
+                        beatWriting===n
+                          ? React.createElement(React.Fragment,null,React.createElement("span",{className:"ns-spin"}),"Writing beat "+n+"…")
+                          : React.createElement(React.Fragment,null,React.createElement(Icon.sparkles,{s:12}),"Write this beat from the beat map"))),
                 editing && React.createElement(AddBlockRow,{onAdd:(kind)=>insertBlock(n, kind)}))));
         })),
       transOut && React.createElement(TransitionBar,{trans:transOut,out:true,

@@ -721,6 +721,44 @@ async function aiPolishScene(scene, beats, structuralBlocks, prevScene){
 }
 window.aiPolishScene = aiPolishScene;
 
+/* Write JUST ONE missing beat's screenplay prose into an existing draft — the fix for
+   a beat the map defines but the script never dramatized ("No screenplay text assigned
+   to this beat"). The neighbouring beats' existing text rides as READ-ONLY context so
+   the new prose bridges seamlessly; returns blocks force-tagged to that beat, ready to
+   splice in beat order (the caller commits the result as a normal version). */
+async function aiWriteBeatText(scene, beats, beatN, screenplay, prevScene){
+  if(!aiAvailable() || !beats || !screenplay) return null;
+  const n = Number(beatN);
+  const row = (beats.rows||[]).find(x=>Number(x.n)===n);
+  if(!row) return null;
+  const blocks = screenplay.blocks||[];
+  const beatText = (bn)=> blocks.filter(b=>Number(b.beat)===bn && b.type!=="scene")
+    .map(b=> b.type==="char" ? (String(b.text||"")+":") : String(b.text||"")).join(" ").trim();
+  // nearest WRITTEN neighbours (other beats may be gaps too)
+  const nums = Array.from(new Set(blocks.map(b=>Number(b.beat)).filter(Number.isFinite))).sort((a,b)=>a-b);
+  const prevN = nums.filter(x=>x<n).pop();
+  const nextN = nums.find(x=>x>n);
+  const prevTxt = prevN!=null ? beatText(prevN) : "";
+  const nextTxt = nextN!=null ? beatText(nextN) : "";
+  const prompt = storyContext(scene, prevScene) + "\n" + castPronounBlock(window.turnCast) + beatsBrief(beats) +
+    "\n\nThis scene's screenplay is ALREADY WRITTEN, but beat "+n+" was never dramatized — there is a gap in the prose."+
+    "\nBEAT "+n+" — the ONLY beat to write"+(Number(beats.turnAt)===n?" (this is the scene's TURNING POINT)":"")+":"+
+    "\n- "+(beats.driverLabel||"Driver")+" ("+((row.drive&&row.drive.a)||"Action")+"): "+((row.drive&&row.drive.d)||"")+
+    "\n- "+(beats.reactorLabel||"Reactor")+" ("+((row.react&&row.react.a)||"Reaction")+"): "+((row.react&&row.react.d)||"")+
+    (prevTxt ? "\n\nThe prose IMMEDIATELY BEFORE the gap (already written — do NOT rewrite or repeat it):\n"+prevTxt.slice(0,600) : "")+
+    (nextTxt ? "\n\nThe prose IMMEDIATELY AFTER the gap (already written — do NOT rewrite it; your text must flow INTO it):\n"+nextTxt.slice(0,600) : "")+
+    "\n\nWrite ONLY beat "+n+"'s screenplay prose — 1-3 blocks that dramatize its action/reaction exchange and bridge the surrounding text seamlessly (match its tone, tense and register). "+
+    "The action stays in this scene's existing location — no new sluglines.\n\n" + SCREENPLAY_STYLE + "\n\n" + BLOCK_SPEC;
+  try{
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
+    const parsed = parseScreenplay(res, scene) || [];
+    const out = parsed.filter(b=> b && b.type!=="scene" && String(b.text||"").trim())
+      .map(b=>({ beat:n, type:b.type, text:scrubBrand(String(b.text).trim()) })).slice(0,6);
+    return out.length ? { blocks:out, by:writingStamp() } : null;
+  }catch(e){ return null; }
+}
+window.aiWriteBeatText = aiWriteBeatText;
+
 /* ---- MUSE chat ---- */
 function spineDigest(scenes){
   return scenes.map(s=>`${s.no}. ${s.title} [${chargeStr(s.openCharge)}\u2192${chargeStr(s.closeCharge)}${turnInfo(s).flagged?" NO-TURN":""}]`).join("; ");
@@ -809,7 +847,7 @@ const APP_FEATURES = [
   { name:"Human truth (Cast panel)", what:"every character carries a HUMAN TRUTH — the one observation about human nature they embody, a DISTINCT stance on the film's controlling idea, grounded in behaviour the script shows — plus an ARGUES selector (The idea / The counter-idea / Complicates both). The cast is the argument's JURY: the protagonist prosecutes the idea through change, others hold opposing or complicating stances, and that difference is what makes dialogue unswappable. Both fields sit on the Cast panel under Desire; the character 'Draft with MUSE' button and the story build's cast-psychology pass draft them automatically (script-grounded — the truth must fit what the character actually DOES). The FREE Consistency Check audits the ARGUMENT MAP: it flags scene-driving characters with no human truth, and a unanimous jury (3+ stanced characters all arguing the same side)." },
   { name:"Auto-draft all (N left)", what:"drafts EVERY still-undrafted scene in order, threading continuity scene-to-scene. The (N left) counts scenes with no draft yet. Same engine as Draft with MUSE, just batched." },
   { name:"Redraft script from beats", what:"the ONE rebuild lever for a scene's screenplay, living in the Script view's toolbar (formerly 'Polish with MUSE' / 'Re-polish'; a duplicate in the Beats tab was removed). The scene's prose is rewritten fresh from its CURRENT beat cards (the old prose is never read \u2014 beats are the source), a CENTERED full-screen progress card shows while MUSE works, and the outgoing draft lands in version history so Undo restores it. Reshape the beats first to reshape the scene; press it on an untouched scene simply to elevate the structural draft into final prose. DRIVER RECAST: changing a scene's DRIVER (the Scene tab dropdown) syncs the Beats tab's labels instantly, and \u2014 because prose can't follow a dropdown \u2014 OFFERS to recast the scene's subtext for the new driver (a confirm, then MUSE rewrites the summary, objective, desire, antagonism and every beat's drive side for the new character, same beat count and escalation; a centered progress card shows while it runs). Review the recast beats, then 'Redraft script from beats' rebuilds the screenplay to match. Declining the recast keeps all text as it was." },
-  { name:"Undo / Redo (version history)", what:"every draft, polish AND manual edit is kept on one linear per-scene history; the Undo / Redo buttons in the script toolbar move between those versions (so you can undo a manual screenplay edit just like reverting a MUSE polish). The button tooltips name the version each step lands on (e.g. 'Manual edit', 'MUSE polish', 'Original draft'). ENGINE PROVENANCE: every AI-written version records WHICH writing model produced it — the Script view's version badge shows it after the provenance label (e.g. 'MUSE draft · Kimi K3', with the full write date in its tooltip), and the Undo/Redo tooltips carry it too, so switching writing models mid-project stays auditable version by version. Manual edits clear the engine stamp (a human wrote that version); drafts made before this feature simply show no engine. The Beats tab shows the same metadata for the beat map — a small 'Drafted by <model> · <date>' line above the beat cards whenever the map was AI-authored (hand-edits to beats keep the stamp; a hand-built map has none)." },
+  { name:"Undo / Redo (version history)", what:"every draft, polish AND manual edit is kept on one linear per-scene history; the Undo / Redo buttons in the script toolbar move between those versions (so you can undo a manual screenplay edit just like reverting a MUSE polish). The button tooltips name the version each step lands on (e.g. 'Manual edit', 'MUSE polish', 'Original draft'). WRITE A MISSING BEAT: when the beat map defines a beat but no screenplay block dramatizes it, the Script view shows 'No screenplay text assigned to this beat' with a 'Write this beat from the beat map' button underneath — one click has MUSE write JUST that beat's prose from its action/reaction row (the surrounding beats' existing text rides as read-only context so the insert bridges seamlessly; no new sluglines), splices it in beat order, flashes the new blocks, and commits it as a new version on this same history (Undo restores the gap). ENGINE PROVENANCE: every AI-written version records WHICH writing model produced it — the Script view's version badge shows it after the provenance label (e.g. 'MUSE draft · Kimi K3', with the full write date in its tooltip), and the Undo/Redo tooltips carry it too, so switching writing models mid-project stays auditable version by version. Manual edits clear the engine stamp (a human wrote that version); drafts made before this feature simply show no engine. The Beats tab shows the same metadata for the beat map — a small 'Drafted by <model> · <date>' line above the beat cards whenever the map was AI-authored (hand-edits to beats keep the stamp; a hand-built map has none)." },
   { name:"Continuity check", what:"flags a payoff with no earlier setup, a reference that lands before its setup, or a setup that never pays off; updates live as you reorder or edit scenes." },
   { name:"Board view", what:"all scenes laid out as cards in three act columns." },
   { name:"Editing", what:"scenes and beats are editable; add, delete, drag-reorder scenes, and re-charge values, and every view updates live." },
