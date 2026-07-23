@@ -396,12 +396,14 @@ function useShotKeyframe(shotId){
 }
 
 /* one compact row per shot inside a BEAT CARD — click to expand the full editor */
-function BeatShotRow({ sh, letter, open, onToggle }){
+function BeatShotRow({ sh, letter, open, onToggle, isNext }){
   const url = useShotKeyframe(sh.id);
-  return _el("div",{className:"bc-shot-row"+(open?" on":""),role:"button",tabIndex:0,onClick:onToggle,
+  return _el("div",{className:"bc-shot-row"+(open?" on":"")+(isNext?" next":""),role:"button",tabIndex:0,onClick:onToggle,
     title:open?"Collapse this shot":"Open this shot (frame, references, grammar, action)"},
     url ? _el("img",{className:"bc-shot-thumb",src:url,alt:""}) : _el("span",{className:"bc-shot-thumb ph"}),
     _el("span",{className:"bc-shot-letter"},letter),
+    isNext && _el("span",{className:"bc-next-chip",
+      title:"NEXT IN THE ROLLING CHAIN \u2014 this frame renders next; later shots seed from it. Open it and Generate, or use 'Render Scene in order'."},"\u25b8 next"),
     sh.priority && _el("span",{className:"bc-shot-pri",title:"Priority — carries the beat's protected moment"},"\u2605"),
     _el("span",{className:"bc-shot-gram"},String(sh.size||"")+" \u00b7 "+String(sh.angle||"")+" \u00b7 "+String(sh.lens||"")+"mm"),
     _el("span",{className:"bc-shot-act"},String(sh.action||"")),
@@ -415,7 +417,7 @@ function BeatShotRow({ sh, letter, open, onToggle }){
    video clips — nothing about clip packing changes. */
 function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered, firstId, toggleHead,
   onAddShot, onUpdate, onDelete, onView, onGenerateShot, onRegenDownstream, onStopChain, onBatchDone,
-  batchActiveId, openShotId, setOpenShotId }){
+  batchActiveId, openShotId, setOpenShotId, sceneStart, onRenderScene, renderBusy, nextShotId }){
   const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(L.n));
   // the card quotes the SCREENPLAY (canon) for this beat; the beat-map summary
   // only stands in until the scene is drafted
@@ -432,8 +434,18 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
       ? _el("img",{className:"beat-card-img",src:kf,alt:"Beat "+L.n+" keyframe",
           title:"This beat's opening keyframe (its first shot's frame) — click to enlarge",
           onClick:()=>onView&&onView(kf,{name:scene.title+" \u2014 Beat "+L.n})})
-      : _el("div",{className:"beat-card-img ph"},
-          "No keyframe yet \u2014 'Render Scene "+String(scene.no).padStart(2,"0")+" in order' renders the chain"),
+      : (sceneStart && onRenderScene
+        // THE tab's "start here": an unrendered scene's FIRST card carries the
+        // primary action right where the missing image is
+        ? _el("div",{className:"beat-card-img ph cta"},
+            _el("div",{className:"bc-cta-t"},"This scene's frames haven't been rendered yet"),
+            _el("button",{className:"char-draft-btn primary bc-cta-btn",disabled:!!renderBusy,
+              title:"Render every shot in this scene in chain order, each seeded by the previous frame, auto-approving each as it goes",
+              onClick:()=>onRenderScene(scene)},
+              _el(Icon.sparkles,{s:13}),"Render Scene "+String(scene.no).padStart(2,"0")+" in order"),
+            _el("div",{className:"bc-cta-d"},"Renders every frame in chain order \u2014 or open the \u25b8 next shot below and generate just its frame."))
+        : _el("div",{className:"beat-card-img ph"},
+            "Renders with the scene chain \u2014 or open a shot below to generate its frame")),
     _el("div",{className:"beat-card-body"},
       _el("div",{className:"beat-card-head"},
         _el("span",{className:"beat-lane-no"},"Beat "+L.n+(lanesLen>1?(" of "+lanesLen):"")),
@@ -478,7 +490,7 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
       _el("div",{className:"bc-shots"},
         _el("div",{className:"bc-sec-lab"},"Shots \u00b7 "+L.shots.length),
         L.shots.map((sh,i)=> _el(React.Fragment,{key:sh.id},
-          _el(BeatShotRow,{sh,letter:letterOf(i),open:openShotId===sh.id,
+          _el(BeatShotRow,{sh,letter:letterOf(i),open:openShotId===sh.id,isNext:(sh.id===nextShotId),
             onToggle:()=>setOpenShotId(openShotId===sh.id?null:sh.id)}),
           openShotId===sh.id && _el("div",{className:"bc-shot-expand"},
             (()=>{ const prevShot=(typeof prevShotOf==="function")?prevShotOf(sh,ordered):null;
@@ -617,7 +629,11 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
                     onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
                     subLabel:(L.shots.length>1?String.fromCharCode(65+li):null)})); })));
         }))
-      : _el("div",{className:"beat-grid-wrap"+(draftingScene?" drafting":"")},
+      : (()=>{
+        const _kf=(id)=> (typeof nbGetImage==="function") ? !!nbGetImage(id) : false;
+        const _sceneRendered = ordered.some(sh=>_kf(sh.id));
+        const _nextShotId = (ordered.find(sh=>!_kf(sh.id))||{}).id || null;
+        return _el("div",{className:"beat-grid-wrap"+(draftingScene?" drafting":"")},
           // REDRAFT IN PROGRESS — visible on the canvas, not just the button: the
           // current cards dim (they stay until the new list lands) under a status card
           draftingScene && _el("div",{className:"beat-redraft-note"},
@@ -626,9 +642,11 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
               _el("div",{className:"brn-t"},"MUSE is re-designing Scene "+String(scene.no).padStart(2,"0")+"'s shots"),
               _el("div",{className:"brn-d"},"Beat-by-beat coverage from the beats + script \u2014 about a minute. The current shots stay until the new list lands (a failed draft changes nothing)."))),
           _el("div",{className:"beat-card-grid"},
-            lanes.map(L=> _el(BeatCard,{key:"bc"+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
+            lanes.map((L,Li)=> _el(BeatCard,{key:"bc"+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
               ordered, firstId, toggleHead, onAddShot, onUpdate, onDelete, onView,
-              onGenerateShot, onRegenDownstream, onStopChain, onBatchDone, batchActiveId, openShotId, setOpenShotId }))))));
+              onGenerateShot, onRegenDownstream, onStopChain, onBatchDone, batchActiveId, openShotId, setOpenShotId,
+              sceneStart:(!_sceneRendered && Li===0), onRenderScene, renderBusy, nextShotId:_nextShotId }))));
+      })()));
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,

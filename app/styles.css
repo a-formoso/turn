@@ -5853,6 +5853,19 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
   border-radius:9px;background:var(--bg-2);cursor:pointer;transition:.12s;min-width:0}
 .bc-shot-row:hover{border-color:var(--line-3);background:var(--bg-3)}
 .bc-shot-row.on{border-color:var(--pos)}
+/* "start here" guidance: the next frame in the rolling chain */
+.bc-shot-row.next{border-color:var(--pos-line);background:var(--pos-soft)}
+.bc-next-chip{flex:0 0 auto;display:inline-flex;align-items:center;font-family:var(--f-mono);
+  font-size:8.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--pos);border:1px solid var(--pos-line);border-radius:9px;padding:1px 7px;cursor:help;
+  animation:bcNextPulse 2.4s ease-in-out infinite}
+@keyframes bcNextPulse{0%,100%{opacity:1}50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){ .bc-next-chip{animation:none} }
+/* the unrendered scene's first card = the primary call-to-action */
+.beat-card-img.ph.cta{display:grid;place-items:center;gap:10px;align-content:center;padding:22px 30px}
+.bc-cta-t{font-family:var(--f-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-2)}
+.bc-cta-btn{height:36px;padding:0 16px;font-size:12.5px}
+.bc-cta-d{font-size:11px;line-height:1.55;color:var(--txt-3);text-align:center;max-width:360px}
 .bc-shot-thumb{width:53px;height:30px;border-radius:5px;object-fit:cover;flex:0 0 auto;background:var(--bg-4);display:block}
 .bc-shot-thumb.ph{border:1px dashed var(--line-2)}
 .bc-shot-letter{flex:0 0 auto;font-family:var(--f-mono);font-weight:700;font-size:10.5px;color:var(--txt-0)}
