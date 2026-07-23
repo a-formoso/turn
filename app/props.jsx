@@ -925,15 +925,20 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   const startSceneBatch = ()=>{
     if(!sceneFilter || batchActiveId) return;
     if(kindFilter) setKindFilter("");   // the scene batch covers ALL kinds in the scene
-    const eligible = draftedIds(shown);
+    // Count from the KIND-UNFILTERED scene base (kindCountBase = scene \u2229 search, every
+    // kind), NOT `shown`: `shown` is still narrowed by the kind filter we just cleared
+    // (setKindFilter only takes effect next render), so using it would run the batch on
+    // just the filtered kind and mis-count the "already have a sheet" / skipped totals.
+    const inSceneAll = kindCountBase;
+    const eligible = draftedIds(inSceneAll);
     if(!eligible.length){
-      const nonWorn = shown.filter(p=>p.kind!=="worn");
+      const nonWorn = inSceneAll.filter(p=>p.kind!=="worn");
       batch.setMsg(!nonWorn.length
         ? "Every prop mapped to this scene is WORN \u2014 worn items render on their owner\u2019s character sheet (Characters tab), not here. Nothing separate to generate."
         : "Draft these props first (\u201cDraft details\u201d on each card) \u2014 nothing in this scene is ready to generate yet.");
       return;
     }
-    batch.begin(eligible, shown.length - eligible.length);
+    batch.begin(eligible, inSceneAll.length - eligible.length);
   };
   const startAllBatch = ()=>{
     if(batchActiveId) return;
@@ -1014,7 +1019,10 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
         onChange:e=>setSceneFilter(e.target.value)},
         React.createElement("option",{value:""},"All scenes \u2014 show every prop"),
         sceneList.map(s=>{
-          const n = list.filter(p=>inScene(p,s.id)).length;
+          // scene-focus count MATCHES the SHOW "All" chip's re-scoped total: scene \u2229
+          // the active search (matchesQuery). Without a search matchesQuery is true for
+          // all, so this is the plain per-scene count; with one, dropdown and chips agree.
+          const n = list.filter(p=>inScene(p,s.id)).filter(matchesQuery).length;
           return React.createElement("option",{key:s.id,value:s.id},
             "Scene "+String(s.no).padStart(2,"0")+" \u00b7 "+(s.title||"")+"  ("+n+" prop"+(n!==1?"s":"")+")");
         })),
