@@ -71,15 +71,17 @@ function buildPropRefPrompt(p, project){
       scale: scale,
     },
     layout: {
-      format: "a 3-panel object reference sheet in 16:9 landscape: three tall vertical panels divided by thin clean vertical lines; the FIRST panel is wider and holds a large hero view, the other two hold orthographic views; the SAME object throughout",
+      format: "a 4-panel object reference sheet in 16:9 landscape: four EQUAL-width tall vertical panels divided by thin clean vertical lines \u2014 hero, front, side and detail; the SAME object throughout",
       panels_left_to_right: [
-        "PANEL 1 \u2014 large HERO three-quarter view of the object, its most identifying angle, filling most of the panel, the exact identity anchor (approximately "+scale+")",
-        "PANEL 2 \u2014 straight-on FRONT elevation of the whole object at EXACTLY the same size and vertical alignment as the back view in panel 3 (same headroom, resting on the same line)",
-        "PANEL 3 \u2014 BACK view of the whole object, head-on from behind, same size, alignment, materials and finish"
+        "PANEL 1 \u2014 large HERO three-quarter view of the object, its most identifying angle, filling the panel, the exact identity anchor (approximately "+scale+")",
+        "PANEL 2 \u2014 straight-on FRONT elevation of the whole object, sharing a baseline with the side view in panel 3",
+        "PANEL 3 \u2014 SIDE PROFILE view rotated 90\u00b0 from the front, showing the object's true depth and thickness, at the SAME size and baseline as the front view",
+        "PANEL 4 \u2014 DETAIL macro close-up "+(detail?("of its signature feature \u2014 "+((typeof clipWords==="function")?clipWords(detail,70):detail.slice(0,70))+" \u2014 and its "):"of the object's ")+"material & construction: fastenings, joins, edges, surface finish and wear"
       ],
+      panel_widths: "all four panels are EQUAL width \u2014 a clean, evenly divided turnaround, NOT a wider hero panel (each whole-object view needs comparable readable space)",
       one_object_rule: "EXACTLY ONE object per panel \u2014 no duplicates, no exploded parts, no alternate colourways, no accessories that aren't part of the object itself",
-      scale_rule: "the front and back views are the SAME size and vertically aligned across panels 2 and 3",
-      no_extra_views: "do not add side/profile or three-quarter turnaround columns, exploded diagrams, detail-callout insets, rulers, dimension lines, captions, labels, title text, measurement text, or ANY info box (no name, size or material printed on the image \u2014 that metadata travels in the prompt, never baked into pixels)",
+      scale_rule: "the FRONT (panel 2) and SIDE (panel 3) views are the SAME size and share a baseline; the hero and detail panels may frame the object differently",
+      no_extra_views: "do not add a BACK view, extra turnaround angles, exploded diagrams, rulers, dimension lines, captions, labels, title text, measurement text, or ANY info box (no name, size or material printed on the image \u2014 that metadata travels in the prompt, never baked into pixels)",
       background: bg
     },
     continuity: {
@@ -397,7 +399,7 @@ function buildSimplePropPrompt(p){
     "Prop reference \u2014 "+(p.name||"object"),
     form||"",
     material ? (material) : "",
-    "3-panel object sheet: hero three-quarter view, front elevation, and back view",
+    "4-panel object sheet: hero three-quarter view, front elevation, side profile, and detail macro",
     "plain light grey background, studio product lighting, "
       +((String(p.renderStyle||((typeof window.renderStyleText==="function")?window.renderStyleText("prop",p.renderStyleKey||propInheritedStyleKey(p)):"")).split(/[;,]/)[0].trim())||"photoreal")
       +", sharp focus, no people"
@@ -566,7 +568,7 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
       "Edit this prop reference sheet for "+(p.name||"the object")+". "
       +"Apply ONLY this change: "+instr+". "
       +"Preserve everything else without alteration \u2014 the exact same object shape, proportions and identity "
-      +"across all panels. Keep the same 3-panel layout (hero \u00b7 front \u00b7 back) on a neutral grey background. "
+      +"across all panels. Keep the same 4-panel layout (hero \u00b7 front \u00b7 side \u00b7 detail) on a neutral grey background. "
       +"Do not replace or re-imagine the object.",
   });
 
@@ -748,7 +750,7 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
           placeholder:"photoreal product reference, 85mm, soft studio lighting\u2026",onCommit:val=>onUpdate(p.id,{renderStyle:val})})),
 
       React.createElement(CardFold,{label:"Master reference prompt",defaultOpen:false},
-        React.createElement(CopyBox,{label:"3-panel object sheet (hero \u00b7 front \u00b7 back) \u2014 feed to your image tool",text:buildPropRefPrompt(p,project)}),
+        React.createElement(CopyBox,{label:"4-panel object sheet (hero \u00b7 front \u00b7 side \u00b7 detail) \u2014 feed to your image tool",text:buildPropRefPrompt(p,project)}),
         React.createElement(SheetField,{label:"Negative prompt \u2014 exclude",value:p.negativePrompt||d.negativePrompt,multiline:true,
           onCommit:val=>onUpdate(p.id,{negativePrompt:val})}),
         React.createElement(CopyBox,{label:(genForFrame.genUrl && genForFrame.genMeta && genForFrame.genMeta.prompt)
