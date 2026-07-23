@@ -967,6 +967,11 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 }
 .sp-badge.polished{color:var(--pos);background:var(--pos-soft)}
 .sp-badge.structural{color:var(--txt-2);background:var(--bg-3);border:1px solid var(--line-2)}
+/* engine provenance rides the version badge ("MUSE draft · Kimi K3") — muted, same chip */
+.sp-badge .sp-badge-model{opacity:.72;font-weight:500;white-space:nowrap}
+/* beat-map provenance line in the Inspector's Beats tab */
+.beat-by-line{display:flex;align-items:center;gap:5px;margin:0 0 10px;
+  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.03em;color:var(--txt-2)}
 .draft-prog{display:flex;align-items:center;gap:11px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:9px;padding:8px 13px}
 .draft-prog .lbl{font-family:var(--f-mono);font-size:11px;color:var(--txt-1)}
 .draft-prog .bar{width:150px;height:6px;border-radius:4px;background:var(--bg-4);overflow:hidden}

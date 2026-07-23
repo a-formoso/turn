@@ -265,6 +265,12 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
       deriving ? "Reading the script…" : (blankMap ? "Build from script" : "Rebuild from script")),
     // ("Redraft script from beats" lives in the SCRIPT view's toolbar only —
     // the duplicate button here was removed by product decision 2026-07-13.)
+    // provenance: which engine drafted this beat map (stamped as beats.by; hand-built
+    // or pre-stamp maps have none). Hand-edits keep it — they refine, not re-author.
+    (beats.by && beats.by.model) && React.createElement("div",{className:"beat-by-line",
+      title:"Beat map drafted by "+beats.by.model+(beats.by.at?(" — "+new Date(beats.by.at).toLocaleString()):"")},
+      React.createElement(Icon.sparkles,{s:11}),
+      "Drafted by "+beats.by.model+(beats.by.at?(" · "+new Date(beats.by.at).toLocaleDateString(undefined,{month:"short",day:"numeric"})):"")),
     React.createElement("div",{className:"beat-labels"},
       React.createElement("div",{className:"cell"},
         React.createElement("div",{className:"obj-lab",style:{marginBottom:3}},"Driver"),

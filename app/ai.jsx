@@ -37,6 +37,15 @@ try{ localStorage.removeItem("turn-writing-model"); }catch(e){}
 function getWritingModelId(task){ if(_writingPick && WRITING_MODELS.find(m=>m.id===_writingPick)) return _writingPick; return recommendedWritingModelId(task); }
 function setWritingModelId(id){ _writingPick = id || null; try{ window.dispatchEvent(new CustomEvent("turn-writing-model-changed")); }catch(e){} }
 window.WRITING_MODELS = WRITING_MODELS; window.getWritingModelId = getWritingModelId; window.setWritingModelId = setWritingModelId;
+/* PROVENANCE STAMP — which engine actually wrote a thing (screenplay draft / beat map).
+   window.claude.complete records the model it resolved to on every successful call;
+   writingStamp() is read right after a completion and attached as `by` on the result. */
+function writingStamp(){
+  const last = window.__lastWritingModel;
+  const m = last || WRITING_MODELS.find(x=>x.id===getWritingModelId()) || WRITING_MODELS[0];
+  return { model:(m&&m.label)||"AI", modelId:(m&&m.id)||"", at:Date.now() };
+}
+window.writingStamp = writingStamp;
 window.getWritingPick = ()=> _writingPick;   // null = Auto (per-task recommendation)
 window.recommendedWritingModelId = recommendedWritingModelId;
 // Scope helper: run fn with a task hint so complete() resolves that task's default
@@ -143,6 +152,7 @@ if(!window.claude || typeof window.claude.complete !== "function"){
       }
       if(data && data.error) return fail(String(data.error));   // provider error relayed by the proxy (e.g. depleted credits)
       textSpendAdd(m.id);   // meter the successful call (display-only spend estimate)
+      try{ window.__lastWritingModel = { id:m.id, label:m.label }; }catch(e){}
       return (data && typeof data.text==="string") ? data.text : "";
     }
   };
@@ -506,7 +516,7 @@ async function aiDraftScene(scene, beats, prevScene){
     // never trust the model's beat tags positionally — re-align them by CONTENT
     // against the beat map (shots, storyboards and dialogue-speaker lookups all
     // read the script through these tags)
-    if(blocks) return { blocks: realignBlockBeats(blocks, beats), ai:true, auto:false };
+    if(blocks) return { blocks: realignBlockBeats(blocks, beats), ai:true, auto:false, by:writingStamp() };
   }catch(e){}
   return autoDraftScene(scene, beats, prevScene);
 }
@@ -548,7 +558,7 @@ async function aiRecastDriver(scene, beats, characters, newDriverId, oldDriverId
       drive:{ a:cl(r.drive&&r.drive.a,42)||rows[i].drive.a||"Action", d:cl(r.drive&&r.drive.d,320)||rows[i].drive.d },
       react:{ a:cl(r.react&&r.react.a,42)||rows[i].react.a||"Reaction", d:cl(r.react&&r.react.d,320)||rows[i].react.d } })) : null;
     return { summary:cl(j.summary,320), objective:cl(j.objective,200),
-      desire:cl(j.desire,260), obstacle:cl(j.antagonism||j.obstacle,260), rows:outRows };
+      desire:cl(j.desire,260), obstacle:cl(j.antagonism||j.obstacle,260), rows:outRows, by:writingStamp() };
   }catch(e){ return null; }
 }
 window.aiRecastDriver = aiRecastDriver;
@@ -623,7 +633,8 @@ async function aiAuthorScene(scene, prevScene, characters){
       rows: j.beats.map((b,i)=>({ n:i+1,
         drive:{ a:(b.drive&&b.drive.a)||"Action", d:(b.drive&&b.drive.d)||"" },
         react:{ a:(b.react&&b.react.a)||"Reaction", d:(b.react&&b.react.d)||"" },
-        ..._beatChg(b.charge) }))
+        ..._beatChg(b.charge) })),
+      by: writingStamp()
     };
     const patch = {
       title: (j.title||scene.title).toString().slice(0,60),
@@ -688,7 +699,7 @@ async function aiBeatsFromScript(scene, draft, characters){
       .sort((a,b)=>a.n-b.n).map((r,k)=>({ ...r, n:k+1 }));
     return { driverLabel:resolveLabel(j.driverLabel,"DRIVER"), reactorLabel:resolveLabel(j.reactorLabel,"REACTOR"),
       desire:clipWords(scrubBrand((j.desire||"").toString()),160), obstacle:clipWords(scrubBrand((j.obstacle||"").toString()),160),
-      turnAt: Math.max(0, Math.min(rows.length, Math.round(Number(j.turnAt))||0)), rows };
+      turnAt: Math.max(0, Math.min(rows.length, Math.round(Number(j.turnAt))||0)), rows, by:writingStamp() };
   }catch(e){ return null; }
 }
 window.aiBeatsFromScript = aiBeatsFromScript;
@@ -704,7 +715,7 @@ async function aiPolishScene(scene, beats, structuralBlocks, prevScene){
   try{
     const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
     const blocks = parseScreenplay(res, scene);
-    if(blocks) return { blocks, ai:true, auto:false, polished:true };
+    if(blocks) return { blocks, ai:true, auto:false, polished:true, by:writingStamp() };
   }catch(e){}
   return null;
 }
@@ -798,7 +809,7 @@ const APP_FEATURES = [
   { name:"Human truth (Cast panel)", what:"every character carries a HUMAN TRUTH — the one observation about human nature they embody, a DISTINCT stance on the film's controlling idea, grounded in behaviour the script shows — plus an ARGUES selector (The idea / The counter-idea / Complicates both). The cast is the argument's JURY: the protagonist prosecutes the idea through change, others hold opposing or complicating stances, and that difference is what makes dialogue unswappable. Both fields sit on the Cast panel under Desire; the character 'Draft with MUSE' button and the story build's cast-psychology pass draft them automatically (script-grounded — the truth must fit what the character actually DOES). The FREE Consistency Check audits the ARGUMENT MAP: it flags scene-driving characters with no human truth, and a unanimous jury (3+ stanced characters all arguing the same side)." },
   { name:"Auto-draft all (N left)", what:"drafts EVERY still-undrafted scene in order, threading continuity scene-to-scene. The (N left) counts scenes with no draft yet. Same engine as Draft with MUSE, just batched." },
   { name:"Redraft script from beats", what:"the ONE rebuild lever for a scene's screenplay, living in the Script view's toolbar (formerly 'Polish with MUSE' / 'Re-polish'; a duplicate in the Beats tab was removed). The scene's prose is rewritten fresh from its CURRENT beat cards (the old prose is never read \u2014 beats are the source), a CENTERED full-screen progress card shows while MUSE works, and the outgoing draft lands in version history so Undo restores it. Reshape the beats first to reshape the scene; press it on an untouched scene simply to elevate the structural draft into final prose. DRIVER RECAST: changing a scene's DRIVER (the Scene tab dropdown) syncs the Beats tab's labels instantly, and \u2014 because prose can't follow a dropdown \u2014 OFFERS to recast the scene's subtext for the new driver (a confirm, then MUSE rewrites the summary, objective, desire, antagonism and every beat's drive side for the new character, same beat count and escalation; a centered progress card shows while it runs). Review the recast beats, then 'Redraft script from beats' rebuilds the screenplay to match. Declining the recast keeps all text as it was." },
-  { name:"Undo / Redo (version history)", what:"every draft, polish AND manual edit is kept on one linear per-scene history; the Undo / Redo buttons in the script toolbar move between those versions (so you can undo a manual screenplay edit just like reverting a MUSE polish). The button tooltips name the version each step lands on (e.g. 'Manual edit', 'MUSE polish', 'Original draft')." },
+  { name:"Undo / Redo (version history)", what:"every draft, polish AND manual edit is kept on one linear per-scene history; the Undo / Redo buttons in the script toolbar move between those versions (so you can undo a manual screenplay edit just like reverting a MUSE polish). The button tooltips name the version each step lands on (e.g. 'Manual edit', 'MUSE polish', 'Original draft'). ENGINE PROVENANCE: every AI-written version records WHICH writing model produced it — the Script view's version badge shows it after the provenance label (e.g. 'MUSE draft · Kimi K3', with the full write date in its tooltip), and the Undo/Redo tooltips carry it too, so switching writing models mid-project stays auditable version by version. Manual edits clear the engine stamp (a human wrote that version); drafts made before this feature simply show no engine. The Beats tab shows the same metadata for the beat map — a small 'Drafted by <model> · <date>' line above the beat cards whenever the map was AI-authored (hand-edits to beats keep the stamp; a hand-built map has none)." },
   { name:"Continuity check", what:"flags a payoff with no earlier setup, a reference that lands before its setup, or a setup that never pays off; updates live as you reorder or edit scenes." },
   { name:"Board view", what:"all scenes laid out as cards in three act columns." },
   { name:"Editing", what:"scenes and beats are editable; add, delete, drag-reorder scenes, and re-charge values, and every view updates live." },

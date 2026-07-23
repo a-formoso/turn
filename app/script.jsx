@@ -402,7 +402,13 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
 
     const verLabel = labelOf(screenplay);
     const isPolished = !!screenplay.polished;
-    badge = React.createElement("span",{className:`sp-badge ${isPolished?"polished":(screenplay.auto?"structural":"")}`}, verLabel);
+    // provenance metadata: which engine wrote THIS version (stamped by the drafters as
+    // `by:{model,modelId,at}`; manual edits clear it — pre-stamp drafts simply show none)
+    const verBy = (!screenplay.edited && screenplay.by && screenplay.by.model) ? screenplay.by : null;
+    badge = React.createElement("span",{className:`sp-badge ${isPolished?"polished":(screenplay.auto?"structural":"")}`,
+      title: verBy ? ("Written by "+verBy.model+(verBy.at?(" — "+new Date(verBy.at).toLocaleString()):"")) : undefined},
+      verLabel,
+      verBy && React.createElement("span",{className:"sp-badge-model"}," · "+verBy.model));
 
     // Polish: generate a NEW version (old one is pushed to history by commitVersion)
     const runPolish = async ()=>{
@@ -457,8 +463,10 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       verFlashTimer.current = setTimeout(()=>setVerFlash(null), 2600);
     };
     if(hb.back.length || hb.fwd.length){
-      const prevLabel = hb.back.length ? labelOf(hb.back[hb.back.length-1]) : null;
-      const nextLabel = hb.fwd.length ? labelOf(hb.fwd[0]) : null;
+      // the version's engine rides its Undo/Redo tooltip too ("MUSE draft · Kimi K3")
+      const labelWithBy = (v)=>{ const l=labelOf(v); return (v && !v.edited && v.by && v.by.model) ? l+" · "+v.by.model : l; };
+      const prevLabel = hb.back.length ? labelWithBy(hb.back[hb.back.length-1]) : null;
+      const nextLabel = hb.fwd.length ? labelWithBy(hb.fwd[0]) : null;
       versionUI = React.createElement("div",{className:"ver-ctl"},
         React.createElement("button",{className:"ver-btn",disabled:!hb.back.length||polishing,
           title: prevLabel?("Undo — back to "+prevLabel):"Nothing to undo",
@@ -477,7 +485,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       const gi = screenplay.blocks.indexOf(b);
       if(gi<0) return;
       const nextBlocks = screenplay.blocks.map((x,j)=> j===gi ? {...x, text:newText} : x);
-      onEditScene(scene.id, { ...screenplay, blocks:nextBlocks, edited:true, polished:false, ai:false, auto:false });
+      onEditScene(scene.id, { ...screenplay, blocks:nextBlocks, edited:true, polished:false, ai:false, auto:false, by:null });
     };
 
     // EDIT MODE: remove one element outright (the direct undo for an added box).
@@ -487,7 +495,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       const gi = screenplay.blocks.indexOf(b);
       if(gi<0) return;
       const blocks = screenplay.blocks.filter((x,j)=> j!==gi);
-      onEditScene(scene.id, { ...screenplay, blocks, edited:true, polished:false, ai:false, auto:false });
+      onEditScene(scene.id, { ...screenplay, blocks, edited:true, polished:false, ai:false, auto:false, by:null });
     };
 
     // EDIT MODE: insert new element(s) at the END of a beat's blocks. "charline"
@@ -502,7 +510,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
         ? [ { beat:beatN, type:"char", text:"" }, { beat:beatN, type:"dia", text:"" } ]
         : [ { beat:beatN, type:kind, text:"" } ];
       blocks.splice(at+1, 0, ...fresh);
-      onEditScene(scene.id, { ...screenplay, blocks, edited:true, polished:false, ai:false, auto:false });
+      onEditScene(scene.id, { ...screenplay, blocks, edited:true, polished:false, ai:false, auto:false, by:null });
     };
     const beatRow = (n)=> beats && beats.rows.find(r=>r.n===n);
     body = React.createElement(React.Fragment,null,
