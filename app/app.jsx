@@ -309,7 +309,9 @@ function App(){
   // re-applies room, so cloud hydration can't flip it (that flip was the old flash).
   const [room, setRoom] = React.useState(()=> nav.room || "writers");
   const [artView, setArtView] = React.useState(()=>{
-    const v = nav.artView || (saved && saved.artView) || "characters";
+    // first-ever Art Room visit lands on the LOOKBOOK (the look steers everything
+    // downstream); any later visit restores the tab the user last left (nav/doc).
+    const v = nav.artView || (saved && saved.artView) || "lookbook";
     return v==="voices" ? "characters" : v;   // Voices is no longer a tab — it lives on the character card
   });
   // once-per-story guard so auto-seeding the Props tab from the cast doesn't
