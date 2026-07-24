@@ -5842,6 +5842,16 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .beat-redraft-note .ns-spin{flex:0 0 auto}
 .brn-t{font-family:var(--f-display);font-size:13.5px;font-weight:600;color:var(--txt-0)}
 .brn-d{font-size:11.5px;line-height:1.5;color:var(--txt-2);margin-top:2px}
+/* SHARED ART-ROOM PROGRESS CARD — the same spinner + bold title + reassuring subtitle
+   as the shots re-design note, so every tab-level "MUSE is working" state reads alike. */
+.art-progress-card{display:flex;align-items:center;gap:12px;width:min(560px,100%);
+  margin:2px 0 6px;padding:13px 16px;border-radius:14px;background:var(--bg-1);
+  border:1px solid var(--pos-line);box-shadow:0 12px 42px rgba(0,0,0,.28)}
+.art-progress-card .ns-spin{flex:0 0 auto}
+.apc-txt{min-width:0}
+.apc-t{font-family:var(--f-display);font-size:13.5px;font-weight:600;color:var(--txt-0)}
+.apc-d{font-size:11.5px;line-height:1.5;color:var(--txt-2);margin-top:2px}
+.apc-cancel{margin-left:auto;flex:0 0 auto}
 
 /* ONE CARD PER BEAT (2026-07-21): first-shot keyframe as the card image, Protect,
    micro-beat checklist, compact shot rows expanding into the full editor */

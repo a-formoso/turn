@@ -1628,6 +1628,18 @@ window.usePager = usePager; window.PagerBar = PagerBar;
 
 /* shared batch status / choice strip — render just under a tab's toolbar. `noun`
    is the singular card noun ("prop" / "character" / "location"). */
+/* Shared ART-ROOM PROGRESS CARD — spinner + bold title + reassuring subtitle, matching
+   the shots re-design note, so every tab-level "MUSE is working" state reads the same. */
+function ArtProgress({ title, detail, onCancel }){
+  return React.createElement("div",{className:"art-progress-card"},
+    React.createElement("span",{className:"ns-spin"}),
+    React.createElement("div",{className:"apc-txt"},
+      React.createElement("div",{className:"apc-t"},title),
+      detail && React.createElement("div",{className:"apc-d"},detail)),
+    onCancel && React.createElement("button",{className:"art-draftall ghost apc-cancel",onClick:onCancel},"Cancel"));
+}
+window.ArtProgress = ArtProgress;
+
 function BatchBar({ batch, noun }){
   const { activeId, msg, prompt, run, cancel, setPrompt, setMsg } = batch;
   // the bar lives at the TOP of the tab, but its triggers (e.g. a card's generate
@@ -1667,8 +1679,14 @@ function BatchBar({ batch, noun }){
         React.createElement(Icon.sparkles,{s:13}),"Regenerate all "+(prompt.missing.length+prompt.existing.length),
         typeof window.nbCostChip==="function" && window.nbCostChip(prompt.missing.length+prompt.existing.length)),
       React.createElement("button",{className:"art-draftall ghost",onClick:()=>{ setPrompt(null); setMsg(""); }},"Cancel")),
-    activeId && React.createElement("button",{className:"art-draftall ghost",onClick:cancel},"Cancel"),
-    msg && React.createElement("span",{className:"prop-scenebar-msg"},msg));
+    // ACTIVELY GENERATING → the shared progress card (spinner + status + reassurance),
+    // matching the shots re-design note; a bare info/error msg stays a plain line.
+    activeId
+      ? React.createElement(ArtProgress,{
+          title: msg || ("Generating "+N+" sheets…"),
+          detail: "Rendering coverage in order — each frame takes a moment; the sheets already finished stay even if you cancel.",
+          onCancel: cancel })
+      : (msg && React.createElement("span",{className:"prop-scenebar-msg"},msg)));
 }
 window.BatchBar = BatchBar;
 
