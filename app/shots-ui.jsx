@@ -406,6 +406,33 @@ function beatScriptText(sceneId, n){
 
 /* circled micro-beat numerals: 1..20 -> \u2460.. ; beyond that "#n" */
 function _circ(n){ return (n>=1&&n<=20) ? String.fromCharCode(0x245F+n) : ("#"+n); }
+/* MICRO-BEAT COVERAGE \u2014 which micro-beats each shot films. A shot's explicit `covers`
+   array wins; a shot with NO covers (drafted before the micro-beat layer, an auto-injected
+   establishing wide, or a model that omitted the field) is attributed to the micro-beats
+   its ACTION text matches \u2014 so a present shot is never counted as covering NOTHING, which
+   made a fully-shot beat read as every micro-beat "uncovered". Token-overlap, same idea as
+   the beat-realign / verbatim-snap passes. Returns { shotId -> Set(1-based micro numbers) }. */
+const _MB_STOP = new Set("the and a an of to in on at as is are was for with into from over under this that it its his her their they them then out off up down back again while when where who how".split(" "));
+function _mbToks(s){ const set=new Set(); String(s||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/).forEach(w=>{ if(w.length>=3 && !_MB_STOP.has(w)) set.add(w); }); return set; }
+function microCoverage(shots, microTexts){
+  const rowToks = (microTexts||[]).map(_mbToks);
+  const map = {};
+  (shots||[]).forEach(sh=>{
+    if(Array.isArray(sh.covers) && sh.covers.length){ map[sh.id] = new Set(sh.covers); return; }
+    const st = _mbToks((sh.action||"")+" "+(sh.dialogue||"")+" "+(sh.composition||""));
+    const set = new Set(); let best=-1, bi=-1;
+    rowToks.forEach((rt,i)=>{ let hit=0; st.forEach(w=>{ if(rt.has(w)) hit++; });
+      const score = hit / Math.max(1, Math.min(st.size||1, rt.size||1));
+      if(score >= 0.34) set.add(i+1);
+      if(score > best){ best=score; bi=i; } });
+    // a present but weakly-matching shot still covers its single best micro-beat, so it's
+    // never "nothing" (only genuinely-unfilmed micro-beats keep the "uncovered" flag)
+    if(!set.size && bi>=0) set.add(bi+1);
+    map[sh.id] = set;
+  });
+  return map;
+}
+window.microCoverage = microCoverage;
 /* live keyframe url for a shot id: sync cache, async IDB hydrate, adopt fresh gens */
 function useShotKeyframe(shotId){
   const [url,setUrl]=React.useState(()=> shotId && (typeof nbGetImage==="function") ? nbGetImage(shotId) : "");
@@ -453,6 +480,10 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
   const isTurn = String(bm.turnAt||"")===String(L.n);
   const chg = beatRow && beatRow.charge!=null && beatRow.charge!=="" ? Number(beatRow.charge) : null;
   const plan = L.shots.map(x=>x.beatPlan).find(Boolean);
+  // per-shot effective micro-beat coverage (explicit covers, else inferred from action
+  // text) so an unmapped shot doesn't falsely flag every micro-beat as "uncovered"
+  const microCov = (plan && Array.isArray(plan.micro))
+    ? microCoverage(L.shots, plan.micro.map(t=>String(t).replace(/^\s*\d+[\.\)]\s*/,""))) : {};
   const kf = useShotKeyframe(L.shots[0] ? L.shots[0].id : "");
   const letterOf = (i)=>String.fromCharCode(65+i);
   return _el("div",{className:"beat-card"+(isTurn?" turn":"")},
@@ -501,7 +532,7 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
       plan && Array.isArray(plan.micro) && plan.micro.length>0 && _el("div",{className:"bc-micro"},
         _el("div",{className:"bc-sec-lab"},"Micro-beats \u00b7 "+plan.micro.length),
         plan.micro.map((m,i)=>{ const n=i+1;
-          const covering = L.shots.map((sh,idx)=>({sh,idx})).filter(x=>Array.isArray(x.sh.covers)&&x.sh.covers.includes(n));
+          const covering = L.shots.map((sh,idx)=>({sh,idx})).filter(x=> microCov[x.sh.id] && microCov[x.sh.id].has(n));
           return _el("div",{key:n,className:"bc-micro-row"+(covering.length?"":" uncovered")},
             _el("span",{className:"bc-micro-t"},_circ(n)+" "+String(m).replace(/^\s*\d+[\.\)]\s*/,"")),
             covering.length
