@@ -3260,7 +3260,7 @@ function App(){
     // the floating WRITING-engine dock (mirror of the Art Room's image dock) —
     // wherever text models run: the Writers' Room and the Art Room
     (room==="writers"||room==="art") && scenes.length>0 && (typeof window.WritingDock==="function")
-      && React.createElement(window.WritingDock),
+      && React.createElement(window.WritingDock, { task: room==="art" ? "specs" : "story" }),
 
     // Undo affordance — persists whether the Writers' Room is open or closed.
     // Suppressed for Adaptation (full build-from-scratch): the toast is easy to miss

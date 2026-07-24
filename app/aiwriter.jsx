@@ -29,7 +29,7 @@ window.WritingModelPicker = WritingModelPicker;
    expanded panel listing every writing model plus AUTO (the per-task
    recommendation — story prose vs Art-Room specs). A pick here is SESSION-scoped,
    exactly like the in-panel pickers: every fresh session starts back on Auto. */
-function WritingDock(){
+function WritingDock({ task }){
   const [open, setOpen] = React.useState(false);
   const [, force] = React.useState(0);
   const ref = React.useRef(null);
@@ -50,16 +50,22 @@ function WritingDock(){
   const pick = (typeof window.getWritingPick==="function") ? window.getWritingPick() : null;
   const recStory = (typeof window.recommendedWritingModelId==="function") ? window.recommendedWritingModelId("story") : "";
   const recSpecs = (typeof window.recommendedWritingModelId==="function") ? window.recommendedWritingModelId("specs") : "";
-  const SHORT = { "claude-opus-4-8":"4.8", "claude-fable-5":"FABLE", "gemini-3.5-flash":"FLASH", "gpt-5.5-2026-04-23":"GPT5", "kimi-k3":"K3" };
-  const short = pick ? (SHORT[pick]||pick.slice(0,5).toUpperCase()) : "AUTO";
+  const SHORT = { "claude-opus-4-8":"4.8", "claude-fable-5":"FABLE", "gemini-3.5-flash":"FLASH", "gpt-5.5-2026-04-23":"GPT5", "kimi-k3":"K3", "kimi-k2.7-code":"K2.7" };
+  // resolve the engine for THIS room's task (Art Room → specs, Writers' Room → story) so
+  // the collapsed pill NAMES the model at a glance — whether Auto-resolved or a manual pick
+  // (this is why there's no separate text chip on the Art Room's image dock any more).
+  const resolvedId = (typeof window.getWritingModelId==="function") ? window.getWritingModelId(task) : (pick||recStory);
+  const short = SHORT[resolvedId] || String((models.find(m=>m.id===resolvedId)||{}).label||resolvedId||"AUTO").replace(/^(Claude|Gemini|GPT|Kimi)\s+/,"").slice(0,6).toUpperCase();
+  // second chip flags whether that model came from AUTO (the recommendation) or your pick
+  const mode = pick ? "SET" : "AUTO";
   const choose = (id)=>{ if(typeof window.setWritingModelId==="function") window.setWritingModelId(id||""); force(x=>x+1); };
   const labelOf = (id)=> ((models.find(m=>m.id===id)||{}).label)||id;
   return React.createElement("div",{className:"write-dock nb-dock"+(open?" open":""),ref,"aria-label":"Writing engine"},
     React.createElement("button",{className:"nb-dock-toggle","aria-expanded":open?"true":"false",
-      title:"Writing engine — the text model behind drafting, agents and story builds. AUTO follows the per-task recommendation; a pick here applies for this session.",
+      title:"Writing engine ("+((models.find(m=>m.id===resolvedId)||{}).label||resolvedId)+") — the text model behind drafting, agents and story builds"+(pick?" (your pick this session)":" (AUTO — the per-task recommendation)")+". Click to change.",
       onClick:()=>setOpen(o=>!o)},
       React.createElement("span",{className:"nb-dock-chip model"},short),
-      React.createElement("span",{className:"nb-dock-chip"},"TEXT")),
+      React.createElement("span",{className:"nb-dock-chip"},mode)),
     open && React.createElement("div",{className:"nb-dock-panel write-dock-panel"},
       React.createElement("div",{className:"write-dock-title"},"Writing engine"),
       // MODE — Auto mirrors the image dock's labelled-control style
