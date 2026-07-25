@@ -150,9 +150,16 @@ body{
 
 .proj{display:flex;flex-direction:column;line-height:1.15;min-width:0}
 .proj-name{font-family:var(--f-display);font-weight:600;font-size:13.5px;color:var(--txt-0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.proj-format{flex:0 0 auto;font-family:var(--f-mono);font-size:8.5px;font-weight:600;letter-spacing:.1em;
+/* Badges were flex:0 0 auto inside a chip that CAN shrink, so once the film title +
+   SHARED + format + framework stopped fitting, the last badge was hard-clipped mid-word
+   ("STORY CI"). Now the chip shrinks cleanly, the NAME yields first, and if a badge still
+   has to give it ellipsizes instead of being cut with no indication. */
+.proj-format{flex:0 1 auto;min-width:0;max-width:104px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;font-family:var(--f-mono);font-size:8.5px;font-weight:600;letter-spacing:.1em;
   text-transform:uppercase;color:var(--txt-2);background:var(--bg-3);border:1px solid var(--line-2);
   border-radius:20px;padding:2px 8px}
+/* SHARED is the one badge that changes what you're allowed to do — it never shrinks away */
+.proj-format.shared{flex:0 0 auto}
 /* framework badge — shown only for non-default frameworks (e.g. Kishōtenketsu) */
 .proj-format.fw{color:var(--accent);border-color:var(--accent)}
 
@@ -2549,9 +2556,19 @@ html[data-theme="dark"] .dt-viewing svg{color:oklch(0.82 0.09 296)}
 .proj-wrap{position:relative}
 .proj-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 12px;border-radius:9px;
   background:var(--bg-3);border:1px solid var(--line-2);color:var(--txt-1);font:600 12px var(--f-ui);cursor:pointer;
-  max-width:200px}
+  /* 200px predates the SHARED badge: a title plus format + framework + shared could not
+     fit, and the overflow hard-clipped the last badge mid-word ("STORY CI"). The cap is
+     now generous enough for the full set; under real pressure the name ellipsizes, then
+     badges shed by viewport (below), so nothing is ever cut without indication. */
+  max-width:420px}
 .proj-btn:hover,.proj-btn.open{background:var(--bg-4);color:var(--txt-0)}
-.proj-btn .proj-name{max-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.proj-btn{min-width:0;overflow:hidden}
+.proj-btn .proj-name{flex:0 1 auto;min-width:0;max-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* tight widths: shed the framework badge first (it's also on the Brief), then the format —
+   shedding beats squeezing three badges into a space that fits one */
+.vp-tablet .proj-btn .proj-format.fw{display:none}
+.vp-mobile .proj-btn .proj-format.fw,
+.vp-mobile .proj-btn .proj-format:not(.shared){display:none}
 .proj-btn>svg:first-child{color:var(--pos);flex:0 0 auto}
 .proj-menu{position:absolute;top:calc(100% + 8px);left:0;min-width:250px;background:var(--bg-4);
   border:1px solid var(--line-2);border-radius:11px;padding:8px;z-index:60;box-shadow:0 12px 36px rgba(0,0,0,.6)}
