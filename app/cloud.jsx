@@ -356,6 +356,46 @@ async function cloudPatchDoc(id, mutate){
   return { ok:false, conflict:true };
 }
 window.cloudPatchDoc = cloudPatchDoc;
+
+/* COLLABORATIVE SECTION SAVE — the collaboration fix.
+   The old autosave overwrote the WHOLE doc behind a single _rev fence. That is correct
+   for one user in two windows (it refuses to clobber), but for two COLLABORATORS it meant
+   whoever saved second was told "changed in another window", reloaded, and lost their
+   edits — every ~700ms of typing. Real collaboration was impossible.
+   Now a window writes ONLY the top-level sections it actually changed, merged onto the
+   freshest cloud doc. Two people working on different parts (one on scenes, one on props)
+   never collide at all; two people in the SAME section still resolve last-writer-wins, but
+   only for that section instead of the entire film.
+   Returns { ok, doc } where `doc` is the cloud doc AS READ (before our overlay), so the
+   caller can adopt the sections OTHER people changed. */
+async function cloudSaveSections(id, sections){
+  const sb = sbClient(); if(!sb || !id) return { ok:false };
+  const keys = Object.keys(sections||{});
+  if(!keys.length) return { ok:true, noop:true };
+  for(let attempt=0; attempt<4; attempt++){
+    try{
+      const { data, error } = await sb.from("turn_projects").select("doc").eq("id", id).single();
+      if(error) return { ok:false };
+      const cloudDoc = (data && data.doc) || {};
+      const cur = Number(cloudDoc._rev) || 0;
+      const next = { ...cloudDoc };
+      keys.forEach(k=>{ next[k] = sections[k]; });
+      next._rev = cur + 1;
+      let q = sb.from("turn_projects").update({ doc: next }).eq("id", id);
+      q = cur ? q.eq("doc->>_rev", String(cur))
+              : q.or("doc->>_rev.is.null,doc->>_rev.eq.0");
+      const { data: rows, error: wErr } = await q.select("id");
+      if(wErr) return { ok:false };
+      if(rows && rows.length){
+        _docRevSeen[id] = cur + 1;      // we merged onto the freshest doc, so we ARE current
+        return { ok:true, doc:cloudDoc };
+      }
+      // someone wrote between our read and our write — re-read and merge again
+    }catch(e){ return { ok:false }; }
+  }
+  return { ok:false, conflict:true };   // pathological contention only
+}
+window.cloudSaveSections = cloudSaveSections;
 async function cloudRenameProject(id, title){
   const sb = sbClient(); if(!sb || !id) return;
   try{ await sb.from("turn_projects").update({ title }).eq("id", id); }catch(e){}

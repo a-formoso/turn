@@ -92,7 +92,7 @@ function AuthModal({ onClose, onAuthed, initialMode, plan, light }){
 }
 window.AuthModal = AuthModal;
 
-function AccountChip({ session, cloudActive, saveState, onSignIn, onSignOut }){
+function AccountChip({ session, cloudActive, saveState, shareRole, onSignIn, onSignOut }){
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
   React.useEffect(()=>{
@@ -116,7 +116,10 @@ function AccountChip({ session, cloudActive, saveState, onSignIn, onSignOut }){
       cloudActive
         // the chip reports the REAL save state — it used to read "Synced" purely because
         // cloud mode was on, so a failing save still looked healthy
-        ? (saveState==="failed"
+        ? (shareRole==="view_only"
+            ? React.createElement("span",{className:"acct-cloud warn",title:"You have VIEW-ONLY access to this film. You can read and explore it, but changes you make here are not saved. Ask the owner for Writer access to edit."},
+                React.createElement(Icon.eye||Icon.warn,{s:11}),"View only")
+            : saveState==="failed"
             ? React.createElement("span",{className:"acct-cloud bad",title:"Your latest changes could not be saved. Check your connection — the app keeps trying, and your work stays on screen meanwhile."},
                 React.createElement(Icon.warn,{s:11}),"Not saved")
             : saveState==="retrying"

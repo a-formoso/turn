@@ -6350,3 +6350,9 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .crash-pre{margin-top:8px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;
   font-family:var(--f-mono,monospace);font-size:10.5px;line-height:1.5;color:var(--txt-2,#6b675f);
   background:var(--bg-3,#efece6);border-radius:8px;padding:10px}
+
+/* VIEW-ONLY collaborator — a standing notice, because RLS silently rejects their writes */
+.readonly-banner{position:sticky;top:0;z-index:70;display:flex;align-items:center;gap:9px;
+  padding:9px 16px;font-size:12px;line-height:1.5;color:var(--txt-0);
+  background:var(--alert-soft,rgba(216,166,87,.16));border-bottom:1px solid var(--alert-line,rgba(216,166,87,.4))}
+.readonly-banner b{font-weight:650}

@@ -540,6 +540,13 @@ function App(){
   // result that lands after a switch belongs to a film that is no longer open.
   const projIdRef = React.useRef(null); projIdRef.current = currentProjectId;
   const cloudMode = !!(session && currentProjectId);
+  /* SHARE ROLE on the open film. view_only is enforced by RLS, but the client enforced
+     NOTHING: a read-only collaborator could edit for an hour and every save was silently
+     rejected by the database. Saves are now skipped outright (and the UI says why) rather
+     than firing writes that can only fail. */
+  const _projRow = (projects||[]).find(p=>p.id===currentProjectId) || null;
+  const shareRole = (_projRow && _projRow.shareRole) || (_projRow && _projRow.isOwner ? "owner" : "");
+  const readOnlyShare = shareRole === "view_only";
   // ADMIN — demo upkeep account. The Matrix sample story (and "Reset to sample story")
   // is admin-only: every other user (and signed-out local mode) never sees Matrix data.
   const isAdmin = (((typeof cloudUserEmail==="function" && cloudUserEmail(session))||"").toLowerCase()==="admin@infinitestudioai.com");
@@ -637,6 +644,7 @@ function App(){
   // params (e.g. the location plate folds in the environment props it owns — locations.jsx)
   React.useEffect(()=>{ window.turnContinuity = { props, scenes, locations, characters, drafts }; },[props, scenes, locations, characters, drafts]);
   const hydratingRef = React.useRef(false);
+  const lastSentRef = React.useRef({});   // per-section save baseline (seeded by applyDoc)
   // bumped when a hydration pass finishes — lets effects that are gated on
   // hydratingRef (auto-seed) re-run once the doc has settled, even if the user
   // is already sitting on the tab (e.g. reloaded straight into Locations).
@@ -688,6 +696,19 @@ function App(){
     setTrash(d.trash && typeof d.trash==="object"
       ? { characters:d.trash.characters||[], props:d.trash.props||[], locations:d.trash.locations||[] }
       : _emptyTrash());
+    /* seed the per-section baseline from the doc we just loaded. Without this the first
+       save after opening a film would treat EVERY section as locally changed and write the
+       lot — flattening anything a collaborator changed in the meantime, which is exactly
+       the whole-doc behaviour we're replacing. */
+    try{
+      const base = {};
+      ["scenes","characters","props","locations","lookbook","lookbookNote","lookbookApplied","shots",
+       "project","drafts","beatsMap","history","continuityMap","trash","selId",
+       "propsSeeded","locsSeeded","visualsSeeded"].forEach(k=>{
+        if(d[k]!==undefined) base[k] = JSON.stringify(d[k]);
+      });
+      lastSentRef.current = base;
+    }catch(e){ lastSentRef.current = {}; }
     setTimeout(()=>{
       if(typeof stale==="function" && stale()) return;   // a newer load owns hydration now
       hydratingRef.current = false; setHydrationTick(t=>t+1);
@@ -1107,6 +1128,13 @@ function App(){
      to blind-overwrite that row, so two windows on two DIFFERENT episodes of one show each
      clobbered the other's show write, conflict-looped, and the recovery reload discarded
      whatever the user had typed since. Skipping an unchanged bible write breaks the loop. */
+  /* COLLABORATION — per-section saves. `lastSentRef` holds a JSON snapshot of every
+     top-level doc section as this window last successfully wrote (or adopted) it, so each
+     save can send ONLY what actually changed here. Two collaborators editing different
+     parts of a film then never overwrite each other; before this, every save was a
+     full-doc overwrite and whoever saved second had their work discarded by the conflict
+     reload. Per-user VIEW state (room/view/artView) is deliberately excluded — it isn't
+     shared, and writing it would make one person's navigation churn everyone's saves. */
   const bibleSavedRef = React.useRef(null);
   const _conflictBusy = React.useRef(false);
   const _docConflictCheck = (r)=>{
@@ -1129,6 +1157,28 @@ function App(){
   const [retryTick, setRetryTick] = React.useState(0);
   const saveFailsRef = React.useRef(0);
   const dirtyRef = React.useRef(false);     // edits exist that no successful save has covered
+  /* adopt the sections OTHER people changed. Only ever applied to sections THIS window
+     did not touch in the same save, so it can never stomp on what the user is typing;
+     lastSentRef is updated in step so the adoption doesn't look like a local edit and
+     bounce straight back out as another write. */
+  const _adoptTheirs = (cloudDoc, mineKeys)=>{
+    if(!cloudDoc) return;
+    const setters = { scenes:setScenes, characters:setCharacters, props:setProps, locations:setLocations,
+      lookbook:setLookbook, lookbookNote:setLookbookNote, lookbookApplied:setLookbookApplied, shots:setShots,
+      project:setProject, drafts:setDrafts, beatsMap:setBeatsMap, history:setHistory,
+      continuityMap:setContinuityMap, trash:setTrash };
+    let adopted = 0;
+    Object.keys(setters).forEach(k=>{
+      if(mineKeys.indexOf(k)>=0) return;                    // this window just wrote it
+      if(cloudDoc[k]===undefined) return;
+      const theirs = JSON.stringify(cloudDoc[k]);
+      if(theirs === lastSentRef.current[k]) return;          // unchanged since we last saw it
+      lastSentRef.current[k] = theirs;
+      try{ setters[k](cloudDoc[k]); adopted++; }catch(e){}
+    });
+    if(adopted && typeof window.appToast==="function")
+      window.appToast("Picked up changes a collaborator just made.","info");
+  };
   const _docSaveResult = (r)=>{
     _docConflictCheck(r);
     if(r && r.conflict) return;             // the conflict path reloads; not a save failure
@@ -1152,14 +1202,38 @@ function App(){
       // one-deep history and Home's "Restore poster" silently stops working
       if(meta.coverPrev) keep.coverPrev = meta.coverPrev;
       if(meta.ord!=null) keep.homeOrder = Number(meta.ord);
+      if(readOnlyShare){
+        // nothing this window does is persistable — don't fire writes the DB will reject
+        dirtyRef.current = false; setSaveState("readonly"); return;
+      }
       if(cloudMode){
         if(typeof cloudSaveDoc==="function"){
           setSaveState("saving");
+          /* Send only the sections that changed HERE since our last successful write.
+             This is what makes concurrent editing safe: cloudSaveSections merges them
+             onto the freshest cloud doc, so a collaborator's untouched sections survive
+             instead of being flattened by a whole-doc overwrite. */
+          const _sectionsNow = { ...doc, ...keep };
+          const _changed = {};
+          Object.keys(_sectionsNow).forEach(k=>{
+            if(k==="room" || k==="view" || k==="artView") return;    // per-user view state
+            const j = JSON.stringify(_sectionsNow[k]);
+            if(j !== lastSentRef.current[k]) _changed[k] = _sectionsNow[k];
+          });
+          const _mineKeys = Object.keys(_changed);
+          const _rememberSent = ()=> _mineKeys.forEach(k=>{ lastSentRef.current[k] = JSON.stringify(_sectionsNow[k]); });
           if(currentShowId){
             // series episode: shared departments live in the SHOW's bible; the
             // episode keeps its own story (scenes/beats/drafts/shots/…)
-            const { characters:_bc, locations:_bl, props:_bp, lookbook:_blb, lookbookNote:_bln, ...epDoc } = doc;
-            Promise.resolve(cloudSaveDoc(currentProjectId, { ...epDoc, showId:currentShowId, episodeNo:currentEpisodeNo, ...keep })).then(_docSaveResult);
+            const _epChanged = { ...(_changed) };
+            ["characters","locations","props","lookbook","lookbookNote"].forEach(k=>{ delete _epChanged[k]; });
+            if(Object.keys(_epChanged).length){
+              _epChanged.showId = currentShowId; _epChanged.episodeNo = currentEpisodeNo;
+              Promise.resolve(cloudSaveSections(currentProjectId, _epChanged)).then((r)=>{
+                if(r && r.ok){ _rememberSent(); _adoptTheirs(r.doc, _mineKeys); }
+                _docSaveResult(r);
+              });
+            } else { dirtyRef.current = false; setSaveState("saved"); }
             // the SHOW row carries only the shared bible; skip the write entirely when it
             // hasn't changed, so two windows on two episodes of one show stop conflict-
             // looping over a row neither of them actually edited
@@ -1169,7 +1243,12 @@ function App(){
               Promise.resolve(cloudSaveDoc(currentShowId, { isShow:true,
                 bible:{ characters, locations, props, lookbook, lookbookNote } })).then(_docConflictCheck);
             }
-          } else Promise.resolve(cloudSaveDoc(currentProjectId, { ...doc, ...keep })).then(_docSaveResult);
+          } else if(_mineKeys.length){
+            Promise.resolve(cloudSaveSections(currentProjectId, _changed)).then((r)=>{
+              if(r && r.ok){ _rememberSent(); _adoptTheirs(r.doc, _mineKeys); }
+              _docSaveResult(r);
+            });
+          } else { dirtyRef.current = false; setSaveState("saved"); }
         }
       }
       else {
@@ -1180,20 +1259,21 @@ function App(){
       }
     }, cloudMode ? 700 : 250);
     return ()=> clearTimeout(saveTimer.current);
-  },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash, cloudMode, currentProjectId, currentShowId, currentEpisodeNo, retryTick]);
+  },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash, cloudMode, currentProjectId, currentShowId, currentEpisodeNo, retryTick, readOnlyShare]);
 
   /* UNLOAD GUARD — saves are debounced (700ms) and can be mid-flight or retrying, so
      closing the tab at the wrong moment silently dropped the last edits with no warning.
      Only prompts when something is genuinely unwritten; a settled window closes clean. */
   React.useEffect(()=>{
     const h = (e)=>{
+      if(readOnlyShare) return;   // nothing of theirs is pending — never was
       if(!dirtyRef.current && saveState!=="saving" && saveState!=="retrying" && saveState!=="failed") return;
       e.preventDefault(); e.returnValue = "";      // browsers show their own generic wording
       return "";
     };
     window.addEventListener("beforeunload", h);
     return ()=>window.removeEventListener("beforeunload", h);
-  },[saveState]);
+  },[saveState, readOnlyShare]);
 
   /* Write-through: the Presets (Colorist) "Visual references" field auto-fills from the
      Lookbook — the colorist brief goes INTO the editable field itself (no labels/markers),
@@ -3160,8 +3240,15 @@ function App(){
         scenes:[], selScene:null, signedIn:false, aiOn:false, onSignIn:()=>openAuth("signup") }));
   }
 
-  return React.createElement("div",{className:`app vp-${vp} ${densClass} ${premiumClass}`},
+  return React.createElement("div",{className:`app vp-${vp} ${densClass} ${premiumClass}`+(readOnlyShare?" is-readonly":"")},
     window.ConfirmHost && React.createElement(window.ConfirmHost,null),
+    /* VIEW-ONLY BANNER — say it UP FRONT. RLS rejects this user's writes, so without a
+       standing notice they could work for an hour and only discover it from a failed save. */
+    readOnlyShare && React.createElement("div",{className:"readonly-banner"},
+      React.createElement(Icon.eye||Icon.warn,{s:13}),
+      React.createElement("span",null,
+        React.createElement("b",null,"View-only access — "),
+        "you can open and read this film, but nothing you change here is saved. Ask the owner for Writer access to edit it.")),
     // the post-checkout welcome card (/?welcome=1): live-updates as the webhook's
     // grant streams into the balance; its CTA goes straight to New Story
     welcomeOpen && session && window.WelcomePlanCard && React.createElement(window.WelcomePlanCard,{
@@ -3193,7 +3280,7 @@ function App(){
           onRestorePoster: restorePoster,
           onGoRoom: async (rid)=>{ if(!currentProjectId){ await createProject(); } setHomeOpen(false); if(rid==="writers") setView("spine"); guardedSetRoom(rid); },
           onClose: ()=>setHomeOpen(false),
-          accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode, saveState,
+          accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode, saveState, shareRole,
             onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }),
     t.grain && React.createElement("div",{style:{position:"fixed",inset:0,pointerEvents:"none",zIndex:50,
       opacity:.025,mixBlendMode:"overlay",
@@ -3247,7 +3334,7 @@ function App(){
         (locations||[]).some(l=>l && l.renderStyleKey)
       ),
       theme,onTheme:setTheme,
-      authSlot: React.createElement(AccountChip,{ session, cloudActive: cloudMode, saveState,
+      authSlot: React.createElement(AccountChip,{ session, cloudActive: cloudMode, saveState, shareRole,
         onSignIn:()=>setAuthOpen(true), onSignOut:signOut }),
       projectSlot: cloudMode ? React.createElement(ProjectSwitcher,{ projects, currentId:currentProjectId,
         formatLabel:(typeof formatOf==="function") ? formatOf(project).label : null,
