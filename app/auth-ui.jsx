@@ -172,6 +172,7 @@ function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, on
 
   const current = (projects||[]).find(p=>p.id===currentId);
   const title = current ? current.title : "Loading\u2026";
+  const currentShared = current && current.isShared;
   // Phase 3 grouping: SHOW rows hold the shared bible; episodes nest beneath them
   // STABLE ORDER (user ruling 2026-07-14): films sort by CREATION date, newest
   // first — never by last-updated, so the list doesn't reshuffle as you work
@@ -181,7 +182,9 @@ function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, on
     .sort((a,b)=>(Number(a.episodeNo)||0)-(Number(b.episodeNo)||0));
   const standalone = (projects||[]).filter(p=>String(p.isShow)!=="true" && !p.showId).sort(_byCreated);
 
-  const row = (p)=> renaming===p.id
+  const row = (p)=>{
+    const canOwn = p.isOwner !== false && !p.isShared;
+    return renaming===p.id
     ? React.createElement("div",{key:p.id,className:"proj-rename"},
         React.createElement("input",{className:"proj-rename-input",autoFocus:true,value:draft,
           onChange:e=>setDraft(e.target.value),
@@ -193,20 +196,23 @@ function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, on
         React.createElement("button",{className:"proj-row-main",onClick:()=>{ onSwitch(p.id); setOpen(false); }},
           React.createElement("span",{className:"proj-dot"}),
           React.createElement("span",{className:"proj-row-name"},p.title),
+          p.isShared && React.createElement("span",{className:"proj-row-share"},"Shared \u00b7 "+(window.teamRoleLabel ? window.teamRoleLabel(p.shareRole) : (p.shareRole||"Collaborator"))),
           // creation date disambiguates same-named films (e.g. a rebuild alongside
           // its original); same-day twins also get the time
           (p.created_at||p.updated_at) && React.createElement("span",{className:"proj-row-date"},_projRowDate(p, projects))),
-        React.createElement("button",{className:"proj-row-act",title:"Rename",
+        canOwn && React.createElement("button",{className:"proj-row-act",title:"Rename",
           onClick:()=>{ setRenaming(p.id); setDraft(p.title); }},
           React.createElement(Icon.wand,{s:12})),
-        React.createElement("button",{className:"proj-row-act danger",title:p.showId?"Delete episode":"Delete film",
+        canOwn && React.createElement("button",{className:"proj-row-act danger",title:p.showId?"Delete episode":"Delete film",
           onClick:async ()=>{ const ok=await window.appConfirm({title:"Delete \u201c"+p.title+"\u201d?",body:p.showId?"This removes the episode (the show's bible and other episodes stay).":"This removes the film and its sheets. If it's your only film, a fresh blank one opens in its place.",confirmLabel:"Delete",danger:true}); if(ok) onDelete(p.id); }},
           React.createElement(Icon.trash,{s:12})));
+  };
 
   return React.createElement("div",{className:"proj-wrap",ref:ref},
     React.createElement("button",{className:"proj-btn"+(open?" open":""),onClick:()=>setOpen(o=>!o),title:"Switch film"},
       React.createElement(Icon.film,{s:13}),
       React.createElement("span",{className:"proj-name"},title),
+      currentShared && React.createElement("span",{className:"proj-format shared"},"Shared"),
       formatLabel && React.createElement("span",{className:"proj-format"},formatLabel),
       frameworkLabel && React.createElement("span",{className:"proj-format fw"},frameworkLabel),
       React.createElement(Icon.chevD,{s:12})),
@@ -220,7 +226,7 @@ function ProjectSwitcher({ projects, currentId, onSwitch, onCreate, onRename, on
             React.createElement("span",{className:"proj-show-name"},s.title),
             React.createElement("span",{className:"proj-show-tag"},"Show")),
           episodesOf(s.id).map(row),
-          onNewEpisode && React.createElement("button",{className:"proj-newep",onClick:()=>{ onNewEpisode(s.id); setOpen(false); }},
+          onNewEpisode && s.isOwner !== false && !s.isShared && React.createElement("button",{className:"proj-newep",onClick:()=>{ onNewEpisode(s.id); setOpen(false); }},
             React.createElement(Icon.plus,{s:12}),"New episode")))),
       canMakeShow && onMakeShow && React.createElement("button",{className:"proj-new ghosted",onClick:()=>{ onMakeShow(); setOpen(false); },
         title:"This film becomes Episode 1; its cast, locations, props and lookbook become the show's shared bible"},

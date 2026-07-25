@@ -1,11 +1,7 @@
-/* imagegen.jsx — Nano Banana (Gemini 2.5 Flash Image) integration.
-   Path B: real client-side image generation with the user's own Google AI Studio
-   API key (stored locally). Combines the master reference prompt + negative prompt
-   into one final prompt and returns a data URL for the generated character sheet.
-
-   Honest note: the key lives in this browser's localStorage and the call goes
-   straight to Google from the page. That's fine for a single creator's tool; a
-   multi-user product would proxy this through a backend so keys aren't client-side. */
+/* imagegen.jsx — TURN image runtime.
+   All Art Room image models now route through the server proxy first, with fal.ai
+   as the image broker. Writing, video, and voice-library calls keep their own
+   routing elsewhere. */
 
 const NB_KEY = "turn-nanobanana-key";
 const NB_MODEL_KEY = "turn-nb-model";
@@ -23,17 +19,14 @@ function _nbAnnounce(name){ try{ window.dispatchEvent(new CustomEvent(name)); }c
 window.nbGetOaiQuality = nbGetOaiQuality; window.nbSetOaiQuality = nbSetOaiQuality;
 const NB_RES_KEY = "turn-nb-res";
 
-/* selectable models. provider:"google" → Nano Banana (Gemini), which can run directly
-   from the browser with the user's local key or through the server proxy. provider:"openai"
-   → GPT Image, which CANNOT run from the browser (OpenAI blocks cross-origin calls);
-   it is offered ONLY when the server-side proxy is enabled, using a user-saved key
-   when present or the proxy's server secret as a fallback. */
+/* selectable models. provider:"fal" means the browser always calls the Supabase
+   proxy; the proxy then maps this UI id to fal.ai's provider route. */
 const _imageProxyOn = !!(window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxy);
 const NB_MODELS = [
-  { id:"gemini-3.1-flash-image",      label:"Nano Banana 2",      provider:"google", note:"fast \u00b7 high quality" },
-  { id:"gemini-3.1-flash-lite-image", label:"Nano Banana 2 Lite", provider:"google", note:"fastest \u00b7 ~4s \u00b7 lowest cost" },
-  { id:"gemini-3-pro-image",          label:"Nano Banana Pro",    provider:"google", note:"highest fidelity" },
-  ...(_imageProxyOn ? [{ id:"gpt-image-2", label:"GPT Image 2", provider:"openai", via:"proxy", note:"server-side \u00b7 in-image text" }] : []),
+  { id:"gemini-3.1-flash-image",      label:"Nano Banana 2",      provider:"fal", family:"nano",   falModel:"fal-ai/nano-banana-2",      note:"fal.ai \u00b7 fast \u00b7 high quality" },
+  { id:"gemini-3.1-flash-lite-image", label:"Nano Banana 2 Lite", provider:"fal", family:"nano",   falModel:"fal-ai/nano-banana-2-lite", note:"fal.ai \u00b7 fastest \u00b7 lowest cost" },
+  { id:"gemini-3-pro-image",          label:"Nano Banana Pro",    provider:"fal", family:"nano",   falModel:"fal-ai/nano-banana-pro",    note:"fal.ai \u00b7 highest fidelity" },
+  { id:"gpt-image-2",                 label:"GPT Image 2",        provider:"fal", family:"openai", falModel:"openai/gpt-image-2", falEditModel:"openai/gpt-image-2/edit", note:"fal.ai \u00b7 in-image text" },
 ];
 const NB_ASPECTS = ["16:9","21:9","9:16","1:1","3:4","4:3"];
 const NB_RESOLUTIONS = ["1K","2K","4K"];
@@ -122,39 +115,43 @@ function slotAssetKind(slotId){
 }
 window.slotAssetKind = slotAssetKind;
 
-/* which provider a model id belongs to ("google" default for back-compat) */
+/* which provider a model id belongs to ("google" default for older saved stories) */
+function imageModelEntry(model){
+  return (window.NB_MODELS||NB_MODELS).find(x=>x.id===model) || null;
+}
 function providerOfModel(model){
-  const m = (window.NB_MODELS||NB_MODELS).find(x=>x.id===model);
+  const m = imageModelEntry(model);
   return (m && m.provider) || "google";
 }
-function nbProviderLabel(provider){ return provider==="openai" ? "GPT Image" : "Nano Banana"; }
+function isGptImageModel(model){
+  const m = imageModelEntry(model);
+  return /^gpt-image/i.test(String(model||"")) || !!(m && m.family==="openai");
+}
+function nbProviderLabel(provider){ return provider==="fal" ? "fal.ai" : (provider==="openai" ? "GPT Image" : "Nano Banana"); }
 /* key presence per provider — used by the key bar and the batch/generate gates.
-   OpenAI (GPT Image) must go through the server proxy; the proxy can use either the
-   user's saved OpenAI key or its own server secret. */
-function nbHasKeyForModel(model){ return (providerOfModel(model)==="openai" || imageProxyOn()) ? true : nbHasKey(); }
+   fal.ai image generation must go through the server proxy; the proxy can use either
+   the user's saved fal key or its own server secret. */
+function nbHasKeyForModel(model){ return providerOfModel(model)==="fal" ? imageProxyOn() : ((providerOfModel(model)==="openai" || imageProxyOn()) ? true : nbHasKey()); }
 function nbHasKeyForCurrent(){ return nbHasKeyForModel(nbGetModel()); }
-window.providerOfModel = providerOfModel; window.nbProviderLabel = nbProviderLabel;
+window.imageModelEntry = imageModelEntry; window.providerOfModel = providerOfModel; window.isGptImageModel = isGptImageModel; window.nbProviderLabel = nbProviderLabel;
 window.nbHasKeyForModel = nbHasKeyForModel; window.nbHasKeyForCurrent = nbHasKeyForCurrent;
 
-/* ---- per-image cost, in GENERATION CREDITS (the Stage's currency: 1 credit ≈ $0.30).
-   USD figures are the public API list prices (July 2026): Gemini image models bill
-   $30/M output tokens (1K=1120 · 2K=1680 · 4K=2520 tokens; Pro 1K/2K both 1120,
-   4K 2000 at its higher rate); GPT Image 2 estimates are for the 1536×1024 landscape
-   this app renders. Shown on Generate buttons so cost is visible BEFORE a render —
-   image generations don't deduct credits yet. */
-const NB_IMG_USD = {
+/* ---- per-image cost, in GENERATION CREDITS.
+   Provider USD assumptions live in app/pricing.jsx so pricing is auditable from
+   one place. Shown on Generate buttons so cost is visible BEFORE a render —
+   the server deducts whole credits after a successful image generation. */
+const NB_IMG_USD = (window.turnImageProviderUsdTable && window.turnImageProviderUsdTable()) || {
   "gemini-3.1-flash-lite-image": { "1K":0.034, "2K":0.050, "4K":0.076 },
   "gemini-3.1-flash-image":      { "1K":0.067, "2K":0.101, "4K":0.151 },
   "gemini-3-pro-image":          { "1K":0.134, "2K":0.134, "4K":0.240 },
   "gpt-image-2":                 { low:0.009, medium:0.080, high:0.317 },
 };
-const NB_CREDIT_USD = 0.30;
 function nbImageCredits(opts){
   opts = opts||{};
   const model = opts.model || nbGetModel();
   const t = NB_IMG_USD[model]; if(!t) return null;
   let usd;
-  if(providerOfModel(model)==="openai"){
+  if(isGptImageModel(model)){
     const q = opts.quality || nbGetOaiQuality();
     usd = (t[q]!=null) ? t[q] : t.medium;
   } else {
@@ -163,14 +160,15 @@ function nbImageCredits(opts){
   }
   // ×CREDIT_SCALE so image costs read in the same generous denomination as plan
   // allowances (grant + cost scale together — real value unchanged).
-  return (usd / NB_CREDIT_USD) * (Number(window.CREDIT_SCALE)||1);
+  return (typeof window.turnCreditsFromProviderUsd==="function")
+    ? window.turnCreditsFromProviderUsd(usd)
+    : (usd / 0.30) * (Number(window.CREDIT_SCALE)||1);
 }
 function nbImageCostText(count, opts){
   const per = nbImageCredits(opts);
   if(per==null) return "";
   const total = per * Math.max(1, Number(count)||1);
-  const r = Math.round(total*20)/20;                 // nearest 0.05 credit
-  return String(r>=10 ? Math.round(r) : r);
+  return String(Math.max(1, Math.ceil(total)));
 }
 /* small cost chip for Generate/Re-generate buttons. A tiny COMPONENT (not a static
    span) so it re-reads the current model/resolution/quality when the picker fires
@@ -189,7 +187,7 @@ function NbCostChipInner({ count, opts }){
   if(!txt) return null;
   const model = (opts&&opts.model) || nbGetModel();
   const m = (window.NB_MODELS||NB_MODELS).find(x=>x.id===model);
-  const detail = providerOfModel(model)==="openai"
+  const detail = isGptImageModel(model)
     ? ((opts&&opts.quality)||nbGetOaiQuality())+" quality"
     : ((opts&&opts.res)||nbGetRes());
   const n = Math.max(1, Number(count)||1);
@@ -204,7 +202,7 @@ function nbCostChip(count, opts){
 }
 window.nbImageCredits = nbImageCredits; window.nbImageCostText = nbImageCostText; window.nbCostChip = nbCostChip;
 
-/* grounding with Google Search — Nano Banana 2 (gemini-3.1-flash-image) only */
+/* grounding with web search — Nano Banana 2 (gemini-3.1-flash-image) only */
 const NB_GROUND_KEY = "turn-nb-ground";
 function nbGetGroundSearch(){ try{ return localStorage.getItem(NB_GROUND_KEY)==="1"; }catch(e){ return false; } }
 function nbSetGroundSearch(v){ try{ v ? localStorage.setItem(NB_GROUND_KEY,"1") : localStorage.removeItem(NB_GROUND_KEY); }catch(e){} }
@@ -872,13 +870,11 @@ async function cropImageToAspect(src, aspect){
   });
 }
 
-/* Generate through the SERVER-SIDE proxy (Supabase Edge Function), provider-agnostic.
-   The browser calls our `image-proxy` function, which makes the provider request
-   server-side. If the user saved a key in API Keys, it is sent for this one provider;
-   otherwise the function uses its server secret. Used for BOTH OpenAI GPT Image
-   (which can't run in the browser at all) and, when imageProxy is on, Google Nano
-   Banana. Requires the user to be signed in and the function deployed. Resolves to a
-   data URL; mirrors nbGenerate's signature and reports grounding via opts.metaOut. */
+/* Generate through the SERVER-SIDE proxy (Supabase Edge Function). For image
+   generation the client sends provider:"fal"; the proxy maps the selected TURN
+   model to fal.ai's Nano Banana / GPT Image route. Requires the user to be signed
+   in and the function deployed. Resolves to a data URL; mirrors nbGenerate's
+   signature and reports grounding via opts.metaOut. */
 /* SOFTEN — rewrite phrasings that commonly TRIP a moderation FALSE POSITIVE on
    legitimate film content into neutral, cinematic equivalents. This only rescues
    MISCLASSIFIED benign content ("gap-tooth" → "small natural gap between the front
@@ -934,7 +930,7 @@ async function proxyGenerate(prompt, opts, provider){
                  groundSearch: !!opts.groundSearch, groundImageSearch: !!opts.groundImageSearch,
                  // least-restrictive SUPPORTED moderation for gpt-image (fewer false positives on
                  // legitimate creative content; genuinely prohibited content is still blocked)
-                 ...(provider==="openai" ? { moderation: opts.moderation || "low" } : {}) };
+                 ...(isGptImageModel(model) ? { moderation: opts.moderation || "low" } : {}) };
   // Only retry true NETWORK-level failures (DNS / "failed to send"): they fail FAST and no
   // server work was done, so a quick retry is safe and cheap. Do NOT retry 5xx/504 \u2014 a 504
   // only comes back after the gateway's full (~150s) timeout, and the Edge Function may STILL
@@ -950,7 +946,7 @@ async function proxyGenerate(prompt, opts, provider){
   // and say so. (Wording deliberately avoids isNetworkBlip's trigger words so an
   // abandoned wait is never auto-retried.)
   const _capped = (pr)=> Promise.race([ pr,
-    new Promise((_,rej)=> setTimeout(()=>{ const e=new Error("The image server didn't answer within 6\u00bd minutes — the request was abandoned. If this keeps happening on Nano Banana models, the Google account may be out of prepaid credits or the image-proxy needs a redeploy."); e.__timedOut=true; rej(e); }, 390000)) ]);
+    new Promise((_,rej)=> setTimeout(()=>{ const e=new Error("The image server didn't answer within 6\u00bd minutes — the request was abandoned. If this keeps happening, fal.ai may be rate-limited or the image-proxy needs a redeploy."); e.__timedOut=true; rej(e); }, 390000)) ]);
   for(let attempt=0; attempt<2; attempt++){
     error = null;
     try{ ({ data, error } = await _capped(sb.functions.invoke(fnName, { body }))); }
@@ -974,7 +970,7 @@ async function proxyGenerate(prompt, opts, provider){
     // CONTENT-FILTER false positive: retry ONCE with benign-softened phrasing (e.g.
     // "gap-tooth" → "small gap between the front teeth"). Only rescues misclassified
     // legitimate content; genuinely prohibited prompts stay blocked and surface cleanly.
-    if(provider==="openai" && !opts.__softened && (window.turnIsContentBlock ? window.turnIsContentBlock(_raw) : false)){
+    if(isGptImageModel(model) && !opts.__softened && (window.turnIsContentBlock ? window.turnIsContentBlock(_raw) : false)){
       const soft = (typeof softenImagePrompt==="function") ? softenImagePrompt(prompt) : null;
       if(soft && soft!==prompt){
         if(opts.metaOut) opts.metaOut.softened = true;
@@ -984,6 +980,8 @@ async function proxyGenerate(prompt, opts, provider){
     throw new Error((window.turnSafeError||(x=>x))(_raw));          // provider error relayed by the proxy
   }
   if(opts.metaOut && data && typeof data.grounded!=="undefined") opts.metaOut.grounded = !!data.grounded;
+  if(data && data.usage && typeof window.dispatchEvent==="function")
+    window.dispatchEvent(new CustomEvent("turn-credits-changed",{ detail:data.usage }));
   // Provider-native landscape/portrait canvases are not always Cinema Machine's selected
   // ratio (GPT Image landscape is 3:2). Normalize BEFORE returning, so callers
   // can only commit a frame whose pixels match its 16:9 / 9:16 / 21:9 label.
@@ -991,79 +989,22 @@ async function proxyGenerate(prompt, opts, provider){
   if(data && data.url) return await cropImageToAspect(data.url, aspect);
   throw new Error("The proxy returned no image. Try simplifying the prompt.");
 }
-async function oaiGenerate(prompt, opts){ return proxyGenerate(prompt, opts||{}, "openai"); }
+async function oaiGenerate(prompt, opts){ return proxyGenerate(prompt, { ...(opts||{}), model:((opts&&opts.model)||"gpt-image-2") }, "fal"); }
 window.proxyGenerate = proxyGenerate;
 window.oaiGenerate = oaiGenerate;
 
-/* call Nano Banana; opts={model, aspectRatio, key}. resolves to a data URL or throws. */
+/* call the selected image model; opts={model, aspectRatio}. resolves to a data URL or throws. */
 async function nbGenerate(prompt, opts){
   opts = opts || {};
   const model = opts.model || nbGetModel();
   const provider = providerOfModel(model);
-  /* dispatch to the right provider. OpenAI is always server-side. Google (Nano
-     Banana) routes through the proxy too when imageProxy is on (no key in the
-     browser); otherwise it calls Google directly with the user's local key. */
+  /* dispatch to the server image broker. All current image models go through fal.ai
+     first via the Supabase Edge Function; the direct browser Google path is retired
+     for production reliability and key safety. */
+  if(provider==="fal") return proxyGenerate(prompt, { ...opts, model }, "fal");
   if(provider==="openai") return proxyGenerate(prompt, { ...opts, model }, "openai");
-  if(imageProxyOn()) return proxyGenerate(prompt, { ...opts, model }, "google");
-  const key = opts.key || nbGetKey();
-  if(!key) throw new Error("No API key set.");
-  const aspectRatio = opts.aspectRatio || nbGetAspect();
-  const imageSize = opts.imageSize || nbGetRes();
-  const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent";
-  let res;
-  try{
-    /* parts: text prompt + optional reference/edit image + extra reference images */
-    const parts = [{ text: prompt }];
-    if(opts.referenceImage){
-      const b64 = await nbToInlineData(opts.referenceImage);
-      if(b64) parts.push({ inlineData: b64 });
-    }
-    if(opts.extraImages && opts.extraImages.length){
-      for(const u of opts.extraImages){
-        const b = await nbToInlineData(u);
-        if(b) parts.push({ inlineData: b });
-      }
-    }
-    /* body — with optional Google Search grounding */
-    const reqBody = {
-      contents:[{ parts }],
-      generationConfig:{ responseModalities:["IMAGE"], imageConfig:{ aspectRatio, imageSize } }
-    };
-    if(opts.groundSearch){
-      const isFlash = model === "gemini-3.1-flash-image";
-      reqBody.tools = [{ googleSearch: (isFlash && opts.groundImageSearch)
-        ? { searchTypes:{ webSearch:{}, imageSearch:{} } } : {} }];
-    }
-    res = await fetch(endpoint+"?key="+encodeURIComponent(key), {
-      method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify(reqBody), signal: opts.signal
-    });
-  }catch(e){
-    if(e && (e.name==="AbortError" || opts.signal && opts.signal.aborted)) throw e;   // user cancelled — propagate as-is
-    if(typeof navigator!=="undefined" && navigator.onLine===false)
-      throw new Error("You appear to be offline. Reconnect and try again.");
-    throw new Error("Couldn't reach Google's image API. Check your connection and try again.");
-  }
-  if(!res.ok){
-    let msg = "Generation failed ("+res.status+")";
-    try{ const j = await res.json(); if(j && j.error && j.error.message) msg = j.error.message; }catch(e){}
-    if(res.status===400 && /api key/i.test(msg)) msg = "That API key was rejected. Check it in Google AI Studio.";
-    if(res.status===404) msg = "This model isn't available on your key yet \u2014 try the other model.";
-    throw new Error((window.turnSafeError||(x=>x))(msg));   // mask provider billing/key detail from users
-  }
-  const data = await res.json();
-  const cand = (data.candidates||[])[0] || {};
-  const parts = (cand.content||{}).parts || [];
-  const img = parts.find(p=>p.inlineData && p.inlineData.data);
-  if(!img) throw new Error("The model returned no image. Try simplifying the prompt.");
-  /* report whether the model ACTUALLY grounded (groundingMetadata present), not just
-     whether we requested it — written to opts.metaOut so callers can badge accurately */
-  if(opts.metaOut){
-    const gm = cand.groundingMetadata || cand.grounding_metadata || null;
-    const chunks = gm && (gm.groundingChunks || gm.grounding_chunks || gm.groundingAttributions || []);
-    opts.metaOut.grounded = !!(gm && ((chunks && chunks.length) || gm.webSearchQueries || gm.searchEntryPoint));
-  }
-  return "data:"+(img.inlineData.mimeType||"image/png")+";base64,"+img.inlineData.data;
+  if(imageProxyOn()) return proxyGenerate(prompt, { ...opts, model }, provider);
+  throw new Error("Image generation now runs through fal.ai on the server. Sign in and make sure the image proxy is enabled.");
 }
 window.nbGenerate = nbGenerate;
 

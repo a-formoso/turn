@@ -1,13 +1,13 @@
 /* plans.jsx — Cinema Machine subscription plans + paywall modal.
-   The three tiers open their Stripe Payment Link, tagged with the user's Supabase
-   id (client_reference_id) so the webhook credits the right account. Credits are
-   granted server-side by supabase/functions/stripe-webhook.
+   The three tiers and one-off credit packs open their Stripe Payment Link, tagged
+   with the user's Supabase id (client_reference_id) so the webhook credits the
+   right account. Credits are granted server-side by supabase/functions/stripe-webhook.
 
    TEST vs LIVE links auto-switch by hostname (see LIVE_HOSTS / planLink below):
    production domains use `live`, everything else (localhost, *.replit.dev preview)
    uses `test` — so local/preview testing can never hit a real card. At launch you
-   only fill in the three `live:` URLs; no code path changes. Until a `live` URL is
-   set it safely falls back to `test`. */
+   fill in the plan and pack `live:` URLs; no code path changes. Until a `live`
+   URL is set it safely falls back to `test`. */
 
 /* Production hostnames that should use the LIVE payment links. Add the custom
    domain here once cinema.infinitestudioai.com is verified. */
@@ -19,26 +19,47 @@ const LIVE_HOSTS = ["cinema-machine.replit.app", "cinema.infinitestudioai.com", 
    so 800 new credits buys exactly what 80 old credits did. The `credits` shown on each
    plan below is already in this denomination; the Stripe product's `plan_credits`
    metadata MUST match these numbers (that's what the webhook actually grants). */
-window.CREDIT_SCALE = 10;
+window.CREDIT_SCALE = Number(window.CREDIT_SCALE) || 10;
 
 const PLANS = [
   { tier:"writer",   name:"Writer",   price:"$19", credits:800,
-    blurb:"Write, design, and shoot short scenes.",
-    features:["800 credits / month","Story, cast, props & locations","Video on Kling & 720p"],
+    blurb:"Start with the story engine.",
+    entitlements:{ writers_room:true, art_room:false, stage:false },
+    features:["800 credits / month","Writers' Room","Story spine, beats and screenplay"],
     test:"https://buy.stripe.com/test_8x24gB63afmHgtS3eXc7u00",
     live:"https://buy.stripe.com/8x24gB63afmHgtS3eXc7u00" },
   { tier:"director", name:"Director", price:"$49", credits:2400, popular:true,
-    blurb:"Produce a whole short each month.",
-    features:["2,400 credits / month","Every model unlocked","Up to 1080p","Priority render queue"],
+    blurb:"Write the film, then design it.",
+    entitlements:{ writers_room:true, art_room:true, stage:false },
+    features:["2,400 credits / month","Writers' Room + Art Room","Characters, props, locations, shots and storyboards"],
     test:"https://buy.stripe.com/test_00waEZ77eeiD6Ti4j1c7u01",
     live:"https://buy.stripe.com/00waEZ77eeiD6Ti4j1c7u01" },
   { tier:"studio",   name:"Studio",   price:"$149", credits:9000,
-    blurb:"Full films, back to back.",
-    features:["9,000 credits / month","4K output","Batch rendering","Front of the queue"],
+    blurb:"Move from script to production.",
+    entitlements:{ writers_room:true, art_room:true, stage:true },
+    features:["9,000 credits / month","Writers' Room + Art Room + Stage","Video, voice, timeline and production assets"],
     test:"https://buy.stripe.com/test_bJe9AVbnu6QbdhG2aTc7u02",
     live:"https://buy.stripe.com/bJe9AVbnu6QbdhG2aTc7u02" },
 ];
 window.CINEMA_PLANS = PLANS;
+
+/* One-off top-ups. Create these in Stripe as ONE-OFF products with metadata:
+     app=cinema-machine
+     kind=credit_pack
+     pack_credits=<credits>
+   Then paste each Payment Link below. Leave blank until the Stripe link exists. */
+const CREDIT_PACKS = [
+  { sku:"credits-300", name:"300 Credit Pack", price:"$9", credits:300,
+    blurb:"A quick top-up for extra drafts or a few more renders.",
+    test:"", live:"https://buy.stripe.com/8x200l63a2zVfpO9Dlc7u03" },
+  { sku:"credits-1200", name:"1,200 Credit Pack", price:"$29", credits:1200, popular:true,
+    blurb:"Enough room for a heavier design or production pass.",
+    test:"", live:"https://buy.stripe.com/9B6cN73V28YjfpO02Lc7u04" },
+  { sku:"credits-4000", name:"4,000 Credit Pack", price:"$79", credits:4000,
+    blurb:"A production reserve for image, voice and video work.",
+    test:"", live:"https://buy.stripe.com/8x200l77e1vR4La7vdc7u05" },
+];
+window.CINEMA_CREDIT_PACKS = CREDIT_PACKS;
 
 /* ---- admin-editable plan-card COPY (name / blurb / features / most-popular) -------
    Price & credits are NOT editable here — Stripe owns them (product price +
@@ -75,16 +96,24 @@ window.turnPlanCopy = function(){ const o={}; PLANS.forEach(p=>{ o[p.tier]={ nam
      test checkout on a real domain — a "" makes startCheckout show a soft notice).
    - Anywhere else (localhost, *.replit.dev preview): the TEST link, so dev/preview
      testing can never touch a real card. */
-function planLink(plan){
+function checkoutLink(item){
   let host = "";
   try{ host = (window.location && window.location.hostname || "").toLowerCase(); }catch(e){}
   const isLiveHost = LIVE_HOSTS.indexOf(host) >= 0;
-  return isLiveHost ? (plan.live || "") : plan.test;
+  return isLiveHost ? (item.live || "") : item.test;
+}
+function planLink(plan){
+  return checkoutLink(plan);
 }
 window.turnPlanLink = planLink;
+window.turnCreditPackLink = checkoutLink;
 
 /* ---- PER-TIER ENTITLEMENTS — the checkout copy, made true in the app. ----------
-   Enforced in the Stage (model picker, resolution ladder, takes-per-Generate):
+   Enforced in room navigation:
+     Writer   → Writers' Room
+     Director → Writers' Room + Art Room
+     Studio   → Writers' Room + Art Room + Stage
+   Enforced inside the Stage too (model picker, resolution ladder, takes-per-Generate):
      Writer   → Kling only, up to 720p, single take
      Director → every model, up to 1080p, single take
      Studio   → every model, 4K, batch takes (up to 4)
@@ -95,10 +124,39 @@ const RES_RANK = { "480p":0, "720p":1, "1080p":2, "4K":3 };
 const TIER_GATES = {
   writer:   { models:["kling-3.0"], maxRes:"720p",  maxBatch:1 },
   none:     { models:["kling-3.0"], maxRes:"720p",  maxBatch:1 },
+  pro:      { models:"all",         maxRes:"1080p", maxBatch:1 }, // legacy tier name; treated as Director
   director: { models:"all",         maxRes:"1080p", maxBatch:1 },
   studio:   { models:"all",         maxRes:"4K",    maxBatch:4 },
 };
 const OPEN_GATE = { tier:"open", models:"all", maxRes:"4K", maxBatch:4 };
+const ROOM_ENTITLEMENTS = {
+  writer:   { writers_room:true, art_room:false, stage:false },
+  none:     { writers_room:true, art_room:false, stage:false },
+  free:     { writers_room:false, art_room:false, stage:false },
+  pro:      { writers_room:true, art_room:true,  stage:false },
+  director: { writers_room:true, art_room:true,  stage:false },
+  studio:   { writers_room:true, art_room:true,  stage:true },
+};
+const OPEN_ROOM_ENTITLEMENTS = { writers_room:true, art_room:true, stage:true };
+function _roomTier(balanceOrTier){
+  if(typeof balanceOrTier==="string") return balanceOrTier.toLowerCase().trim();
+  const b = balanceOrTier || window.turnCreditBalance || null;
+  if(!b) return "open";
+  return String(b.plan || b.tier || "none").toLowerCase().trim();
+}
+window.turnRoomEntitlements = function(balanceOrTier){
+  if(window.turnIsAdmin) return { ...OPEN_ROOM_ENTITLEMENTS };
+  const tier = _roomTier(balanceOrTier);
+  if(tier==="open") return { ...OPEN_ROOM_ENTITLEMENTS };
+  const e = ROOM_ENTITLEMENTS[tier] || ROOM_ENTITLEMENTS.none;
+  return { ...e };
+};
+window.turnRoomRequiredPlan = function(room){
+  const r = String(room||"").toLowerCase();
+  if(r==="art" || r==="art_room") return "Director";
+  if(r==="stage") return "Studio";
+  return "Writer";
+};
 window.turnTierGates = function(balance){
   if(window.turnIsAdmin) return OPEN_GATE;
   const bal = (balance!==undefined) ? balance : window.turnCreditBalance;
@@ -127,11 +185,11 @@ function startCheckout(plan, opts){
   const uid = window.turnUserId || null;
   const email = window.turnUserEmail || "";
   if(!uid){
-    if(window.appToast) window.appToast("Sign in first — your plan's credits are tied to your account.","info");
+    if(window.appToast) window.appToast("Sign in first — purchases are tied to your account.","info");
     try{ window.dispatchEvent(new CustomEvent("turn-need-signin")); }catch(e){}
     return;
   }
-  const base = planLink(plan);
+  const base = checkoutLink(plan);
   if(!base){
     if(window.appToast) window.appToast("Checkout isn't available yet — please try again shortly.","info");
     return;
@@ -166,6 +224,21 @@ function WelcomePlanCard({ plan, credits, activating, onNewStory, onClose }){
       React.createElement("button",{className:"welcome-later",onClick:onClose},"I’ll look around first")));
 }
 window.WelcomePlanCard = WelcomePlanCard;
+
+function WelcomeCreditPackCard({ credits, activating, onClose }){
+  return React.createElement("div",{className:"ns-overlay"},
+    React.createElement("div",{className:"welcome-card"},
+      React.createElement("div",{className:"welcome-eyebrow"},"Cinema Machine"),
+      React.createElement("div",{className:"welcome-title"},
+        activating ? "Adding your extra credits…" : "Extra credits added"),
+      React.createElement("div",{className:"welcome-sub"},
+        activating
+          ? "Payment received — your top-up is being added to your balance. This only takes a few seconds."
+          : ("Your balance is now "+(Number(credits)||0).toLocaleString()+" credits.")),
+      React.createElement("button",{className:"welcome-cta",onClick:onClose},
+        activating ? "Back to studio" : "Back to studio")));
+}
+window.WelcomeCreditPackCard = WelcomeCreditPackCard;
 
 /* ADMIN copy editor — edits only the marketing text (name/blurb/features/popular),
    persisted globally via cloudSaveAppConfig. Price & credits stay Stripe-owned. */
@@ -216,6 +289,14 @@ function PlansModal({ onClose, currentPlan }){
   if(typeof window.usePlansVersion==="function") window.usePlansVersion();   // re-render on copy edits
   const [editing, setEditing] = React.useState(false);
   const isAdmin = !!window.turnIsAdmin;
+  const hasPlan = !!(window.turnIsPaidPlan && window.turnIsPaidPlan(currentPlan || ((window.turnCreditBalance||{}).plan)));
+  const buyPack = (pack)=>{
+    if(!hasPlan && !window.turnIsAdmin){
+      if(window.appToast) window.appToast("Choose a monthly plan first — extra credits top up an active subscription.","info");
+      return;
+    }
+    startCheckout(pack);
+  };
   return React.createElement("div",{className:"ns-overlay",onMouseDown:e=>{ if(e.target===e.currentTarget && !editing) onClose(); }},
     React.createElement("div",{className:"plans-modal"},
       React.createElement("button",{className:"ag-x plans-x",onClick:onClose},React.createElement(Icon.x,{s:16})),
@@ -229,7 +310,8 @@ function PlansModal({ onClose, currentPlan }){
           React.createElement((Icon.wand||Icon.sparkles),{s:13})," Edit copy")),
       editing
         ? React.createElement(PlanCopyEditor,{ onDone:()=>setEditing(false) })
-        : React.createElement("div",{className:"plans-grid"},
+        : React.createElement(React.Fragment,null,
+          React.createElement("div",{className:"plans-grid"},
             PLANS.map(p=>{
               const active = currentPlan && String(currentPlan).toLowerCase()===p.tier;
               return React.createElement("div",{key:p.tier,className:"plan-card"+(p.popular?" popular":"")+(active?" active":"")},
@@ -245,6 +327,24 @@ function PlansModal({ onClose, currentPlan }){
                   onClick:()=>{ if(!active) startCheckout(p); }},
                   active ? "Current plan" : ("Choose "+p.name)));
             })),
+          React.createElement("div",{className:"credit-packs"},
+            React.createElement("div",{className:"credit-packs-head"},
+              React.createElement("div",null,
+                React.createElement("div",{className:"credit-packs-title"},"Extra credits"),
+                React.createElement("div",{className:"credit-packs-sub"},"One-off top-ups for active subscriptions. Purchased credits are added to your balance."))),
+            React.createElement("div",{className:"credit-packs-grid"},
+              CREDIT_PACKS.map(p=>{
+                const unavailable = !checkoutLink(p);
+                return React.createElement("div",{key:p.sku,className:"credit-pack"+(p.popular?" popular":"")},
+                  p.popular && React.createElement("div",{className:"credit-pack-flag"},"Best value"),
+                  React.createElement("div",{className:"credit-pack-name"},p.name),
+                  React.createElement("div",{className:"credit-pack-price"},p.price),
+                  React.createElement("div",{className:"credit-pack-blurb"},p.blurb),
+                  React.createElement("button",{className:"plan-cta"+(p.popular?" primary":""),disabled:unavailable,
+                    title:unavailable ? "Paste this pack's Stripe Payment Link into app/plans.jsx first" : "Buy extra credits",
+                    onClick:()=>buyPack(p)},
+                    unavailable ? "Coming soon" : ("Buy "+p.credits.toLocaleString())));
+              })))),
       React.createElement("div",{className:"plans-foot"},
         "Secure checkout by Stripe · Cinema Machine, by Infinite Studio AI")));
 }

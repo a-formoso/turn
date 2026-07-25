@@ -100,8 +100,12 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
     const grab = async (id)=>{ let u = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
       if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(id); }catch(e){} } return u; };
     const _locPanel = (loc && typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
-    const locSpec = loc ? [{ id:loc.id, locPanelQ:(_locPanel?_locPanel.q:null),
-      note:(loc.name||"location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+" (one full-frame view)" }] : [];
+    const locSpec = loc
+      ? ((typeof shotLocationCoverageSpecs==="function")
+        ? shotLocationCoverageSpecs(loc, sh, scene, (window.turnContinuity||{}).drafts||{})
+        : [{ id:loc.id, locPanelQ:(_locPanel?_locPanel.q:null),
+          note:(loc.name||"location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+" (one full-frame view)" }])
+      : [];
     // identity anchors for the cast & props actually in THIS frame — derived from the
     // action text (inFrameCast/inFrameProps), never the fragile manual tags.
     const _chars = Object.values(ctx.charById||{});
@@ -191,7 +195,8 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
     window.addEventListener("nb-gen-done", onDone);
     return ()=>window.removeEventListener("nb-gen-done", onDone);
   },[prevShot && prevShot.id]);
-  const _refKey = [sh.id, prevShot&&prevShot.id, prevShot&&prevShot.locked?1:0, prevSeedBump, loc&&loc.id, locWeight,
+  const _coverageKey = loc && Array.isArray(loc.coverageSheets) ? loc.coverageSheets.map(v=>v.id).join(",") : "";
+  const _refKey = [sh.id, prevShot&&prevShot.id, prevShot&&prevShot.locked?1:0, prevSeedBump, loc&&loc.id, _coverageKey, locWeight,
     subjects.map(c=>c.id).join(","), inProps.map(p=>p.id).join(","), gen.genUrl||""].join("|");
   React.useEffect(()=>{
     let alive = true;
@@ -201,11 +206,18 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
       // the rolling SEED leads (the previous shot's frame), then the canon sheets ordered by weight
       const seedU = prevShot ? await grab(prevShot.id) : "";
       const seed = (prevShot && seedU) ? [{ url:seedU, label:"Previous shot · Beat "+(prevShot.beatN||"—"), kind:"seed", approved:!!prevShot.locked }] : [];
-      const locItems = []; if(loc){ let u=await grab(loc.id); let lab=(loc.name||"Location")+" plate";
-        if(u && typeof shotLocPanel==="function" && typeof shotLocPanelCrop==="function"){
-          const p=shotLocPanel(sh); const cu=await shotLocPanelCrop(u, p.q);
-          if(cu){ u=cu; lab=(loc.name||"Location")+" — "+p.label; } }
-        if(u) locItems.push({ url:u, label:lab, kind:"location", refId:loc.id }); }
+      const locItems = []; if(loc){
+        const p = (typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
+        const locSpecs = (typeof shotLocationCoverageSpecs==="function")
+          ? shotLocationCoverageSpecs(loc, sh, scene, (window.turnContinuity||{}).drafts||{})
+          : [{ id:loc.id, locPanelQ:(p?p.q:null), note:(loc.name||"Location")+" plate" }];
+        for(const s of locSpecs){ let u=await grab(s.id);
+          if(u && s.locPanelQ!=null && typeof shotLocPanelCrop==="function"){
+            const cu=await shotLocPanelCrop(u, s.locPanelQ); if(cu) u=cu;
+          }
+          if(u) locItems.push({ url:u, label:String(s.note||"Location reference").replace(/\s+\([^)]*\)$/,""), kind:"location", refId:s.id });
+        }
+      }
       const castItems = []; for(const c of subjects){ const u=await grab(c.id); if(u) castItems.push({ url:u, label:c.name, kind:"character", refId:c.id }); }
       const propItems = []; for(const p of inProps){ const u=await grab(p.id); if(u) propItems.push({ url:u, label:p.name, kind:"prop", refId:p.id }); }
       const sheetOrder = (locWeight==="ambient") ? [...castItems, ...locItems, ...propItems] : [...locItems, ...castItems, ...propItems];
@@ -572,10 +584,28 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
   // shot is always the chain HEAD; a shot flagged .anchor is an explicit FRESH START (a hard
   // cut mid-scene that won't inherit the previous frame). toggleHead flips that flag.
   const ordered = (typeof sceneShotsOrdered==="function") ? sceneShotsOrdered(shots) : shots;
-  // BEAT LANES model: contiguous chain-order groups by beat number
-  const lanes = (()=>{ const Ls=[]; ordered.forEach(sh=>{ const n=sh.beatN||0;
-    let L=Ls[Ls.length-1]; if(!L || L.n!==n){ L={ n, shots:[] }; Ls.push(L); } L.shots.push(sh); });
-    return Ls; })();
+  // BEAT LANES model: one card for EVERY Writers' Room beat, even if the shot
+  // designer missed it. Orphan/manual shots with non-map beat numbers are kept
+  // after the canonical beat cards instead of silently disappearing.
+  const lanes = (()=>{
+    const rows = Array.isArray(bm.rows) ? bm.rows : [];
+    const byBeat = {};
+    ordered.forEach(sh=>{ const n = Number(sh.beatN)||0; (byBeat[n]=byBeat[n]||[]).push(sh); });
+    const seen = new Set();
+    const Ls = rows.map((r,i)=>{
+      const n = Number(r.n)||i+1;
+      seen.add(n);
+      return { n, shots:byBeat[n]||[], canonical:true };
+    });
+    Object.keys(byBeat).map(Number).sort((a,b)=>a-b).forEach(n=>{
+      if(!seen.has(n)) Ls.push({ n, shots:byBeat[n]||[], canonical:false });
+    });
+    if(!Ls.length && ordered.length){
+      ordered.forEach(sh=>{ const n=Number(sh.beatN)||0;
+        let L=Ls[Ls.length-1]; if(!L || L.n!==n){ L={ n, shots:[] }; Ls.push(L); } L.shots.push(sh); });
+    }
+    return Ls;
+  })();
   // ONE CARD PER BEAT (user ruling 2026-07-21): all beats list vertically as cards.
   // EXCEPTION: while a BATCH renders, the legacy full-card lanes mount for every
   // beat — the scene runner advances by watching MOUNTED ShotCards, and the compact

@@ -172,6 +172,274 @@ window.deriveLocations = deriveLocations;
 window.parseSlugline = parseSlugline;
 window.locSlug = locSlug;
 
+function locationSceneText(scene, drafts){
+  const bits = [scene&&scene.loc, scene&&scene.title, scene&&scene.summary, scene&&scene.objective, scene&&scene.turningPoint];
+  const d = drafts && scene && drafts[scene.id];
+  if(d && Array.isArray(d.blocks)) d.blocks.forEach(b=>{ if(b && b.text) bits.push(b.text); });
+  return bits.filter(Boolean).join(" ").replace(/\s+/g," ").trim();
+}
+function locationSceneScriptText(scene, drafts){
+  if(!scene) return "";
+  const d = drafts && drafts[scene.id];
+  if(d && Array.isArray(d.blocks) && d.blocks.length){
+    return d.blocks.map(b=>{
+      const t = String(b&&b.text||"").replace(/\s+/g," ").trim(); if(!t) return "";
+      if(b.type==="scene") return t.toUpperCase();
+      if(b.type==="char") return "\n"+t.toUpperCase();
+      if(b.type==="dia") return "  "+t;
+      if(b.type==="paren") return "  ("+t.replace(/^\(|\)$/g,"")+")";
+      return t;
+    }).filter(Boolean).join("\n");
+  }
+  return [scene.loc, scene.summary, scene.objective, scene.turningPoint].filter(Boolean).join("\n");
+}
+function locationScriptExcerpt(scene, drafts, index, radius){
+  const txt = locationSceneScriptText(scene, drafts).replace(/\s+/g," ").trim();
+  if(!txt) return "";
+  const r = radius || 420;
+  const at = Math.max(0, Math.min(Number(index)||0, txt.length));
+  const start = Math.max(0, at-r);
+  const end = Math.min(txt.length, at+r);
+  return (start>0?"... ":"") + txt.slice(start,end).trim() + (end<txt.length?" ...":"");
+}
+function locationScreenplayContext(l, scenes, drafts, limit){
+  const locScenes = (Array.isArray(l&&l.scenes) && l.scenes.length)
+    ? (scenes||[]).filter(s=>l.scenes.indexOf(s.id)>=0)
+    : (scenes||[]);
+  const chunks = locScenes.map(s=>locationSceneScriptText(s, drafts)).filter(Boolean);
+  const text = chunks.join("\n\n").replace(/\n{3,}/g,"\n\n").trim();
+  const max = limit || 2600;
+  return text.length>max ? text.slice(0,max).replace(/\s+\S*$/,"").trim()+" ..." : text;
+}
+window.locationSceneScriptText = locationSceneScriptText;
+window.locationScreenplayContext = locationScreenplayContext;
+function locationSceneForCoverageSheet(l, sheet, scenes){
+  const nos = Array.isArray(sheet&&sheet.sceneNos) ? sheet.sceneNos.map(Number).filter(Number.isFinite) : [];
+  const list = scenes||[];
+  if(nos.length){
+    const byNo = list.find(s=>nos.indexOf(Number(s.no))>=0);
+    if(byNo) return byNo;
+  }
+  const sid = l && Array.isArray(l.scenes) && l.scenes[0];
+  return list.find(s=>s.id===sid) || list[0] || null;
+}
+function locationScreenplayBlocks(scene, drafts){
+  if(!scene) return [];
+  const d = drafts && drafts[scene.id];
+  if(d && Array.isArray(d.blocks) && d.blocks.length) return d.blocks.map(b=>({ ...b }));
+  const out = [];
+  if(scene.loc) out.push({ type:"scene", text:scene.loc });
+  if(scene.summary) out.push({ type:"action", text:scene.summary });
+  if(scene.objective) out.push({ type:"action", text:scene.objective });
+  if(scene.turningPoint) out.push({ type:"action", text:scene.turningPoint });
+  return out;
+}
+function locationScreenplayReferenceImages(l, sheet, scenes, drafts){
+  if(typeof document==="undefined") return [];
+  const scene = locationSceneForCoverageSheet(l, sheet, scenes);
+  const blocks = locationScreenplayBlocks(scene, drafts);
+  if(!blocks.length) return [];
+  const W = 1000, H = 1294, padX = 78, padTop = 62, padBottom = 64, lineH = 20;
+  const font = "15px Courier New, monospace";
+  const boldFont = "700 15px Courier New, monospace";
+  const lineUnits = (b)=>{
+    const type = String(b&&b.type||"action");
+    const text = String(b&&b.text||"").replace(/\s+/g," ").trim();
+    if(!text) return [];
+    const cfg = type==="char" ? { x:378, w:220, bold:true, upper:true, before:12, after:0 }
+      : type==="dia" ? { x:250, w:390, before:0, after:10 }
+      : type==="paren" ? { x:305, w:310, before:0, after:0 }
+      : type==="trans" ? { x:650, w:230, upper:true, before:10, after:10 }
+      : type==="scene" ? { x:padX, w:760, bold:true, upper:true, before:8, after:12 }
+      : { x:padX, w:760, before:8, after:12 };
+    const sample = document.createElement("canvas").getContext("2d");
+    sample.font = cfg.bold ? boldFont : font;
+    const words = (cfg.upper ? text.toUpperCase() : text).split(/\s+/);
+    const lines = []; let line = "";
+    words.forEach(w=>{
+      const t = line ? line+" "+w : w;
+      if(sample.measureText(t).width > cfg.w && line){ lines.push(line); line = w; }
+      else line = t;
+    });
+    if(line) lines.push(line);
+    return [{ blank:cfg.before }, ...lines.map(s=>({ text:s, ...cfg })), { blank:cfg.after }];
+  };
+  const units = [];
+  const slug = blocks.find(b=>b.type==="scene");
+  if(slug && !String(slug.text||"").match(/^\s*\d+\s+/) && scene && scene.no!=null)
+    units.push(...lineUnits({ type:"scene", text:String(scene.no)+"  "+slug.text }));
+  blocks.forEach(b=>{ if(slug && b===slug) return; units.push(...lineUnits(b)); });
+  const pages = [];
+  let page = [], y = padTop;
+  const pushPage = ()=>{ if(page.length){ pages.push(page); page = []; y = padTop; } };
+  units.forEach(u=>{
+    const h = u.blank!=null ? Number(u.blank)||0 : lineH;
+    if(y + h > H - padBottom){ pushPage(); }
+    page.push(u); y += h;
+  });
+  pushPage();
+  const sceneNo = scene&&scene.no!=null ? scene.no : "";
+  const title = "SCENE "+sceneNo+" - "+(((scene&&scene.title)||((l&&l.name)||"LOCATION"))).toUpperCase();
+  const imgs = pages.slice(0,6).map((items,pi)=>{
+    const canvas = document.createElement("canvas"); canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d"); if(!ctx) return "";
+    ctx.fillStyle = "#f4f0e6"; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle = "#151515"; ctx.font = boldFont;
+    ctx.fillText(title.slice(0,86), padX, 42);
+    ctx.fillText(String(pi+1), W-padX-8, 42);
+    let cy = padTop;
+    items.forEach(u=>{
+      if(u.blank!=null){ cy += Number(u.blank)||0; return; }
+      ctx.font = u.bold ? boldFont : font;
+      ctx.fillStyle = "#151515";
+      ctx.fillText(u.text, u.x, cy);
+      cy += lineH;
+    });
+    ctx.fillStyle = "#8a8177"; ctx.font = "12px Courier New, monospace";
+    ctx.fillText("FULL SCENE SCREENPLAY SNAPSHOT - WRITERS' ROOM TEXT", padX, H-34);
+    ctx.fillText("PAGE "+(pi+1)+" OF "+pages.length, W-padX-92, H-34);
+    try{ return canvas.toDataURL("image/png"); }catch(e){ return ""; }
+  }).filter(Boolean);
+  return imgs;
+}
+function locationScreenplayReferenceImage(l, sheet, scenes, drafts){
+  const imgs = locationScreenplayReferenceImages(l, sheet, scenes, drafts);
+  return imgs[0] || "";
+}
+window.locationSceneForCoverageSheet = locationSceneForCoverageSheet;
+window.locationScreenplayReferenceImages = locationScreenplayReferenceImages;
+window.locationScreenplayReferenceImage = locationScreenplayReferenceImage;
+function locationMasterPanelPlan(l, scenes, drafts){
+  const sheets = (typeof deriveLocationCoverageSheets==="function") ? deriveLocationCoverageSheets(l, scenes||[], drafts||{}) : [];
+  const roles = sheets.map(s=>String(s.role||"").toUpperCase());
+  const mixed = roles.indexOf("INT")>=0 && roles.indexOf("EXT")>=0;
+  if(!mixed) return null;
+  const firstRole = String((sheets[0]&&sheets[0].role)||"EXT").toUpperCase();
+  const extName = (sheets.find(s=>String(s.role).toUpperCase()==="EXT")||{}).name || ((l&&l.name)||"Location")+" Exterior";
+  const intName = (sheets.find(s=>String(s.role).toUpperCase()==="INT")||{}).name || ((l&&l.name)||"Location")+" Interior";
+  const threshold = "the visible threshold/sightline relationship between "+extName+" and "+intName+" — windows, glass, doors, booth walls, openings, approach path and eyeline geometry must line up";
+  if(firstRole==="INT") return {
+    layout: "exactly 4 views in a 2x2 grid, planned from the screenplay's first playable space",
+    top_left: "INTERIOR establishing view of "+intName+" because the action starts inside — show the empty working room, floor, walls, openings and usable blocking space",
+    top_right: "INTERIOR key action station from the screenplay — desk/terminal/counter/work surface or the practical area where the first business plays",
+    bottom_left: "EXTERIOR context of "+extName+" seen from the connected approach or through the relevant opening, matching the interior's sightlines",
+    bottom_right: "THRESHOLD CONNECTION view: "+threshold,
+    rule: "the four panels are one coherent real location with matched scale, materials, light direction and geography; no actors, no action, no text",
+  };
+  return {
+    layout: "exactly 4 views in a 2x2 grid, planned from the screenplay's first playable space",
+    top_left: "EXTERIOR wide establishing view of "+extName+" because the scene opens outside — show the whole playable geography, approach, ground plane, weather and major landmarks",
+    top_right: "EXTERIOR-to-INTERIOR relationship view: "+threshold,
+    bottom_left: "INTERIOR establishing view of "+intName+" — the empty room/subspace the script later plays inside, with working surfaces and openings",
+    bottom_right: "key close/detail from the screenplay that proves the location can stage the action: terminal, desk, counter, rack, window/glass, doorway or other named functional feature",
+    rule: "the four panels are one coherent real location with matched scale, materials, light direction and geography; no actors, no action, no text",
+  };
+}
+window.locationMasterPanelPlan = locationMasterPanelPlan;
+function _locSheetId(role, name){
+  const k = locSlug(name).split("-").slice(0,4).join("-") || role.toLowerCase();
+  return "cov-"+role.toLowerCase()+"-"+k;
+}
+function _locSideCueIndex(text, role){
+  const s = String(text||"");
+  const re = role==="INT"
+    ? /\b(inside|interior|within|booth|room|office|building|kiosk|cab|cabin|car|vehicle|lobby|hall|shop|store|terminal|control room|desk|counter|console|lamp)\b/i
+    : /\b(outside|exterior|facade|front|street|yard|parking|rain|pavement|road|approach|rack|racks)\b/i;
+  const i = s.search(re);
+  return i>=0 ? i : 999999;
+}
+function deriveLocationCoverageSheets(l, scenes, drafts){
+  if(!l) return [];
+  const clean = (s,n)=>{ const x=String(s||"").replace(/\s+/g," ").trim();
+    return (typeof clipWords==="function") ? clipWords(x,n||180) : x.slice(0,n||180); };
+  const locScenes = (Array.isArray(l.scenes) && l.scenes.length)
+    ? (scenes||[]).filter(s=>l.scenes.indexOf(s.id)>=0)
+    : (scenes||[]);
+  const sceneTexts = locScenes.map((s,i)=>{
+    const script = locationSceneScriptText(s, drafts);
+    const bodyScan = locationScreenplayBlocks(s, drafts).filter(b=>b&&b.type!=="scene").map(b=>b.text).join(" ").replace(/\s+/g," ").trim();
+    const prose = locationSceneText(s, drafts);
+    return { scene:s, i, text:prose, script, bodyScan, scan:script || prose };
+  });
+  const text = sceneTexts.map(s=>s.scan).join(" ").replace(/\s+/g," ").trim();
+  if(!text) return [];
+  const baseName = l.name || "Location";
+  const out = [];
+  const add = (role, name, summary, triggers, order, scene, scriptExcerpt)=>{
+    const id = _locSheetId(role, name);
+    const sceneNo = scene && scene.no;
+    const existing = out.find(v=>v.id===id);
+    if(existing){
+      if(Number(order)<Number(existing.order||999999)) existing.order = order;
+      if(scriptExcerpt && !existing.scriptExcerpt) existing.scriptExcerpt = clean(scriptExcerpt,720);
+      if(sceneNo!=null && existing.sceneNos.indexOf(sceneNo)<0) existing.sceneNos.push(sceneNo);
+      return;
+    }
+    out.push({ id, role, name:clean(name,64), summary:clean(summary,260), order:Number(order)||0,
+      sceneNos: sceneNo!=null ? [sceneNo] : [],
+      scriptExcerpt: clean(scriptExcerpt,720),
+      triggerWords:Array.from(new Set((triggers||[]).map(x=>String(x||"").toLowerCase()).filter(Boolean))).slice(0,10),
+      fromScript:true });
+  };
+  const intExt = String(l.intExt||"").toUpperCase();
+  const mentionsSubspace = /\b(?:inside|within|in)\s+(?:the\s+|a\s+|an\s+)?[A-Za-z0-9'’ -]{2,44}?\b(?:booth|room|office|building|kiosk|cab|cabin|car|vehicle|lobby|hall|shop|store|terminal|control room|desk|counter)\b/i.test(text)
+    || (/\bbooth\b/i.test(text) && /\b(?:glass|window|terminal|desk|counter|keyboard|monitor|console|lamp)\b/i.test(text));
+  const mixedSides = intExt==="INT/EXT" || (/(^|\/)INT(\/|$)/.test(intExt) && /(^|\/)EXT(\/|$)/.test(intExt)) || mentionsSubspace;
+  sceneTexts.forEach(entry=>{
+    const s = entry.scene;
+    const baseOrder = entry.i * 100000;
+    const parsed = parseSlugline(s&&s.loc);
+    const sceneRole = String(parsed&&parsed.intExt||intExt).toUpperCase();
+    const body = entry.bodyScan || entry.scan || "";
+    const firstInt = _locSideCueIndex(body, "INT");
+    const firstExt = _locSideCueIndex(body, "EXT");
+    const cueOrder = (role)=>{
+      const own = role==="INT" ? firstInt : firstExt;
+      const other = role==="INT" ? firstExt : firstInt;
+      if(own<999999) return baseOrder + own + 1;
+      // A slugline side still needs a sheet, but if the first playable action cues
+      // the opposite side, let that opposite side lead the list.
+      if(other<999999) return baseOrder + other + 2;
+      return baseOrder + (role==="EXT" ? 0 : 1);
+    };
+    if(mixedSides && /EXT/.test(sceneRole)){
+      add("EXT", baseName+" Exterior",
+        "Exterior side required by the screenplay: render the empty outside of "+baseName+" with its approach, openings, weather, ground plane and sightline toward any interior side named by the scene.",
+        ["outside","exterior","facade","front","street","yard","rain","window","glass"],
+        cueOrder("EXT"), s, locationScriptExcerpt(s, drafts, firstExt<999999?firstExt:0));
+    }
+    if(mixedSides && /INT/.test(sceneRole)){
+      add("INT", baseName+" Interior",
+        "Interior side required by the screenplay: render the empty inside of "+baseName+" with the working areas, fixtures, openings and sightlines the scene plays through.",
+        ["inside","interior","room","booth","window","glass","terminal","desk","counter"],
+        cueOrder("INT"), s, locationScriptExcerpt(s, drafts, firstInt<999999?firstInt:0));
+    }
+    const insideM = entry.scan.match(/\b(?:inside|within|in)\s+(?:the\s+|a\s+|an\s+)?([A-Za-z0-9'’ -]{2,44}?\b(?:booth|room|office|building|kiosk|cab|cabin|car|vehicle|lobby|hall|shop|store|terminal|control room|desk|counter))\b/i);
+    const throughGlass = /\b(?:through|behind|inside|beyond)\s+(?:the\s+)?(?:glass|window|windshield|door|booth glass)\b/i.test(entry.scan);
+    const boothish = /\bbooth\b/i.test(entry.scan);
+    const terminalish = /\bterminal|desk|counter|keyboard|monitor|console|lamp\b/i.test(entry.scan);
+    if((/EXT/.test(sceneRole) || /EXT/.test(intExt)) && (insideM || (boothish && (throughGlass || terminalish)))){
+      const hitIndex = insideM ? insideM.index : Math.max(0, entry.scan.search(/\bbooth\b/i));
+      const sub = insideM ? tidyPlace(insideM[1]) : (boothish ? "Booth" : "Interior");
+      const name = /intake/i.test(baseName) && !/intake/i.test(sub) ? ("Intake "+sub) : sub;
+      add("INT", name+" Interior",
+        "Interior coverage required by the screenplay even if the prose only names the space: action plays inside "+name+" while the parent scene is staged from "+baseName+". Infer the empty interior from the screenplay page, the parent exterior, working surfaces, glass/window relationship, controls and sightline to the exterior.",
+        ["inside","interior","booth","glass","window","terminal","desk","counter","console"],
+        baseOrder + hitIndex + 1, s, locationScriptExcerpt(s, drafts, hitIndex));
+    }
+    const exteriorCueIdx = entry.scan.search(/\b(?:outside|exterior|facade|front|street|yard|parking|through\s+(?:the\s+)?window|through\s+(?:the\s+)?glass)\b/i);
+    if(/INT/.test(sceneRole) && exteriorCueIdx>=0){
+      add("EXT", baseName+" Exterior",
+        "Exterior coverage required by the screenplay: the scene looks out from the interior or cuts to the outside of this place. Render the empty exterior/facade, approach, openings and sightline back toward the interior.",
+        ["outside","exterior","facade","front","street","yard","window","glass"],
+        baseOrder + exteriorCueIdx + 1, s, locationScriptExcerpt(s, drafts, exteriorCueIdx));
+    }
+  });
+  return out.sort((a,b)=>(Number(a.order||0)-Number(b.order||0)) || String(a.name).localeCompare(String(b.name)));
+}
+window.locationSceneText = locationSceneText;
+window.deriveLocationCoverageSheets = deriveLocationCoverageSheets;
+
 /* true when the script has any parseable slugline we could pull into the tab */
 function scriptHasLocations(scenes){ return (scenes||[]).some(s=> !!parseSlugline(s.loc)); }
 window.scriptHasLocations = scriptHasLocations;
@@ -497,6 +765,9 @@ function buildLocationRefPrompt(l, project, opts){
   if(clean(st.fg.right))  fixtures.push({ what: clean(st.fg.right),  position: "near foreground right" });
   const mainStation = clean(st.bg.center) || "the space's primary, most story-relevant feature";
   const secondStation = clean(st.mid.left) || clean(st.mid.right) || clean(st.fg.left) || clean(st.fg.right) || "a signature material detail of the space";
+  const _C0 = window.turnContinuity || {};
+  const screenplayContext = (typeof locationScreenplayContext==="function") ? locationScreenplayContext(l, _C0.scenes||[], _C0.drafts||{}, 2600) : "";
+  const panelPlan = (typeof locationMasterPanelPlan==="function") ? locationMasterPanelPlan(l, _C0.scenes||[], _C0.drafts||{}) : null;
   const envProps = locationEnvironmentProps(l).map(p=>({
     name: p.name,
     description: [clean(p.form), clean(p.material)].filter(Boolean).join("; ") || undefined,
@@ -557,6 +828,7 @@ function buildLocationRefPrompt(l, project, opts){
         affordances: _affordances.length ? _affordances : undefined,
         capacity: _capacity>1 ? ("the space must comfortably hold up to "+_capacity+" people at once when scenes play") : undefined,
       } : undefined,
+      screenplay_context: screenplayContext || undefined,
       tone: tone || undefined,
     },
     fixtures: fixtures.length ? fixtures : undefined,
@@ -572,12 +844,14 @@ function buildLocationRefPrompt(l, project, opts){
     })(),
     ambient_species_canon: speciesCanon.length ? speciesCanon : undefined,
     views: {
-      layout: "exactly 4 views in a 2x2 grid",
-      top_left: "wide establishing front shot at eye level with symmetrical centered composition",
-      top_right: "high-angle three-quarter overview shot from an elevated corner perspective looking down into the space showing depth and spatial layout",
-      bottom_left: "close-up of "+mainStation,
-      bottom_right: "close-up of "+secondStation,
-      rule: "each view a distinctly different camera angle and composition \u2014 the SAME identical space, consistent architecture, scale, materials and light across all views",
+      ...(panelPlan || {
+        layout: "exactly 4 views in a 2x2 grid",
+        top_left: "wide establishing front shot at eye level with symmetrical centered composition",
+        top_right: "high-angle three-quarter overview shot from an elevated corner perspective looking down into the space showing depth and spatial layout",
+        bottom_left: "close-up of "+mainStation,
+        bottom_right: "close-up of "+secondStation,
+        rule: "each view a distinctly different camera angle and composition \u2014 the SAME identical space, consistent architecture, scale, materials and light across all views",
+      }),
     },
     render: {
       style: v.renderStyle.replace(/\.$/,""),
@@ -665,6 +939,51 @@ function buildLocationVariantPrompt(l, project, opts){
 }
 window.buildLocationVariantPrompt = buildLocationVariantPrompt;
 
+function buildLocationCoveragePrompt(l, sheet, project){
+  sheet = sheet || {};
+  const v = locVisualDefaults(l);
+  const role = String(sheet.role||"INT").toUpperCase();
+  const rules = (typeof locationNoCharactersRules==="function") ? locationNoCharactersRules(project, l).join(" ") : "empty of people and characters.";
+  const speciesCanon = (typeof locationSpeciesCanonText==="function") ? locationSpeciesCanonText(l) : "";
+  const clean = (x)=>String(x||"").replace(/\s+/g," ").trim().replace(/\.$/,"");
+  const parent = clean(l&&l.name) || "the parent location";
+  const name = clean(sheet.name) || (parent+" "+role);
+  const summary = clean(sheet.summary);
+  const spec = {
+    task: "single full-frame location coverage sheet derived from the screenplay",
+    coverage: {
+      role: role==="EXT" ? "exterior side" : "interior side",
+      name,
+      parent_location: parent+" ("+(l.intExt||"INT")+")",
+      screenplay_basis: summary || undefined,
+      screenplay_excerpt: clean(sheet.scriptExcerpt) || undefined,
+      screenplay_order: sheet.order!=null ? Number(sheet.order) : undefined,
+      scenes: Array.isArray(sheet.sceneNos) && sheet.sceneNos.length ? sheet.sceneNos : undefined,
+      rule: "render ONLY the space the screenplay needs for shots; no actors, no story action, no temporary performance moment",
+    },
+    relationship_to_parent: role==="INT"
+      ? "This is the inside/subspace of the parent location; preserve any glass, doorway, booth, window or threshold relationship back to the exterior when the script states it."
+      : "This is the outside/facade/context of the parent location; preserve entrances, windows, thresholds and approach geometry that connect to the interior when the script states it.",
+    environment_spec: {
+      architecture: clean(l.architecture) || undefined,
+      materials: clean(l.materials) || undefined,
+      lighting: clean(l.lighting) || undefined,
+      dramatic_use: clean(l.significance) || undefined,
+    },
+    ambient_species_canon: speciesCanon || undefined,
+    render: {
+      style: clean(v.renderStyle),
+      format: "ONE 16:9 cinematic environment reference image, not a grid, not a storyboard panel",
+      rules: [rules, "empty set only", "if the screenplay names a subspace without fully describing it, infer the missing architecture from the attached screenplay-page reference plus the parent location reference while staying conservative", "no text, no labels, no typography, no captions, no watermarks", "consistent with the parent location's materials, scale and light"],
+    },
+  };
+  const neg = [l.negativePrompt || v.negativePrompt || "", (typeof locationCharacterNegative==="function") ? locationCharacterNegative(project, l) : ""].filter(Boolean).join(", ").trim();
+  return "Render this screenplay-derived location coverage sheet EXACTLY as specified by this JSON spec:\n"
+    + JSON.stringify(spec, null, 1)
+    + (neg ? ("\nAVOID: "+neg.replace(/\.$/,"")+".") : "");
+}
+window.buildLocationCoveragePrompt = buildLocationCoveragePrompt;
+
 /* simplified fallback — fewer words, less likely to trip a content filter */
 function buildSimpleLocationPrompt(l){
   const rules = (typeof locationNoCharactersRules==="function") ? locationNoCharactersRules(null, l).join(" ") : "empty of people and characters";
@@ -718,7 +1037,7 @@ function _nbLocMeta(prompt){
   const mEntry = (window.NB_MODELS||[]).find(m=>m.id===model) || {};
   return { modelLabel:mEntry.label||"Nano Banana", modelId:model, aspect, size,
     // match the per-card sheet caption: GPT Image carries its quality (low/medium/high)
-    quality: (typeof window.providerOfModel==="function" && window.providerOfModel(model)==="openai")
+    quality: (typeof window.isGptImageModel==="function" && window.isGptImageModel(model))
       ? ((typeof window.nbGetOaiQuality==="function") ? window.nbGetOaiQuality() : "medium") : undefined,
     date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
     time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),

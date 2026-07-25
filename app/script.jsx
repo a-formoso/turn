@@ -433,15 +433,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
         polishWait ? "Redrafting\u2026"
           // full label on desktop; CSS shortens the middle word out at <=400px
           : React.createElement(React.Fragment,null,"Redraft ",
-              React.createElement("span",{className:"redraft-long"},"script "),"from beats")),
-      polishWait && ReactDOM.createPortal(
-        React.createElement("div",{className:"redraft-overlay"},
-          React.createElement("div",{className:"redraft-card"},
-            React.createElement("span",{className:"orb"}),
-            React.createElement("div",{className:"redraft-t"},"MUSE is redrafting Scene "+(scene&&scene.no!=null?scene.no:"")),
-            React.createElement("div",{className:"redraft-d"},
-              "Rebuilding the screenplay from the current beats \u2014 about a minute. The previous draft stays in version history (Undo restores it)."))),
-        document.body));
+              React.createElement("span",{className:"redraft-long"},"script "),"from beats")));
 
     // undo / redo — one linear history of the scene's screenplay states (manual edits,
     // MUSE polishes and drafts all push onto the same stack). Appears once there's history.

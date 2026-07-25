@@ -750,7 +750,8 @@ window.turnLockRenderStyle = async function(label, render){
     return "";
   }
   const key = _freshKey(LOCKED_KEY_PREFIX, label);
-  const entry = { key, label:String(label||"Locked style").slice(0,48), render };
+  const entryLabel = (typeof clipWords==="function") ? clipWords(String(label||"Locked style"),48) : String(label||"Locked style").slice(0,48);
+  const entry = { key, label:entryLabel, render };
   _userStyles.push(entry); _writeCache(_userStyles); _applyAll();
   if(_cloudOn() && window.cloudSaveUserStyle){ try{ await window.cloudSaveUserStyle(key, entry.label, render); }catch(e){} }
   return key;
@@ -773,7 +774,7 @@ window.turnPublishGlobalStyle = async function(label, render){
     return "";
   }
   const key = same ? same.key : _freshKey(GLOBAL_KEY_PREFIX, label);
-  const lab = String(label||"House style").slice(0,48);
+  const lab = (typeof clipWords==="function") ? clipWords(String(label||"House style"),48) : String(label||"House style").slice(0,48);
   const order = same ? same.order : _visibleGlobalItems().length;
   if(!same){ _globalStyles.push({ key, label:lab, render, order }); _globalOrder.push(key); }
   _applyAll();
@@ -1226,7 +1227,10 @@ function useImageGen(opts){
   const generate = async (gopts)=>{
     gopts = gopts || {};
     if(gening) return;
-    if(typeof nbHasKeyForCurrent==="function" && !nbHasKeyForCurrent()){ setGenErr("Set your "+((typeof nbProviderLabel==="function"&&typeof providerOfModel==="function"&&typeof nbGetModel==="function")?nbProviderLabel(providerOfModel(nbGetModel())):"image")+" API key first (top of this tab)."); return; }
+    if(typeof nbHasKeyForCurrent==="function" && !nbHasKeyForCurrent()){
+      setGenErr("Image generation runs through fal.ai on your server. Sign in and make sure the image proxy is enabled.");
+      return;
+    }
     /* Mark this entity busy UP FRONT — before the optional pre-generate gate — and in
        the module-level inflight registry, not just local state. This makes a
        multi-step pre-step (e.g. generating linked props first, which can take a while)
@@ -1373,7 +1377,7 @@ function useImageGen(opts){
       : mode==="base" ? "Base sheet" : null;
     const refsUsed = [];
     if(refImage && refLabel && !(mode==="cameo" && isCloud)) refsUsed.push({ kind:mode, label:refLabel, url:refImage });
-    attachList.forEach(a=>refsUsed.push({ kind:"prop", label:a.note||"Prop sheet", url:a.url, refId:a.refId }));
+    attachList.forEach(a=>refsUsed.push({ kind:a.kind||"prop", label:a.note||"Reference image", url:a.url, refId:a.refId }));
     // user-attached edit inputs (the "+" menu: uploads and prop sheets, incl. carried)
     // — recorded so Details › "Reference images used" tells the whole story of an edit
     if(isEditMode && Array.isArray(gopts.editRefMeta)){
@@ -1394,11 +1398,11 @@ function useImageGen(opts){
         if(!useSimple && !isEditMode && /no image/i.test(emsg) && opts.buildSimple){
           setRetrying(true);
           url = await nbGenerate(opts.buildSimple(), genOpts);
-        } else if(isPolicy && typeof providerOfModel==="function" && providerOfModel(usedModel)==="openai"){
-          // GPT Image refused on CONTENT POLICY — auto-fall back to Google (Nano Banana),
+        } else if(isPolicy && typeof isGptImageModel==="function" && isGptImageModel(usedModel)){
+          // GPT Image refused on CONTENT POLICY — auto-fall back to Nano Banana,
           // which is far more permissive for cinematic content (action, blood, intensity).
           // One-off: the user's SELECTED engine is left unchanged, only this frame switches.
-          const gModel = allModels.find(m=> typeof providerOfModel==="function" && providerOfModel(m.id)==="google");
+          const gModel = allModels.find(m=> !(typeof isGptImageModel==="function" && isGptImageModel(m.id)));
           if(!gModel) throw e;
           setRetrying(true);
           policyFellBack = gModel.label || "Nano Banana";
@@ -1429,7 +1433,7 @@ function useImageGen(opts){
         size: genOpts.imageSize || ((typeof nbGetRes==="function") ? nbGetRes() : "2K"),
         // quality is a GPT Image (OpenAI) setting only — low/medium/high; Nano Banana
         // has no such control (its "quality" IS its resolution tier), so leave it unset there.
-        quality: (typeof providerOfModel==="function" && providerOfModel(actualModel)==="openai")
+        quality: (typeof isGptImageModel==="function" && isGptImageModel(actualModel))
           ? (genOpts.quality || ((typeof nbGetOaiQuality==="function") ? nbGetOaiQuality() : "medium")) : undefined,
         date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
         time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
@@ -1920,7 +1924,10 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
     try{ patch = await window.aiApplyQaAdvice(noun, specFields(), r.promptFix); }catch(e){}
     setApplying(false);
     if(!patch){ if(typeof window.appToast==="function") window.appToast("Nothing to change — the spec already covers the advice (or the writing model is unavailable).","info"); return; }
-    const summary = Object.keys(patch).map(k=> k.toUpperCase()+" → "+patch[k].slice(0,90)+(patch[k].length>90?"…":"")).join("\n");
+    const summary = Object.keys(patch).map(k=>{
+      const text = (typeof clipWords==="function") ? clipWords(patch[k],90) : (patch[k].slice(0,90)+(patch[k].length>90?"…":""));
+      return k.toUpperCase()+" → "+text;
+    }).join("\n");
     let ok = true;
     if(typeof window.appConfirm==="function")
       ok = await window.appConfirm({ title:"Apply the advice and regenerate?",
@@ -2065,7 +2072,7 @@ function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec, sh
 }
 window.QaCheckButton = QaCheckButton;
 
-function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate, extraMeta, menuExtra, dropToImport, hideUploadButton, onStop, generateDisabled, generateDisabledLabel, generateDisabledTitle, editPropRefs, editSuggestions }){
+function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate, extraMeta, menuExtra, dropToImport, hideUploadButton, onStop, generateDisabled, generateDisabledLabel, generateDisabledTitle, referenceControls, editPropRefs, editSuggestions }){
   const { genUrl, genMeta, genTier, gening, genErr, retrying, slotHasRef,
     editMode, setEditMode, editText, setEditText, generate, cancelGen, clearGen, importSheet, relatedClearCount, revertPrevious, layers, allModels } = gen;
   // Resolution ALWAYS shows on the caption. Prefer the stored size; if it's missing
@@ -2312,6 +2319,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
       layers>0 && React.createElement("div",{className:"sheet-edit-layers"},
         React.createElement(Icon.history,{s:10}),
         layers+" earlier version"+(layers!==1?"s":"")+" \u00b7 see all in the \u2026 menu \u203a Details")),
+    referenceControls,
     // generate + (while running) stop sit on ONE row — full-width when idle, 50/50 while generating
     React.createElement("div",{className:"sheet-gen-row"},
     React.createElement("button",{className:"sheet-gen-btn"+(generateDisabled&&!gening?" waiting":""),onClick:handleGenerateClick,disabled:!!generateDisabled||gening||(drafting&&pendingGenerate)||specBlocked,
@@ -2381,7 +2389,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
         React.createElement(Icon.warn,{s:10,sw:2}),"Session only \u00b7 download to keep"),
       genUrl && genMeta && genMeta.grounded && React.createElement("span",{
         className:"sheet-ground-chip",
-        title:genMeta.groundImages ? "Generated with Google Search grounding (web + images)" : "Generated with Google Search grounding"},
+        title:genMeta.groundImages ? "Generated with web grounding and image references" : "Generated with web grounding"},
         React.createElement(Icon.globe,{s:9,sw:2}),"Grounded"),
       genUrl && genMeta && genMeta.cameo && React.createElement("span",{
         className:"sheet-cameo-chip",
@@ -3338,14 +3346,13 @@ function NbKeyBar(){
     return ()=>window.removeEventListener("nb-model-changed", h);
   },[]);
   const provider = (typeof providerOfModel==="function") ? providerOfModel(model) : "google";
-  const isOAI = provider==="openai";
-  // proxied: this provider's generation runs server-side. Always true for GPT Image;
-  // true for Nano Banana too when the image proxy is enabled. The proxy can use a
-  // user-saved key from the top-bar API Keys modal, or fall back to server secrets.
-  const proxied = isOAI || (typeof imageProxyOn==="function" && imageProxyOn());
+  const isOAI = (typeof isGptImageModel==="function") ? isGptImageModel(model) : /^gpt-image/.test(model||"");
+  // proxied: this provider's generation runs server-side. Current image models are
+  // fal.ai-first through the Supabase proxy; legacy providers can still fall back.
+  const proxied = provider==="fal" || isOAI || (typeof imageProxyOn==="function" && imageProxyOn());
   const getKeyFn = isOAI ? oaiGetKey : nbGetKey;
   const setKeyFn = isOAI ? oaiSetKey : nbSetKey;
-  const label = isOAI ? "GPT Image" : "Nano Banana";
+  const label = provider==="fal" ? "fal.ai images" : (isOAI ? "GPT Image" : "Nano Banana");
   const placeholder = isOAI ? "sk-\u2026" : "AIza\u2026 or AQ.\u2026";
   const help = isOAI ? "Paste your OpenAI API key to generate with GPT Image"
                      : "Paste your Google AI Studio API key to generate images";
@@ -3390,7 +3397,7 @@ function NbKeyBar(){
   // operator info only — the admin account sees the strip; everyone else nothing
   if(proxied) return window.turnIsAdmin ? React.createElement("div",{className:"nb-keybar set"},
     React.createElement(Icon.check,{s:13}),
-    React.createElement("span",null,label+" runs on your server"),
+    React.createElement("span",null,label+" run on your server"),
     React.createElement("span",{className:"nb-key-note"},"\u00b7 no key needed in the browser; sign in to use it")) : null;
   if(!editing && key) return React.createElement("div",{className:"nb-keybar set"},
     React.createElement(Icon.check,{s:13}),
@@ -3421,7 +3428,7 @@ function NbControls(){
   const models = window.NB_MODELS || [];
   const aspects = window.NB_ASPECTS || ["16:9","21:9"];
   const isFlash = model === "gemini-3.1-flash-image";
-  const isGpt = /^gpt-image/.test(model||"");
+  const isGpt = (typeof isGptImageModel==="function") ? isGptImageModel(model) : /^gpt-image/.test(model||"");
   const [oaiQ, setOaiQ] = React.useState(()=> (typeof nbGetOaiQuality==="function") ? nbGetOaiQuality() : "medium");
   const modelLabel = (models.find(m=>m.id===model)||{}).label || model || "Model";
 
@@ -3483,9 +3490,9 @@ function NbControls(){
               React.createElement(Icon.bolt,{s:11,sw:2.2}),
               "Grounding",
               React.createElement("span",{className:"nb-ground-tip-badge"},"Nano Banana 2"),
-              React.createElement("span",{className:"nb-ground-tip-sub"},"real-world visual references")),
+              React.createElement("span",{className:"nb-ground-tip-sub"},"web references")),
             React.createElement("div",{className:"nb-ground-tip-body"},
-              "When on, the model searches Google Images to anchor generation to real-world ",
+              "When on, the model searches the web to anchor generation to real-world ",
               "references \u2014 period costumes, locations, props."),
             React.createElement("div",{className:"nb-seg nb-ground-seg"},
               React.createElement("button",{className:"nb-seg-btn "+(!ground?"on":""),
@@ -4109,7 +4116,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
     if(artView==="lookbook") return (lookbook||[]).map(c=>c&&c.id).filter(Boolean);
     if(artView==="characters") return (characters||[]).flatMap(c=> (c&&c.id) ? [c.id, ...(c.states||[]).map(s=>c.id+":"+s.id)] : []);
     if(artView==="props") return (props||[]).map(p=>p&&p.id).filter(Boolean);
-    if(artView==="locations") return (locations||[]).flatMap(l=> (l&&l.id) ? [l.id, ...(l.variants||[]).map(v=>l.id+"-"+v.id)] : []);
+    if(artView==="locations") return (locations||[]).flatMap(l=> (l&&l.id) ? [l.id, ...(l.variants||[]).map(v=>l.id+"-"+v.id), ...(l.coverageSheets||[]).map(v=>l.id+"-"+v.id)] : []);
     if(artView==="shots") return (shots||[]).map(s=>s&&s.id).filter(Boolean);
     return [];
   };
@@ -4144,7 +4151,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
           lookbookStale:!!_stale.props,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("props"),
           onApplyLookbookDraftOnly:()=>onApplyLookbook&&onApplyLookbook("props","draft")})
     : artView==="locations" && LocationSheets
-      ? React.createElement(LocationSheets,{project,locations,scenes,onUpdate:onUpdateLocation,onDraft:onDraftLocation,onSetWorldScale,
+      ? React.createElement(LocationSheets,{project,locations,scenes,drafts,onUpdate:onUpdateLocation,onDraft:onDraftLocation,onSetWorldScale,
           onDraftAll:onDraftAllLocs,onAdd:onAddLocation,onDelete:onDeleteLocation,draftingIds:draftingLocIds,draftingAll:draftingAllLocs,
           trashItems:(trash&&trash.locations)||[],onRestore:onRestoreLoc,onPurge:onPurgeLoc,
           onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId,onScout,

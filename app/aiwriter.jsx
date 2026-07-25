@@ -50,7 +50,7 @@ function WritingDock({ task }){
   const pick = (typeof window.getWritingPick==="function") ? window.getWritingPick() : null;
   const recStory = (typeof window.recommendedWritingModelId==="function") ? window.recommendedWritingModelId("story") : "";
   const recSpecs = (typeof window.recommendedWritingModelId==="function") ? window.recommendedWritingModelId("specs") : "";
-  const SHORT = { "claude-opus-4-8":"4.8", "claude-fable-5":"FABLE", "gemini-3.5-flash":"FLASH", "gpt-5.5-2026-04-23":"GPT5", "kimi-k3":"K3", "kimi-k2.7-code":"K2.7" };
+  const SHORT = { "claude-opus-5":"OPUS5", "claude-fable-5":"FABLE", "gemini-3.5-flash":"FLASH", "gpt-5.5-2026-04-23":"GPT5", "kimi-k3":"K3", "kimi-k2.7-code":"K2.7" };
   // resolve the engine for THIS room's task (Art Room → specs, Writers' Room → story) so
   // the collapsed pill NAMES the model at a glance — whether Auto-resolved or a manual pick
   // (this is why there's no separate text chip on the Art Room's image dock any more).

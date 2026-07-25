@@ -60,7 +60,10 @@ function sbPropIdsForPage(scene, shots, ctx){
 /* a brief beat title for the panel label: prefer the beat's dramatic intention
    (drive.a from the beat map), else the first clause of the action, else "Beat n". */
 function sbBeatTitle(sh, i, row){
-  if(row && row.drive && row.drive.a) return String(row.drive.a).replace(/\s+/g," ").trim().slice(0,46);
+  if(row && row.drive && row.drive.a){
+    const title = String(row.drive.a).replace(/\s+/g," ").trim();
+    return (typeof clipWords==="function") ? clipWords(title,46) : title.slice(0,46);
+  }
   const a = (sh && sh.action||"").replace(/\s+/g," ").trim();
   const first = (a.split(/[,;.]/)[0]||"").trim();
   return first ? first.split(" ").slice(0,6).join(" ") : ("Beat "+((sh&&sh.beatN)||(i+1)));

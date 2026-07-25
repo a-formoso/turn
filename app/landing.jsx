@@ -94,13 +94,16 @@ function HeroSpine(){
       React.createElement("circle",{className:"lp-spine-run",r:3.5,fill:"#fff",style:runStyle})));
 }
 
-const LP_FEATURES = [
-  { no:"01", icon:"script", title:"Development",
-    body:"Bring an idea. Develop it into a story, then a finished screenplay — scene by scene, draft by draft, until it reads right." },
-  { no:"02", icon:"palette", title:"Pre-Production",
-    body:"Design the film before you shoot it. Your cast, your places, your look — planned down to every single shot." },
-  { no:"03", icon:"clapper", title:"Production",
-    body:"Turn the plans into pictures. Storyboard the whole film from everything you’ve built — ready for the screen." },
+const LP_ROOMS = [
+  { no:"01", icon:"script", title:"Writers' Room", status:"Available now",
+    body:"Turn an idea into a structured screenplay: story spine, beat maps and script drafts that stay editable.",
+    cta:"Start with Writers' Room", plan:"writer" },
+  { no:"02", icon:"palette", title:"Art Room", status:"Available now",
+    body:"Design the film from the script: characters, props, locations, style, shots and storyboards prepared for production.",
+    cta:"Start with Art Room", plan:"director" },
+  { no:"03", icon:"clapper", title:"Stage", status:"Under maintenance",
+    body:"Generate video, voice, timeline passes and final production assets once the film is designed and ready to shoot.",
+    cta:"Join Stage waitlist", plan:"stage_waitlist" },
 ];
 
 /* the hero's rotating phrase — the FOUR narrative structures a film can be told
@@ -151,14 +154,14 @@ function Landing({ onStart, onSignIn }){
           React.createElement("span",{className:"lp-logo"},"Cinema Machine")),
         React.createElement("div",{className:"lp-nav-cta"},
           React.createElement("button",{className:"lp-btn ghost",onClick:onSignIn},"Sign in"),
-          React.createElement("button",{className:"lp-btn primary",onClick:()=>onStart("free")},"Get started")),
+          React.createElement("button",{className:"lp-btn primary",onClick:()=>onStart("writer")},"Start with a room")),
         // mobile-only hamburger (the inline buttons hide below 560px)
         React.createElement("button",{className:"lp-burger"+(menuOpen?" open":""),"aria-label":"Menu",
           "aria-expanded":menuOpen?"true":"false",onClick:()=>setMenuOpen(o=>!o)},
           React.createElement("span",null),React.createElement("span",null),React.createElement("span",null))),
       menuOpen && React.createElement("div",{className:"lp-menu"},
         React.createElement("button",{className:"lp-menu-item",onClick:()=>{ setMenuOpen(false); onSignIn(); }},"Sign in"),
-        React.createElement("button",{className:"lp-menu-item primary",onClick:()=>{ setMenuOpen(false); onStart("free"); }},"Get started"))),
+        React.createElement("button",{className:"lp-menu-item primary",onClick:()=>{ setMenuOpen(false); onStart("writer"); }},"Start with a room"))),
 
     // hero — UNFRAMED (no hairlines), headline + CTAs left, supporting copy right
     React.createElement("section",{className:"lp-hero"},
@@ -166,11 +169,11 @@ function Landing({ onStart, onSignIn }){
         React.createElement("h1",{className:"lp-h1"},"Your film, told",React.createElement("br",null),
           "as ",React.createElement(RotatingWord,null),"."),
         React.createElement("div",{className:"lp-hero-cta"},
-          React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("free")},"Start creating"),
+          React.createElement("button",{className:"lp-btn primary big",onClick:()=>onStart("writer")},"Start with Writers' Room"),
           React.createElement("button",{className:"lp-btn ghost big",onClick:onSignIn},"Sign in"))),
       React.createElement("div",{className:"lp-hero-aside"},
         React.createElement("p",{className:"lp-lede"},
-          "Cinema Machine is your AI film studio: bring an idea, choose one of four classic story structures, and watch it grow — a story spine built to hold an audience, a finished screenplay, a designed cast and world, and a storyboarded film."))),
+          "Start with the room you need. Write the screenplay now, design the film when you are ready, and move into Stage as production opens — one project, one story spine, every department connected."))),
 
     // hero media — the 21:9 short-film placeholder, still outside the frame
     React.createElement("section",{className:"lp-hero-media"},
@@ -181,15 +184,17 @@ function Landing({ onStart, onSignIn }){
 
       React.createElement("section",{className:"lp-section"},
         React.createElement("div",{className:"lp-sec-head"},
-          React.createElement("div",{className:"lp-act"},"Act I · The studio"),
-          React.createElement("h2",{className:"lp-h2"},"One studio, every department")),
+          React.createElement("div",{className:"lp-act"},"Act I · Choose your room"),
+          React.createElement("h2",{className:"lp-h2"},"Start with the room you need")),
         React.createElement("div",{className:"lp-grid"},
-          LP_FEATURES.map((f,i)=>React.createElement("div",{key:i,className:"lp-card"},
+          LP_ROOMS.map((f,i)=>React.createElement("div",{key:i,className:"lp-card lp-room-card"},
             React.createElement("div",{className:"lp-card-top"},
               React.createElement("div",{className:"lp-card-ic"}, Icn(f.icon,20)),
               React.createElement("span",{className:"lp-card-no"}, f.no)),
+            React.createElement("div",{className:"lp-room-status"}, f.status),
             React.createElement("div",{className:"lp-card-t"}, f.title),
-            React.createElement("div",{className:"lp-card-b"}, f.body))))),
+            React.createElement("div",{className:"lp-card-b"}, f.body),
+            React.createElement("button",{className:"lp-btn ghost full lp-room-cta",onClick:()=>onStart(f.plan)}, f.cta))))),
 
       React.createElement("section",{className:"lp-section steps"},
         React.createElement("div",{className:"lp-sec-head"},
@@ -203,8 +208,8 @@ function Landing({ onStart, onSignIn }){
 
       React.createElement("section",{className:"lp-section pricing"},
         React.createElement("div",{className:"lp-sec-head"},
-          React.createElement("div",{className:"lp-act"},"Act III · The price"),
-          React.createElement("h2",{className:"lp-h2"},"Simple pricing")),
+          React.createElement("div",{className:"lp-act"},"Act III · Plans"),
+          React.createElement("h2",{className:"lp-h2"},"Pricing follows the rooms")),
         React.createElement("div",{className:"lp-tiers"},
           lpTiers().map((t,i)=>React.createElement("div",{key:i,className:"lp-tier"+(t.featured?" featured":"")},
             t.tag && React.createElement("div",{className:"lp-tier-tag"}, t.tag),

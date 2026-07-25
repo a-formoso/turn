@@ -30,7 +30,7 @@ const TEASER_QA = [
   { k:["what can i make","what can i build","what can i do","make here","build here","capabilities","features","what's included","whats included","get out of"],
     a:"A complete film: the value-charge spine, scene beats, a generated screenplay, a full Art Room for characters, props, locations, style and shots — and the Stage, where it all becomes footage. Sign up to start your first story." },
   { k:["why sign up","is it free","it free","for free","sign up","signup","create account","cost","costs","price","prices","pricing","how much","plans","subscription","worth it","why should i"],
-    a:"Creating an account is free — the studio runs on monthly plans: Writer at $19, Director at $49, Studio at $149, each with a monthly allowance of credits that power every render. Sign up, then pick the plan that fits when you’re ready to build." },
+    a:"I can help with the story and explain how the studio works, but pricing and credits are handled outside MUSE. Open the account or plans window for the current options, then bring me back to the film you want to make." },
   { k:["who are you","what are you","your name","are you muse","hello","hi","hey"],
     a:"I’m MUSE, your story guide inside Cinema Machine. Once you’re signed in I read your spine and help you shape scenes, fix the ones that don’t turn, and answer anything about your film. Sign up and put me to work." },
 ];

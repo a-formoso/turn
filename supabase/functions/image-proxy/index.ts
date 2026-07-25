@@ -1,16 +1,15 @@
 // supabase/functions/image-proxy/index.ts
 //
-// TURN image-generation proxy (the "Higgsfield approach").
+// TURN generation proxy.
 //
 // WHY THIS EXISTS
 //   The TURN web app runs entirely in the browser. This Edge Function runs on
 //   Supabase's servers and makes provider calls server-side. It can use either
 //   a signed-in user's per-request key (sent from their local browser store) or
-//   the platform's provider key from SERVER SECRETS. It serves two image providers:
-//     • OpenAI GPT Image — MUST be proxied: OpenAI blocks direct cross-origin
-//       browser calls, so the page can't reach it at all.
-//     • Google Nano Banana (Gemini) — CAN run from the browser, but can also be
-//       routed here so the app has one signed-in server-side path.
+//   the platform's provider key from SERVER SECRETS. Image generation is fal.ai
+//   first: the client sends provider:"fal" and this function maps TURN model ids
+//   to fal.ai Nano Banana / GPT Image routes. Writing/text providers, Stage video,
+//   and ElevenLabs voice-library operations keep their existing routes.
 //
 // SECURITY
 //   - Only signed-in TURN users may call it: we verify the caller's Supabase
@@ -24,7 +23,7 @@
 //   3. Set the server secrets (your provider keys): npx supabase secrets set OPENAI_API_KEY=sk-...
 //                                                   npx supabase secrets set GOOGLE_API_KEY=...
 //                                                   npx supabase secrets set ELEVENLABS_API_KEY=...  (voice — the Stage)
-//                                                   npx supabase secrets set FAL_KEY=...             (video — Seedance via fal.ai)
+//                                                   npx supabase secrets set FAL_KEY=...             (images + video via fal.ai)
 //   4. Deploy:                                      npx supabase functions deploy image-proxy --no-verify-jwt
 //   5. In app/supabase-config.js set  imageProxy: true
 //
@@ -79,6 +78,71 @@ function dataUrlToBlob(dataUrl: string): Blob | null {
   return new Blob([bytes], { type: mime });
 }
 
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    const chunk = bytes.subarray(i, i + 0x8000);
+    bin += String.fromCharCode(...chunk);
+  }
+  return btoa(bin);
+}
+
+const CREDIT_SCALE = 10;
+const BASE_PROVIDER_USD_PER_CREDIT = 0.30;
+const IMAGE_PROVIDER_USD: Record<string, Record<string, number>> = {
+  "gemini-3.1-flash-lite-image": { "1K": 0.034, "2K": 0.050, "4K": 0.076 },
+  "gemini-3.1-flash-image": { "1K": 0.067, "2K": 0.101, "4K": 0.151 },
+  "gemini-3-pro-image": { "1K": 0.134, "2K": 0.134, "4K": 0.240 },
+  "gpt-image-2": { low: 0.009, medium: 0.080, high: 0.317 },
+};
+const TEXT_PROVIDER_USD_PER_1M: Record<string, { input: number; output: number }> = {
+  "claude-opus-5": { input: 15, output: 75 },
+  "claude-fable-5": { input: 25, output: 100 },
+  "gemini-3.5-flash": { input: 0.35, output: 1.05 },
+  "gpt-5.5": { input: 10, output: 30 },
+  "kimi-k3": { input: 2, output: 8 },
+  "kimi-k2.7-code": { input: 0.5, output: 2 },
+  default: { input: 1, output: 4 },
+};
+function creditsFromProviderUsd(usd: number): number {
+  return Math.max(1, Math.ceil(((Number(usd) || 0) / BASE_PROVIDER_USD_PER_CREDIT) * CREDIT_SCALE));
+}
+function imageUsageEstimate(model: string, imageSize: string, quality: string) {
+  const table = IMAGE_PROVIDER_USD[model] || {};
+  const key = /^gpt-image/i.test(model || "") ? (quality || "medium") : (imageSize || "2K");
+  const providerCostUsd = Number(table[key] ?? table.medium ?? table["2K"] ?? 0);
+  return { providerCostUsd, credits: creditsFromProviderUsd(providerCostUsd) };
+}
+function normaliseTextUsage(provider: string, data: any) {
+  const u = data?.usage || data?.usageMetadata || data?.usage_metadata || {};
+  if (provider === "anthropic") {
+    return {
+      inputTokens: Number(u.input_tokens || 0) || 0,
+      outputTokens: Number(u.output_tokens || 0) || 0,
+    };
+  }
+  if (provider === "google") {
+    return {
+      inputTokens: Number(u.promptTokenCount || u.prompt_token_count || 0) || 0,
+      outputTokens: Number(u.candidatesTokenCount || u.candidates_token_count || 0) || 0,
+    };
+  }
+  return {
+    inputTokens: Number(u.prompt_tokens || 0) || 0,
+    outputTokens: Number(u.completion_tokens || 0) || 0,
+  };
+}
+function textUsageEstimate(provider: string, model: string, usage: { inputTokens: number; outputTokens: number }, usageKind: string) {
+  if (usageKind === "muse") return { providerCostUsd: 0, credits: 0 };
+  const rates = TEXT_PROVIDER_USD_PER_1M[model] || TEXT_PROVIDER_USD_PER_1M.default;
+  const input = Math.max(0, Number(usage.inputTokens) || 0);
+  const output = Math.max(0, Number(usage.outputTokens) || 0);
+  const visionMultiplier = usageKind === "vision" ? 1.5 : 1;
+  const providerCostUsd = (((input / 1000000) * rates.input) + ((output / 1000000) * rates.output)) * visionMultiplier;
+  return { providerCostUsd, credits: creditsFromProviderUsd(providerCostUsd) };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -113,9 +177,9 @@ Deno.serve(async (req) => {
   //   task below runs on the platform's own provider keys.
   const ADMIN_EMAILS = ["admin@infinitestudioai.com"];
   const isAdmin = ADMIN_EMAILS.includes(String(authUser.email || "").toLowerCase());
+  let accountPlan = "none";
+  let accountRemaining = 0;
   if (!isAdmin) {
-    let plan = "none";
-    let remaining = 0;
     try {
       // RLS policy turn_credits_select_own lets a user read their OWN row via the
       // user-scoped client. No row yet (never funded) → unentitled → refuse.
@@ -126,12 +190,12 @@ Deno.serve(async (req) => {
         .limit(1);
       const row = Array.isArray(rows) ? rows[0] : rows;
       if (row) {
-        plan = String(row.plan || "none").toLowerCase().trim();
-        remaining = Number(row.remaining) || 0;
+        accountPlan = String(row.plan || "none").toLowerCase().trim();
+        accountRemaining = Number(row.remaining) || 0;
       }
     } catch (_e) { /* read failure → treat as unentitled, fail closed */ }
-    const paid = plan === "writer" || plan === "director" || plan === "studio";
-    if (!paid && remaining <= 0) {
+    const paid = accountPlan === "writer" || accountPlan === "director" || accountPlan === "studio";
+    if (!paid && accountRemaining <= 0) {
       return json({
         error: "no_plan",
         message: "Choose a plan to start creating — every generation runs on your plan's credits.",
@@ -158,6 +222,7 @@ Deno.serve(async (req) => {
   const groundImageSearch = !!body.groundImageSearch;
   const images: string[] = Array.isArray(body.images) ? body.images : [];
   const task = body.task || "image";
+  const usageKind = String(body.usageKind || (images.length && task === "text" ? "vision" : task)).toLowerCase();
   const messages: any[] = Array.isArray(body.messages) ? body.messages : [];
   const cleanApiKey = (k: unknown) => String(k || "")
     .replace(/[\s\u00a0\u200b-\u200d\ufeff]/g, "")
@@ -193,9 +258,9 @@ Deno.serve(async (req) => {
       contentType: blob.type || "application/octet-stream",
       upsert: false,
     });
-    if (up.error) throw new Error(`Could not stage ${kind} input for video rendering: ${up.error.message || "storage upload failed"}`);
+    if (up.error) throw new Error(`Could not stage ${kind} input for generation: ${up.error.message || "storage upload failed"}`);
     const signed = await sbAuth.storage.from(bucket).createSignedUrl(path, 3600);
-    if (signed.error || !signed.data?.signedUrl) throw new Error(`Could not sign staged ${kind} input for video rendering.`);
+    if (signed.error || !signed.data?.signedUrl) throw new Error(`Could not sign staged ${kind} input for generation.`);
     return signed.data.signedUrl;
   };
   const videoInputUrls = async (arr: unknown, kind: string): Promise<string[]> => {
@@ -206,12 +271,73 @@ Deno.serve(async (req) => {
     }
     return out;
   };
+  const ensureCanSpend = (credits: number) => {
+    const need = Math.max(0, Math.ceil(Number(credits) || 0));
+    if (isAdmin || need <= 0 || accountRemaining >= need) return null;
+    return json({
+      error: "insufficient_credits",
+      message: `This generation needs ${need} credits, but this account has ${accountRemaining}.`,
+      creditsRequired: need,
+      creditsRemaining: accountRemaining,
+    }, 402);
+  };
+  const recordUsage = async (payload: {
+    kind?: string; providerName?: string; modelName?: string; taskName?: string;
+    credits?: number; status?: string; requestId?: string; inputTokens?: number;
+    outputTokens?: number; providerCostUsd?: number; metadata?: Record<string, unknown>;
+  }) => {
+    const credits = Math.max(0, Math.ceil(Number(payload.credits) || 0));
+    if (isAdmin) return { credits: 0, remaining: accountRemaining, plan: accountPlan };
+    const { data, error } = await sbAuth.rpc("turn_record_usage_event", {
+      event_kind: payload.kind || "generation",
+      provider_name: payload.providerName || provider,
+      model_name: payload.modelName || model,
+      task_name: payload.taskName || task,
+      credit_cost: credits,
+      usage_status: payload.status || "succeeded",
+      request_key: payload.requestId || null,
+      input_token_count: payload.inputTokens ?? null,
+      output_token_count: payload.outputTokens ?? null,
+      provider_cost: payload.providerCostUsd ?? null,
+      usage_metadata: payload.metadata || {},
+    });
+    if (error) {
+      if (/INSUFFICIENT_CREDITS/i.test(error.message || "")) {
+        throw new Error("This generation completed, but the account did not have enough credits to record the spend. Add credits and try again.");
+      }
+      throw new Error(error.message || "Could not record usage.");
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    accountRemaining = Number(row?.remaining ?? accountRemaining) || 0;
+    accountPlan = String(row?.plan || accountPlan || "none");
+    return { credits, remaining: accountRemaining, plan: accountPlan };
+  };
 
   // ── task: TEXT completion (powers spec drafting, MUSE, and the agents) ────────
   // The client folds any system prompt into the user message, so we just pass the
   // messages through to the provider's chat API and return the completion text.
   if (task === "text") {
     if (!messages.length) return json({ error: "No messages supplied." }, 400);
+    if (usageKind !== "muse") {
+      const block = ensureCanSpend(1);
+      if (block) return block;
+    }
+    const finishText = async (providerName: string, modelName: string, providerData: any, text: string, vision: boolean) => {
+      const tokens = normaliseTextUsage(providerName, providerData);
+      const estimate = textUsageEstimate(providerName, modelName, tokens, usageKind);
+      const usage = await recordUsage({
+        kind: "generation",
+        providerName,
+        modelName,
+        taskName: "text",
+        credits: estimate.credits,
+        inputTokens: tokens.inputTokens,
+        outputTokens: tokens.outputTokens,
+        providerCostUsd: estimate.providerCostUsd,
+        metadata: { usageKind, vision, totalTokens: tokens.inputTokens + tokens.outputTokens },
+      });
+      return json({ text, vision, usage: { ...usage, ...estimate, ...tokens, totalTokens: tokens.inputTokens + tokens.outputTokens } });
+    };
     if (provider === "google") {
       const gkey = providerKey("google", "GOOGLE_API_KEY");
       if (!gkey) return json({ error: missingKey("Google", "GOOGLE_API_KEY") }, 500);
@@ -235,7 +361,7 @@ Deno.serve(async (req) => {
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `Google error (${r.status}).`, status: r.status }, 200); }
         const data = await r.json();
         const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
-        return json({ text: parts.map((p: any) => p.text || "").join(""), vision: images.length > 0 });
+        return await finishText("google", model, data, parts.map((p: any) => p.text || "").join(""), images.length > 0);
       } catch (e) { return json({ error: "Proxy failed to reach Google: " + (e?.message || e) }, 502); }
     }
     if (provider === "openai") {
@@ -254,7 +380,7 @@ Deno.serve(async (req) => {
         });
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `OpenAI error (${r.status}).`, status: r.status }, 200); }
         const data = await r.json();
-        return json({ text: (((data.choices || [])[0] || {}).message || {}).content || "", vision: images.length > 0 });
+        return await finishText("openai", model, data, (((data.choices || [])[0] || {}).message || {}).content || "", images.length > 0);
       } catch (e) { return json({ error: "Proxy failed to reach OpenAI: " + (e?.message || e) }, 502); }
     }
     if (provider === "moonshot") {
@@ -277,7 +403,7 @@ Deno.serve(async (req) => {
         });
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `Moonshot error (${r.status}).`, status: r.status }, 200); }
         const data = await r.json();
-        return json({ text: (((data.choices || [])[0] || {}).message || {}).content || "", vision: false });
+        return await finishText("moonshot", model, data, (((data.choices || [])[0] || {}).message || {}).content || "", false);
       } catch (e) {
         if ((e as any)?.name === "TimeoutError") return json({ error: "Kimi took too long to answer — K3 is a brand-new deep-reasoning flagship, and this draft outran even the extended 6-minute server window. Try again, keep K3 for shorter tasks (analysis, alt lines), or switch the writing dock back to Auto for heavy drafting." }, 200);
         return json({ error: "Proxy failed to reach Moonshot: " + (e?.message || e) }, 502);
@@ -309,7 +435,7 @@ Deno.serve(async (req) => {
         });
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `Anthropic error (${r.status}).`, status: r.status }, 200); }
         const data = await r.json();
-        return json({ text: (data.content || []).map((p: any) => p.text || "").join(""), vision: images.length > 0 });
+        return await finishText("anthropic", model, data, (data.content || []).map((p: any) => p.text || "").join(""), images.length > 0);
       } catch (e) { return json({ error: "Proxy failed to reach Anthropic: " + (e?.message || e) }, 502); }
     }
     return json({ error: `Text provider "${provider}" is not configured on this proxy.` }, 400);
@@ -587,6 +713,130 @@ Deno.serve(async (req) => {
   }
 
   if (!prompt) return json({ error: "No prompt supplied." }, 400);
+  const imageUsage = imageUsageEstimate(model, imageSize, quality);
+  const imageBlock = ensureCanSpend(imageUsage.credits);
+  if (imageBlock) return imageBlock;
+  const finishImage = async (payload: Record<string, unknown>, providerName = provider, modelName = model) => {
+    const usage = await recordUsage({
+      kind: "generation",
+      providerName,
+      modelName,
+      taskName: "image",
+      credits: imageUsage.credits,
+      providerCostUsd: imageUsage.providerCostUsd,
+      metadata: { aspect, quality, imageSize, referenceImages: images.length },
+    });
+    return json({ ...payload, usage: { ...usage, ...imageUsage } });
+  };
+
+  // ── provider: fal.ai image broker (Nano Banana + GPT Image) ────────────────
+  if (provider === "fal") {
+    const falKey = providerKey("fal", "FAL_KEY");
+    if (!falKey) return json({ error: missingKey("fal.ai", "FAL_KEY") }, 500);
+
+    const falImageModels: Record<string, { base: string; edit?: string; family: "nano" | "openai" }> = {
+      "gemini-3.1-flash-image":      { base: "fal-ai/nano-banana-2",      family: "nano" },
+      "gemini-3.1-flash-lite-image": { base: "fal-ai/nano-banana-2-lite", family: "nano" },
+      "gemini-3-pro-image":          { base: "fal-ai/nano-banana-pro",    family: "nano" },
+      "gpt-image-2":                 { base: "openai/gpt-image-2", edit: "openai/gpt-image-2/edit", family: "openai" },
+    };
+    const cfg = falImageModels[model];
+    if (!cfg) return json({ error: `Image model "${model}" is not allowed on the fal proxy.` }, 400);
+
+    const falHead = { "Authorization": "Key " + falKey, "Content-Type": "application/json" };
+    const falErr = async (r: Response) => {
+      let d = "";
+      try {
+        const j = await r.json();
+        d = j?.detail || j?.error || j?.message || JSON.stringify(j);
+      } catch (_e) {
+        try { d = await r.text(); } catch (_e2) { /* noop */ }
+      }
+      return d || `fal error (${r.status}).`;
+    };
+    const okFalHost = (u: string) => {
+      try { return new URL(u).host.endsWith("fal.run"); } catch (_e) { return false; }
+    };
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    try {
+      const imageUrls = await videoInputUrls(images, "image");
+      const endpoint = cfg.family === "openai" && imageUrls.length && cfg.edit ? cfg.edit : cfg.base;
+      const input: any = { prompt };
+
+      if (cfg.family === "openai") {
+        input.image_size = sizeForAspect(aspect, imageSize);
+        input.quality = quality || "medium";
+        if (moderation) input.moderation = moderation;
+        if (imageUrls.length) input.image_urls = imageUrls;
+      } else {
+        input.aspect_ratio = aspect || "16:9";
+        input.resolution = imageSize || "2K";
+        input.output_format = "png";
+        input.num_images = 1;
+        input.limit_generations = true;
+        input.sync_mode = false;
+        if (imageUrls.length) input.image_urls = imageUrls;
+        if (groundSearch) input.enable_web_search = true;
+      }
+
+      const submit = await fetch("https://queue.fal.run/" + endpoint, {
+        method: "POST",
+        headers: falHead,
+        body: JSON.stringify(input),
+        signal: AbortSignal.timeout(380000),
+      });
+      if (!submit.ok) return json({ error: await falErr(submit), status: submit.status }, 200);
+      let result: any = await submit.json();
+
+      if (result?.status_url && result?.response_url) {
+        const statusUrl = String(result.status_url || "");
+        const responseUrl = String(result.response_url || "");
+        if (!okFalHost(statusUrl) || !okFalHost(responseUrl)) return json({ error: "Bad fal image response URLs." }, 200);
+        let completed = false;
+        for (let i = 0; i < 190; i++) {
+          const sr = await fetch(statusUrl, { headers: { "Authorization": "Key " + falKey } });
+          if (!sr.ok) return json({ error: await falErr(sr), status: sr.status }, 200);
+          const sd = await sr.json();
+          const st = String(sd.status || "").toUpperCase();
+          if (st === "COMPLETED") {
+            const rr = await fetch(responseUrl, { headers: { "Authorization": "Key " + falKey } });
+            if (!rr.ok) return json({ error: await falErr(rr), status: rr.status }, 200);
+            result = await rr.json();
+            completed = true;
+            break;
+          }
+          if (st === "FAILED" || st === "ERROR") return json({ error: sd?.error || sd?.detail || "fal image generation failed." }, 200);
+          await wait(2000);
+        }
+        if (!completed) return json({ error: "fal.ai image generation took too long to complete." }, 200);
+      }
+
+      const imageList = Array.isArray(result?.images) ? result.images
+        : Array.isArray(result?.data?.images) ? result.data.images
+        : Array.isArray(result?.output?.images) ? result.output.images
+        : [];
+      const img = imageList[0] || result?.image || result?.data?.image || result?.output?.image || null;
+      const b64 = (img && (img.b64_json || img.base64 || img.b64)) || result?.b64_json || result?.base64 || "";
+      if (b64) return await finishImage({ b64, mime: (img && (img.content_type || img.mime_type)) || "image/png", falModel: endpoint, grounded: !!groundSearch }, "fal", model);
+
+      const url = typeof img === "string" ? img : (img && (img.url || img.image_url)) || result?.url || "";
+      if (!url) return json({ error: "fal returned no image." }, 200);
+      const m = /^data:(.*?);base64,(.*)$/.exec(url);
+      if (m) return await finishImage({ b64: m[2], mime: m[1] || "image/png", falModel: endpoint, grounded: !!groundSearch }, "fal", model);
+
+      const u = new URL(url);
+      const imageHeaders = u.host.endsWith("fal.run") ? { "Authorization": "Key " + falKey } : undefined;
+      const ir = await fetch(url, { headers: imageHeaders });
+      if (!ir.ok) return json({ error: `Could not download fal image (${ir.status}).` }, 200);
+      const mime = ir.headers.get("content-type") || (img && (img.content_type || img.mime_type)) || "image/png";
+      return await finishImage({ b64: arrayBufferToBase64(await ir.arrayBuffer()), mime, falModel: endpoint, grounded: !!groundSearch }, "fal", model);
+    } catch (e) {
+      if ((e as any)?.name === "TimeoutError")
+        return json({ error: "fal.ai took too long to answer (over 6 minutes) — the request was cancelled server-side. Try again, or choose a faster quality/resolution." }, 200);
+      return json({ error: "Proxy failed to reach fal: " + ((e as any)?.message || e) }, 502);
+    }
+  }
 
   // ── provider: Google (Nano Banana / Gemini) — mirrors the client's nbGenerate ──
   if (provider === "google") {
@@ -631,7 +881,7 @@ Deno.serve(async (req) => {
       const gm = cand.groundingMetadata || cand.grounding_metadata || null;
       const chunks = gm && (gm.groundingChunks || gm.grounding_chunks || gm.groundingAttributions || []);
       const grounded = !!(gm && ((chunks && chunks.length) || gm.webSearchQueries || gm.searchEntryPoint));
-      return json({ b64: img.inlineData.data, mime: img.inlineData.mimeType || "image/png", grounded });
+      return await finishImage({ b64: img.inlineData.data, mime: img.inlineData.mimeType || "image/png", grounded }, "google", model);
     } catch (e) {
       if ((e as any)?.name === "TimeoutError")
         return json({ error: "Google took too long to answer (over 2 minutes) — the request was cancelled server-side. Try again; if it persists the Google account may be rate-limited or out of prepaid credits." }, 200);
@@ -690,8 +940,8 @@ Deno.serve(async (req) => {
 
     const data = await oaiRes.json();
     const d = (data.data || [])[0] || {};
-    if (d.b64_json) return json({ b64: d.b64_json });
-    if (d.url) return json({ url: d.url });
+    if (d.b64_json) return await finishImage({ b64: d.b64_json }, "openai", model);
+    if (d.url) return await finishImage({ url: d.url }, "openai", model);
     return json({ error: "OpenAI returned no image." }, 200);
   } catch (e) {
     return json({ error: "Proxy failed to reach OpenAI: " + (e?.message || e) }, 502);

@@ -1,11 +1,12 @@
 // ============================================================================
 // Cinema Machine — Stripe webhook  (Supabase Edge Function)
 //
-// Turns a paid subscription into generation credits. Metadata-driven: it reads
-// `app`, `tier` and `plan_credits` off the PRODUCT, so changing a plan's credits
-// is a Stripe dashboard edit — never a code change. It ignores any product whose
-// `app` metadata isn't "cinema-machine", so your Academy / mentorship products
-// on the same Stripe account never grant app credits.
+// Turns a paid subscription into generation credits, and one-off credit packs into
+// top-ups. Metadata-driven: it reads `app`, `tier` and `plan_credits` off plan
+// PRODUCTS, and `app`, `kind=credit_pack`, `pack_credits` off pack PRODUCTS, so
+// changing grants is a Stripe dashboard edit. It ignores any product whose `app`
+// metadata isn't "cinema-machine", so your Academy / mentorship products on the
+// same Stripe account never grant app credits.
 //
 // SETUP (once):
 //   1. supabase functions deploy stripe-webhook --no-verify-jwt
@@ -46,6 +47,16 @@ function readPlan(sub: Stripe.Subscription): { tier: string; credits: number } |
   return { tier: md.tier || "member", credits };
 }
 
+/** Read a one-off credit-pack grant from a Checkout line item's product metadata. */
+function readCreditPack(product: Stripe.Price.Product | undefined | null): number {
+  const md = (product && typeof product === "object" && !("deleted" in product)
+    ? (product as Stripe.Product).metadata
+    : null) || {};
+  if (md.app !== "cinema-machine" || md.kind !== "credit_pack") return 0;
+  const credits = parseInt(md.pack_credits ?? "0", 10);
+  return Number.isFinite(credits) && credits > 0 ? credits : 0;
+}
+
 /** Find the app user behind a Stripe customer (renewals/cancellations carry the
  *  customer, not the client_reference_id — we stored the mapping on first purchase). */
 async function uidByCustomer(customerId: string | null): Promise<string | null> {
@@ -68,6 +79,26 @@ async function setPlan(uid: string, sub: Stripe.Subscription, customerId: string
   });
 }
 
+async function addCreditPack(uid: string, session: Stripe.Checkout.Session, event: Stripe.Event) {
+  const items = await stripe.checkout.sessions.listLineItems(session.id, {
+    limit: 100,
+    expand: ["data.price.product"],
+  });
+  let credits = 0;
+  for (const item of items.data) {
+    const grant = readCreditPack(item.price?.product);
+    if (grant) credits += grant * Math.max(1, item.quantity ?? 1);
+  }
+  if (!credits) return;
+  const { error } = await admin.rpc("turn_apply_pack_once", {
+    event_id: event.id,
+    uid,
+    amount: credits,
+    event_type: event.type,
+  });
+  if (error) throw error;
+}
+
 Deno.serve(async (req) => {
   const sig = req.headers.get("stripe-signature");
   const body = await req.text();
@@ -88,6 +119,9 @@ Deno.serve(async (req) => {
             expand: ["items.data.price.product"],
           });
           await setPlan(s.client_reference_id, sub, s.customer as string);
+        }
+        if (s.mode === "payment" && s.client_reference_id) {
+          await addCreditPack(s.client_reference_id, s, event);
         }
         break;
       }

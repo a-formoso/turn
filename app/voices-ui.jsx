@@ -132,8 +132,9 @@ function VoiceCard({ c, project, speaks, onUpdate }){
   const roleSummary = (c.role||"").split(/\s[—-]\s/)[0] || "Character";
 
   const lockVoice = (voiceId, voiceName, source)=>{
+    const fallbackName = (typeof clipWords==="function") ? clipWords(spec,40) : spec.slice(0,40);
     onUpdate(c.id, { voiceSpec: spec, voiceLock: {
-      voiceId, voiceName: voiceName||spec.slice(0,40), source,
+      voiceId, voiceName: voiceName||fallbackName, source,
       modelId: ttsModel || (window.VG_TTS_MODEL||"eleven_v3"),
       modelChosen: deliveryChosen,   // only an explicit pick pins the model; else follow the app default
       defaults: window.VG_DEFAULTS || { stability:0.7, similarity:0.75, style:0.1, speed:1.0, speakerBoost:true },

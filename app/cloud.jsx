@@ -122,6 +122,15 @@ async function cloudGetCreditBalance(){
 }
 window.cloudGetCreditBalance = cloudGetCreditBalance;
 
+async function cloudJoinStageWaitlist(){
+  const sb = sbClient(); if(!sb) return { error:{ message:"Cloud not configured." } };
+  try{
+    const { data, error } = await sb.rpc("turn_join_stage_waitlist");
+    return { data, error };
+  }catch(e){ return { error:{ message:(e && e.message) || "Could not join the Stage waitlist." } }; }
+}
+window.cloudJoinStageWaitlist = cloudJoinStageWaitlist;
+
 /* decrement after a successful render (supabase/credits.sql turn_spend_credit).
    Fire-and-forget from the render path; the UI refreshes via cloudGetCreditBalance
    on the "turn-credits-changed" event either way. Returns the new balance or null. */
@@ -147,16 +156,96 @@ async function cloudListProjects(){
     // hasShots/hasLocs: tiny scalar probes (the first element's id) so the Home
     // cards can show each film's honest pipeline PHASE without fetching whole
     // docs — shots exist → Production; location cards → Pre-production; else Development.
+    const session = await cloudGetSession();
+    const uid = session && session.user && session.user.id;
+    const email = String((session && session.user && session.user.email) || "").toLowerCase();
     const { data, error } = await sb.from("turn_projects")
-      .select("id,title,updated_at,created_at,isShow:doc->>isShow,showId:doc->>showId,episodeNo:doc->>episodeNo,cover:doc->>cover,coverPrev:doc->>coverPrev,fmt:doc->project->>format,logline:doc->project->>logline,ord:doc->>homeOrder,hasShots:doc->shots->0->>id,hasLocs:doc->locations->0->>id")
+      .select("id,owner,title,updated_at,created_at,isShow:doc->>isShow,showId:doc->>showId,episodeNo:doc->>episodeNo,cover:doc->>cover,coverPrev:doc->>coverPrev,fmt:doc->project->>format,logline:doc->project->>logline,ord:doc->>homeOrder,hasShots:doc->shots->0->>id,hasLocs:doc->locations->0->>id")
       .order("updated_at",{ ascending:false });
     // null = REQUEST FAILED (e.g. expired token → 401), [] = genuinely no projects.
     // Callers must not treat a failure as "new user" — that's how an auth hiccup
     // once spawned a create-first-project during boot and stranded the app.
     if(error) return null;
-    return data || [];
+    let memberships = [];
+    try{
+      const { data:ms } = await sb.from("turn_project_members")
+        .select("project_id,role,member_email,status")
+        .or("member_user.eq."+uid+",member_email.eq."+email);
+      memberships = (ms||[]).filter(m=>String(m.status||"active")==="active");
+    }catch(e){}
+    const byProject = {};
+    memberships.forEach(m=>{ if(m && m.project_id) byProject[m.project_id]=m; });
+    return (data || []).map(p=>{
+      const m = byProject[p.id] || null;
+      const isOwner = !!(uid && p.owner===uid);
+      return { ...p, isOwner, isShared:!isOwner && !!m, shareRole:m&&m.role || (isOwner?"owner":"") };
+    });
   }catch(e){ return null; }
 }
+function _teamEmail(s){ return String(s||"").trim().toLowerCase(); }
+function _teamSchemaMissing(err){
+  const msg = String((err && err.message) || err || "");
+  return /turn_project_members|schema cache|relation .* does not exist|could not find the table/i.test(msg);
+}
+function _teamSetupMessage(){
+  return "Team collaboration needs the Supabase team-collaboration.sql migration before invites can be added.";
+}
+async function cloudListProjectMembers(projectId){
+  const sb = sbClient(); if(!sb || !projectId) return [];
+  try{
+    const { data, error } = await sb.from("turn_project_members")
+      .select("id,project_id,member_email,member_user,role,status,created_at")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending:true });
+    if(error){
+      window.turnTeamSchemaMissing = _teamSchemaMissing(error);
+      return [];
+    }
+    window.turnTeamSchemaMissing = false;
+    return data || [];
+  }catch(e){ window.turnTeamSchemaMissing = _teamSchemaMissing(e); return []; }
+}
+async function cloudInviteProjectMember(projectId, email, role){
+  const sb = sbClient(); if(!sb || !projectId) return { ok:false };
+  const e = _teamEmail(email);
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return { ok:false, message:"Enter a valid email address." };
+  const r = ["view_only","writer","art_director","producer_admin"].indexOf(role)>=0 ? role : "writer";
+  try{
+    const { error } = await sb.from("turn_project_members")
+      .insert({ project_id:projectId, member_email:e, role:r, status:"active" });
+    if(error){
+      if(_teamSchemaMissing(error)){ window.turnTeamSchemaMissing = true; return { ok:false, setup:true, message:_teamSetupMessage() }; }
+      return { ok:false, message:error.message };
+    }
+    window.turnTeamSchemaMissing = false;
+    return { ok:true };
+  }catch(err){
+    if(_teamSchemaMissing(err)){ window.turnTeamSchemaMissing = true; return { ok:false, setup:true, message:_teamSetupMessage() }; }
+    return { ok:false, message:(err&&err.message)||"Invite failed." };
+  }
+}
+async function cloudUpdateProjectMember(memberId, patch){
+  const sb = sbClient(); if(!sb || !memberId) return { ok:false };
+  const role = patch && patch.role;
+  const r = ["view_only","writer","art_director","producer_admin"].indexOf(role)>=0 ? role : null;
+  try{
+    const { error } = await sb.from("turn_project_members").update(r?{role:r}:patch).eq("id", memberId);
+    if(error) return { ok:false, message:error.message };
+    return { ok:true };
+  }catch(err){ return { ok:false, message:(err&&err.message)||"Update failed." }; }
+}
+async function cloudRemoveProjectMember(memberId){
+  const sb = sbClient(); if(!sb || !memberId) return { ok:false };
+  try{
+    const { error } = await sb.from("turn_project_members").delete().eq("id", memberId);
+    if(error) return { ok:false, message:error.message };
+    return { ok:true };
+  }catch(err){ return { ok:false, message:(err&&err.message)||"Remove failed." }; }
+}
+window.cloudListProjectMembers = cloudListProjectMembers;
+window.cloudInviteProjectMember = cloudInviteProjectMember;
+window.cloudUpdateProjectMember = cloudUpdateProjectMember;
+window.cloudRemoveProjectMember = cloudRemoveProjectMember;
 /* persist a film's poster (a downscaled data URL) onto its doc.cover, merging so the
    rest of the story doc is untouched. Used by the Home screen's poster generator. */
 async function cloudSaveCover(id, cover, prevCover){

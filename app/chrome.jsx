@@ -26,7 +26,7 @@ function ExportMenu({ project, scenes, drafts, onReset }){
   ];
   return React.createElement("div",{className:"export-wrap",ref:ref},
     React.createElement("button",{className:`tb-btn ${open?"on":""}`,onClick:()=>setOpen(o=>!o),title:"Export the screenplay / story"},
-      React.createElement(Icon.download,{s:14}),"Export"),
+      React.createElement(Icon.download,{s:14})),
     open && React.createElement("div",{className:"export-menu"},
       React.createElement("div",{className:"export-head"},
         "Export \u00b7 ",React.createElement("span",{style:{color:"var(--txt-2)"}}, drafted+" of "+scenes.length+" scenes drafted")),
@@ -147,14 +147,14 @@ function ViewNav({ room, view, setView, artView, setArtView, railOpen, inspOpen,
 window.ViewNav = ViewNav;
 
 const ROOMS = [
-  { id:"writers", label:"Writers\u2019 Room", phase:"Development", icon:"script", live:true },
-  { id:"art", label:"The Art Room", phase:"Pre-production", icon:"palette", live:true },
-  { id:"stage", label:"The Stage", phase:"Production", icon:"clapper", live:true },
+  { id:"writers", label:"Writers\u2019 Room", phase:"Development", icon:"script", live:true, entitlement:"writers_room" },
+  { id:"art", label:"The Art Room", phase:"Pre-production", icon:"palette", live:true, entitlement:"art_room" },
+  { id:"stage", label:"The Stage", phase:"Production", icon:"clapper", live:true, entitlement:"stage" },
   { id:"cutting", label:"The Cutting Room", phase:"Post", icon:"scissorsCut", live:false },
 ];
 window.ROOMS = ROOMS;
 
-function RoomSwitcher({ room, setRoom, hasStory }){
+function RoomSwitcher({ room, setRoom, hasStory, roomEntitlements }){
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
   React.useEffect(()=>{
@@ -163,7 +163,14 @@ function RoomSwitcher({ room, setRoom, hasStory }){
   },[]);
   const cur = ROOMS.find(r=>r.id===room) || ROOMS[0];
   // until a story exists, every room downstream of the Writers' Room is locked
-  const locked = (r)=> r.live && r.id!=="writers" && !hasStory;
+  const planLocked = (r)=> r.live && r.id!=="writers" && roomEntitlements && roomEntitlements[r.entitlement]===false;
+  const storyLocked = (r)=> r.live && r.id!=="writers" && !hasStory;
+  const locked = (r)=> planLocked(r) || storyLocked(r);
+  const lockLabel = (r)=>{
+    if(planLocked(r)) return (typeof window.turnRoomRequiredPlan==="function" ? window.turnRoomRequiredPlan(r.id) : "Upgrade")+" plan";
+    if(storyLocked(r)) return "Needs a story";
+    return "";
+  };
   return React.createElement("div",{className:"room-switch",ref},
     React.createElement("button",{className:"room-btn",onClick:()=>setOpen(o=>!o)},
       React.createElement("span",{className:"room-btn-ic"},React.createElement(Icon[cur.icon]||Icon.script,{s:14})),
@@ -176,7 +183,8 @@ function RoomSwitcher({ room, setRoom, hasStory }){
       ROOMS.map((r,i)=>
         React.createElement("button",{key:r.id,
           className:`room-item ${room===r.id?"on":""} ${(r.live&&!locked(r))?"":"soon"}`,
-          title: locked(r) ? "Create a story first — this room works on your story" : undefined,
+          title: planLocked(r) ? `${r.label} requires the ${typeof window.turnRoomRequiredPlan==="function" ? window.turnRoomRequiredPlan(r.id) : "right"} plan` :
+            storyLocked(r) ? "Create a story first — this room works on your story" : undefined,
           onClick:()=>{ if(r.live){ setRoom(r.id); setOpen(false); } }},
           React.createElement("span",{className:"room-item-no"},i+1),
           React.createElement("span",{className:"room-item-ic"},React.createElement(Icon[r.icon]||Icon.script,{s:15})),
@@ -186,7 +194,7 @@ function RoomSwitcher({ room, setRoom, hasStory }){
           !r.live
             ? React.createElement("span",{className:"room-item-soon"},"Soon")
             : locked(r)
-              ? React.createElement("span",{className:"room-item-soon"},"Needs a story")
+              ? React.createElement("span",{className:"room-item-soon"},lockLabel(r))
               : (room===r.id && React.createElement("span",{className:"room-item-dot"}))))));
 }
 
@@ -209,10 +217,10 @@ window.ThemeToggle = ThemeToggle;
 const TURN_API_KEY_STORE = "turn.providerApiKeys.v1";
 const TURN_API_PROVIDERS = [
   { id:"anthropic", label:"Anthropic", hint:"Writing, agents and MUSE when that text provider is selected", placeholder:"sk-ant-..." },
-  { id:"openai", label:"OpenAI", hint:"GPT Image and OpenAI text models through the server proxy", placeholder:"sk-..." },
-  { id:"google", label:"Google AI Studio", hint:"Nano Banana / Gemini image models and Google text models", placeholder:"AIza..." },
-  { id:"elevenlabs", label:"ElevenLabs", hint:"Voice design, text-to-speech and speech-to-text through the server proxy", placeholder:"sk_..." },
-  { id:"fal", label:"fal.ai", hint:"Stage video generation through the server proxy", placeholder:"fal..." },
+  { id:"openai", label:"OpenAI", hint:"OpenAI text models when selected; GPT Image is routed through fal.ai", placeholder:"sk-..." },
+  { id:"google", label:"Google AI Studio", hint:"Gemini text models when selected; Nano Banana images are routed through fal.ai", placeholder:"AIza..." },
+  { id:"elevenlabs", label:"ElevenLabs", hint:"Voice design, library, clone, text-to-speech and speech-to-text through the server proxy", placeholder:"sk_..." },
+  { id:"fal", label:"fal.ai", hint:"Image generation and Stage video generation through the server proxy", placeholder:"fal..." },
 ];
 function turnSanitizeApiKey(k){
   return String(k||"")
@@ -444,7 +452,7 @@ function StoryBriefModal({ project, onClose, onRebuild }){
 }
 window.StoryBriefModal = StoryBriefModal;
 
-function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, onManageStyles, onRebuildFromBrief, hasFilmStyle, theme, onTheme, authSlot, projectSlot, onHome }){
+function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, onManageStyles, onRebuildFromBrief, hasFilmStyle, theme, onTheme, authSlot, projectSlot, teamSlot, roomEntitlements, onHome }){
   const [bibleOpen, setBibleOpen] = React.useState(false);
   const [briefOpen, setBriefOpen] = React.useState(false);
   const [stylesOpen, setStylesOpen] = React.useState(false);
@@ -467,18 +475,15 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
       // the project title first, then the department (room) switcher to its right
       React.createElement("div",{className:"context-group"},
         projectSlot || null,
-        React.createElement(RoomSwitcher,{room,setRoom,hasStory:(scenes||[]).length>0}))),
+        React.createElement(RoomSwitcher,{room,setRoom,hasStory:(scenes||[]).length>0,roomEntitlements}))),
 
     React.createElement("div",{className:"tb-right"},
       React.createElement(ThemeToggle,{theme,onTheme}),
+      teamSlot || null,
       // Writers' Room: review the logline + synopsis the story was built from
       room==="writers" && project && (project.sourceBrief||project.logline||project.premise) && React.createElement("button",{className:"tb-btn",onClick:()=>setBriefOpen(true),
         title:"Story brief — the logline & synopsis this story was built from"},
         React.createElement((Icon.book||Icon.file||Icon.layers),{s:14}),"Brief"),
-      // ADMIN ONLY: the whole continuity JSON, one click
-      onViewBible && React.createElement("button",{className:"tb-btn",onClick:()=>setBibleOpen(true),
-        title:"Film Bible — view the whole continuity JSON the studio reads from"},
-        React.createElement(Icon.layers,{s:14}),"JSON"),
       // Styles manager: ADMIN ONLY. Its real job is curating the GLOBAL style tier
       // (publish/hide/reorder what every user sees). Regular users manage their own
       // locked styles where they live — on the Art Room cards (lock 🔒 / unlock chip)
@@ -492,7 +497,7 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
         title:"API keys — platform provider keys (admin only)"},
         React.createElement((Icon.key||Icon.lock||Icon.layers),{s:14}),"API Keys"),
       React.createElement("button",{className:"tb-btn newstory",onClick:onNewStory,title:"Start a new story from an idea"},
-        React.createElement(Icon.plus,{s:14}),"New Story"),
+        React.createElement(Icon.plus,{s:14})),
       // Export is a Writers' Room action (screenplay / story formats) — only there,
       // and only once a story exists (nothing to export from an empty canvas).
       room==="writers" && (scenes||[]).length>0 && React.createElement(ExportMenu,{project,scenes,drafts,onReset}),

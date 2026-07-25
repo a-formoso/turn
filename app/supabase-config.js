@@ -11,11 +11,11 @@ window.TURN_SUPABASE = {
   /* Server-side proxy. When TRUE, generation is routed through the `image-proxy`
      Supabase Edge Function. The function can use user-saved provider keys sent
      per request from the top-bar API Keys modal, or fall back to platform keys
-     stored as server secrets. It serves image providers (GPT Image / OpenAI must
-     be proxied; Nano Banana / Google can also be proxied), the TEXT model behind
-     MUSE/spec drafting/agents, plus voice/video routes. Keep FALSE until you've
-     deployed that function; while FALSE, GPT Image/voice/video aren't offered and
-     Nano Banana runs in-browser with the user's saved local Google key. */
+     stored as server secrets. Image generation is fal.ai-first (Nano Banana
+     variants and GPT Image 2), writing/text stays with the selected text provider,
+     Stage video stays on fal.ai, and ElevenLabs voice-library operations stay on
+     ElevenLabs through this proxy. Keep FALSE only for local smoke tests that do
+     not need media generation. */
   imageProxy: true,
   imageProxyFn: "image-proxy",
 };

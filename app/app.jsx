@@ -53,6 +53,17 @@ const GRADES = {
   "Ember & Ice":   { pos:"oklch(0.68 0.18 35)", posH:"35", neg:"oklch(0.74 0.09 210)", negH:"210" },
 };
 
+function StudioProgressOverlay({ title, detail, progress }){
+  const pct = progress==null ? null : Math.max(0, Math.min(100, Math.round(progress)));
+  return React.createElement("div",{className:"redraft-overlay studio-progress-overlay"},
+    React.createElement("div",{className:"redraft-card studio-progress-card"},
+      React.createElement("span",{className:"orb"}),
+      React.createElement("div",{className:"redraft-t"},title),
+      detail && React.createElement("div",{className:"redraft-d"},detail),
+      pct!=null && React.createElement("div",{className:"studio-progress-bar","aria-label":"Progress"},
+        React.createElement("i",{style:{width:pct+"%"}}))));
+}
+
 /* ---- alternate view: Turn Audit table ---- */
 function TurnAudit({ scenes, selId, onSelect }){
   return React.createElement(DragScroll,{className:"canvas-scroll",style:{padding:"18px 28px 40px"}},
@@ -442,8 +453,10 @@ function App(){
   const startWithPlan = (plan)=>{
     // carry the tier the visitor chose on the landing pricing cards through signup:
     // writer/director/studio (a real plan) or "free" for the generic Get-started CTA.
+    const waitlist = String(plan||"").toLowerCase()==="stage_waitlist";
+    if(waitlist){ try{ localStorage.setItem("turn-stage-waitlist-intent","1"); }catch(e){} }
     const valid = (window.CINEMA_PLANS||[]).some(p=>String(p.tier).toLowerCase()===String(plan).toLowerCase());
-    const p = valid ? String(plan).toLowerCase() : "free";
+    const p = waitlist ? "free" : (valid ? String(plan).toLowerCase() : "free");
     try{ localStorage.setItem("turn-intended-plan", p); }catch(e){}
     setIntendedPlan(p); openAuth("signup");
   };
@@ -457,9 +470,15 @@ function App(){
   const [welcomeOpen, setWelcomeOpen] = React.useState(()=>{
     try{ return new URLSearchParams(window.location.search).has("welcome"); }catch(e){ return false; }
   });
+  const [creditPackOpen, setCreditPackOpen] = React.useState(()=>{
+    try{
+      const qs = new URLSearchParams(window.location.search);
+      return qs.has("credits") || qs.has("credit_pack");
+    }catch(e){ return false; }
+  });
   React.useEffect(()=>{
-    if(!welcomeOpen) return;
-    try{ const u = new URL(window.location.href); u.searchParams.delete("welcome");
+    if(!welcomeOpen && !creditPackOpen) return;
+    try{ const u = new URL(window.location.href); u.searchParams.delete("welcome"); u.searchParams.delete("credits"); u.searchParams.delete("credit_pack");
       window.history.replaceState({}, "", u.pathname + (u.searchParams.toString()?("?"+u.searchParams.toString()):"") + u.hash); }catch(e){}
   },[]);
   // PLAN-LESS SIGNUP — a "Get started" signup carried no tier: once the ledger loads
@@ -469,8 +488,21 @@ function App(){
     if(!(session && session.user)) return;
     if(intendedPlan!=="free") return;
     if(!creditBalance) return;                         // wait for the ledger to load
+    let stageWaitlist = false;
+    try{ stageWaitlist = localStorage.getItem("turn-stage-waitlist-intent")==="1"; }catch(e){}
     try{ localStorage.removeItem("turn-intended-plan"); }catch(e){}
     setIntendedPlan(null);                             // fires once, then never again
+    if(stageWaitlist){
+      try{ localStorage.removeItem("turn-stage-waitlist-intent"); }catch(e){}
+      (async()=>{ try{
+        const res = typeof window.cloudJoinStageWaitlist==="function" ? await window.cloudJoinStageWaitlist() : null;
+        if(res && res.error) throw new Error(res.error.message || "Could not join the Stage waitlist.");
+        if(typeof window.appToast==="function") window.appToast("You're on the Stage waitlist. We'll email you when production access opens.","success");
+      }catch(e){
+        if(typeof window.appToast==="function") window.appToast((e && e.message) || "Could not join the Stage waitlist yet.","error");
+      } })();
+      return;
+    }
     if(window.turnIsPaidPlan(creditBalance.plan) || (Number(creditBalance.remaining)||0) > 0) return;   // already covered
     if(typeof window.appToast==="function") window.appToast("Pick your plan to start creating — every render runs on your plan's credits.","info");
     if(typeof window.turnOpenPlans==="function") setTimeout(()=>window.turnOpenPlans(), 400);
@@ -1106,9 +1138,9 @@ function App(){
     return false;
   };
   // PLAN GATE — no free tier: a signed-in user needs an active plan (or purchased
-  // credits) before creating a story or leaving the Writers' Room. Admin and local/
-  // dev (balance not loaded yet) bypass; the server-side credit check is the real
-  // enforcement, this is the friendly nudge to the plans modal.
+  // credits) before creating a story. Admin and local/dev (balance not loaded yet)
+  // bypass; the server-side credit check is the real enforcement, this is the
+  // friendly nudge to the plans modal.
   const planActive = ()=>{
     if(window.turnIsAdmin) return true;
     const b = window.turnCreditBalance;
@@ -1122,16 +1154,54 @@ function App(){
     }
     return window.turnIsPaidPlan(b.plan) || (Number(b.credits)||0) > 0 || (Number(b.remaining)||0) > 0;
   };
+  const currentRoomEntitlements = ()=>{
+    if(window.turnIsAdmin) return { writers_room:true, art_room:true, stage:true };
+    const b = window.turnCreditBalance;
+    if(!b && session && session.user) return null;
+    if(typeof window.turnRoomEntitlements==="function") return window.turnRoomEntitlements(b);
+    return { writers_room:true, art_room:true, stage:true };
+  };
+  const roomGateReady = ()=>{
+    if(window.turnIsAdmin) return true;
+    if(!(session && session.user)) return true;
+    return !!window.turnCreditBalance;
+  };
+  const canAccessRoom = (id)=>{
+    if(id==="writers") return true;
+    const e = currentRoomEntitlements();
+    if(!e) return false;
+    if(id==="art") return !!e.art_room;
+    if(id==="stage") return !!e.stage;
+    return false;
+  };
   const requirePlan = (what)=>{
     // The plans modal itself carries the "choose a plan" message, so no toast —
     // the bottom popup was redundant noise on top of the modal.
     if(typeof window.turnOpenPlans==="function") window.turnOpenPlans();
   };
+  const requireRoomEntitlement = (id)=>{
+    const plan = (typeof window.turnRoomRequiredPlan==="function") ? window.turnRoomRequiredPlan(id) : "the right";
+    if(typeof window.appToast==="function"){
+      window.appToast(`${id==="art"?"The Art Room":"The Stage"} requires the ${plan} plan.`, "info");
+    }
+    requirePlan("open "+(id==="art"?"the Art Room":id==="stage"?"the Stage":"this room"));
+  };
   const guardedSetRoom = (id)=>{
     if(id!=="writers" && !planActive()){ requirePlan("open "+(id==="art"?"the Art Room":id==="stage"?"the Stage":"this room")); return; }
-    if(id!=="writers" && !scenes.length){ requireStory("The Art Room"); return; }
+    if(id!=="writers" && !canAccessRoom(id)){ requireRoomEntitlement(id); return; }
+    if(id!=="writers" && !scenes.length){ requireStory(id==="stage" ? "The Stage" : "The Art Room"); return; }
     setRoom(id);
   };
+  React.useEffect(()=>{
+    if(room==="writers") return;
+    if(!roomGateReady()) return;
+    if(canAccessRoom(room)) return;
+    const plan = (typeof window.turnRoomRequiredPlan==="function") ? window.turnRoomRequiredPlan(room) : "the right";
+    setRoom("writers"); setView("spine");
+    if(typeof window.appToast==="function"){
+      window.appToast(`${room==="art"?"The Art Room":"The Stage"} requires the ${plan} plan.`, "info");
+    }
+  },[room, creditBalance, session, isAdmin]);
 
   const resetStory = ()=>{
     if(!isAdmin) return;   // the Matrix sample is admin-only — belt & braces behind the hidden menu item
@@ -1312,8 +1382,8 @@ function App(){
       if(targets.length) markApplied("characters");
     }catch(e){}
     setDraftingAllVisuals(false);
-    return landed;
     setDraftingVisualIds([]);
+    return landed;
   };
 
   // ---- Art Room: LOOKBOOK (References) ----
@@ -1620,7 +1690,10 @@ function App(){
   const purgeLocation = (id)=>{
     const item = (trash.locations||[]).find(x=>x.id===id);
     setTrash(t=>({ ...t, locations:(t.locations||[]).filter(x=>x.id!==id) }));
-    try{ if(typeof nbClearAsset==="function"){ nbClearAsset(id); (item&&item.variants||[]).forEach(v=>nbClearAsset(id+"-"+v.id)); } }catch(e){}
+    try{ if(typeof nbClearAsset==="function"){
+      nbClearAsset(id);
+      [...(item&&item.variants||[]), ...(item&&item.coverageSheets||[])].forEach(v=>nbClearAsset(id+"-"+v.id));
+    } }catch(e){}
   };
   const draftLocationVisuals = async (l)=>{
     if(!(typeof aiLocationVisuals==="function")) return;
@@ -1848,6 +1921,68 @@ function App(){
       action:(seed&&seed.action)||"", covers:(seed&&Array.isArray(seed.covers))?seed.covers:[],
       dialogue:"", negativePrompt:"", manual:true }]);
   };
+  const completeDraftedShotCoverage = (scene, list)=>{
+    const bm = (beatsMap||{})[scene.id] || {};
+    const rows = Array.isArray(bm.rows) ? bm.rows : [];
+    if(!rows.length || !Array.isArray(list) || !list.length) return list;
+    const made = list.slice();
+    const stamp = Date.now().toString(36);
+    const clean = (s,n)=> (typeof clipWords==="function")
+      ? clipWords(String(s||"").replace(/\s+/g," ").trim(), n||160)
+      : String(s||"").replace(/\s+/g," ").trim().slice(0,n||160);
+    const rowText = (row)=>{
+      const d = row.drive||{}, r = row.react||{};
+      return [d.d, r.d].filter(Boolean).join(" — ") || scene.summary || "";
+    };
+    const rawFor = (row, idx, action, covers, plan)=>({
+      beat:Number(row.n)||idx+1,
+      size:covers && covers.length ? "MS" : (idx===0 ? "WS" : "MS"),
+      angle:"eye", move:"static", lens:(idx===0 ? "35" : "50"),
+      subjects:[], props:[],
+      action:clean(action || rowText(row), 300),
+      composition:"Clean coverage backstop: isolate this beat's missing visual event so the chain has complete beat coverage.",
+      dialogue:"",
+      covers:Array.isArray(covers) ? covers : [1],
+      purpose:"complete the beat's missing coverage",
+      priority:!made.some(sh=>Number(sh.beatN)===Number(row.n) && sh.priority),
+      beatPlan:plan || { micro:[clean(rowText(row),180)].filter(Boolean), protect:clean(rowText(row),220) }
+    });
+    rows.forEach((row, idx)=>{
+      const beatNo = Number(row.n)||idx+1;
+      const beatShots = made.filter(sh=>Number(sh.beatN)===beatNo);
+      if(!beatShots.length){
+        made.push(normalizeShot(rawFor(row, idx), scene, made.length, locations, props, characters, beatsMap));
+        return;
+      }
+      const plan = beatShots.map(sh=>sh.beatPlan).find(p=>p && Array.isArray(p.micro) && p.micro.length);
+      if(!plan || typeof microCoverage!=="function") return;
+      const cov = microCoverage(beatShots, plan.micro.map(t=>String(t).replace(/^\s*\d+[\.\)]\s*/,"")));
+      plan.micro.forEach((m, mi)=>{
+        const n = mi+1;
+        const covered = beatShots.some(sh=>cov[sh.id] && cov[sh.id].has(n));
+        if(covered) return;
+        const sh = normalizeShot(rawFor(row, idx, m, [n], plan), scene, made.length, locations, props, characters, beatsMap);
+        sh.id = "shot-"+scene.id+"-b"+beatNo+"m"+n+"-"+stamp;
+        made.push(sh);
+      });
+    });
+    const orderOf = {}; rows.forEach((r,i)=>{ orderOf[Number(r.n)||i+1]=i; });
+    return made.sort((a,b)=>(orderOf[Number(a.beatN)]??999)-(orderOf[Number(b.beatN)]??999) || (a.order||0)-(b.order||0))
+      .map((sh,i)=>({ ...sh, order:i }));
+  };
+  React.useEffect(()=>{
+    if(!(shots||[]).length || !(scenes||[]).length || typeof normalizeShot!=="function") return;
+    let next = shots.slice(), changed = false;
+    (scenes||[]).forEach(scene=>{
+      const sceneShots = next.filter(sh=>sh.sceneId===scene.id);
+      if(!sceneShots.length) return;
+      const fixed = completeDraftedShotCoverage(scene, sceneShots);
+      if(fixed.length <= sceneShots.length) return;
+      changed = true;
+      next = next.filter(sh=>sh.sceneId!==scene.id).concat(fixed);
+    });
+    if(changed) setShots(next);
+  },[(shots||[]).length,(scenes||[]).length,Object.keys(beatsMap||{}).length]);
   // SPLIT A BEAT INTO COVERAGE — MUSE designs 2-3 shots for ONE beat (one per
   // distinct visual event); the beat's current shot(s) are replaced (confirmed
   // first). Writing-model credits only; frames render separately in chain order.
@@ -1907,6 +2042,7 @@ function App(){
             if(best && bestScore>=0.35) sh.dialogue=best;
           });
         }
+        made = completeDraftedShotCoverage(scene, made);
       }
     }
     if(!made && typeof deriveShotsHeuristic==="function"){
@@ -2073,12 +2209,20 @@ function App(){
     draftingRef.current = false;
   };
   // polish: regenerate one scene's prose as genuinely new final text (beats locked)
+  const [polishBusy, setPolishBusy] = React.useState(null);
   const polishScene = async (s, beatsForScene)=>{
+    setPolishBusy({ no:s && s.no });
     const i = scenes.findIndex(x=>x.id===s.id);
-    const structural = autoDraftScene(s, beatsForScene, i>0?scenes[i-1]:null);
-    const res = await aiPolishScene(s, beatsForScene, structural.blocks, i>0?scenes[i-1]:null);
-    if(res){ commitVersion(s.id, res); return true; }
-    return false; // fall back to seed prose animation
+    try{
+      const structural = autoDraftScene(s, beatsForScene, i>0?scenes[i-1]:null);
+      const res = await aiPolishScene(s, beatsForScene, structural.blocks, i>0?scenes[i-1]:null);
+      if(res){ commitVersion(s.id, res); return true; }
+      return false; // fall back to seed prose animation
+    }catch(e){
+      return false;
+    }finally{
+      setPolishBusy(null);
+    }
   };
 
   const sel = scenes.find(s=>s.id===selId) || null;
@@ -2343,7 +2487,8 @@ function App(){
       turnAtOf: (sid)=> ((beatsMap||{})[sid]||{}).turnAt,
       draftCoverage: async (scene)=>{ if(typeof aiDraftShots!=="function" || typeof normalizeShot!=="function") return null;
         const raw = await aiDraftShots(scene, beatsMap, drafts, locations, props, characters, lbProject("shots"));
-        return (raw && raw.length) ? raw.map((r,i)=>normalizeShot(r, scene, i, locations, props, characters, beatsMap)) : null; },
+        if(!raw || !raw.length) return null;
+        return completeDraftedShotCoverage(scene, raw.map((r,i)=>normalizeShot(r, scene, i, locations, props, characters, beatsMap))); },
       applyCoverage: (sceneId, newShots, anchorId)=>{
         // chain model: the head is the FIRST shot in order, so coverage shots carry no
         // explicit .anchor (that flag now means a manual fresh-start / chain break).
@@ -2803,6 +2948,63 @@ function App(){
       React.createElement("div",{className:"empty-canvas-title"},"Start your film"),
       React.createElement("div",{className:"empty-canvas-sub"},"Your canvas is clean. Describe an idea and Cinema Machine builds the value-charge spine, scene by scene — then characters, props, script and shots all follow from it."),
       React.createElement("button",{className:"empty-canvas-btn",onClick:startNewStory},"+ New Story")));
+  const sceneByBusyShot = draftingSceneShots ? scenes.find(s=>s.id===draftingSceneShots) : null;
+  const draftSceneNow = drafting ? scenes[Math.min(drafting.i||0, Math.max(0, scenes.length-1))] : null;
+  const draftSceneNo = draftSceneNow && draftSceneNow.no!=null ? String(draftSceneNow.no).padStart(2,"0") : "";
+  const busyShotSceneNo = sceneByBusyShot && sceneByBusyShot.no!=null ? String(sceneByBusyShot.no).padStart(2,"0") : "";
+  const draftingProgress = drafting && (drafting.total||scenes.length)
+    ? ((Number(drafting.i||0) + (drafting.one ? 0.35 : 1)) / Math.max(1, Number(drafting.total||scenes.length))) * 100
+    : null;
+  const studioProgress =
+    polishBusy ? {
+      title:"MUSE is redrafting Scene "+(polishBusy.no!=null?polishBusy.no:""),
+      detail:"Rebuilding the screenplay from the current beats — about a minute. The previous draft stays in version history (Undo restores it)."
+    } :
+    recastBusy ? {
+      title:"MUSE is recasting Scene "+recastBusy.no+" for "+recastBusy.name,
+      detail:"MUSE is rewriting the scene's summary, desire and beats so "+recastBusy.name+" drives — about half a minute."
+    } :
+    (room==="writers" && drafting) ? {
+      title:drafting.one
+        ? "MUSE is drafting Scene "+draftSceneNo
+        : "MUSE is drafting the screenplay",
+      detail:drafting.one
+        ? "Writing Scene "+draftSceneNo+" from its beats while preserving continuity."
+        : "Threading continuity scene by scene — "+Math.min(Number(drafting.i||0)+1, Number(drafting.total||scenes.length))+" of "+Number(drafting.total||scenes.length)+".",
+      progress:draftingProgress
+    } :
+    (room==="art" && draftingAllVisuals) ? {
+      title:"MUSE is designing character specs",
+      detail:"Building wardrobe, body, continuity states and visual rules from the screenplay."
+    } :
+    (room==="art" && draftingAllProps) ? {
+      title:"MUSE is designing prop specs",
+      detail:"Pulling items from the cast and script, then mapping them to the scenes where they appear."
+    } :
+    (room==="art" && draftingAllLocs) ? {
+      title:"MUSE is scouting location specs",
+      detail:"Deriving places from the screenplay, drafting set geography and staging reusable depth grids."
+    } :
+    (room==="art" && assigningStyles) ? {
+      title:"MUSE is assigning scene styles",
+      detail:"Reading the film and color-scripting every scene from the current visual bible."
+    } :
+    (room==="art" && taggingScenes) ? {
+      title:"MUSE is mapping props to scenes",
+      detail:"Checking where each prop appears so downstream shots attach the right references."
+    } :
+    (room==="art" && draftingSceneShots) ? {
+      title:"MUSE is designing shots for Scene "+busyShotSceneNo,
+      detail:"Breaking the scene into filmable shot coverage from the current beats and screenplay."
+    } :
+    (room==="art" && draftingAllShots) ? {
+      title:"MUSE is designing shot coverage",
+      detail:"Building missing scene shot lists in story order while preserving beat coverage."
+    } :
+    (room==="art" && draftingStageId) ? {
+      title:"MUSE is drafting location staging",
+      detail:"Turning the location into a practical depth grid for consistent camera blocking."
+    } : null;
   // ── Signed-out gate: show the commercial landing page instead of the app. The
   //    departments (spine, Writers' Room, Art Room, Agents) are never exposed until
   //    sign-in. Only when cloud auth is configured; local-only mode runs the app as before.
@@ -2834,6 +3036,10 @@ function App(){
       activating: !(creditBalance && window.turnIsPaidPlan(creditBalance.plan)),
       onNewStory: ()=>{ setWelcomeOpen(false); startNewStory(); },
       onClose: ()=>setWelcomeOpen(false) }),
+    creditPackOpen && session && window.WelcomeCreditPackCard && React.createElement(window.WelcomeCreditPackCard,{
+      credits: creditBalance && creditBalance.remaining,
+      activating: !creditBalance,
+      onClose: ()=>setCreditPackOpen(false) }),
     // Home = the dashboard, and ONLY once the user has >=2 films. Below that,
     // opening Home routes straight into the Writers' Room (see onHome), so the
     // dashboard overlay never renders for a 0/1-film studio.
@@ -2915,7 +3121,19 @@ function App(){
         frameworkLabel:(typeof frameworkOf==="function" && frameworkOf(project).id!=="threeact") ? frameworkOf(project).badge : null,
         onSwitch:switchProject, onCreate:createProject, onRename:renameProject, onDelete:deleteProject,
         onNewEpisode:createEpisode, onMakeShow:makeShow,
-        canMakeShow: !currentShowId && scenes.length>0 }) : null,
+        canMakeShow: !currentShowId && scenes.length>0 && !(((projects||[]).find(p=>p.id===currentProjectId)||{}).isShared) }) : null,
+      teamSlot: cloudMode && window.TeamButton ? React.createElement(window.TeamButton,{
+        projectId:currentProjectId,
+        projectTitle:((projects||[]).find(p=>p.id===currentProjectId)||{}).title || project.title,
+        projectMeta:(projects||[]).find(p=>p.id===currentProjectId) || null,
+        onChanged:async ()=>{
+          if(typeof cloudListProjects==="function"){
+            const list = await cloudListProjects();
+            if(list) setProjects(list);
+          }
+        }
+      }) : null,
+      roomEntitlements: currentRoomEntitlements(),
       railOpen,inspOpen,
       onToggleRail:toggleRail,
       onToggleInsp:toggleInsp}),
@@ -2943,11 +3161,11 @@ function App(){
                 onUpdateShot:updateShot,
                 onStageNav:(tab)=>{
                   if(tab==="timeline"){ setRoom("writers"); setView("script"); return; }
-                  if(tab==="shots"){ setRoom("art"); setArtView("shots"); return; }
-                  if(tab==="assets"){ setRoom("art"); setArtView("lookbook"); return; }
-                  if(tab==="audio"){ setRoom("stage"); return; }
-                  if(tab==="versions"){ setRoom("stage"); return; }
-                  setRoom("stage");
+                  if(tab==="shots"){ setArtView("shots"); guardedSetRoom("art"); return; }
+                  if(tab==="assets"){ setArtView("lookbook"); guardedSetRoom("art"); return; }
+                  if(tab==="audio"){ guardedSetRoom("stage"); return; }
+                  if(tab==="versions"){ guardedSetRoom("stage"); return; }
+                  guardedSetRoom("stage");
                 }}))
       : room==="art"
         ? (scenes.length===0
@@ -3265,13 +3483,7 @@ function App(){
     // Undo affordance — persists whether the Writers' Room is open or closed.
     // Suppressed for Adaptation (full build-from-scratch): the toast is easy to miss
     // beneath the result modal, and the in-room "Undo last" still covers it.
-    // centered progress while a driver recast runs (same chrome as the redraft overlay)
-    recastBusy && React.createElement("div",{className:"redraft-overlay"},
-      React.createElement("div",{className:"redraft-card"},
-        React.createElement("span",{className:"orb"}),
-        React.createElement("div",{className:"redraft-t"},"Recasting Scene "+recastBusy.no+" for "+recastBusy.name),
-        React.createElement("div",{className:"redraft-d"},
-          "MUSE is rewriting the scene\u2019s summary, desire and beats so "+recastBusy.name+" drives \u2014 about half a minute."))),
+    studioProgress && React.createElement(StudioProgressOverlay, studioProgress),
     agentUndo.length>0 && agentUndo[agentUndo.length-1].label!=="Adaptation" && React.createElement("div",{className:"agent-undo"},
       React.createElement("span",{className:"au-ic"},React.createElement(Icon.undo,{s:15})),
       React.createElement("div",{className:"au-text"},

@@ -9,7 +9,7 @@ function locSwatch(intExt){
     : "linear-gradient(135deg,#4a5a78,#222c3e)";     // interior — slate
 }
 
-function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage, onIeClick }){
+function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage, onIeClick }){
   const d = locVisualDefaults(l);
   const scenePresets = (typeof locScenePresets==="function") ? locScenePresets(l, project) : [];
   const finalPrompt = combinedLocationPrompt(l, project, {});
@@ -72,15 +72,57 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
     if(!same) onUpdate(l.id, { times: next });
   },[l.id, scenes]);
 
+  React.useEffect(()=>{
+    if(typeof deriveLocationCoverageSheets!=="function") return;
+    const C = window.turnContinuity || {};
+    const derived = deriveLocationCoverageSheets(l, scenes, drafts||C.drafts||{});
+    const cur = l.coverageSheets || [];
+    const curById = {}; cur.forEach(v=>{ if(v&&v.id) curById[v.id]=v; });
+    const merged = derived.map(v=>({ ...(curById[v.id]||{}), ...v }));
+    const same = JSON.stringify(cur)===JSON.stringify(merged);
+    if(!same) onUpdate(l.id, { coverageSheets: merged });
+  },[l.id, l.intExt, (l.scenes||[]).join(","), scenes, drafts]);
+
+  const [masterRefs, setMasterRefs] = React.useState([]);
+  const [masterRefOff, setMasterRefOff] = React.useState([]);
+  const buildMasterRefs = ()=>{
+    const out = [];
+    const C = window.turnContinuity || {};
+    const list = (Array.isArray(l.scenes) && l.scenes.length)
+      ? (scenes||C.scenes||[]).filter(s=>l.scenes.indexOf(s.id)>=0).sort((a,b)=>(a.no||0)-(b.no||0))
+      : (scenes||C.scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+    for(const sc of list){
+      const imgs = (typeof locationScreenplayReferenceImages==="function")
+        ? locationScreenplayReferenceImages(l, { name:l.name, sceneNos:[sc.no] }, scenes||C.scenes||[], drafts||C.drafts||{})
+        : [];
+      imgs.forEach((url,i)=>{ if(out.length<6) out.push({ url, kind:"script", ready:true, required:false,
+        refId:"script-main-"+l.id+"-"+(sc.no||sc.id)+"-"+i,
+        label:"Scene "+String(sc.no||"?").padStart(2,"0")+" p"+(i+1),
+        note:"full-scene screenplay page "+(i+1)+" for Scene "+(sc.no||"?")+" — use this to design the location's 2x2 geography from what is actually filmed; do not render page text or borders" }); });
+      if(out.length>=6) break;
+    }
+    return out;
+  };
+  const masterScriptSig = JSON.stringify((l.scenes||[]).map(sid=>(((drafts||{})[sid]||{}).blocks||[])));
+  const masterRefsKey = [l.id, (l.scenes||[]).join(","), scenes&&scenes.length, masterScriptSig].join("|");
+  React.useEffect(()=>{ setMasterRefs(buildMasterRefs()); },[masterRefsKey]);
+  const toggleMasterRef = (rid)=> setMasterRefOff(off=> off.indexOf(rid)>=0 ? off.filter(x=>x!==rid) : [...off, rid]);
+
   const gen = useImageGen({
     id: l.id, slotId: "locref-"+l.id,
     entity: l,
     /* Clear cascades to this location's time-of-day variant plates so they aren't
        orphaned in storage. */
-    relatedClearIds: ()=> (l.variants||[]).map(v=> l.id+"-"+v.id),
+    relatedClearIds: ()=> [...(l.variants||[]), ...(l.coverageSheets||[])].map(v=> l.id+"-"+v.id),
     buildFinal: ()=> finalPrompt,
     buildFromPhoto: ()=> buildLocationFromPhotoPrompt(l, project),
     buildSimple: ()=> buildSimpleLocationPrompt(l),
+    attachments: async ()=> buildMasterRefs()
+      .filter(r=>r.url && masterRefOff.indexOf(r.refId)<0)
+      .map(r=>({ url:r.url, kind:"script", refId:r.refId, note:r.note })),
+    attachmentsText: (refs)=> refs && refs.length
+      ? "REFERENCE IMAGES are attached: "+refs.map((r,i)=>"Image "+(i+1)+" = "+r.note).join("; ")+". These are screenplay snapshots for production-design context only: use them to decide the 2x2 plate geography, but never copy their typography, page border, text, captions or layout."
+      : "",
     /* NO set-dressing refs at generation — the clean plate anchors the look;
        fixtures are painted in afterwards via the Edit panel's Set-dressing buttons */
     buildEdit: (instr)=>
@@ -142,6 +184,7 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
 
   const sceneById = React.useMemo(()=>{ const m={}; (scenes||[]).forEach(s=>{ m[s.id]=s; }); return m; },[scenes]);
   const locScenes = (l.scenes||[]).map(id=>sceneById[id]).filter(Boolean).sort((a,b)=>(a.no||0)-(b.no||0));
+  const coverageSheets = (l.coverageSheets || []).slice().sort((a,b)=>(Number(a.order||0)-Number(b.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
 
   // time-of-day / weather variants
   const addVariant = ()=>{
@@ -178,6 +221,7 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
       menuExtra: gen.genUrl ? [{ label: panelEdit?"Close panel edit":"Edit a panel\u2026",
         title:"Change just ONE view of the multi-angle plate, leaving the others untouched",
         onClick:()=> setPanelEdit(pe=> pe ? null : { idx:null, text:"" }) }] : null,
+      referenceControls: masterRefs.length>0 && React.createElement(CoverageReferenceStrip,{ refs:masterRefs, excludedIds:masterRefOff, onToggle:toggleMasterRef, onView }),
       onDelete:()=>onDelete(l.id), deleteLabel:"Delete location" }),
     panelEdit && gen.genUrl && React.createElement("div",{className:"sheet-edit-panel loc-panel-edit"},
       React.createElement("div",{className:"loc-panel-pick"},
@@ -282,6 +326,12 @@ function LocationSheet({ l, project, scenes, onUpdate, onDelete, onDraft, drafti
       React.createElement(CardFold,{label:"Staging \u2014 Depth Grid",defaultOpen:false},
         React.createElement(StagingGrid,{l,onUpdate,onDraftStaging,draftingStage})),
 
+      React.createElement(CardFold,{label:"Screenplay coverage sheets",defaultOpen:coverageSheets.length>0},
+        React.createElement("div",{className:"loc-variants"},
+          coverageSheets.length
+            ? coverageSheets.map((v,i)=>React.createElement(LocationCoverageSheet,{key:v.id, l, v, project, scenes, drafts, previousSheets:coverageSheets.slice(0,i), parentGenUrl:gen.genUrl, onView}))
+            : React.createElement("div",{className:"loc-variants-empty"},"No separate INT / EXT sheet is needed from the current screenplay text."))),
+
       React.createElement(CardFold,{label:"Time-of-day variants",defaultOpen:false},
         React.createElement("div",{className:"loc-variants"},
           (l.variants||[]).length
@@ -375,6 +425,141 @@ function StagingGrid({ l, onUpdate, onDraftStaging, draftingStage }){
       placeholder:"surface texture underfoot\u2026",onCommit:val=>set({key:"floor",val})}));
 }
 
+/* screenplay-derived INT/EXT side plates. These are not time/weather variants:
+   they are extra empty-set anchors for subspaces the screenplay actually films
+   inside a broader scene location (e.g. EXT yard + INT booth). */
+function LocationCoverageSheet({ l, v, project, scenes, drafts, previousSheets, parentGenUrl, onView }){
+  const id = l.id+"-"+v.id;
+  const sceneNos = Array.isArray(v.sceneNos) ? v.sceneNos.filter(n=>n!=null) : [];
+  const sourceLabel = sceneNos.length
+    ? ((sceneNos.length>1 ? "Scenes " : "Scene ")+sceneNos.map(n=>String(n)).join(", "))
+    : "Scene";
+  const [refPreview, setRefPreview] = React.useState([]);
+  const [coverageRefOff, setCoverageRefOff] = React.useState([]);
+  const _C0 = window.turnContinuity || {};
+  const _sheetScene = (typeof locationSceneForCoverageSheet==="function") ? locationSceneForCoverageSheet(l, v, scenes||_C0.scenes||[]) : null;
+  const _sheetDraft = _sheetScene && (drafts||_C0.drafts||{})[_sheetScene.id];
+  const _scriptSig = JSON.stringify((_sheetDraft&&_sheetDraft.blocks)||[]);
+  const refsKey = [l.id, id, v.id, v.order, v.scriptExcerpt, parentGenUrl, _scriptSig, (previousSheets||[]).map(p=>p&&p.id).join(","), scenes&&scenes.length].join("|");
+  const buildCoverageRefs = async ()=>{
+    const out = [];
+    const C = window.turnContinuity || {};
+    const scriptImgs = (typeof locationScreenplayReferenceImages==="function")
+      ? locationScreenplayReferenceImages(l, v, scenes||C.scenes||[], drafts||C.drafts||{})
+      : ((typeof locationScreenplayReferenceImage==="function") ? [locationScreenplayReferenceImage(l, v, scenes||C.scenes||[], drafts||C.drafts||{})].filter(Boolean) : []);
+    scriptImgs.forEach((scriptImg, i)=> out.push({ url:scriptImg, kind:"script", refId:"script-"+id+"-"+i, required:false, ready:true,
+      label:"Screenplay p"+(i+1), note:"full-scene screenplay page "+(i+1)+" for "+(v.name||l.name||"this coverage sheet")+" — use it to infer what the script implies, but do not render any text from it" }));
+    const grab = async (rid)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(rid):"";
+      if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(rid); }catch(e){} } return u||""; };
+    const parent = parentGenUrl || await grab(l.id);
+    out.push({ url:parent, kind:"location", refId:l.id, required:true, ready:!!parent,
+      label:(l.name||"Parent location"), note:(l.name||"parent location")+" master plate — preserve the same exterior/interior world, materials, scale and light" });
+    for(const p of (previousSheets||[])){
+      if(!p || !p.id) continue;
+      const rid = l.id+"-"+p.id;
+      const u = await grab(rid);
+      out.push({ url:u, kind:"location previous", refId:rid, required:true, ready:!!u,
+        label:p.name||"Previous coverage", note:(p.name||"previous coverage sheet")+" — earlier screenplay coverage; keep geometry and thresholds consistent" });
+    }
+    return out;
+  };
+  React.useEffect(()=>{
+    let alive = true;
+    (async ()=>{
+      const refs = await buildCoverageRefs();
+      if(!alive) return;
+      setRefPreview(refs);
+    })();
+    const onDone = (e)=>{
+      const rid = e && e.detail && e.detail.id;
+      if(rid===l.id || rid===id || (previousSheets||[]).some(p=>rid===l.id+"-"+p.id)){
+        buildCoverageRefs().then(refs=>{ if(alive) setRefPreview(refs); });
+      }
+    };
+    window.addEventListener("nb-gen-done", onDone);
+    return ()=>{ alive=false; window.removeEventListener("nb-gen-done", onDone); };
+  },[refsKey]);
+  const missingRequiredRefs = refPreview.filter(r=>r.required && !r.ready);
+  const canGenerateCoverage = refPreview.length>0 && missingRequiredRefs.length===0;
+  const missingPrev = missingRequiredRefs.some(r=>String(r.refId||"").indexOf(l.id+"-")===0);
+  const toggleCoverageRef = (rid)=> setCoverageRefOff(off=> off.indexOf(rid)>=0 ? off.filter(x=>x!==rid) : [...off, rid]);
+  const collectCoverageRefs = async ()=>{
+    return (await buildCoverageRefs())
+      .filter(r=>r.ready && r.url && coverageRefOff.indexOf(r.refId)<0)
+      .map(r=>({ url:r.url, kind:r.kind==="script"?"script":"location", refId:r.refId, note:r.note }));
+  };
+  const gen = useImageGen({
+    id, slotId: "loccov-"+id,
+    entity: l,
+    buildFinal: ()=> buildLocationCoveragePrompt(l, v, project),
+    buildSimple: ()=> buildSimpleLocationPrompt(l),
+    beforeGenerate: async ()=>{
+      const refs = await buildCoverageRefs();
+      const missing = refs.filter(r=>r.required && !r.ready);
+      const ok = missing.length===0;
+      if(!ok && typeof window.appToast==="function"){
+        const prev = missing.some(r=>String(r.refId||"").indexOf(l.id+"-")===0);
+        window.appToast(prev
+          ? "Generate the earlier coverage sheet first — this one depends on it."
+          : "Generate the parent location plate first — this coverage sheet needs it as a reference.");
+      }
+      return ok;
+    },
+    attachments: collectCoverageRefs,
+    attachmentsText: (refs)=> refs && refs.length
+      ? "REFERENCE IMAGES are attached in this order: "+refs.map((r,i)=>"Image "+(i+1)+" = "+r.note).join("; ")+". The screenplay page snapshots are context only: read the scene geography from them, but never copy their typography, page border, text, captions or layout into the location sheet."
+      : "",
+    buildEdit: (instr)=> "Edit this "+(v.role||"INT")+" coverage sheet for "+(v.name||l.name||"the location")+". Apply ONLY: "+instr+". Keep it consistent with the parent location's architecture, materials and light.",
+  });
+  return React.createElement("div",{className:"loc-variant loc-coverage-sheet"},
+    React.createElement("div",{className:"loc-variant-head"},
+      React.createElement("div",{className:"loc-coverage-title"},
+        React.createElement("span",{className:"loc-intext-badge "+(/EXT/.test(v.role||"")?"ext":"int")},v.role||"INT"),
+        React.createElement("b",null,v.name||"Coverage sheet")),
+      React.createElement("span",{className:"loc-coverage-source",title:v.summary||""},sourceLabel)),
+    v.summary && React.createElement("div",{className:"loc-variants-empty loc-coverage-summary"},v.summary),
+    React.createElement(SheetFrame,{ gen, slotId:"loccov-"+id, name:(v.name||l.name||"Location")+" \u00b7 "+(v.role||"INT"),
+      avatarColor:locSwatch(v.role), initials:(v.role||"?").slice(0,2).toUpperCase(), drafted:true, drafting:false,
+      entity:l, onView, slotPlaceholder:"Drop a finished side plate", noun:"coverage sheet", compact:true,
+      referenceControls: React.createElement(CoverageReferenceStrip,{ refs:refPreview, excludedIds:coverageRefOff, onToggle:toggleCoverageRef, onView }),
+      generateDisabled:!canGenerateCoverage,
+      generateDisabledLabel: missingPrev ? "Generate earlier coverage first" : "Generate parent plate first",
+      generateDisabledTitle: missingPrev
+        ? "This coverage sheet depends on an earlier coverage sheet. Generate that sheet first so the geometry and sightlines can carry forward."
+        : "This coverage sheet needs the parent location plate as a visual reference before it can generate." }),
+    gen.genUrl && window.QaCheckButton && React.createElement("div",{className:"card-qa-row"},
+      React.createElement(window.QaCheckButton,{ gen, name:(v.name||l.name||"")+" \u00b7 "+(v.role||"INT"), noun:"location coverage sheet" })));
+}
+
+function CoverageReferenceStrip({ refs, excludedIds, onToggle, onView }){
+  refs = refs || [];
+  excludedIds = excludedIds || [];
+  return React.createElement("div",{className:"coverage-refs"},
+    React.createElement("div",{className:"shot-refs-lab"},
+      React.createElement(Icon.layers,{s:11}),"Reference images"),
+    React.createElement("div",{className:"shot-refs-row coverage-refs-row"},
+      refs.map((r,i)=>{
+        const canToggle = !!(onToggle && r.refId!=null);
+        const off = canToggle && excludedIds.indexOf(r.refId)>=0;
+        if(r.ready && r.url) return React.createElement("div",{key:i,role:"button",tabIndex:0,
+            className:"shot-ref-thumb "+(r.kind==="script"?"script":"location")+(off?" off":""),
+            title:(r.required?"Needed to unlock":"Optional")+" — "+(r.note||r.label||"Reference image")+(off?" — excluded from generation":""),
+            onClick:()=>onView&&onView(r.url,{name:r.label||"Reference image"}),
+            onKeyDown:(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); onView&&onView(r.url,{name:r.label||"Reference image"}); } }},
+            React.createElement("img",{src:r.url,alt:r.label||"Reference",loading:"lazy"}),
+            r.required && React.createElement("span",{className:"coverage-ref-req"},"need"),
+            canToggle && React.createElement("button",{className:"shot-ref-tick"+(off?"":" on"),
+              title: off ? "Excluded — click to include this reference image in generation."
+                : "Included — click to exclude this reference image from generation.",
+              onClick:(e)=>{ e.stopPropagation(); onToggle(r.refId); }},
+              off ? "\u00d7" : "\u2713"));
+        return React.createElement("div",{key:i,className:"shot-ref-thumb missing "+(r.kind==="script"?"script":"location"),
+            title:(r.required?"Required missing":"Optional missing")+" — "+(r.label||"Reference image")},
+            React.createElement("span",{className:"coverage-ref-missing"},r.required?"needed":"later"),
+            React.createElement("span",{className:"coverage-ref-cap"},r.label||"Reference"));
+      })));
+}
+
 /* one time-of-day variant: its own image slot + a small establishing-frame generator */
 function LocationVariant({ l, v, project, onTime, onRemove, onView }){
   const gen = useImageGen({
@@ -395,7 +580,7 @@ function LocationVariant({ l, v, project, onTime, onRemove, onView }){
       React.createElement(window.QaCheckButton,{ gen, name:(l.name||"")+" \u00b7 "+v.time, noun:"time-of-day plate" })));
 }
 
-function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingIds, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, onSetWorldScale }){
+function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingIds, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, onSetWorldScale }){
   const [view, setView] = React.useState(null);
   if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   const [sceneFilter, setSceneFilter] = React.useState("");
@@ -547,7 +732,7 @@ function LocationSheets({ project, locations, scenes, onUpdate, onDraft, onDraft
       ? (shown.length
           ? React.createElement(React.Fragment,null,
               React.createElement("div",{className:"sheet-grid"},
-                pager.slice(shown).map(l=>React.createElement(LocationSheet,{key:l.id,l,project,scenes,onUpdate,onDelete,onDraft,
+                pager.slice(shown).map(l=>React.createElement(LocationSheet,{key:l.id,l,project,scenes,drafts,onUpdate,onDelete,onDraft,
                   onIeClick:(k)=>setIeFilter(x=>x===k?"":k),
                   drafting:draftingId===l.id||(draftingIds||[]).indexOf(l.id)>=0||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
                   batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),

@@ -333,6 +333,51 @@ function locationForScene(locations, sceneId){
 }
 window.locationForScene = locationForScene;
 
+function shotLocationText(sh){
+  return [sh&&sh.action, sh&&sh.composition, sh&&sh.dialogue, sh&&sh.directives]
+    .filter(Boolean).join(" ").replace(/\s+/g," ").trim();
+}
+function shotLocationSide(sh, loc, scene, drafts){
+  const explicit = String((sh&&sh.locationSide)||"").toUpperCase();
+  if(/^(INT|EXT|BOTH)$/.test(explicit)) return explicit;
+  const text = shotLocationText(sh).toLowerCase();
+  const intHit = /\b(inside|interior|within|booth|room|office|desk|terminal|console|counter|window|glass)\b/.test(text);
+  const extHit = /\b(outside|exterior|yard|street|facade|rain|pavement|road|parking|approach)\b/.test(text);
+  if(intHit && extHit) return "BOTH";
+  if(intHit) return "INT";
+  if(extHit) return "EXT";
+  const side = String(loc&&loc.intExt||"").toUpperCase();
+  if(side==="INT" || side==="EXT") return side;
+  return "";
+}
+function shotLocationCoverageSpecs(loc, sh, scene, drafts){
+  if(!loc) return [];
+  const _locPanel = (typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
+  const base = { id:loc.id, locPanelQ:(_locPanel?_locPanel.q:null), role:loc.intExt||"",
+    note:(loc.name||"location")+" — master location plate seen as its "+(_locPanel?_locPanel.label:"coverage view")+" (one full-frame view)" };
+  const sheets = (Array.isArray(loc.coverageSheets) && loc.coverageSheets.length)
+    ? loc.coverageSheets
+    : ((typeof deriveLocationCoverageSheets==="function") ? deriveLocationCoverageSheets(loc, scene?[scene]:[], drafts||((window.turnContinuity||{}).drafts)||{}) : []);
+  if(!sheets.length) return [base];
+  const text = shotLocationText(sh).toLowerCase();
+  const side = shotLocationSide(sh, loc, scene, drafts);
+  const matches = sheets.filter(v=>{
+    const role = String(v.role||"").toUpperCase();
+    if(side==="BOTH") return true;
+    if(side && role && role!==side) return false;
+    const words = (v.triggerWords||[]).map(w=>String(w||"").toLowerCase()).filter(Boolean);
+    return !words.length || words.some(w=>text.indexOf(w)>=0);
+  }).map(v=>({ id:loc.id+"-"+v.id, role:v.role||"", locPanelQ:null,
+    note:(v.name||loc.name||"location")+" — screenplay-derived "+(v.role||"INT")+" coverage sheet (one full-frame view)" }));
+  const crossBoundary = side==="BOTH" || /\b(through|across|behind|beyond)\s+(?:the\s+)?(glass|window|door|threshold)\b/i.test(text);
+  if(!matches.length) return [base];
+  if(side==="INT" && !crossBoundary) return matches;
+  if(side==="EXT" && !crossBoundary) return [base, ...matches.filter(m=>String(m.role).toUpperCase()==="EXT")].filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i);
+  return [base, ...matches].filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i);
+}
+window.shotLocationSide = shotLocationSide;
+window.shotLocationCoverageSpecs = shotLocationCoverageSpecs;
+
 /* ---- SCALE & POV --------------------------------------------------------------
    A character/creature/prop carries a SCALE CLASS that does two jobs: it sets a
    canonical height (for the scale sheet's ruler) AND, more powerfully, it
@@ -930,9 +975,9 @@ function buildShotPrompt(sh, ctx){
   // entity stays in the staging text; just its sheet isn't attached (labels must
   // mirror the real attachment list or the numbered map mislabels the files)
   const _refOff = (sh && Array.isArray(sh.refOff)) ? sh.refOff : [];
-  const _locPanel = (typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
-  const _locLabel = (loc && _refOff.indexOf(loc.id)<0) ? ((loc.name||"the location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+", one full-frame view of this ONE set — "
-    + (locWeight==="ambient" ? "a background reference for the grade and surfaces only; the character fills this tight frame" : "reproduce its architecture, surfaces, fixtures and signage exactly")) : null;
+  const _locSpecs = (typeof shotLocationCoverageSpecs==="function") ? shotLocationCoverageSpecs(loc, sh, scene, (window.turnContinuity||{}).drafts||{}) : [];
+  const _locLabels = _locSpecs.filter(s=>_refOff.indexOf(s.id)<0).map(s=>s.note+" — "
+    + (locWeight==="ambient" ? "a background reference for the grade and surfaces only; the character fills this tight frame" : "reproduce its architecture, surfaces, fixtures, sightlines and signage exactly"));
   const _castLabels = subjects.filter(c=>_refOff.indexOf(c.id)<0).map(c=> {
     const scale = (typeof canonicalScaleLabel==="function") ? canonicalScaleLabel(c) : (c.name||"character");
     return c.name+"'s character sheet — match the face, build, hair and wardrobe exactly; canonical scale: "+scale;
@@ -945,8 +990,8 @@ function buildShotPrompt(sh, ctx){
     const scale = (typeof propPhysicalScaleLabel==="function") ? propPhysicalScaleLabel(p) : (p.name||"prop");
     return "the "+p.name+" (prop sheet) — still in frame from an earlier beat; keep it present, matching its sheet; physical scale: "+scale;
   });
-  if(locWeight==="ambient"){ _castLabels.forEach(l=>imgs.push(l)); if(_locLabel) imgs.push(_locLabel); }
-  else { if(_locLabel) imgs.push(_locLabel); _castLabels.forEach(l=>imgs.push(l)); }
+  if(locWeight==="ambient"){ _castLabels.forEach(l=>imgs.push(l)); _locLabels.forEach(l=>imgs.push(l)); }
+  else { _locLabels.forEach(l=>imgs.push(l)); _castLabels.forEach(l=>imgs.push(l)); }
   _propLabels.forEach(l=>imgs.push(l));
   _carriedLabels.forEach(l=>imgs.push(l));
   let MAP = imgs.length
@@ -956,8 +1001,8 @@ function buildShotPrompt(sh, ctx){
     MAP += " Worn items have no separate sheets — each is part of its owner's character sheet and must match exactly as designed there: "
       + wornProps.map(p=> p.name+" (on "+(p.ownerName||"its owner")+")").join("; ")+".";
   }
-  if(_locLabel){
-    MAP += " If the framing reveals space beyond the attached location view, extend the SAME set consistently — the reference is one angle of ONE real set.";
+  if(_locLabels.length){
+    MAP += " If the framing crosses between attached location views, preserve the exact threshold/sightline relationship between them; otherwise extend the SAME set consistently from the attached view.";
   }
 
   // ---- ASSEMBLE: image map, then the style spine, then the staging line, then constraints ----
@@ -1060,8 +1105,12 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
     carried = (ledger[sh.id]||[]).filter(pid=> inPr.indexOf(pid)<0); }catch(e){}
   // build the sheet-reference specs, then ORDER by location weight
   const _locPanel = (ctx.location && typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
-  const locSpec  = ctx.location ? [{ id:ctx.location.id, locPanelQ:(_locPanel?_locPanel.q:null),
-    note:(ctx.location.name||"location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+" (one full-frame view)" }] : [];
+  const locSpec  = ctx.location
+    ? ((typeof shotLocationCoverageSpecs==="function")
+      ? shotLocationCoverageSpecs(ctx.location, sh, ctx.scene, (window.turnContinuity||{}).drafts||{})
+      : [{ id:ctx.location.id, locPanelQ:(_locPanel?_locPanel.q:null),
+        note:(ctx.location.name||"location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+" (one full-frame view)" }])
+    : [];
   const castSpec = inCast.map(id=>{ const c=(ctx.charById||{})[id]; return c?{ id, note:c.name+" character sheet" }:null; }).filter(Boolean);
   // same dressing gate as buildShotPrompt/collectShotRefs — labels must match files
   const propSpec = inPr.map(id=>{ const p=(ctx.propById||{})[id];
@@ -1337,6 +1386,8 @@ window.beatContinuityLint = beatContinuityLint;
 function normalizeShot(raw, scene, idx, locations, props, characters, beats){
   const sizeIds = SHOT_SIZES.map(x=>x.id), angleIds = SHOT_ANGLES.map(x=>x.id),
         moveIds = SHOT_MOVES.map(x=>x.id), lensIds = SHOT_LENSES.map(x=>x.id);
+  const rawBeat = Number(raw && raw.beat);
+  const beatNo = Number.isFinite(rawBeat) && rawBeat > 0 ? rawBeat : (idx+1);
   const pick = (v, ids, dflt)=>{ const u=String(v||"").toUpperCase(); const lc=String(v||"").toLowerCase();
     return ids.find(id=>id.toUpperCase()===u) || ids.find(id=>id.toLowerCase()===lc) || dflt; };
   const loc = locationForScene(locations, scene.id);
@@ -1371,32 +1422,38 @@ function normalizeShot(raw, scene, idx, locations, props, characters, beats){
   };
   // never leave a shot with an empty action: fall back to the originating BEAT's
   // own action text (then the scene summary) when the model omitted it.
-  const beatRow = (beats && beats[scene.id] && (beats[scene.id].rows||[]).find(r=>String(r.n)===String(raw.beat||idx+1)));
+  const beatRow = (beats && beats[scene.id] && (beats[scene.id].rows||[]).find(r=>String(r.n)===String(beatNo)));
   const beatAction = beatRow ? ((beatRow.drive&&beatRow.drive.d)||(beatRow.react&&beatRow.react.d)||"") : "";
-  const action = ((typeof clipWords==="function") ? clipWords((raw.action||"").toString(),300) : (raw.action||"").toString().slice(0,300)) || beatAction || (scene.summary||"");
+  const specText = (v,max)=>{
+    const clean = (typeof scrubBrand==="function" ? scrubBrand(String(v||"")) : String(v||"")).replace(/\s+/g," ").trim();
+    return (typeof clipWords==="function") ? clipWords(clean,max) : clean.slice(0,max);
+  };
+  const action = specText(raw.action,300) || specText(beatAction,300) || specText(scene.summary,300);
+  const sideRaw = String(raw.locationSide || raw.side || "").toUpperCase();
   return {
-    id: "shot-"+scene.id+"-"+(raw.beat||idx+1)+"-"+Date.now().toString(36)+idx,
-    sceneId: scene.id, beatN: raw.beat || (idx+1), order: idx,
+    id: "shot-"+scene.id+"-"+beatNo+"-"+Date.now().toString(36)+idx,
+    sceneId: scene.id, beatN: beatNo, order: idx,
     size: pick(raw.size, sizeIds, "MS"),
     angle: pick(raw.angle, angleIds, "eye"),
     move: pick(raw.move || raw.movement, moveIds, "static"),
     lens: pick(raw.lens, lensIds, "50"),
-    composition: (typeof clipWords==="function") ? clipWords((raw.composition||"").toString(),240) : (raw.composition||"").toString().slice(0,240),
+    composition: specText(raw.composition,240),
     subjects: resolveSubjects(raw, action),
     locationId: loc?loc.id:"",
     props: resolveProps(raw.props),
+    locationSide: /^(INT|EXT|BOTH)$/.test(sideRaw) ? sideRaw : undefined,
     action: action,
-    dialogue: (typeof clipWords==="function") ? clipWords((raw.dialogue||"").toString(),200) : (raw.dialogue||"").toString().slice(0,200),
+    dialogue: specText(raw.dialogue,200),
     // micro-beat mapping (pre-production layer): which of the beat's discrete
     // filmable actions this shot covers, why it exists, and whether it carries
     // the beat's protected emotional core. The per-beat plan (micro list +
     // protect line) rides denormalized on every shot of its beat.
     covers: Array.isArray(raw.covers) ? raw.covers.map(Number).filter(n=>Number.isFinite(n)&&n>0&&n<=20).slice(0,12) : [],
-    purpose: (typeof clipWords==="function") ? clipWords((raw.purpose||"").toString(),160) : (raw.purpose||"").toString().slice(0,160),
+    purpose: specText(raw.purpose,160),
     priority: !!raw.priority,
     beatPlan: (raw.beatPlan && Array.isArray(raw.beatPlan.micro) && raw.beatPlan.micro.length)
-      ? { micro: raw.beatPlan.micro.map(t=>String(t||"").slice(0,90)).slice(0,10),
-          protect: String(raw.beatPlan.protect||"").slice(0,220) }
+      ? { micro: raw.beatPlan.micro.map(t=> specText(t,180)).filter(Boolean).slice(0,10),
+          protect: specText(raw.beatPlan.protect,220) }
       : undefined,
     // no dur: a drafted shot stays on AUTO — its length can't be predicted, only
     // budgeted (dialogue-anchored estimate via shotDur); the user pins by hand

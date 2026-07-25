@@ -12,10 +12,13 @@ cross-device access, and multiple projects all work.
    and triggers.
 2. **SQL Editor → run `storage.sql`** — creates the private `turn-assets` bucket
    and per-user access policies.
-3. **SQL Editor → run `cameos.sql`** — creates the `turn_cameos` table (RLS).
-4. **Authentication → Providers** — enable whichever sign-in you chose
+3. **SQL Editor → run `team-collaboration.sql`** — creates project membership
+   rows and upgrades project / generation / storage RLS from owner-only to
+   owner-or-collaborator access.
+4. **SQL Editor → run `cameos.sql`** — creates the `turn_cameos` table (RLS).
+5. **Authentication → Providers** — enable whichever sign-in you chose
    (Email magic-link and/or Google OAuth).
-5. Paste your **Project URL** and **anon public key** into `app/supabase-config.js`.
+6. Paste your **Project URL** and **anon public key** into `app/supabase-config.js`.
    The anon key is safe in client code — RLS is what protects the data.
 
    (No "Exposed schemas" step is needed — the tables live in `public`, which is
@@ -79,4 +82,3 @@ so no provider key sits in the browser. While `imageProxy` is `false`, GPT Image
 hidden and Nano Banana runs in-browser with your local Google key.
 Add more providers by branching on `provider` inside the function and giving it the
 matching secret.
-
