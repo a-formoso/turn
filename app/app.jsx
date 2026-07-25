@@ -443,7 +443,13 @@ function App(){
   const [authOpen, setAuthOpen] = React.useState(false);
   const [authMode, setAuthMode] = React.useState("signin");   // which tab the auth modal opens on
   const [authReady, setAuthReady] = React.useState(false);    // has the initial session check resolved?
-  const openAuth = (mode)=>{ setAuthMode(mode==="signup"?"signup":"signin"); setAuthOpen(true); };
+  const openAuth = (mode, opts)=>{
+    if(!(opts && opts.keepPlanIntent)){
+      try{ localStorage.removeItem("turn-intended-plan"); localStorage.removeItem("turn-intended-plan-at"); localStorage.removeItem("turn-stage-waitlist-intent"); }catch(e){}
+      setIntendedPlan(null);
+    }
+    setAuthMode(mode==="signup"?"signup":"signin"); setAuthOpen(true);
+  };
 
   // Intended plan from the landing pricing CTAs. Persisted to localStorage so checkout /
   // onboarding can read which tier the visitor chose AFTER they sign up:
@@ -457,12 +463,12 @@ function App(){
     if(waitlist){ try{ localStorage.setItem("turn-stage-waitlist-intent","1"); }catch(e){} }
     const valid = (window.CINEMA_PLANS||[]).some(p=>String(p.tier).toLowerCase()===String(plan).toLowerCase());
     const p = waitlist ? "free" : (valid ? String(plan).toLowerCase() : "free");
-    try{ localStorage.setItem("turn-intended-plan", p); }catch(e){}
-    setIntendedPlan(p); openAuth("signup");
+    try{ localStorage.setItem("turn-intended-plan", p); localStorage.setItem("turn-intended-plan-at", String(Date.now())); }catch(e){}
+    setIntendedPlan(p); openAuth("signup", { keepPlanIntent:true });
   };
   React.useEffect(()=>{
     window.turnIntendedPlan = ()=>{ try{ return localStorage.getItem("turn-intended-plan")||null; }catch(e){ return null; } };
-    window.turnClearIntendedPlan = ()=>{ try{ localStorage.removeItem("turn-intended-plan"); }catch(e){} setIntendedPlan(null); };
+    window.turnClearIntendedPlan = ()=>{ try{ localStorage.removeItem("turn-intended-plan"); localStorage.removeItem("turn-intended-plan-at"); }catch(e){} setIntendedPlan(null); };
   },[]);
   // WELCOME MOMENT — Stripe's after-payment redirect returns the buyer to
   // /?welcome=1 (set on each payment link's after-payment URL). Show the
@@ -481,16 +487,15 @@ function App(){
     try{ const u = new URL(window.location.href); u.searchParams.delete("welcome"); u.searchParams.delete("credits"); u.searchParams.delete("credit_pack");
       window.history.replaceState({}, "", u.pathname + (u.searchParams.toString()?("?"+u.searchParams.toString()):"") + u.hash); }catch(e){}
   },[]);
-  // PLAN-LESS SIGNUP — a "Get started" signup carried no tier: once the ledger loads
-  // and shows no plan and no credits, open the plans modal proactively ONE time —
-  // "pick your plan to start creating" — instead of waiting for them to hit a wall.
+  // PLAN-LESS SIGNUP / TEAM ONBOARDING — generic auth should land in the app.
+  // Locked room/action gates can still ask for a plan exactly when the user needs one.
   React.useEffect(()=>{
     if(!(session && session.user)) return;
     if(intendedPlan!=="free") return;
     if(!creditBalance) return;                         // wait for the ledger to load
     let stageWaitlist = false;
     try{ stageWaitlist = localStorage.getItem("turn-stage-waitlist-intent")==="1"; }catch(e){}
-    try{ localStorage.removeItem("turn-intended-plan"); }catch(e){}
+    try{ localStorage.removeItem("turn-intended-plan"); localStorage.removeItem("turn-intended-plan-at"); }catch(e){}
     setIntendedPlan(null);                             // fires once, then never again
     if(stageWaitlist){
       try{ localStorage.removeItem("turn-stage-waitlist-intent"); }catch(e){}
@@ -503,9 +508,6 @@ function App(){
       } })();
       return;
     }
-    if(window.turnIsPaidPlan(creditBalance.plan) || (Number(creditBalance.remaining)||0) > 0) return;   // already covered
-    if(typeof window.appToast==="function") window.appToast("Pick your plan to start creating — every render runs on your plan's credits.","info");
-    if(typeof window.turnOpenPlans==="function") setTimeout(()=>window.turnOpenPlans(), 400);
   },[session, intendedPlan, creditBalance]);
   // load the admin's plan-card copy overrides (global, public-read) so the plan cards
   // and landing pricing show the edited copy for everyone, including signed-out visitors.
@@ -551,8 +553,18 @@ function App(){
     if(!(session && session.user && session.user.id)) return;
     const plan = intendedPlan;
     if(!plan || plan==="free") return;
+    let fresh = false;
+    try{
+      const at = Number(localStorage.getItem("turn-intended-plan-at")||0);
+      fresh = !!at && (Date.now() - at) < 20*60*1000;
+    }catch(e){}
+    if(!fresh){
+      try{ localStorage.removeItem("turn-intended-plan"); localStorage.removeItem("turn-intended-plan-at"); }catch(e){}
+      setIntendedPlan(null);
+      return;
+    }
     const planObj = (window.CINEMA_PLANS||[]).find(p=>String(p.tier).toLowerCase()===plan);
-    try{ localStorage.removeItem("turn-intended-plan"); }catch(e){}
+    try{ localStorage.removeItem("turn-intended-plan"); localStorage.removeItem("turn-intended-plan-at"); }catch(e){}
     setIntendedPlan(null);
     // sameTab: this fires from an effect (no user gesture) — window.open would be
     // popup-blocked; navigating this tab to Stripe is never blocked, and the
@@ -1084,6 +1096,9 @@ function App(){
       const meta = (projectsRef.current||[]).find(p=>p.id===currentProjectId) || {};
       const keep = {};
       if(meta.cover) keep.cover = meta.cover;
+      // coverPrev too, or the first story edit after generating a poster wipes the
+      // one-deep history and Home's "Restore poster" silently stops working
+      if(meta.coverPrev) keep.coverPrev = meta.coverPrev;
       if(meta.ord!=null) keep.homeOrder = Number(meta.ord);
       if(cloudMode){
         if(typeof cloudSaveDoc==="function"){
@@ -2137,16 +2152,33 @@ function App(){
   },[selId, view]);
   const [agentUndo, setAgentUndo] = React.useState([]);   // stack of pre-run snapshots
   const draftingRef = React.useRef(false);
+  // Scene-id counter. SEEDED FROM THE LOADED SCENES, not a fixed 1000: a bare counter
+  // restarts every page load, so session 2's first "+ Add scene" re-issued s1001 and
+  // collided with session 1's — two scenes sharing one id share drafts/beats/history,
+  // and editing or deleting either hits both.
   const uidRef = React.useRef(1000);
-  const newId = ()=>"s"+(++uidRef.current);
+  const newId = ()=>{
+    const maxSeen = (scenes||[]).reduce((m,s)=>{
+      const hit = String((s&&s.id)||"").match(/^s(\d+)$/);
+      const n = hit ? Number(hit[1]) : NaN;
+      return Number.isFinite(n) && n>m ? n : m;
+    }, uidRef.current);
+    uidRef.current = maxSeen + 1;
+    return "s"+uidRef.current;
+  };
   const renum = (arr)=>arr.map((s,i)=>({...s,no:i+1}));
   // human label describing a draft's provenance
   const labelOf = (v)=> !v ? null : v.edited ? "Manual edit" : v.polished ? "MUSE polish" : (v.ai ? "MUSE draft" : (v.auto ? "Structural draft" : "Original draft"));
   // replace a scene's draft, pushing the old version onto its history stack
+  // undo depth per scene. CAPPED (like the image layer's 12 versions): every entry is a
+  // full screenplay draft and `history` rides in the saved doc, so an uncapped stack grew
+  // the doc on every commit — in local mode it eventually blew the localStorage quota and
+  // (because that write is a bare try/catch) saves then failed silently forever.
+  const HISTORY_MAX = 12;
   const commitVersion = (id, next)=>{
     const prev = drafts[id];
     if(prev) setHistory(h=>{ const e=h[id]||{back:[],fwd:[]};
-      return {...h,[id]:{ back:[...e.back, prev], fwd:[] }}; });
+      return {...h,[id]:{ back:[...e.back, prev].slice(-HISTORY_MAX), fwd:[] }}; });
     setDrafts(d=>({...d,[id]:next}));
   };
   const revertVersion = (id)=>{
@@ -2315,6 +2347,11 @@ function App(){
     setScenes(renum(remaining));
     setBeatsMap(m=>{ const n={...m}; delete n[id]; return n; });
     setDrafts(d=>{ const n={...d}; delete n[id]; return n; });
+    // drop the scene's version history and continuity entry too — left behind they bloat
+    // the saved doc forever, and a later scene that reuses the id would inherit a dead
+    // scene's undo stack (pressing Undo on a new blank scene restored someone else's text)
+    setHistory(h=>{ if(!h[id]) return h; const n={...h}; delete n[id]; return n; });
+    setContinuityMap(c=>{ if(!c || !c[id]) return c; const n={...c}; delete n[id]; return n; });
     setSelId(nxt ? nxt.id : null);
   };
   const reorderScenes = (fromIdx,toIdx)=>setScenes(ss=>{
@@ -3515,4 +3552,41 @@ function App(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+/* CRASH BOUNDARY — before this, ONE render exception unmounted the whole tree and left a
+   white screen with no way back. Worse: if the cause was a bad record in the open film,
+   reloading re-loaded it and crashed again, so the film became effectively unopenable.
+   This catches the error, says what happened, and offers two escapes — a plain reload and
+   a reload that clears the device-local view state (NAV_KEY), so a crash tied to one tab
+   doesn't reopen straight onto it. Note the honest limit: React runs effect cleanups while
+   unwinding, which cancels the 700ms save debounce, so the last unsaved moment can be
+   lost — the copy says so rather than promising nothing was. */
+class AppCrash extends React.Component {
+  constructor(p){ super(p); this.state = { err:null }; }
+  static getDerivedStateFromError(err){ return { err }; }
+  componentDidCatch(err, info){ try{ console.error("Cinema Machine — render crash:", err, info); }catch(e){} }
+  render(){
+    if(!this.state.err) return this.props.children;
+    const e = this.state.err;
+    const msg = String((e && (e.stack || e.message)) || e);
+    const reload = ()=>{ try{ window.location.reload(); }catch(x){} };
+    return React.createElement("div",{className:"crash-wrap"},
+      React.createElement("div",{className:"crash-card"},
+        React.createElement("div",{className:"crash-t"},"Something broke on screen"),
+        React.createElement("div",{className:"crash-d"},
+          "This is a display error, not a lost film — your work saves continuously, though the last few seconds of edits may not have been written. Reload to get back in."),
+        React.createElement("div",{className:"crash-acts"},
+          React.createElement("button",{className:"crash-btn primary",onClick:reload},"Reload"),
+          React.createElement("button",{className:"crash-btn",
+            title:"Reload starting on the default view — use this if the same screen keeps breaking",
+            onClick:()=>{ try{ localStorage.removeItem(NAV_KEY); }catch(x){} reload(); }},
+            "Reload on a fresh view"),
+          React.createElement("button",{className:"crash-btn",
+            title:"Copy the technical detail so it can be reported",
+            onClick:()=>{ try{ navigator.clipboard.writeText(msg); }catch(x){} }},"Copy error")),
+        React.createElement("details",{className:"crash-det"},
+          React.createElement("summary",null,"Technical detail"),
+          React.createElement("pre",{className:"crash-pre"},msg))));
+  }
+}
+ReactDOM.createRoot(document.getElementById("root")).render(
+  React.createElement(AppCrash,null,React.createElement(App)));

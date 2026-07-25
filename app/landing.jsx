@@ -61,8 +61,8 @@ function HeroSpine(){
       [-2,-1,1,2].map(c=>React.createElement("line",{key:"g"+c,x1:X0-26,y1:MID-c*AMP,x2:X1+26,y2:MID-c*AMP,
         stroke:"rgba(255,255,255,.05)",strokeWidth:1})),
       React.createElement("line",{x1:X0-26,y1:MID,x2:X1+26,y2:MID,stroke:"rgba(255,255,255,.18)",strokeWidth:1}),
-      React.createElement("text",{x:X0-26,y:84,fill:"rgba(255,255,255,.38)",fontSize:12,style:mono},"POSITIVE +"),
-      React.createElement("text",{x:X0-26,y:H-64,fill:"rgba(255,255,255,.38)",fontSize:12,style:mono},"NEGATIVE −"),
+      React.createElement("text",{x:X0-26,y:92,fill:"rgba(255,255,255,.38)",fontSize:44,style:mono},"+"),
+      React.createElement("text",{x:X0-26,y:H-58,fill:"rgba(255,255,255,.38)",fontSize:44,style:mono},"-"),
       // act bands
       actX.map((x,i)=>React.createElement("line",{key:"ax"+i,x1:x,y1:64,x2:x,y2:H-48,
         stroke:"rgba(255,255,255,.12)",strokeWidth:1,strokeDasharray:"3 6"})),
@@ -87,7 +87,7 @@ function HeroSpine(){
         stroke:"rgba(255,255,255,.28)",strokeWidth:1,style:{animationDelay:(1.4+i*0.12)+"s"}})),
       pts.filter(p=>p.m).map((p,i)=>React.createElement("text",{key:"m"+i,className:"lp-spine-lab",
         x:p.x,y:p.up?p.y-28:p.y+36,textAnchor:"middle",fill:"rgba(255,255,255,.5)",fontSize:11,
-        style:{...mono,animationDelay:(1.4+i*0.12)+"s"}},p.m.toUpperCase())),
+        style:{...mono,animationDelay:(1.4+i*0.12)+"s"}},p.m)),
       // the playhead — a dot of light reading the story on a loop
       React.createElement("circle",{className:"lp-spine-run halo",r:10,fill:"rgba(255,255,255,.35)",
         filter:"url(#lpgBlur)",style:runStyle}),
@@ -101,9 +101,9 @@ const LP_ROOMS = [
   { no:"02", icon:"palette", title:"Art Room", status:"Available now",
     body:"Design the film from the script: characters, props, locations, style, shots and storyboards prepared for production.",
     cta:"Start with Art Room", plan:"director" },
-  { no:"03", icon:"clapper", title:"Stage", status:"Under maintenance",
+  { no:"03", icon:"clapper", title:"Stage", status:"Available now",
     body:"Generate video, voice, timeline passes and final production assets once the film is designed and ready to shoot.",
-    cta:"Join Stage waitlist", plan:"stage_waitlist" },
+    cta:"Start with Stage", plan:"studio" },
 ];
 
 /* the hero's rotating phrase — the FOUR narrative structures a film can be told
@@ -173,7 +173,7 @@ function Landing({ onStart, onSignIn }){
           React.createElement("button",{className:"lp-btn ghost big",onClick:onSignIn},"Sign in"))),
       React.createElement("div",{className:"lp-hero-aside"},
         React.createElement("p",{className:"lp-lede"},
-          "Start with the room you need. Write the screenplay now, design the film when you are ready, and move into Stage as production opens — one project, one story spine, every department connected."))),
+          "Start with the room you need. Write the screenplay now, design the film when you are ready, and move into Stage for production — one project, one story spine, every department connected."))),
 
     // hero media — the 21:9 short-film placeholder, still outside the frame
     React.createElement("section",{className:"lp-hero-media"},

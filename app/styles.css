@@ -5919,6 +5919,9 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .bc-micro-row.uncovered .bc-micro-t{color:var(--alert)}
 .bc-micro-none{flex:0 0 auto;font-family:var(--f-mono);font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;
   color:var(--alert);border:1px solid var(--alert);border-radius:8px;padding:1px 7px;cursor:help}
+/* coverage NOT MAPPED (pre-micro-beat draft) — neutral, claims neither way */
+.bc-micro-nomap-note{font-size:10.5px;line-height:1.5;color:var(--txt-3);margin:0 0 5px;cursor:help}
+.bc-micro-unknown{flex:0 0 auto;font-family:var(--f-mono);font-size:10px;color:var(--txt-3);padding:1px 7px;cursor:help}
 .bc-micro-shots{flex:0 0 auto;display:inline-flex;gap:4px}
 .bc-micro-shotlink{border:1px solid var(--line-2);background:var(--bg-3);color:var(--txt-1);
   font-family:var(--f-mono);font-size:9.5px;font-weight:700;border-radius:6px;padding:1px 7px;cursor:pointer;transition:.12s}
@@ -6323,3 +6326,23 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
   .team-invite{grid-template-columns:1fr}
   .team-member-actions{flex-direction:column;align-items:flex-end}
 }
+
+/* CRASH BOUNDARY — the recovery screen shown when a render exception escapes React.
+   Deliberately dependency-free (no app tokens beyond the basics) so it can still paint
+   when whatever broke is a theming/layout problem. */
+.crash-wrap{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:24px;
+  background:var(--bg-0,#f4f2ee);overflow:auto}
+.crash-card{width:min(560px,100%);background:var(--bg-1,#fff);border:1px solid var(--line-2,#e0dcd4);
+  border-radius:16px;padding:26px 26px 22px;box-shadow:0 18px 60px rgba(0,0,0,.18)}
+.crash-t{font-family:var(--f-display,inherit);font-size:19px;font-weight:600;color:var(--txt-0,#1a1a1a)}
+.crash-d{font-size:13px;line-height:1.6;color:var(--txt-2,#6b675f);margin-top:8px}
+.crash-acts{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.crash-btn{font-size:12.5px;font-weight:600;padding:8px 15px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--line-2,#e0dcd4);background:var(--bg-2,#faf9f6);color:var(--txt-1,#3a3a3a)}
+.crash-btn:hover{border-color:var(--txt-3,#98938a)}
+.crash-btn.primary{background:var(--accent,#c8791b);border-color:var(--accent,#c8791b);color:#fff}
+.crash-det{margin-top:16px;font-size:11.5px;color:var(--txt-3,#98938a)}
+.crash-det summary{cursor:pointer}
+.crash-pre{margin-top:8px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;
+  font-family:var(--f-mono,monospace);font-size:10.5px;line-height:1.5;color:var(--txt-2,#6b675f);
+  background:var(--bg-3,#efece6);border-radius:8px;padding:10px}

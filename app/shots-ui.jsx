@@ -418,31 +418,39 @@ function beatScriptText(sceneId, n){
 
 /* circled micro-beat numerals: 1..20 -> \u2460.. ; beyond that "#n" */
 function _circ(n){ return (n>=1&&n<=20) ? String.fromCharCode(0x245F+n) : ("#"+n); }
-/* MICRO-BEAT COVERAGE \u2014 which micro-beats each shot films. A shot's explicit `covers`
-   array wins; a shot with NO covers (drafted before the micro-beat layer, an auto-injected
-   establishing wide, or a model that omitted the field) is attributed to the micro-beats
-   its ACTION text matches \u2014 so a present shot is never counted as covering NOTHING, which
-   made a fully-shot beat read as every micro-beat "uncovered". Token-overlap, same idea as
-   the beat-realign / verbatim-snap passes. Returns { shotId -> Set(1-based micro numbers) }. */
-const _MB_STOP = new Set("the and a an of to in on at as is are was for with into from over under this that it its his her their they them then out off up down back again while when where who how".split(" "));
+/* MICRO-BEAT COVERAGE \u2014 which micro-beats each shot films.
+   A shot's explicit `covers` array is the truth and always wins. A shot WITHOUT covers is
+   only inferred when the rest of the beat IS mapped (so this shot is the anomaly \u2014 a
+   hand-added shot, or one the designer left untagged): geometric-mean token overlap (the
+   same similarity realignBlockBeats uses) with a 2-token floor, so one shared common word
+   can never "cover" a micro-beat, and NO best-match fallback \u2014 a shot that matches nothing
+   covers nothing rather than silently claiming micro-beat 1.
+   When NO shot in the beat carries covers, the beat predates the micro-beat layer and we
+   have no coverage data at all: `mapped:false` tells the UI to claim NEITHER covered nor
+   uncovered, instead of inventing a signal in one direction.
+   Returns { map: {shotId -> Set(1-based micro numbers)}, mapped: boolean }. */
+const _MB_STOP = new Set(("the and a an of to in on at as is are was were be been being for with into from over under this that it its his her hers him she they them their then out off up down back again while when where who how not no one two has had have does did doing goes go get gets"
+  ).split(" "));
 function _mbToks(s){ const set=new Set(); String(s||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/).forEach(w=>{ if(w.length>=3 && !_MB_STOP.has(w)) set.add(w); }); return set; }
 function microCoverage(shots, microTexts){
   const rowToks = (microTexts||[]).map(_mbToks);
+  const list = shots || [];
+  // no shots at all \u2192 nothing films anything, so the uncovered flags ARE the right signal
+  const mapped = !list.length || list.some(sh=>Array.isArray(sh.covers) && sh.covers.length>0);
   const map = {};
-  (shots||[]).forEach(sh=>{
+  list.forEach(sh=>{
     if(Array.isArray(sh.covers) && sh.covers.length){ map[sh.id] = new Set(sh.covers); return; }
-    const st = _mbToks((sh.action||"")+" "+(sh.dialogue||"")+" "+(sh.composition||""));
-    const set = new Set(); let best=-1, bi=-1;
-    rowToks.forEach((rt,i)=>{ let hit=0; st.forEach(w=>{ if(rt.has(w)) hit++; });
-      const score = hit / Math.max(1, Math.min(st.size||1, rt.size||1));
-      if(score >= 0.34) set.add(i+1);
-      if(score > best){ best=score; bi=i; } });
-    // a present but weakly-matching shot still covers its single best micro-beat, so it's
-    // never "nothing" (only genuinely-unfilmed micro-beats keep the "uncovered" flag)
-    if(!set.size && bi>=0) set.add(bi+1);
+    const set = new Set();
+    if(mapped){
+      const st = _mbToks((sh.action||"")+" "+(sh.dialogue||"")+" "+(sh.composition||""));
+      rowToks.forEach((rt,i)=>{
+        let hit=0; st.forEach(w=>{ if(rt.has(w)) hit++; });
+        if(hit>=2 && (hit/Math.sqrt((st.size||1)*(rt.size||1))) >= 0.34) set.add(i+1);
+      });
+    }
     map[sh.id] = set;
   });
-  return map;
+  return { map, mapped };
 }
 window.microCoverage = microCoverage;
 /* live keyframe url for a shot id: sync cache, async IDB hydrate, adopt fresh gens */
@@ -492,10 +500,13 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
   const isTurn = String(bm.turnAt||"")===String(L.n);
   const chg = beatRow && beatRow.charge!=null && beatRow.charge!=="" ? Number(beatRow.charge) : null;
   const plan = L.shots.map(x=>x.beatPlan).find(Boolean);
-  // per-shot effective micro-beat coverage (explicit covers, else inferred from action
-  // text) so an unmapped shot doesn't falsely flag every micro-beat as "uncovered"
-  const microCov = (plan && Array.isArray(plan.micro))
-    ? microCoverage(L.shots, plan.micro.map(t=>String(t).replace(/^\s*\d+[\.\)]\s*/,""))) : {};
+  // per-shot micro-beat coverage: explicit `covers` wins; untagged shots inside an
+  // already-mapped beat are inferred conservatively. microMapped=false means the beat has
+  // NO coverage data at all (pre-micro-beat draft) — the UI then claims neither way.
+  const _mc = (plan && Array.isArray(plan.micro))
+    ? microCoverage(L.shots, plan.micro.map(t=>String(t).replace(/^\s*\d+[\.\)]\s*/,"")))
+    : { map:{}, mapped:true };
+  const microCov = _mc.map, microMapped = _mc.mapped;
   const kf = useShotKeyframe(L.shots[0] ? L.shots[0].id : "");
   const letterOf = (i)=>String.fromCharCode(65+i);
   return _el("div",{className:"beat-card"+(isTurn?" turn":"")},
@@ -543,18 +554,26 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
         _el(Icon.bolt,{s:10}), _el("b",null,"Protect:"), " "+plan.protect),
       plan && Array.isArray(plan.micro) && plan.micro.length>0 && _el("div",{className:"bc-micro"},
         _el("div",{className:"bc-sec-lab"},"Micro-beats \u00b7 "+plan.micro.length),
+        // this beat's shots carry no coverage data (drafted before the micro-beat layer):
+        // say so ONCE, honestly, instead of flagging every row either way
+        !microMapped && _el("div",{className:"bc-micro-nomap-note",
+          title:"These shots were drafted before shots recorded which micro-beats they film, so the mapping is unknown. Re-draft this scene's shots to map them."},
+          "Coverage for this beat isn't mapped \u2014 re-draft the scene's shots to map them."),
         plan.micro.map((m,i)=>{ const n=i+1;
           const covering = L.shots.map((sh,idx)=>({sh,idx})).filter(x=> microCov[x.sh.id] && microCov[x.sh.id].has(n));
-          return _el("div",{key:n,className:"bc-micro-row"+(covering.length?"":" uncovered")},
+          const flag = microMapped && !covering.length;   // genuinely unfilmed
+          return _el("div",{key:n,className:"bc-micro-row"+(flag?" uncovered":"")},
             _el("span",{className:"bc-micro-t"},_circ(n)+" "+String(m).replace(/^\s*\d+[\.\)]\s*/,"")),
             covering.length
               ? _el("span",{className:"bc-micro-shots"},covering.map(x=>_el("button",{key:x.sh.id,className:"bc-micro-shotlink",
                   title:"Filmed in Shot "+letterOf(x.idx)+" \u2014 click to open it",
                   onClick:()=>setOpenShotId(x.sh.id)},letterOf(x.idx))))
-              : _el("button",{className:"bc-micro-none",
-                  title:"No shot films this action yet \u2014 click to ADD A SHOT pre-filled with this action (it joins the chain after the beat's last shot; the frame renders separately)",
-                  onClick:()=> onAddShot && onAddShot(scene.id, L.n, { action:String(m).replace(/^\s*\d+[\.\)]\s*/,""), covers:[n] })},
-                  "uncovered \u2014 add shot"));
+              : flag
+                ? _el("button",{className:"bc-micro-none",
+                    title:"No shot films this action yet \u2014 click to ADD A SHOT pre-filled with this action (it joins the chain after the beat's last shot; the frame renders separately)",
+                    onClick:()=> onAddShot && onAddShot(scene.id, L.n, { action:String(m).replace(/^\s*\d+[\.\)]\s*/,""), covers:[n] })},
+                    "uncovered \u2014 add shot")
+                : _el("span",{className:"bc-micro-unknown",title:"Unknown \u2014 these shots don't record which micro-beats they film"},"\u2014"));
         })),
       _el("div",{className:"bc-shots"},
         _el("div",{className:"bc-sec-lab"},"Shots \u00b7 "+L.shots.length),

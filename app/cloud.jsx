@@ -249,44 +249,32 @@ window.cloudRemoveProjectMember = cloudRemoveProjectMember;
 /* persist a film's poster (a downscaled data URL) onto its doc.cover, merging so the
    rest of the story doc is untouched. Used by the Home screen's poster generator. */
 async function cloudSaveCover(id, cover, prevCover){
-  const sb = sbClient(); if(!sb || !id) return;
-  try{
-    const { data } = await sb.from("turn_projects").select("doc").eq("id", id).single();
-    const doc = (data && data.doc) || {};
+  // fenced: a poster save must never revert story edits made while it was in flight
+  await cloudPatchDoc(id, (doc)=>{
     doc.cover = cover || "";
     // one-deep poster history: a REGENERATE passes the outgoing poster so the
     // Home card's Restore can bring it back
     if(prevCover!==undefined) doc.coverPrev = prevCover || "";
-    await sb.from("turn_projects").update({ doc }).eq("id", id);
-  }catch(e){}
+  });
 }
 window.cloudSaveCover = cloudSaveCover;
 /* swap a film's poster with its one-deep history (doc.cover <-> doc.coverPrev) —
    the Home card's Restore. Returns the new pair, or null on failure. */
 async function cloudSwapCover(id){
-  const sb = sbClient(); if(!sb || !id) return null;
-  try{
-    const { data } = await sb.from("turn_projects").select("doc").eq("id", id).single();
-    const doc = (data && data.doc) || {};
-    if(!doc.coverPrev) return null;   // nothing to restore
+  let out = null;
+  const r = await cloudPatchDoc(id, (doc)=>{
+    if(!doc.coverPrev) return false;   // nothing to restore
     const cur = doc.cover || "";
     doc.cover = doc.coverPrev; doc.coverPrev = cur;
-    const { error } = await sb.from("turn_projects").update({ doc }).eq("id", id);
-    if(error) return null;
-    return { cover:doc.cover, coverPrev:doc.coverPrev };
-  }catch(e){ return null; }
+    out = { cover:doc.cover, coverPrev:doc.coverPrev };
+  });
+  return (r && r.ok) ? out : null;
 }
 window.cloudSwapCover = cloudSwapCover;
 /* persist a film's manual position on the Home wall onto doc.homeOrder (merged), so a
    user-arranged order survives reload and rides along in cloudListProjects (`ord`). */
 async function cloudSaveOrder(id, order){
-  const sb = sbClient(); if(!sb || !id) return;
-  try{
-    const { data } = await sb.from("turn_projects").select("doc").eq("id", id).single();
-    const doc = (data && data.doc) || {};
-    doc.homeOrder = order;
-    await sb.from("turn_projects").update({ doc }).eq("id", id);
-  }catch(e){}
+  await cloudPatchDoc(id, (doc)=>{ doc.homeOrder = order; });
 }
 window.cloudSaveOrder = cloudSaveOrder;
 async function cloudCreateProject(title, doc){
@@ -334,6 +322,40 @@ async function cloudSaveDoc(id, doc){
     return { ok:true };
   }catch(e){ return { ok:false }; }
 }
+/* FENCED PATCH — change a FEW keys on a doc without the last-writer-wins hazard of a
+   plain read-modify-write. The naive form (select doc → mutate → update) writes back the
+   whole snapshot it read, so an autosave that lands in between is silently reverted AND
+   _rev goes backwards, which then makes every later save conflict. This reads the current
+   doc, applies `mutate`, and writes under the SAME atomic _rev fence cloudSaveDoc uses,
+   retrying on a lost race. `mutate(doc)` returns false to abort (nothing to do).
+   Fence bookkeeping: only advance this session's _docRevSeen when it was exactly in sync
+   before the patch — if the session was already behind, leave it stale so the next
+   autosave conflicts honestly and takes the reload path instead of clobbering. */
+async function cloudPatchDoc(id, mutate){
+  const sb = sbClient(); if(!sb || !id) return { ok:false };
+  for(let attempt=0; attempt<3; attempt++){
+    try{
+      const { data, error } = await sb.from("turn_projects").select("doc").eq("id", id).single();
+      if(error) return { ok:false };
+      const doc = (data && data.doc) || {};
+      const cur = Number(doc._rev) || 0;
+      const wasInSync = (_docRevSeen[id] || 0) === cur;
+      if(mutate(doc) === false) return { ok:false, skipped:true };
+      let q = sb.from("turn_projects").update({ doc: { ...doc, _rev: cur + 1 } }).eq("id", id);
+      q = cur ? q.eq("doc->>_rev", String(cur))
+              : q.or("doc->>_rev.is.null,doc->>_rev.eq.0");
+      const { data: rows, error: wErr } = await q.select("id");
+      if(wErr) return { ok:false };
+      if(rows && rows.length){
+        if(wasInSync) _docRevSeen[id] = cur + 1;
+        return { ok:true, doc };
+      }
+      // someone else wrote between our read and write — re-read and retry
+    }catch(e){ return { ok:false }; }
+  }
+  return { ok:false, conflict:true };
+}
+window.cloudPatchDoc = cloudPatchDoc;
 async function cloudRenameProject(id, title){
   const sb = sbClient(); if(!sb || !id) return;
   try{ await sb.from("turn_projects").update({ title }).eq("id", id); }catch(e){}
