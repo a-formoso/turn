@@ -127,6 +127,34 @@ function TeamButton({ projectId, projectTitle, projectMeta, onChanged }){
     open && React.createElement(TeamModal,{projectId,projectTitle,projectMeta,onChanged,onClose:()=>setOpen(false)}));
 }
 
+/* PRESENCE DOTS — who else has this film open right now, shown beside the Team button.
+   Only renders when someone OTHER than this window is here, so a solo writer sees nothing.
+   Two entries for the same email means that person has it open twice (their own second
+   window) — worth surfacing, since same-section edits from two windows still resolve
+   last-writer-wins. */
+function PresenceDots({ people }){
+  const others = (people||[]).filter(p=>!p.isSelf);
+  if(!others.length) return null;
+  const label = (p)=> String(p.name || p.email || "Collaborator");
+  const initial = (p)=> (label(p).trim()[0] || "?").toUpperCase();
+  const me = (people||[]).find(p=>p.isSelf) || {};
+  const myEmail = String(me.email || "").toLowerCase();
+  const shown = others.slice(0,4);
+  const extra = others.length - shown.length;
+  const title = "In this film now: " + others.map(p=>{
+    const same = String(p.email||"").toLowerCase()===myEmail && myEmail;
+    return label(p) + (same ? " (your other window)" : "");
+  }).join(", ");
+  return React.createElement("div",{className:"presence-dots",title},
+    shown.map((p,i)=>{
+      const same = String(p.email||"").toLowerCase()===myEmail && myEmail;
+      return React.createElement("span",{key:p.key||i,
+        className:"presence-dot"+(same?" self-other":""),},initial(p));
+    }),
+    extra>0 && React.createElement("span",{className:"presence-dot more"},"+"+extra));
+}
+window.PresenceDots = PresenceDots;
+
 window.TEAM_ROLES = TEAM_ROLES;
 window.teamRoleLabel = teamRoleLabel;
 window.TeamModal = TeamModal;

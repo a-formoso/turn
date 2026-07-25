@@ -452,7 +452,7 @@ function StoryBriefModal({ project, onClose, onRebuild }){
 }
 window.StoryBriefModal = StoryBriefModal;
 
-function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, onManageStyles, onRebuildFromBrief, hasFilmStyle, theme, onTheme, authSlot, projectSlot, teamSlot, roomEntitlements, onHome }){
+function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, onToggleAI, onAgents, onViewBible, onManageStyles, onRebuildFromBrief, hasFilmStyle, theme, onTheme, authSlot, projectSlot, teamSlot, presenceSlot, roomEntitlements, onHome }){
   const [bibleOpen, setBibleOpen] = React.useState(false);
   const [briefOpen, setBriefOpen] = React.useState(false);
   const [stylesOpen, setStylesOpen] = React.useState(false);
@@ -479,6 +479,7 @@ function TopBar({ room, setRoom, project, scenes, drafts, onReset, onNewStory, o
 
     React.createElement("div",{className:"tb-right"},
       React.createElement(ThemeToggle,{theme,onTheme}),
+      presenceSlot || null,      // who else has this film open right now
       teamSlot || null,
       // Writers' Room: review the logline + synopsis the story was built from
       room==="writers" && project && (project.sourceBrief||project.logline||project.premise) && React.createElement("button",{className:"tb-btn",onClick:()=>setBriefOpen(true),

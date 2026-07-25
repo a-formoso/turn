@@ -396,6 +396,52 @@ async function cloudSaveSections(id, sections){
   return { ok:false, conflict:true };   // pathological contention only
 }
 window.cloudSaveSections = cloudSaveSections;
+
+/* PRESENCE — who else has this film open right now.
+   Per-section saves stop collaborators from destroying each other's work, but a
+   same-section collision still resolves last-writer-wins, and arriving at that silently
+   is a nasty surprise. Presence makes concurrent work VISIBLE before it collides.
+   Built on Supabase Realtime presence (no schema, no table writes). The key is per
+   SESSION, not per user, so the same person in two windows shows as two entries — which
+   is exactly the situation that used to trigger the save-conflict reload.
+   Degrades silently: if Realtime is unavailable the callback simply never fires and the
+   UI shows nothing rather than erroring. Returns an unsubscribe function. */
+const _presenceKey = "s"+Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+window.turnPresenceKey = _presenceKey;
+function cloudJoinPresence(projectId, meta, onChange){
+  const sb = sbClient();
+  if(!sb || !projectId || typeof sb.channel!=="function") return ()=>{};
+  let ch = null, dead = false;
+  try{
+    ch = sb.channel("film:"+projectId, { config:{ presence:{ key:_presenceKey } } });
+    const emit = ()=>{
+      if(dead || !ch) return;
+      let people = [];
+      try{
+        const state = ch.presenceState() || {};
+        Object.keys(state).forEach(k=>{
+          const entry = (state[k]||[])[0];
+          if(entry) people.push({ key:k, ...entry, isSelf:k===_presenceKey });
+        });
+      }catch(e){ people = []; }
+      try{ onChange(people); }catch(e){}
+    };
+    ch.on("presence", { event:"sync" }, emit);
+    ch.on("presence", { event:"join" }, emit);
+    ch.on("presence", { event:"leave" }, emit);
+    ch.subscribe(async (status)=>{
+      if(dead) return;
+      if(status==="SUBSCRIBED"){ try{ await ch.track(meta||{}); }catch(e){} }
+      // CHANNEL_ERROR / TIMED_OUT (Realtime off for this project): stay silent
+      else if(status==="CHANNEL_ERROR" || status==="TIMED_OUT"){ try{ onChange([]); }catch(e){} }
+    });
+  }catch(e){ return ()=>{}; }
+  return ()=>{
+    dead = true;
+    try{ if(ch){ ch.untrack(); sb.removeChannel(ch); } }catch(e){}
+  };
+}
+window.cloudJoinPresence = cloudJoinPresence;
 async function cloudRenameProject(id, title){
   const sb = sbClient(); if(!sb || !id) return;
   try{ await sb.from("turn_projects").update({ title }).eq("id", id); }catch(e){}

@@ -547,6 +547,19 @@ function App(){
   const _projRow = (projects||[]).find(p=>p.id===currentProjectId) || null;
   const shareRole = (_projRow && _projRow.shareRole) || (_projRow && _projRow.isOwner ? "owner" : "");
   const readOnlyShare = shareRole === "view_only";
+  /* PRESENCE — who else has this film open. Joins a Realtime channel per film and leaves
+     on switch/sign-out. Purely additive: if Realtime isn't enabled the list stays empty
+     and nothing renders, so this can never break the app for a solo user. */
+  const [presence, setPresence] = React.useState([]);
+  React.useEffect(()=>{
+    setPresence([]);
+    if(!cloudMode || !currentProjectId || typeof window.cloudJoinPresence!=="function") return;
+    const email = (typeof cloudUserEmail==="function") ? cloudUserEmail(session) : "";
+    const off = window.cloudJoinPresence(currentProjectId,
+      { email, name:(email||"").split("@")[0], role:shareRole||"owner", at:Date.now() },
+      (people)=> setPresence(people||[]));
+    return ()=>{ try{ off && off(); }catch(e){} };
+  },[cloudMode, currentProjectId, session && session.user && session.user.id, shareRole]);
   // ADMIN — demo upkeep account. The Matrix sample story (and "Reset to sample story")
   // is admin-only: every other user (and signed-out local mode) never sees Matrix data.
   const isAdmin = (((typeof cloudUserEmail==="function" && cloudUserEmail(session))||"").toLowerCase()==="admin@infinitestudioai.com");
@@ -3343,6 +3356,8 @@ function App(){
         onSwitch:switchProject, onCreate:createProject, onRename:renameProject, onDelete:deleteProject,
         onNewEpisode:createEpisode, onMakeShow:makeShow,
         canMakeShow: !currentShowId && scenes.length>0 && !(((projects||[]).find(p=>p.id===currentProjectId)||{}).isShared) }) : null,
+      presenceSlot: (cloudMode && window.PresenceDots)
+        ? React.createElement(window.PresenceDots,{ people:presence }) : null,
       teamSlot: cloudMode && window.TeamButton ? React.createElement(window.TeamButton,{
         projectId:currentProjectId,
         projectTitle:((projects||[]).find(p=>p.id===currentProjectId)||{}).title || project.title,

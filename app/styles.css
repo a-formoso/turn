@@ -6356,3 +6356,14 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
   padding:9px 16px;font-size:12px;line-height:1.5;color:var(--txt-0);
   background:var(--alert-soft,rgba(216,166,87,.16));border-bottom:1px solid var(--alert-line,rgba(216,166,87,.4))}
 .readonly-banner b{font-weight:650}
+
+/* PRESENCE — collaborators currently in this film (top bar, beside Team) */
+.presence-dots{display:inline-flex;align-items:center;cursor:help}
+.presence-dot{display:grid;place-items:center;width:22px;height:22px;margin-left:-5px;
+  border-radius:50%;font:700 9.5px var(--f-ui);letter-spacing:0;
+  background:var(--pos);color:var(--ink-on-accent,#fff);border:2px solid var(--bg-1)}
+.presence-dot:first-child{margin-left:0}
+/* the same person in another window — distinct, because a second window of YOUR OWN is
+   the case that used to cause save conflicts */
+.presence-dot.self-other{background:var(--txt-3);color:var(--bg-1)}
+.presence-dot.more{background:var(--bg-3);color:var(--txt-2);border-color:var(--bg-1)}
