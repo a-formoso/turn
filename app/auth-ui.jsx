@@ -116,7 +116,12 @@ function AccountChip({ session, cloudActive, saveState, shareRole, onSignIn, onS
       cloudActive
         // the chip reports the REAL save state — it used to read "Synced" purely because
         // cloud mode was on, so a failing save still looked healthy
-        ? (shareRole==="view_only"
+        ? ((shareRole==="writer" || shareRole==="art_director")
+            ? React.createElement("span",{className:"acct-cloud",
+                title:(window.teamRoleScopeNote ? window.teamRoleScopeNote(shareRole) : "")+" Changes inside your remit save normally."},
+                React.createElement(Icon.check,{s:11}),
+                shareRole==="writer" ? "Writer" : "Art dir")
+            : shareRole==="view_only"
             ? React.createElement("span",{className:"acct-cloud warn",title:"You have VIEW-ONLY access to this film. You can read and explore it, but changes you make here are not saved. Ask the owner for Writer access to edit."},
                 React.createElement(Icon.eye||Icon.warn,{s:11}),"View only")
             : saveState==="failed"

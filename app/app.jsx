@@ -1189,6 +1189,7 @@ function App(){
      full-doc overwrite and whoever saved second had their work discarded by the conflict
      reload. Per-user VIEW state (room/view/artView) is deliberately excluded — it isn't
      shared, and writing it would make one person's navigation churn everyone's saves. */
+  const roleNoticeRef = React.useRef(0);   // throttle the "your role doesn't cover that" notice
   const bibleSavedRef = React.useRef(null);
   const _conflictBusy = React.useRef(false);
   const _docConflictCheck = (r)=>{
@@ -1277,6 +1278,26 @@ function App(){
             const j = JSON.stringify(_sectionsNow[k]);
             if(j !== lastSentRef.current[k]) _changed[k] = _sectionsNow[k];
           });
+          /* ROLE SCOPING — drop sections this collaborator's role doesn't cover, and SAY SO.
+             Silently discarding them would repeat the exact failure view_only had: hours of
+             work that can never land, with the UI showing success. Owners and producers are
+             unrestricted, and no-role (your own film) is never restricted. */
+          if(typeof window.teamCanWriteSection==="function" && shareRole && shareRole!=="owner"){
+            const denied = Object.keys(_changed).filter(k=> !window.teamCanWriteSection(shareRole, k));
+            if(denied.length){
+              denied.forEach(k=>{
+                delete _changed[k];
+                // keep the baseline UNCHANGED for denied sections, so we don't pretend they
+                // were saved — the next edit re-attempts and the notice fires again
+              });
+              const now = Date.now();
+              if(now - (roleNoticeRef.current||0) > 60000){
+                roleNoticeRef.current = now;
+                const note = (typeof window.teamRoleScopeNote==="function") ? window.teamRoleScopeNote(shareRole) : "";
+                if(typeof window.appToast==="function" && note) window.appToast(note, "error");
+              }
+            }
+          }
           const _mineKeys = Object.keys(_changed);
           const _rememberSent = ()=> _mineKeys.forEach(k=>{ lastSentRef.current[k] = JSON.stringify(_sectionsNow[k]); });
           if(currentShowId){

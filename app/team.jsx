@@ -4,15 +4,50 @@
    once supabase/team-collaboration.sql has been run. */
 
 const TEAM_ROLES = [
-  { id:"view_only", label:"View-only", blurb:"Can open the project and review it." },
-  { id:"writer", label:"Writer", blurb:"Can edit story, script and project materials." },
-  { id:"art_director", label:"Art director", blurb:"Can work across Art Room assets and coverage." },
-  { id:"producer_admin", label:"Producer/admin", blurb:"Can coordinate edits across the project." },
+  { id:"view_only", label:"View-only", blurb:"Opens and reads the film. Cannot save any change." },
+  { id:"writer", label:"Writer", blurb:"Saves story work — scenes, beats, script and continuity. Art Room changes aren't saved." },
+  { id:"art_director", label:"Art director", blurb:"Saves Art Room work — cast, props, locations, lookbook and shots. Story and script aren't saved." },
+  { id:"producer_admin", label:"Producer/admin", blurb:"Saves anything in the film. Only the owner can rename, delete or manage the team." },
 ];
 function teamRoleLabel(id){
   const r = TEAM_ROLES.find(x=>x.id===id);
   return r ? r.label : String(id||"Collaborator");
 }
+/* WHAT EACH ROLE MAY WRITE, by doc SECTION — the same granularity the per-section save
+   already uses, so scoping is enforced at the exact layer that writes.
+   Until now Writer / Art director / Producer were identical ("can write") in both client
+   and database, so the role blurbs promised a separation that did not exist.
+   `project` is deliberately writable by BOTH writer and art director: it holds the story
+   identity (logline, premise) AND the style bible, so locking either side out of it would
+   block ordinary work. Owner and producer_admin are unrestricted. */
+const TEAM_ROLE_SECTIONS = {
+  owner:          "*",
+  producer_admin: "*",
+  writer:         ["scenes","beatsMap","drafts","history","continuityMap","project"],
+  art_director:   ["characters","props","locations","lookbook","lookbookNote","lookbookApplied",
+                   "shots","trash","project","propsSeeded","locsSeeded","visualsSeeded"],
+  view_only:      [],
+};
+/* Restrict ONLY when we positively know the user is a restricted collaborator. No role
+   information (a film that is simply yours, or a project list that hasn't loaded yet)
+   must never fail closed — that would silently block every save for a solo user. */
+function teamCanWriteSection(role, section){
+  if(!role || role==="owner") return true;
+  const allow = TEAM_ROLE_SECTIONS[role];
+  if(allow === "*") return true;
+  if(!allow) return true;                       // unknown//future role → don't block
+  return allow.indexOf(section) >= 0;
+}
+/* plain-language name for what a role may NOT touch, for the "that wasn't saved" notice */
+function teamRoleScopeNote(role){
+  if(role==="writer") return "Your Writer role covers the story, script and beats — Art Room changes (cast, props, locations, lookbook, shots) aren't saved.";
+  if(role==="art_director") return "Your Art director role covers the Art Room — story and script changes aren't saved.";
+  return "";
+}
+window.TEAM_ROLE_SECTIONS = TEAM_ROLE_SECTIONS;
+window.teamCanWriteSection = teamCanWriteSection;
+window.teamRoleScopeNote = teamRoleScopeNote;
+
 function teamCanManage(projectMeta){
   return !!(projectMeta && (projectMeta.isOwner || window.turnIsAdmin));
 }
