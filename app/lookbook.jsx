@@ -177,6 +177,7 @@ window.LookbookStaleNotice = LookbookStaleNotice;
 
 /* headless mood-frame generation for the Visual Researcher agent (mirrors generatePropSheet) */
 async function generateLookbookFrame(c, project){
+  const _ep = (typeof nbEpoch==="function") ? nbEpoch() : null;   // asset scope at generation start
   if(typeof nbGenerate!=="function" || typeof nbCommit!=="function") return false;
   const prompt = (typeof combinedLookbookPrompt==="function") ? combinedLookbookPrompt(c, project) : (c.source||"reference frame");
   if(!window.__nbGenInflight) window.__nbGenInflight = {};
@@ -193,7 +194,7 @@ async function generateLookbookFrame(c, project){
       date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
       time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
       iso:now.toISOString(), prompt, mode:"final", version:1 };
-    await nbCommit(c.id, url, meta, [], "asset");
+    await nbCommit(c.id, url, meta, [], "asset", _ep);
     try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:c.id, url } })); }catch(e){}
     return true;
   } finally { window.__nbGenInflight[c.id] = false; }

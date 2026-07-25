@@ -534,6 +534,11 @@ function App(){
   const [projects, setProjects] = React.useState([]);
   const [homeOpen, setHomeOpen] = React.useState(false);   // Home / Dashboard overlay (only shown at >=2 films)
   const [currentProjectId, setCurrentProjectId] = React.useState(null);
+  // LIVE mirror of the open film's id. Long async work (agent runs, scene drafting,
+  // image generation) captures the id it started under and compares it against this
+  // before writing results into state — the film switcher stays live throughout, and a
+  // result that lands after a switch belongs to a film that is no longer open.
+  const projIdRef = React.useRef(null); projIdRef.current = currentProjectId;
   const cloudMode = !!(session && currentProjectId);
   // ADMIN — demo upkeep account. The Matrix sample story (and "Reset to sample story")
   // is admin-only: every other user (and signed-out local mode) never sees Matrix data.
@@ -650,7 +655,10 @@ function App(){
   const sampleDoc = ()=>({ scenes:SCENES, characters:CHARACTERS, props:(window.PROPS_SEED||[]), locations:[], lookbook:[], lookbookNote:"", lookbookApplied:{}, shots:[],
     project:PROJECT, drafts:SCREENPLAY, beatsMap:BEATS, history:{}, continuityMap:CONTINUITY||{},
     selId:"s4", propsSeeded:false, locsSeeded:false, visualsSeeded:false });
-  const applyDoc = (d)=>{
+  // `stale` (optional): a superseded load must NOT clear hydratingRef when its 500ms
+  // settle fires — the newer load owns hydration by then, and clearing it early would
+  // reopen the very save window this guards.
+  const applyDoc = (d, stale)=>{
     d = d || {};
     hydratingRef.current = true;
     // honor an explicitly-empty project (clean canvas). A missing/legacy field only
@@ -680,7 +688,10 @@ function App(){
     setTrash(d.trash && typeof d.trash==="object"
       ? { characters:d.trash.characters||[], props:d.trash.props||[], locations:d.trash.locations||[] }
       : _emptyTrash());
-    setTimeout(()=>{ hydratingRef.current = false; setHydrationTick(t=>t+1); }, 500);
+    setTimeout(()=>{
+      if(typeof stale==="function" && stale()) return;   // a newer load owns hydration now
+      hydratingRef.current = false; setHydrationTick(t=>t+1);
+    }, 500);
   };
   // SERIES (Phase 3): the show's BIBLE is itself a project row ({isShow, bible});
   // episodes are normal rows whose doc carries {showId, episodeNo}. On load, an
@@ -691,9 +702,26 @@ function App(){
   const bibleEntityIds = (bible)=> [].concat(
     (bible.characters||[]).map(c=>c.id), (bible.locations||[]).map(l=>l.id),
     (bible.props||[]).map(p=>p.id), (bible.lookbook||[]).map(r=>r.id)).filter(Boolean);
+  /* Opening a film is ASYNC and interruptible, which used to corrupt docs two ways:
+     (1) setCurrentProjectId landed BEFORE the series-bible fetch resolved, so for the
+         length of that fetch the NEW film's id was paired with the PREVIOUS film's story
+         while hydratingRef was still false — a save debounce firing in that window wrote
+         the old story into the new film's doc. Fix: raise hydratingRef for the WHOLE
+         load (every early-return clears it again), not just from applyDoc onward.
+     (2) two loads could overlap (double-click in the film switcher) and the SLOWER one
+         won the state while the faster one had set currentProjectId — id and story from
+         different films, and the next autosave wrote one into the other. Fix: a
+         monotonic sequence; a superseded load abandons without touching state. */
+  const loadSeqRef = React.useRef(0);
   const loadProjectIntoState = async (id)=>{
+    const seq = ++loadSeqRef.current;
+    const stale = ()=> loadSeqRef.current !== seq;
+    hydratingRef.current = true;
+    // release the save-block ONLY if we still own the load; if a newer load superseded
+    // us it owns hydration now and will clear it when it finishes.
+    const release = ()=>{ if(!stale()) hydratingRef.current = false; };
     const row = await cloudLoadProject(id);
-    if(!row) return;
+    if(!row || stale()){ release(); return; }
     if(typeof window.cloudNoteDocRev==="function") window.cloudNoteDocRev(id, row.doc);
     const uid = (typeof cloudUserId==="function") ? cloudUserId(session) : null;
     if(typeof nbUseCloud==="function") nbUseCloud(id, uid);   // re-scope the image cache to this film
@@ -703,6 +731,7 @@ function App(){
     const d = row.doc || {};
     if(d.showId){
       const bibleRow = await cloudLoadProject(d.showId);
+      if(stale()) return;   // a newer load owns the state (and hydratingRef) now
       if(bibleRow && typeof window.cloudNoteDocRev==="function") window.cloudNoteDocRev(d.showId, bibleRow.doc);
       const bible = (bibleRow && bibleRow.doc && bibleRow.doc.bible) || {};
       setCurrentShowId(d.showId);
@@ -711,11 +740,11 @@ function App(){
       applyDoc({ ...d,
         characters: bible.characters || [], locations: bible.locations || [],
         props: bible.props || [], lookbook: bible.lookbook || [],
-        lookbookNote: bible.lookbookNote || "" });
+        lookbookNote: bible.lookbookNote || "" }, stale);
     } else {
       setCurrentShowId(null); setCurrentEpisodeNo(null);
       if(typeof nbUseShared==="function") nbUseShared(null);
-      applyDoc(d);
+      applyDoc(d, stale);
     }
     // A project with no story can't live in the (locked) Art Room — applyDoc
     // deliberately never re-applies the room, so creating or switching to a blank
@@ -2202,8 +2231,12 @@ function App(){
     setDrafting({ i:i<0?0:i, total:scenes.length, one:true });
     let scn = s, beats = beatsMap[s.id];
     // a beats-less scene: author the whole scene (summary, charge, beats) first
+    // the film this draft belongs to — a scene written after the user switches films
+    // must not land in the new one (scene ids repeat across films)
+    const owner = currentProjectId;
     if(!beats && typeof aiAuthorScene==="function" && aiAvailable()){
       const authored = await aiAuthorScene(s, i>0?scenes[i-1]:null, characters);
+      if(owner !== projIdRef.current){ setDrafting(null); return; }
       if(authored){
         scn = {...s, ...authored.patch}; beats = authored.beats;
         setScenes(ss=>ss.map(x=>x.id===s.id?{...x,...authored.patch}:x));
@@ -2211,6 +2244,7 @@ function App(){
       }
     }
     const res = await aiDraftScene(scn, beats, i>0?scenes[i-1]:null);
+    if(owner !== projIdRef.current){ setDrafting(null); return; }
     setDrafts(d=>({...d,[s.id]:res}));
     setDrafting(null);
   };
@@ -2219,13 +2253,16 @@ function App(){
     draftingRef.current = true;
     const tot = scenes.length;
     const have = {...drafts};
+    const owner = currentProjectId;   // abort the whole run if the user switches films
     for(let i=0;i<tot;i++){
+      if(owner !== projIdRef.current) break;
       const s = scenes[i];
       setDrafting({ i, total:tot });
       if(have[s.id]) continue;
       let scn = s, beats = beatsMap[s.id];
       if(!beats && typeof aiAuthorScene==="function" && aiAvailable()){
         const authored = await aiAuthorScene(s, i>0?scenes[i-1]:null, characters);
+        if(owner !== projIdRef.current) break;
         if(authored){
           scn = {...s, ...authored.patch}; beats = authored.beats;
           setScenes(ss=>ss.map(x=>x.id===s.id?{...x,...authored.patch}:x));
@@ -2233,6 +2270,7 @@ function App(){
         }
       }
       const res = await aiDraftScene(scn, beats, i>0?scenes[i-1]:null);
+      if(owner !== projIdRef.current) break;
       have[s.id] = res;
       setDrafts(d=>({...d,[s.id]:res}));
     }
@@ -2391,7 +2429,17 @@ function App(){
       continuity: Object.fromEntries(Object.entries(continuityMap).map(([k,v])=>[k,{
         establishes:[...(v.establishes||[])], references:[...(v.references||[])] }])),
     };
+    // the film this run belongs to — captured when the agent starts
+    const ownerProjectId = currentProjectId;
     const sync = ()=>{
+      // WRONG-FILM GUARD: an agent run takes minutes and the film switcher stays live.
+      // Unguarded, a run that finished after a switch wrote its captured scenes, drafts,
+      // beats, characters and project straight into whatever film was now open — and the
+      // undo snapshot belonged to the ORIGINAL film, so pressing Undo compounded it.
+      if(ownerProjectId !== projIdRef.current){
+        try{ emit && emit({k:"flag", t:"You switched films while this ran, so its changes were NOT applied — they belong to the film it started in. Reopen that film and run it again."}); }catch(e){}
+        return;
+      }
       if(!committed){ committed = true; const snap = snapshot(); setAgentUndo(st=>[...st, snap].slice(-8)); }
       setScenes(model.scenes.map(s=>({...s})));
       if(model.characters) setCharacters(model.characters.map(c=>({...c})));

@@ -243,8 +243,17 @@ let _nbProject = null;      // current cloud project id
 let _nbUid = null;          // current cloud user id
 const _cloudUrlCache = new Map();    // entityId -> signed url
 const _cloudMetaCache = new Map();   // entityId -> meta
-function nbUseCloud(projectId, uid){ _nbBackend="cloud"; _nbProject=projectId; _nbUid=uid; _cloudUrlCache.clear(); _cloudMetaCache.clear(); if(typeof nbResetPrefetchAll==="function") nbResetPrefetchAll(); }
-function nbUseLocal(){ _nbBackend="local"; _nbProject=null; _nbUid=null; _nbShared=null; _nbSharedIds=null; _cloudUrlCache.clear(); _cloudMetaCache.clear(); if(typeof nbResetPrefetchAll==="function") nbResetPrefetchAll(); }
+/* SCOPE EPOCH — bumped whenever the asset scope changes (opening another film, or
+   dropping to local). Generation is async and entity ids REPEAT across films (two films
+   with an office both hold "loc-office-0"), so a render that finished after a film switch
+   used to commit into the NEW film under the OLD film's entity id — overwriting that
+   film's real plate and rolling it into its history. Callers capture nbEpoch() before
+   generating and hand it to nbCommit, which refuses a write from a dead scope. */
+let _nbEpoch = 0;
+function nbEpoch(){ return _nbEpoch; }
+window.nbEpoch = nbEpoch;
+function nbUseCloud(projectId, uid){ if(projectId!==_nbProject) _nbEpoch++; _nbBackend="cloud"; _nbProject=projectId; _nbUid=uid; _cloudUrlCache.clear(); _cloudMetaCache.clear(); if(typeof nbResetPrefetchAll==="function") nbResetPrefetchAll(); }
+function nbUseLocal(){ if(_nbProject!==null) _nbEpoch++; _nbBackend="local"; _nbProject=null; _nbUid=null; _nbShared=null; _nbSharedIds=null; _cloudUrlCache.clear(); _cloudMetaCache.clear(); if(typeof nbResetPrefetchAll==="function") nbResetPrefetchAll(); }
 
 /* ── SHOW-SCOPED SHARED ASSETS (series) ───────────────────────────────────────
    A show's bible entities (cast / locations / props / lookbook) are shared by
@@ -634,7 +643,10 @@ window.nbLoadCameoAngles=nbLoadCameoAngles; window.nbLoadCameoFull=nbLoadCameoFu
 window.nbSetCameo=nbSetCameo; window.nbClearCameo=nbClearCameo; window.nbListCameos=nbListCameos;
 
 /* ===== backend-agnostic commit / clear / revert / details (used by useImageGen) ===== */
-async function nbCommit(id, dataUrl, meta, refs, kind){
+async function nbCommit(id, dataUrl, meta, refs, kind, epoch){
+  // the scope moved while this was generating — the result belongs to a film that is no
+  // longer open, and this id means something different here. Drop it rather than clobber.
+  if(epoch!=null && epoch!==_nbEpoch) return { tier:"stale", url:dataUrl };
   if(_nbBackend==="cloud"){
     if(typeof window.cloudCommit!=="function") return { tier:"error", url:dataUrl };
     const r = await window.cloudCommit(_scopeFor(id), _nbUid, id, dataUrl, meta, refs, kind);

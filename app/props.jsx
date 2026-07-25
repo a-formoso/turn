@@ -434,6 +434,7 @@ function propOwnerNote(p){
 window.propOwnerNote = propOwnerNote;
 
 async function generatePropSheet(p, project){
+  const _ep = (typeof nbEpoch==="function") ? nbEpoch() : null;   // asset scope at generation start
   if(typeof nbGenerate!=="function" || typeof nbCommit!=="function") return false;
   const basePrompt = (typeof combinedPropPrompt==="function") ? combinedPropPrompt(p, project) : (p.name||"prop reference");
   // reference the OWNER's character sheet (if generated) so the prop matches their look
@@ -465,7 +466,7 @@ async function generatePropSheet(p, project){
       date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
       time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
       iso: now.toISOString(), prompt, mode:"final", version:1 };
-    await nbCommit(p.id, url, meta, [], "prop");
+    await nbCommit(p.id, url, meta, [], "prop", _ep);
     // let any mounted card (the prop's own, or a char card watching its props) adopt it
     try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:p.id, url } })); }catch(e){}
     return true;

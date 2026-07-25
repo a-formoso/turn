@@ -1089,6 +1089,7 @@ function locShellMatchEditText(p){
 }
 window.locShellMatchEditText = locShellMatchEditText;
 async function generateLocationPlate(l, project){
+  const _ep = (typeof nbEpoch==="function") ? nbEpoch() : null;   // asset scope at generation start
   if(typeof nbGenerate!=="function" || typeof nbCommit!=="function") return false;
   // no set-dressing refs here — the clean plate anchors the look; fixtures are
   // painted in afterwards via the Edit panel's Set-dressing buttons
@@ -1100,7 +1101,7 @@ async function generateLocationPlate(l, project){
     let url;
     try{ url = await nbGenerate(prompt, gopts); }
     catch(e){ if(/no image/i.test((e&&e.message)||"") && typeof buildSimpleLocationPrompt==="function"){ url = await nbGenerate(buildSimpleLocationPrompt(l), {}); } else throw e; }
-    await nbCommit(l.id, url, _nbLocMeta(prompt), [], "location");
+    await nbCommit(l.id, url, _nbLocMeta(prompt), [], "location", _ep);
     try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:l.id, url } })); }catch(e){}
     return true;
   } finally { window.__nbGenInflight[l.id] = false; }
@@ -1108,6 +1109,7 @@ async function generateLocationPlate(l, project){
 window.generateLocationPlate = generateLocationPlate;
 
 async function generateLocationVariant(l, v, project){
+  const _ep = (typeof nbEpoch==="function") ? nbEpoch() : null;   // asset scope at generation start
   if(typeof nbGenerate!=="function" || typeof nbCommit!=="function") return false;
   const id = l.id+"-"+v.id;
   const prompt = (typeof buildLocationVariantPrompt==="function") ? buildLocationVariantPrompt(l, project, { time:v.time }) : (l.name||"location reference");
@@ -1117,7 +1119,7 @@ async function generateLocationVariant(l, v, project){
     let url;
     try{ url = await nbGenerate(prompt, {}); }
     catch(e){ if(/no image/i.test((e&&e.message)||"") && typeof buildSimpleLocationPrompt==="function"){ url = await nbGenerate(buildSimpleLocationPrompt(l), {}); } else throw e; }
-    await nbCommit(id, url, _nbLocMeta(prompt), [], "location");
+    await nbCommit(id, url, _nbLocMeta(prompt), [], "location", _ep);
     try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id, url } })); }catch(e){}
     return true;
   } finally { window.__nbGenInflight[id] = false; }

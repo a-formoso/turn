@@ -1086,6 +1086,7 @@ window.deriveShotPrompt = deriveShotPrompt;
    nb-gen-done so any mounted card adopts the result.
    opts: { fresh, correction } — fresh ignores the chain seed; correction is the QC repair. */
 async function generateShotFrame(sh, sceneShots, ctx, opts){
+  const _ep = (typeof nbEpoch==="function") ? nbEpoch() : null;   // asset scope at generation start
   opts = opts || {};
   const prevSh = (typeof prevShotOf==="function") ? prevShotOf(sh, sceneShots) : null;
   const isHead = !prevSh;
@@ -1151,7 +1152,7 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
     date:now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
     time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}), iso:now.toISOString(),
     version:((prior.version||0)+1), ...(opts.correction?{editInstruction:opts.correction}:{}) };
-  const r = (typeof nbCommit==="function") ? await nbCommit(sh.id, url, meta, [], "shot") : null;
+  const r = (typeof nbCommit==="function") ? await nbCommit(sh.id, url, meta, [], "shot", _ep) : null;
   const committed = (r && r.url) || url;
   try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:sh.id, url:committed } })); }catch(e){}
   return committed;

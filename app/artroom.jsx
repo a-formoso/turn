@@ -1227,6 +1227,10 @@ function useImageGen(opts){
   const generate = async (gopts)=>{
     gopts = gopts || {};
     if(gening) return;
+    // asset scope at generation start — nbCommit refuses the write if the user opened
+    // another film while this rendered (entity ids repeat across films, so committing
+    // late would overwrite the OTHER film's sheet under the same id)
+    const _genEpoch = (typeof nbEpoch==="function") ? nbEpoch() : null;
     if(typeof nbHasKeyForCurrent==="function" && !nbHasKeyForCurrent()){
       setGenErr("Image generation runs through fal.ai on your server. Sign in and make sure the image proxy is enabled.");
       return;
@@ -1449,7 +1453,7 @@ function useImageGen(opts){
         version: priorCount + 1
       };
       const assetKind = (typeof slotAssetKind==="function") ? slotAssetKind(slotId) : "character";
-      const saveResult = await nbCommit(id, url, meta, refsUsed, assetKind);
+      const saveResult = await nbCommit(id, url, meta, refsUsed, assetKind, _genEpoch);
       committedUrl = (saveResult && saveResult.url) || url;
       setGenUrl(committedUrl);
       setGenTier((saveResult && saveResult.tier) || "local");
