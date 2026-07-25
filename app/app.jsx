@@ -1103,6 +1103,11 @@ function App(){
   // reload the latest doc into this window (their change here is lost, which is
   // the honest outcome; before the fence it silently destroyed the OTHER window's
   // work instead).
+  /* last shared-bible payload this window wrote to the SHOW row. Every episode save used
+     to blind-overwrite that row, so two windows on two DIFFERENT episodes of one show each
+     clobbered the other's show write, conflict-looped, and the recovery reload discarded
+     whatever the user had typed since. Skipping an unchanged bible write breaks the loop. */
+  const bibleSavedRef = React.useRef(null);
   const _conflictBusy = React.useRef(false);
   const _docConflictCheck = (r)=>{
     if(!r || !r.conflict || _conflictBusy.current) return;
@@ -1115,10 +1120,28 @@ function App(){
   // persist the editable story so a browser refresh / reopen keeps the user's work
   const saveTimer = React.useRef(null);
   const projectsRef = React.useRef(projects); projectsRef.current = projects;   // latest rows, for save-time meta
+  /* SAVE HEALTH. A cloudSaveDoc failure that is NOT a conflict (network blip, expired
+     token, RLS hiccup) used to be dropped on the floor: no retry, no indicator. If no
+     further edit happened to re-trigger the debounce, that work simply never landed and
+     the account chip still said "Synced". Now: unsaved edits are tracked, non-conflict
+     failures retry with backoff, and the chip reports the truth. */
+  const [saveState, setSaveState] = React.useState("saved");   // saved | saving | retrying | failed
+  const [retryTick, setRetryTick] = React.useState(0);
+  const saveFailsRef = React.useRef(0);
+  const dirtyRef = React.useRef(false);     // edits exist that no successful save has covered
+  const _docSaveResult = (r)=>{
+    _docConflictCheck(r);
+    if(r && r.conflict) return;             // the conflict path reloads; not a save failure
+    if(r && r.ok){ saveFailsRef.current = 0; dirtyRef.current = false; setSaveState("saved"); return; }
+    const n = ++saveFailsRef.current;
+    if(n <= 3){ setSaveState("retrying"); setTimeout(()=>setRetryTick(t=>t+1), n*2500); }
+    else setSaveState("failed");
+  };
   React.useEffect(()=>{
     clearTimeout(saveTimer.current);
+    dirtyRef.current = true;
     saveTimer.current = setTimeout(()=>{
-      if(hydratingRef.current) return;
+      if(hydratingRef.current){ dirtyRef.current = false; return; }
       const doc = { scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash };
       // The full-doc overwrite would otherwise wipe the Home-wall metadata (the poster and
       // the user's manual order) that lives on the doc but NOT in story state — carry it over.
@@ -1131,20 +1154,46 @@ function App(){
       if(meta.ord!=null) keep.homeOrder = Number(meta.ord);
       if(cloudMode){
         if(typeof cloudSaveDoc==="function"){
+          setSaveState("saving");
           if(currentShowId){
             // series episode: shared departments live in the SHOW's bible; the
             // episode keeps its own story (scenes/beats/drafts/shots/…)
             const { characters:_bc, locations:_bl, props:_bp, lookbook:_blb, lookbookNote:_bln, ...epDoc } = doc;
-            Promise.resolve(cloudSaveDoc(currentProjectId, { ...epDoc, showId:currentShowId, episodeNo:currentEpisodeNo, ...keep })).then(_docConflictCheck);
-            Promise.resolve(cloudSaveDoc(currentShowId, { isShow:true,
-              bible:{ characters, locations, props, lookbook, lookbookNote } })).then(_docConflictCheck);
-          } else Promise.resolve(cloudSaveDoc(currentProjectId, { ...doc, ...keep })).then(_docConflictCheck);
+            Promise.resolve(cloudSaveDoc(currentProjectId, { ...epDoc, showId:currentShowId, episodeNo:currentEpisodeNo, ...keep })).then(_docSaveResult);
+            // the SHOW row carries only the shared bible; skip the write entirely when it
+            // hasn't changed, so two windows on two episodes of one show stop conflict-
+            // looping over a row neither of them actually edited
+            const _bibleNow = JSON.stringify({ characters, locations, props, lookbook, lookbookNote });
+            if(_bibleNow !== bibleSavedRef.current){
+              bibleSavedRef.current = _bibleNow;
+              Promise.resolve(cloudSaveDoc(currentShowId, { isShow:true,
+                bible:{ characters, locations, props, lookbook, lookbookNote } })).then(_docConflictCheck);
+            }
+          } else Promise.resolve(cloudSaveDoc(currentProjectId, { ...doc, ...keep })).then(_docSaveResult);
         }
       }
-      else { try{ localStorage.setItem(STORY_KEY, JSON.stringify(doc)); }catch(e){} }
+      else {
+        // localStorage throws on quota — that used to be swallowed, so a session past the
+        // ~5MB limit silently stopped saving while still looking fine
+        try{ localStorage.setItem(STORY_KEY, JSON.stringify(doc)); dirtyRef.current = false; setSaveState("saved"); }
+        catch(e){ setSaveState("failed"); }
+      }
     }, cloudMode ? 700 : 250);
     return ()=> clearTimeout(saveTimer.current);
-  },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash, cloudMode, currentProjectId, currentShowId, currentEpisodeNo]);
+  },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash, cloudMode, currentProjectId, currentShowId, currentEpisodeNo, retryTick]);
+
+  /* UNLOAD GUARD — saves are debounced (700ms) and can be mid-flight or retrying, so
+     closing the tab at the wrong moment silently dropped the last edits with no warning.
+     Only prompts when something is genuinely unwritten; a settled window closes clean. */
+  React.useEffect(()=>{
+    const h = (e)=>{
+      if(!dirtyRef.current && saveState!=="saving" && saveState!=="retrying" && saveState!=="failed") return;
+      e.preventDefault(); e.returnValue = "";      // browsers show their own generic wording
+      return "";
+    };
+    window.addEventListener("beforeunload", h);
+    return ()=>window.removeEventListener("beforeunload", h);
+  },[saveState]);
 
   /* Write-through: the Presets (Colorist) "Visual references" field auto-fills from the
      Lookbook — the colorist brief goes INTO the editable field itself (no labels/markers),
@@ -3144,7 +3193,7 @@ function App(){
           onRestorePoster: restorePoster,
           onGoRoom: async (rid)=>{ if(!currentProjectId){ await createProject(); } setHomeOpen(false); if(rid==="writers") setView("spine"); guardedSetRoom(rid); },
           onClose: ()=>setHomeOpen(false),
-          accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode,
+          accountSlot: React.createElement(AccountChip,{ session, cloudActive:cloudMode, saveState,
             onSignIn:()=>setAuthOpen(true), onSignOut:signOut }) }),
     t.grain && React.createElement("div",{style:{position:"fixed",inset:0,pointerEvents:"none",zIndex:50,
       opacity:.025,mixBlendMode:"overlay",
@@ -3198,7 +3247,7 @@ function App(){
         (locations||[]).some(l=>l && l.renderStyleKey)
       ),
       theme,onTheme:setTheme,
-      authSlot: React.createElement(AccountChip,{ session, cloudActive: cloudMode,
+      authSlot: React.createElement(AccountChip,{ session, cloudActive: cloudMode, saveState,
         onSignIn:()=>setAuthOpen(true), onSignOut:signOut }),
       projectSlot: cloudMode ? React.createElement(ProjectSwitcher,{ projects, currentId:currentProjectId,
         formatLabel:(typeof formatOf==="function") ? formatOf(project).label : null,

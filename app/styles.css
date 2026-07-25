@@ -2483,6 +2483,10 @@ html[data-theme="dark"] .dt-viewing svg{color:oklch(0.82 0.09 296)}
 .acct-cloud{display:inline-flex;align-items:center;gap:3px;font:600 10px var(--f-ui);letter-spacing:.04em;
   text-transform:uppercase;color:var(--pos)}
 .acct-cloud.warn{color:oklch(0.82 0.14 55)}
+/* save actually failed — uses the themed --neg token (a raw oklch here washes out in
+   light mode), and pulses so a silent data-loss risk isn't easy to miss */
+.acct-cloud.bad{color:var(--neg);animation:acctBad 1.6s ease-in-out infinite}
+@keyframes acctBad{0%,100%{opacity:1}50%{opacity:.45}}
 .acct-menu{position:absolute;top:calc(100% + 8px);right:0;min-width:210px;background:var(--bg-4);
   border:1px solid var(--line-2);border-radius:10px;padding:12px;z-index:60;box-shadow:0 12px 36px rgba(0,0,0,.6)}
 .acct-email{font-size:12.5px;color:var(--txt-0);font-weight:600;word-break:break-all;line-height:1.3}

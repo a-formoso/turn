@@ -92,7 +92,7 @@ function AuthModal({ onClose, onAuthed, initialMode, plan, light }){
 }
 window.AuthModal = AuthModal;
 
-function AccountChip({ session, cloudActive, onSignIn, onSignOut }){
+function AccountChip({ session, cloudActive, saveState, onSignIn, onSignOut }){
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
   React.useEffect(()=>{
@@ -114,12 +114,24 @@ function AccountChip({ session, cloudActive, onSignIn, onSignOut }){
     React.createElement("button",{className:"acct-chip"+(open?" open":""),onClick:()=>setOpen(o=>!o),title:email},
       React.createElement("span",{className:"acct-av"}, initial),
       cloudActive
-        ? React.createElement("span",{className:"acct-cloud"},React.createElement(Icon.check,{s:11}),"Synced")
+        // the chip reports the REAL save state — it used to read "Synced" purely because
+        // cloud mode was on, so a failing save still looked healthy
+        ? (saveState==="failed"
+            ? React.createElement("span",{className:"acct-cloud bad",title:"Your latest changes could not be saved. Check your connection — the app keeps trying, and your work stays on screen meanwhile."},
+                React.createElement(Icon.warn,{s:11}),"Not saved")
+            : saveState==="retrying"
+            ? React.createElement("span",{className:"acct-cloud warn",title:"A save didn't go through — retrying."},
+                React.createElement(Icon.warn,{s:11}),"Retrying")
+            : saveState==="saving"
+            ? React.createElement("span",{className:"acct-cloud"},React.createElement(Icon.cloud||Icon.check,{s:11}),"Saving\u2026")
+            : React.createElement("span",{className:"acct-cloud"},React.createElement(Icon.check,{s:11}),"Synced"))
         : React.createElement("span",{className:"acct-cloud warn"},React.createElement(Icon.warn,{s:11}),"Connecting")),
     open && React.createElement("div",{className:"acct-menu"},
       React.createElement("div",{className:"acct-email"}, email),
       React.createElement("div",{className:"acct-status"},
-        cloudActive ? "Signed in \u00b7 cloud storage active"
+        cloudActive ? (saveState==="failed" ? "Signed in \u00b7 the last save FAILED \u2014 your work is still on screen; leave this tab open until it saves."
+                     : saveState==="retrying" ? "Signed in \u00b7 retrying a save that didn't go through\u2026"
+                     : "Signed in \u00b7 cloud storage active")
                     : "Signed in, but cloud isn't reachable \u2014 check that the `turn` schema is exposed and the SQL has been run."),
       // GENERATION CREDITS (video renders debit these) + WRITING-MODEL spend meter
       // (display-only estimate of Claude/text use \u2014 counted per call in ai.jsx)
