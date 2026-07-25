@@ -442,6 +442,23 @@ function cloudJoinPresence(projectId, meta, onChange){
   };
 }
 window.cloudJoinPresence = cloudJoinPresence;
+
+/* LIVE REFRESH support.
+   cloudDocRev is a DELIBERATELY tiny probe — it selects only the doc's _rev scalar, not
+   the doc, because a film's doc can be megabytes (255 shots, every draft) and polling
+   that would be indefensible. The full pull happens only once the probe says there is
+   actually something newer to fetch. */
+async function cloudDocRev(id){
+  const sb = sbClient(); if(!sb || !id) return null;
+  try{
+    const { data, error } = await sb.from("turn_projects").select("rev:doc->>_rev").eq("id", id).single();
+    if(error) return null;
+    return Number((data && data.rev) || 0) || 0;
+  }catch(e){ return null; }
+}
+function cloudSeenRev(id){ return _docRevSeen[id] || 0; }
+window.cloudDocRev = cloudDocRev;
+window.cloudSeenRev = cloudSeenRev;
 async function cloudRenameProject(id, title){
   const sb = sbClient(); if(!sb || !id) return;
   try{ await sb.from("turn_projects").update({ title }).eq("id", id); }catch(e){}

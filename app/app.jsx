@@ -560,6 +560,42 @@ function App(){
       (people)=> setPresence(people||[]));
     return ()=>{ try{ off && off(); }catch(e){} };
   },[cloudMode, currentProjectId, session && session.user && session.user.id, shareRole]);
+
+  /* LIVE REFRESH — pick up collaborators' changes WHILE IDLE.
+     Per-section saves already merge, so you'd eventually get their work on your next save;
+     but until you typed something your screen silently showed stale scenes/props, and any
+     edit you then made was based on what you could see. This closes that window.
+     Cost discipline: it polls a tiny _rev scalar (never the doc), only when someone else
+     is actually here (presence) or the film is shared with you, and never while you have
+     unsaved edits or a load in flight — so it can't fight your typing, and a solo writer
+     polls nothing at all. Deliberately NOT built on the Realtime subscription: presence
+     is a nice-to-have, but staleness has to be fixed even where Realtime is unavailable. */
+  React.useEffect(()=>{
+    if(!cloudMode || !currentProjectId || typeof window.cloudDocRev!=="function") return;
+    const others = (presence||[]).filter(p=>!p.isSelf).length;
+    const collaborative = others>0 || !!(_projRow && _projRow.isShared);
+    if(!collaborative) return;
+    let alive = true, busy = false;
+    const tick = async ()=>{
+      if(!alive || busy) return;
+      if(dirtyRef.current || hydratingRef.current) return;   // never fight local edits
+      busy = true;
+      try{
+        const rev = await window.cloudDocRev(currentProjectId);
+        const seen = (typeof window.cloudSeenRev==="function") ? window.cloudSeenRev(currentProjectId) : 0;
+        if(alive && rev && rev > seen && !dirtyRef.current && !hydratingRef.current){
+          const row = await cloudLoadProject(currentProjectId);
+          if(alive && row && row.doc && !dirtyRef.current && !hydratingRef.current){
+            if(typeof window.cloudNoteDocRev==="function") window.cloudNoteDocRev(currentProjectId, row.doc);
+            _adoptTheirs(row.doc, []);   // nothing of ours is pending, so adopt freely
+          }
+        }
+      }catch(e){}
+      busy = false;
+    };
+    const iv = setInterval(tick, 12000);
+    return ()=>{ alive = false; clearInterval(iv); };
+  },[cloudMode, currentProjectId, presence.length, _projRow && _projRow.isShared]);
   // ADMIN — demo upkeep account. The Matrix sample story (and "Reset to sample story")
   // is admin-only: every other user (and signed-out local mode) never sees Matrix data.
   const isAdmin = (((typeof cloudUserEmail==="function" && cloudUserEmail(session))||"").toLowerCase()==="admin@infinitestudioai.com");
@@ -698,7 +734,12 @@ function App(){
     setBeatsMap(d.beatsMap||(isAdmin?BEATS:{}));
     setHistory(d.history||{});
     setContinuityMap(d.continuityMap||(isAdmin?(CONTINUITY||{}):{}));
-    setSelId(d.selId||(isAdmin?"s4":null));
+    // restore YOUR last scene (device-local) when it still exists in this film; the doc's
+    // selId is the fallback for a first open on a new device
+    const _navSel = nav && nav.selId;
+    const _scenesIn = Array.isArray(d.scenes) ? d.scenes : [];
+    const _navSelOk = _navSel && _scenesIn.some(sc=>sc && sc.id===_navSel);
+    setSelId(_navSelOk ? _navSel : (d.selId||(isAdmin?"s4":null)));
     // Navigation (room / view / artView) is device-local UI state owned by NAV_KEY
     // and restored synchronously in useState above. Intentionally do NOT re-apply
     // any of it from the hydrated doc — that re-application is what produced the
@@ -1129,8 +1170,8 @@ function App(){
 
   // persist navigation (room/view/artView) to the device-local key on every change
   React.useEffect(()=>{
-    try{ localStorage.setItem(NAV_KEY, JSON.stringify({ room, view, artView })); }catch(e){}
-  },[room, view, artView]);
+    try{ localStorage.setItem(NAV_KEY, JSON.stringify({ room, view, artView, selId })); }catch(e){}
+  },[room, view, artView, selId]);
 
   // MULTI-WINDOW CONFLICT: the save fence (cloud.jsx) refused to overwrite a
   // newer revision written by another window. Don't clobber — tell the user and
@@ -1229,7 +1270,10 @@ function App(){
           const _sectionsNow = { ...doc, ...keep };
           const _changed = {};
           Object.keys(_sectionsNow).forEach(k=>{
-            if(k==="room" || k==="view" || k==="artView") return;    // per-user view state
+            // per-user VIEW state — never a collaborative write. selId is here too: it
+            // lives in the shared doc for history reasons, but clicking a scene must not
+            // bump the film's revision and make every collaborator re-pull the whole doc.
+            if(k==="room" || k==="view" || k==="artView" || k==="selId") return;
             const j = JSON.stringify(_sectionsNow[k]);
             if(j !== lastSentRef.current[k]) _changed[k] = _sectionsNow[k];
           });
