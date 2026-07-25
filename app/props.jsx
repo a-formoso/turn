@@ -926,11 +926,12 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   const startSceneBatch = ()=>{
     if(!sceneFilter || batchActiveId) return;
     if(kindFilter) setKindFilter("");   // the scene batch covers ALL kinds in the scene
+    if(query) setQuery("");             // ...and every prop in it, not just search matches
     // Count from the KIND-UNFILTERED scene base (kindCountBase = scene \u2229 search, every
     // kind), NOT `shown`: `shown` is still narrowed by the kind filter we just cleared
     // (setKindFilter only takes effect next render), so using it would run the batch on
     // just the filtered kind and mis-count the "already have a sheet" / skipped totals.
-    const inSceneAll = kindCountBase;
+    const inSceneAll = list.filter(p=>inScene(p, sceneFilter));   // scene only — search cleared above
     const eligible = draftedIds(inSceneAll);
     if(!eligible.length){
       const nonWorn = inSceneAll.filter(p=>p.kind!=="worn");
@@ -945,8 +946,12 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
     if(batchActiveId) return;
     const eligible = draftedIds(list);
     if(!eligible.length){ batch.setMsg("Draft the props first \u2014 nothing is ready to generate yet."); return; }
-    if(sceneFilter) setSceneFilter("");            // mount every card so the queue can reach each one
+    // clear the SEARCH too, not just the scene/kind filters: the queue advances only
+    // when the target CARD is mounted, so a batch whose first target was filtered out
+    // by a search box never generated anything and hung until Cancel
+    if(sceneFilter) setSceneFilter("");
     if(kindFilter) setKindFilter("");
+    if(query) setQuery("");
     batch.begin(eligible, list.length - eligible.length);
   };
   const eligibleAll = list.filter(p=>propVisualsDrafted(p) && p.kind!=="worn").length;

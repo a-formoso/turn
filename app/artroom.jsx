@@ -1569,6 +1569,16 @@ function useBatchGen(){
   const [total, setTotal] = React.useState(0);
   const [msg, setMsg] = React.useState("");
   const [prompt, setPrompt] = React.useState(null);   // {missing:[ids], existing:[ids]}
+  const [preparing, setPreparing] = React.useState(false);   // the async "already have a sheet?" scan
+  /* BUSY spans a whole batch (partition scan \u2192 queue drained) and is a REF so it reads
+     correctly SYNCHRONOUSLY. `activeId` is state, so during the scan it is still null and
+     the trigger buttons (disabled only on batchActiveId) stayed live: two quick clicks ran
+     two partition loops, and the second one's run() reset the queue to item 0 \u2014 re-rendering
+     an already-finished sheet and double-spending image credits. */
+  const busyRef = React.useRef(false);
+  /* bumped by begin() and cancel(). An in-flight scan whose token has changed abandons, so
+     a batch the user cancelled can't resurrect itself when its awaits finally resolve. */
+  const tokenRef = React.useRef(0);
   const advance = React.useCallback((doneId)=>{
     setQueue(q=>{
       const rest = q.filter(id=>id!==doneId);
@@ -1577,30 +1587,70 @@ function useBatchGen(){
       return rest;
     });
   },[total]);
+  // the batch is over (or never started) \u2192 release the tab for a new one
+  React.useEffect(()=>{ if(!activeId && !prompt && !preparing) busyRef.current = false; },[activeId, prompt, preparing]);
+  /* QUEUE ADVANCEMENT no longer depends on the active CARD staying mounted. It used to
+     advance only from that card's effect, so if the card unmounted mid-generation (tab
+     change, filter change, a reorder that changed its React key) nothing ever called
+     advance: the queue froze at "Generating k of N\u2026" with every generate button disabled,
+     and only Cancel got you out. Listen for the global commit event instead, plus a
+     watchdog for a generation that dies WITHOUT ever committing (a hard failure fires no
+     event at all). The card's own callback still fires too \u2014 advance is idempotent. */
+  React.useEffect(()=>{
+    if(!activeId) return;
+    const onDone = (e)=>{ if(e && e.detail && e.detail.id===activeId) advance(activeId); };
+    window.addEventListener("nb-gen-done", onDone);
+    // 7 min is beyond the client's own 390s hard cap, so this only fires on a dead slot
+    const wd = setTimeout(()=>{
+      setMsg("That sheet didn't finish \u2014 skipping it and carrying on.");
+      advance(activeId);
+    }, 420000);
+    return ()=>{ window.removeEventListener("nb-gen-done", onDone); clearTimeout(wd); };
+  },[activeId, advance]);
+  // a transient notice ("Cancelled.", "nothing to generate") used to pin the bar on screen
+  // for the rest of the session \u2014 retire it once nothing is actually running
+  React.useEffect(()=>{
+    if(!msg || activeId || prompt || preparing) return;
+    const t = setTimeout(()=>setMsg(""), 9000);
+    return ()=>clearTimeout(t);
+  },[msg, activeId, prompt, preparing]);
   const run = (ids, skipped)=>{
     if(!ids.length) return;
-    setPrompt(null);
+    busyRef.current = true;              // the prompt's buttons call run() directly
+    setPrompt(null); setPreparing(false);
     setTotal(ids.length); setQueue(ids); setActiveId(ids[0]);
     setMsg("Generating 1 of "+ids.length+(skipped?(" \u00b7 skipped "+skipped+" already done"):"")+"\u2026");
   };
   const begin = async (ids, undraftedSkipped)=>{
-    if(activeId) return;
-    if(typeof nbHasKeyForCurrent==="function" && !nbHasKeyForCurrent()){ setMsg("Set your image-model API key first (top of this tab)."); return; }
-    if(!ids.length){ setMsg(undraftedSkipped ? "Draft the cards first \u2014 nothing is ready to generate yet." : "Nothing to generate yet."); return; }
-    setPrompt(null);
+    if(busyRef.current || activeId) return;   // ref, not state \u2014 correct during the scan
+    busyRef.current = true;
+    const token = ++tokenRef.current;
+    const mine = ()=> tokenRef.current===token;
+    const stop = (m)=>{ setMsg(m); setPreparing(false); busyRef.current = false; };
+    if(typeof nbHasKeyForCurrent==="function" && !nbHasKeyForCurrent()) return stop("Set your image-model API key first (top of this tab).");
+    if(!ids.length) return stop(undraftedSkipped ? "Draft the cards first \u2014 nothing is ready to generate yet." : "Nothing to generate yet.");
+    setPrompt(null); setPreparing(true);
     setMsg("Checking which already have a sheet\u2026");
     const missing=[], existing=[];
     for(const id of ids){
+      if(!mine()) return;                     // cancelled or restarted mid-scan
       let has = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
       if(!has && typeof nbLoadImage==="function"){ try{ has = await nbLoadImage(id); }catch(e){} }
       (has?existing:missing).push(id);
     }
+    if(!mine()) return;
+    setPreparing(false);
     if(!existing.length){ setMsg(""); run(missing, 0); return; }
     if(!missing.length){ setMsg(""); setPrompt({ missing:[], existing:ids }); return; }
     setMsg(""); setPrompt({ missing, existing });
   };
-  const cancel = ()=>{ setQueue([]); setActiveId(null); setTotal(0); setMsg("Cancelled."); setPrompt(null); };
-  return { activeId, msg, prompt, setPrompt, setMsg, advance, run, begin, cancel, total };
+  const cancel = ()=>{
+    tokenRef.current++;                  // abandon any in-flight partition scan
+    busyRef.current = false;
+    setQueue([]); setActiveId(null); setTotal(0); setPreparing(false); setPrompt(null);
+    setMsg("Cancelled.");
+  };
+  return { activeId, msg, prompt, preparing, setPrompt, setMsg, advance, run, begin, cancel, total };
 }
 window.useBatchGen = useBatchGen;
 
@@ -1649,7 +1699,7 @@ function ArtProgress({ title, detail, onCancel }){
 window.ArtProgress = ArtProgress;
 
 function BatchBar({ batch, noun }){
-  const { activeId, msg, prompt, run, cancel, setPrompt, setMsg } = batch;
+  const { activeId, msg, prompt, preparing, run, cancel, setPrompt, setMsg } = batch;
   // the bar lives at the TOP of the tab, but its triggers (e.g. a card's generate
   // button) can sit far down the page — scroll the bar into view when it has a
   // question or status, or the click looks like it did nothing.
@@ -1667,8 +1717,10 @@ function BatchBar({ batch, noun }){
       try{ sc.scrollTo({ top: Math.max(0, top), behavior:"smooth" }); }catch(e){ sc.scrollTop = Math.max(0, top); } }
     else if(el.scrollIntoView) el.scrollIntoView({ block:"center", behavior:"smooth" });
     el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
-  },[!!prompt, msg]);
-  if(!activeId && !prompt && !msg) return null;
+    // deps deliberately EXCLUDE the per-card progress message: it changes once per card,
+    // so scrolling on it yanked the viewport back to the top for every sheet in the batch
+  },[!!prompt, activeId ? "" : msg]);
+  if(!activeId && !prompt && !msg && !preparing) return null;
   const N = noun || "card";
   return React.createElement("div",{className:"art-batchbar",ref:barRef},
     prompt && React.createElement("div",{className:"batch-choice"},
@@ -1686,10 +1738,15 @@ function BatchBar({ batch, noun }){
         title:"Generate every "+N+", regenerating ones that already have a sheet"},
         React.createElement(Icon.sparkles,{s:13}),"Regenerate all "+(prompt.missing.length+prompt.existing.length),
         typeof window.nbCostChip==="function" && window.nbCostChip(prompt.missing.length+prompt.existing.length)),
-      React.createElement("button",{className:"art-draftall ghost",onClick:()=>{ setPrompt(null); setMsg(""); }},"Cancel")),
+      React.createElement("button",{className:"art-draftall ghost",onClick:cancel},"Cancel")),
     // ACTIVELY GENERATING → the shared progress card (spinner + status + reassurance),
     // matching the shots re-design note; a bare info/error msg stays a plain line.
-    activeId
+    (!activeId && preparing)
+      ? React.createElement(ArtProgress,{
+          title:"Checking which "+N+"s already have a sheet\u2026",
+          detail:"Reading each card's current image so you can choose to fill only the gaps or regenerate everything.",
+          onCancel: cancel })
+      : activeId
       ? React.createElement(ArtProgress,{
           title: msg || ("Generating "+N+" sheets…"),
           detail: "Rendering coverage in order — each frame takes a moment; the sheets already finished stay even if you cancel.",
@@ -3825,7 +3882,11 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
     if(batchActiveId) return;
     const eligible = draftedIds(list);
     if(!eligible.length){ batch.setMsg("Draft the characters first \u2014 nothing is ready to generate yet."); return; }
-    if(sceneFilter) setSceneFilter("");            // mount every card so the queue can reach each one
+    // clear the SEARCH too, not just the scene/kind filters: the queue advances only
+    // when the target CARD is mounted, so a batch whose first target was filtered out
+    // by a search box never generated anything and hung until Cancel
+    if(sceneFilter) setSceneFilter("");
+    if(query) setQuery("");
     batch.begin(eligible, list.length - eligible.length);
   };
   // generate just the cast in the focused scene (mirrors Props / Locations)

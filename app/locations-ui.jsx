@@ -645,8 +645,12 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
     if(batchActiveId) return;
     const eligible = draftedIds(list);
     if(!eligible.length){ batch.setMsg("Draft the locations first \u2014 nothing is ready to generate yet."); return; }
+    // clear the SEARCH too, not just the scene/kind filters: the queue advances only
+    // when the target CARD is mounted, so a batch whose first target was filtered out
+    // by a search box never generated anything and hung until Cancel
     if(sceneFilter) setSceneFilter("");
     if(ieFilter) setIeFilter("");
+    if(query) setQuery("");
     batch.begin(eligible, list.length - eligible.length);
   };
   const eligibleAll = list.filter(l=> (typeof locVisualsDrafted==="function") ? locVisualsDrafted(l) : true).length;
