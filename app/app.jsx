@@ -2199,7 +2199,6 @@ function App(){
     const rows = Array.isArray(bm.rows) ? bm.rows : [];
     if(!rows.length || !Array.isArray(list) || !list.length) return list;
     const made = list.slice();
-    const stamp = Date.now().toString(36);
     const clean = (s,n)=> (typeof clipWords==="function")
       ? clipWords(String(s||"").replace(/\s+/g," ").trim(), n||160)
       : String(s||"").replace(/\s+/g," ").trim().slice(0,n||160);
@@ -2229,13 +2228,28 @@ function App(){
       }
       const plan = beatShots.map(sh=>sh.beatPlan).find(p=>p && Array.isArray(p.micro) && p.micro.length);
       if(!plan || typeof microCoverage!=="function") return;
-      const cov = microCoverage(beatShots, plan.micro.map(t=>String(t).replace(/^\s*\d+[\.\)]\s*/,"")));
+      /* microCoverage returns { map, mapped }. Read it defensively: this call site once
+         treated the return value AS the map, so after the shape changed every lookup was
+         undefined, every micro-beat read "uncovered", and this pass injected a backstop
+         shot for each one — then setShots re-ran the effect and it injected them again,
+         forever (thousands of junk shots). Never inject off a coverage result we can't
+         positively understand. */
+      const _mc = microCoverage(beatShots, plan.micro.map(t=>String(t).replace(/^\s*\d+[\.\)]\s*/,"")));
+      const cov = (_mc && _mc.map) ? _mc.map : null;
+      if(!cov) return;
+      // a beat with NO explicit coverage data isn't "uncovered" — it's unknown. Injecting
+      // against unknown is what made this runaway; leave those beats alone.
+      if(_mc.mapped === false) return;
       plan.micro.forEach((m, mi)=>{
         const n = mi+1;
         const covered = beatShots.some(sh=>cov[sh.id] && cov[sh.id].has(n));
         if(covered) return;
+        // deterministic id (no timestamp): a re-run can only ever REPLACE this backstop,
+        // never stack another copy of it
+        const bid = "shot-"+scene.id+"-b"+beatNo+"m"+n+"-fill";
+        if(made.some(x=>x.id===bid)) return;
         const sh = normalizeShot(rawFor(row, idx, m, [n], plan), scene, made.length, locations, props, characters, beatsMap);
-        sh.id = "shot-"+scene.id+"-b"+beatNo+"m"+n+"-"+stamp;
+        sh.id = bid;
         made.push(sh);
       });
     });
@@ -2243,14 +2257,21 @@ function App(){
     return made.sort((a,b)=>(orderOf[Number(a.beatN)]??999)-(orderOf[Number(b.beatN)]??999) || (a.order||0)-(b.order||0))
       .map((sh,i)=>({ ...sh, order:i }));
   };
+  /* CIRCUIT BREAKER: this pass writes shots and its own output re-triggers it, so a
+     miscount anywhere upstream compounds without limit — it once wrote thousands of junk
+     shots into a film in seconds. A scene cannot legitimately need 120 shots, so past that
+     the pass stops touching it entirely rather than "repairing" its way to infinity. */
+  const SANE_SHOTS_PER_SCENE = 120;
   React.useEffect(()=>{
     if(!(shots||[]).length || !(scenes||[]).length || typeof normalizeShot!=="function") return;
     let next = shots.slice(), changed = false;
     (scenes||[]).forEach(scene=>{
       const sceneShots = next.filter(sh=>sh.sceneId===scene.id);
       if(!sceneShots.length) return;
+      if(sceneShots.length > SANE_SHOTS_PER_SCENE) return;      // refuse to compound a mess
       const fixed = completeDraftedShotCoverage(scene, sceneShots);
       if(fixed.length <= sceneShots.length) return;
+      if(fixed.length > SANE_SHOTS_PER_SCENE) return;           // and refuse to create one
       changed = true;
       next = next.filter(sh=>sh.sceneId!==scene.id).concat(fixed);
     });
