@@ -2257,6 +2257,34 @@ function App(){
     return made.sort((a,b)=>(orderOf[Number(a.beatN)]??999)-(orderOf[Number(b.beatN)]??999) || (a.order||0)-(b.order||0))
       .map((sh,i)=>({ ...sh, order:i }));
   };
+  /* ONE-TIME REPAIR for the runaway-injection incident.
+     A bug wrote thousands of duplicate auto-backstop shots into affected films. A runaway
+     duplicate is unambiguous: same scene, same beat, the SAME covers list, the machine-
+     written backstop composition, and no rendered frame. This keeps the FIRST of each such
+     group and drops the rest, so it can never touch a shot someone made by hand or one
+     that has art attached. Runs once per film load, reports what it removed, and no-ops
+     entirely on healthy films. */
+  const shotRepairRef = React.useRef("");
+  React.useEffect(()=>{
+    const list = shots||[];
+    if(!list.length || !currentProjectId) return;
+    if(shotRepairRef.current === currentProjectId) return;      // once per film
+    const SIG = "Clean coverage backstop";
+    const hasArt = (id)=>{ try{ return !!(typeof nbGetImage==="function" && nbGetImage(id)); }catch(e){ return false; } };
+    const seen = new Set(); const drop = new Set();
+    list.forEach(sh=>{
+      if(String(sh.composition||"").indexOf(SIG)!==0) return;   // not machine-injected
+      if(hasArt(sh.id)) return;                                  // has a rendered frame — keep
+      const key = sh.sceneId+"|"+sh.beatN+"|"+(Array.isArray(sh.covers)?sh.covers.join(","):"");
+      if(seen.has(key)) drop.add(sh.id); else seen.add(key);
+    });
+    shotRepairRef.current = currentProjectId;
+    if(!drop.size) return;
+    setShots(ss=>ss.filter(sh=>!drop.has(sh.id)));
+    if(typeof window.appToast==="function")
+      window.appToast("Cleaned up "+drop.size+" duplicate placeholder shot"+(drop.size!==1?"s":"")+" left by a bug. Your designed shots and any rendered frames were kept.","info");
+  },[(shots||[]).length, currentProjectId]);
+
   /* CIRCUIT BREAKER: this pass writes shots and its own output re-triggers it, so a
      miscount anywhere upstream compounds without limit — it once wrote thousands of junk
      shots into a film in seconds. A scene cannot legitimately need 120 shots, so past that
