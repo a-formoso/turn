@@ -9,13 +9,13 @@ window.TURN_SUPABASE = {
   /* local-first: the app works signed-out on local storage; cloud when signed in */
   localFirst: true,
   /* Server-side proxy. When TRUE, generation is routed through the `image-proxy`
-     Supabase Edge Function. The function can use user-saved provider keys sent
-     per request from the top-bar API Keys modal, or fall back to platform keys
-     stored as server secrets. Image generation is fal.ai-first (Nano Banana
-     variants and GPT Image 2), writing/text stays with the selected text provider,
-     Stage video stays on fal.ai, and ElevenLabs voice-library operations stay on
-     ElevenLabs through this proxy. Keep FALSE only for local smoke tests that do
-     not need media generation. */
+     Supabase Edge Function. The function normally uses platform keys stored as
+     server secrets; the admin-only API Keys modal can override them for testing.
+     Image generation is fal.ai-first (Nano Banana variants and GPT Image 2),
+     writing/text stays with the selected text provider, Stage video stays on
+     fal.ai, and ElevenLabs voice-library operations stay on ElevenLabs through
+     this proxy. Keep FALSE only for local smoke tests that do not need media
+     generation. */
   imageProxy: true,
   imageProxyFn: "image-proxy",
 };

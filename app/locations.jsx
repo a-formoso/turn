@@ -1,9 +1,10 @@
 /* locations.jsx — The Art Room ▸ Locations tab (data layer).
-   Locations are DERIVED from the script's sluglines (scene.loc, e.g.
-   "INT. HEART O' THE CITY HOTEL · NIGHT") so every shot set in a place can match
-   one canonical reference plate. Mirrors the Props flow: derive → draft → generate.
-   This file owns slugline parsing / derivation / defaults + the deterministic
-   plate prompts; the React tab lives in locations-ui.jsx. */
+   Locations are DERIVED from the screenplay. Scene headings and secondary headings
+   anchor the master location cards, while implied rooms/sides/thresholds in the
+   screenplay body become coverage sheets with full screenplay-page snapshots as
+   image references. Mirrors the Props flow: derive → draft → generate. This file
+   owns scene-heading parsing / derivation / defaults + deterministic plate prompts;
+   the React tab lives in locations-ui.jsx. */
 
 function locSlug(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,48); }
 
@@ -113,10 +114,13 @@ function splitCompoundPlace(place){
   return String(place||"").split(/\s*\/\s*/).map(x=>x.trim()).filter(Boolean);
 }
 
-/* Derive canonical locations from every scene's slugline.
+/* Derive canonical master locations from screenplay scene headings.
    Groups scenes by a normalised key on the PRIMARY place so "NEBUCHADNEZZAR · CORE"
    and "NEBUCHADNEZZAR · TRAINING" land under one "Nebuchadnezzar" (areas recorded).
-   Returns new location objects only (deduped against `existing`). */
+   Secondary headings inside the screenplay also create master cards; implied rooms,
+   sides and threshold spaces inside action prose are handled by coverage sheets on
+   the relevant master card. Returns new location objects only (deduped against
+   `existing`). */
 function deriveLocations(scenes, existing, drafts){
   const have = existing || [];
   const seen = new Set(have.map(l=>l.key || locSlug(l.name)));
@@ -440,7 +444,8 @@ function deriveLocationCoverageSheets(l, scenes, drafts){
 window.locationSceneText = locationSceneText;
 window.deriveLocationCoverageSheets = deriveLocationCoverageSheets;
 
-/* true when the script has any parseable slugline we could pull into the tab */
+/* true when the screenplay has any parseable scene-heading anchor we can pull into
+   the tab. Implied side spaces still hang off those anchors as coverage sheets. */
 function scriptHasLocations(scenes){ return (scenes||[]).some(s=> !!parseSlugline(s.loc)); }
 window.scriptHasLocations = scriptHasLocations;
 
@@ -1126,15 +1131,15 @@ async function generateLocationVariant(l, v, project){
 }
 window.generateLocationVariant = generateLocationVariant;
 
-/* coverage audit — scenes whose slugline names a place that isn't linked to any Location
-   card yet (e.g. an unparseable or brand-new slug). After a pull every parseable scene is
-   covered, so this surfaces the genuine gaps. */
+/* coverage audit — scenes whose heading names a place that isn't linked to any Location
+   card yet (e.g. an unparseable or brand-new heading). After a pull every parseable scene
+   heading is covered, so this surfaces the genuine gaps. */
 function locationCoverage(scenes, locations){
   const covered = new Set();
   (locations||[]).forEach(l=> (l.scenes||[]).forEach(id=> covered.add(id)));
   const out = [];
   (scenes||[]).forEach(s=>{
-    if(!s || !(s.loc||"").trim()) return;     // no slugline → not a location-bearing scene
+    if(!s || !(s.loc||"").trim()) return;     // no scene heading → not a master location-bearing scene
     if(covered.has(s.id)) return;
     const p = (typeof parseSlugline==="function") ? parseSlugline(s.loc) : null;
     out.push({ id:s.id, no:s.no, title:s.title||"", slug:(s.loc||"").trim(), place:(p&&p.place)||"" });

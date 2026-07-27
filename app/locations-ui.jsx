@@ -1,7 +1,8 @@
 /* locations-ui.jsx — The Art Room ▸ Locations tab (React).
-   Mirrors PropSheets: derive-from-script → draft fields → generate a multi-angle
-   coverage plate → per-scene batch. Adds time-of-day / weather VARIANT plates and
-   reads the Style Bible preset assigned to each location's scenes. */
+   Mirrors PropSheets: derive-from-screenplay → draft fields → generate a multi-angle
+   coverage plate → screenplay-derived INT/EXT side sheets → per-scene batch. Adds
+   time-of-day / weather VARIANT plates and reads the Style Bible preset assigned to
+   each location's scenes. */
 
 function locSwatch(intExt){
   return /EXT/.test(intExt||"")
@@ -664,13 +665,13 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
         React.createElement("div",{style:{flex:1}},
           React.createElement("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Production Designer (Location Scout)",
             React.createElement(window.InfoTip,{label:"About Locations",
-              text:"Every place the film visits, pulled straight from the script's sluglines. Each gets a multi-angle coverage plate \u2014 the same space from several views \u2014 so any shot set there matches its geometry, materials and light. 'Design all locations' builds every place in one pass \u2014 pulls them from the sluglines, drafts each spec, and stages its depth grid; 'Generate all locations' then renders the plates.\n\nLOCATIONS DERIVE FROM THE SCRIPT \u2014 there's no hand-adding here: write the place into the screenplay's sluglines and 'Design all locations' pulls it in."}))),
+              text:"Every place the film stages gets a multi-angle coverage plate so any shot set there matches its geometry, materials and light. Scene headings and secondary headings anchor the master location cards; the screenplay body can imply additional INT / EXT sides, rooms, booths, thresholds or views, and those become screenplay coverage sheets using full-scene page snapshots as image references.\n\nLOCATIONS DERIVE FROM THE SCREENPLAY \u2014 there's no arbitrary hand-adding here: write the place or implied space into the Writers' Room scene, and 'Design all locations' pulls the staged geography into the Art Room."}))),
         React.createElement("div",{className:"art-intro-actions"},
-          // NO hand-adding (product rule 2026-07-13): locations derive from the
-          // script's sluglines — write the place into the screenplay and
-          // 'Design all locations' pulls it in; the Art Room never invents places.
+          // NO arbitrary hand-adding: master cards anchor to screenplay headings, while
+          // implied side spaces (booths, rooms, interiors seen through glass, etc.) are
+          // derived as coverage sheets from screenplay body text + page snapshots.
           React.createElement("button",{className:"art-draftall ghost",disabled:draftingAll||(!list.length&&!scriptHasLocs),onClick:onDraftAll,
-            title:"Build every location from the story in one pass \u2014 pull any missing places from the script's sluglines, draft each spec (the space, significance, look dev), and stage its depth grid"},
+            title:"Build every location from the screenplay in one pass \u2014 pull missing master places from scene headings, derive implied INT/EXT coverage from scene text, draft each spec, and stage its depth grid"},
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all locations"),
           React.createElement("button",{className:"art-draftall",disabled:!!batchActiveId||!eligibleAll,onClick:startAllBatch,
             title:"Generate (or regenerate) the coverage plate for every drafted location \u2014 you choose whether to redo ones that already have a plate"},
@@ -750,12 +751,12 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
           React.createElement("div",{className:"art-soon-ic"},React.createElement(Icon.layers,{s:30})),
           React.createElement("div",{className:"art-soon-t"},"No locations yet"),
           React.createElement("div",{className:"art-soon-d"}, scriptHasLocs
-            ? "Your script's scene sluglines name the places this story visits \u2014 \u201cDesign all locations\u201d pulls them in, drafts each spec, and stages its depth grid in one pass. Or add one by hand."
-            : "Add a location to start building its reference plate \u2014 a room, a street, a world."),
-          React.createElement("div",{style:{display:"flex",gap:8,marginTop:16}},
-            scriptHasLocs && React.createElement("button",{className:"art-draftall",disabled:draftingAll,onClick:onDraftAll},
-              React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all locations"),
-            React.createElement("button",{className:scriptHasLocs?"art-draftall ghost":"art-draftall",onClick:onAdd},
-              React.createElement(Icon.plus,{s:14}),scriptHasLocs?"Add by hand":"Add your first location"))));
+            ? "Your screenplay names the main staged places in scene headings, and may imply extra rooms, interiors, exteriors or thresholds in the scene body. \u201cDesign all locations\u201d builds the master plates and screenplay coverage sheets from that text."
+            : "Write the scene's staged place in the Writers' Room first. Extra implied spaces can live in the scene action; the Locations tab reads the full screenplay page when it creates coverage sheets."),
+          scriptHasLocs
+            ? React.createElement("div",{style:{display:"flex",gap:8,marginTop:16}},
+                React.createElement("button",{className:"art-draftall",disabled:draftingAll,onClick:onDraftAll},
+                  React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all locations"))
+            : React.createElement("div",{className:"art-soon-d",style:{marginTop:12}},"No screenplay-staged location anchor yet.")));
 }
 window.LocationSheets = LocationSheets;

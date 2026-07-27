@@ -74,37 +74,58 @@ function TurnAudit({ scenes, selId, onSelect }){
       // the table keeps its desktop column widths and scrolls SIDEWAYS inside its
       // own container on narrow screens (minWidth stops the columns crushing)
       React.createElement("div",{className:"audit-tablewrap"},
-      React.createElement("div",{style:{border:"1px solid var(--line)",borderRadius:"var(--r-l)",overflow:"hidden",minWidth:620}},
-        React.createElement("div",{style:{display:"grid",gridTemplateColumns:"44px 1fr 120px 150px 110px",
-          background:"var(--bg-2)",borderBottom:"1px solid var(--line)"}},
-          ["#","Scene","Charge","Value shift","Verdict"].map((h,i)=>
-            React.createElement("div",{key:i,style:{padding:"10px 14px",fontFamily:"var(--f-mono)",
-              fontSize:9,letterSpacing:".1em",textTransform:"uppercase",color:"var(--txt-2)",
-              borderLeft:i?"1px solid var(--line)":"none"}},h))),
+        React.createElement("div",{style:{border:"1px solid var(--line)",borderRadius:"var(--r-l)",overflow:"hidden",minWidth:620}},
+          React.createElement("div",{style:{display:"grid",gridTemplateColumns:"44px 1fr 120px 150px 110px",
+            background:"var(--bg-2)",borderBottom:"1px solid var(--line)"}},
+            ["#","Scene","Charge","Value shift","Verdict"].map((h,i)=>
+              React.createElement("div",{key:i,style:{padding:"10px 14px",fontFamily:"var(--f-mono)",
+                fontSize:9,letterSpacing:".1em",textTransform:"uppercase",color:"var(--txt-2)",
+                borderLeft:i?"1px solid var(--line)":"none"}},h))),
+          scenes.map(s=>{
+            const { flagged } = turnInfo(s);
+            return React.createElement("div",{key:s.id,onClick:()=>onSelect(s.id),
+              style:{display:"grid",gridTemplateColumns:"44px 1fr 120px 150px 110px",cursor:"pointer",
+                borderBottom:"1px solid var(--line)",background:s.id===selId?"var(--bg-3)":"transparent",
+                alignItems:"center"}},
+              React.createElement("div",{style:{padding:"12px 14px",fontFamily:"var(--f-mono)",fontSize:11,color:"var(--txt-3)",fontWeight:700}},String(s.no).padStart(2,"0")),
+              React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)"}},
+                React.createElement("div",{style:{fontFamily:"var(--f-display)",fontSize:13,color:"var(--txt-0)",fontWeight:500}},s.title),
+                React.createElement("div",{style:{fontFamily:"var(--f-mono)",fontSize:9.5,color:"var(--txt-3)",marginTop:2}},
+                  `Act ${["I","II","III","IV"][s.act-1]||s.act} · ${s.seq}`,KIND_LABEL[s.kind]?(" · "+KIND_LABEL[s.kind]):"")),
+              React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)",display:"flex",alignItems:"center",gap:6}},
+                React.createElement(ChargeChip,{value:s.openCharge}),
+                React.createElement("span",{style:{color:"var(--txt-3)",display:"flex"}},React.createElement(Icon.arrowSmall,{s:11})),
+                React.createElement(ChargeChip,{value:s.closeCharge})),
+              React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)",fontSize:11.5,color:"var(--txt-1)"}},
+                `${s.openValue} \u2192 ${s.closeValue}`),
+              React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)"}},
+                flagged
+                  ? React.createElement("span",{className:"turn-badge no"},React.createElement(Icon.alert,{s:10}),
+                      (typeof fwAuditOf==="function" && fwAuditOf().flagBadge)||"No turn")
+                  : React.createElement("span",{className:"turn-badge ok"},React.createElement(Icon.check,{s:10}),
+                      (typeof fwAuditOf==="function" && fwAuditOf().okBadge)||"Turns")));
+          }))),
+      React.createElement("div",{className:"audit-mobile-list"},
         scenes.map(s=>{
           const { flagged } = turnInfo(s);
-          return React.createElement("div",{key:s.id,onClick:()=>onSelect(s.id),
-            style:{display:"grid",gridTemplateColumns:"44px 1fr 120px 150px 110px",cursor:"pointer",
-              borderBottom:"1px solid var(--line)",background:s.id===selId?"var(--bg-3)":"transparent",
-              alignItems:"center"}},
-            React.createElement("div",{style:{padding:"12px 14px",fontFamily:"var(--f-mono)",fontSize:11,color:"var(--txt-3)",fontWeight:700}},String(s.no).padStart(2,"0")),
-            React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)"}},
-              React.createElement("div",{style:{fontFamily:"var(--f-display)",fontSize:13,color:"var(--txt-0)",fontWeight:500}},s.title),
-              React.createElement("div",{style:{fontFamily:"var(--f-mono)",fontSize:9.5,color:"var(--txt-3)",marginTop:2}},
-                `Act ${["I","II","III","IV"][s.act-1]||s.act} · ${s.seq}`,KIND_LABEL[s.kind]?(" · "+KIND_LABEL[s.kind]):"")),
-            React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)",display:"flex",alignItems:"center",gap:6}},
-              React.createElement(ChargeChip,{value:s.openCharge}),
-              React.createElement("span",{style:{color:"var(--txt-3)",display:"flex"}},React.createElement(Icon.arrowSmall,{s:11})),
-              React.createElement(ChargeChip,{value:s.closeCharge})),
-            React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)",fontSize:11.5,color:"var(--txt-1)"}},
-              `${s.openValue} \u2192 ${s.closeValue}`),
-            React.createElement("div",{style:{padding:"12px 14px",borderLeft:"1px solid var(--line)"}},
+          return React.createElement("button",{key:s.id,type:"button",className:"audit-mobile-card"+(s.id===selId?" sel":""),
+            onClick:()=>onSelect(s.id)},
+            React.createElement("div",{className:"audit-mobile-top"},
+              React.createElement("span",{className:"audit-mobile-no"},String(s.no).padStart(2,"0")),
               flagged
                 ? React.createElement("span",{className:"turn-badge no"},React.createElement(Icon.alert,{s:10}),
                     (typeof fwAuditOf==="function" && fwAuditOf().flagBadge)||"No turn")
                 : React.createElement("span",{className:"turn-badge ok"},React.createElement(Icon.check,{s:10}),
-                    (typeof fwAuditOf==="function" && fwAuditOf().okBadge)||"Turns")));
-        })))));
+                    (typeof fwAuditOf==="function" && fwAuditOf().okBadge)||"Turns")),
+            React.createElement("div",{className:"audit-mobile-title"},s.title),
+            React.createElement("div",{className:"audit-mobile-meta"},
+              `Act ${["I","II","III","IV"][s.act-1]||s.act} · ${s.seq}`,KIND_LABEL[s.kind]?(" · "+KIND_LABEL[s.kind]):""),
+            React.createElement("div",{className:"audit-mobile-charge"},
+              React.createElement(ChargeChip,{value:s.openCharge}),
+              React.createElement("span",{className:"audit-mobile-arrow"},React.createElement(Icon.arrowSmall,{s:11})),
+              React.createElement(ChargeChip,{value:s.closeCharge})),
+            React.createElement("div",{className:"audit-mobile-shift"},`${s.openValue} \u2192 ${s.closeValue}`));
+        }))));
 }
 
 /* ---- alternate view: Board (acts as columns) ---- */
@@ -388,8 +409,8 @@ function App(){
   // Memoized so it only recomputes when a real input changes — the App re-renders on
   // every keystroke/autosave across the studio, and this needn't recompute each time.
   const staleTabs = React.useMemo(()=>{
-    // LOCATIONS gate on cards EXISTING (not fully drafted): location cards are pulled
-    // from the script's sluglines long before they're drafted, so requiring a full draft
+    // LOCATIONS gate on cards EXISTING (not fully drafted): master location cards are
+    // pulled from screenplay headings long before they're drafted, so requiring a full draft
     // meant the "Lookbook changed" banner couldn't appear until the first Draft & Generate.
     // Counting present cards lets it appear the moment the Lookbook diverges from what was
     // last applied — there's something to apply it to. (Characters/props stay on the
@@ -459,10 +480,8 @@ function App(){
   const startWithPlan = (plan)=>{
     // carry the tier the visitor chose on the landing pricing cards through signup:
     // writer/director/studio (a real plan) or "free" for the generic Get-started CTA.
-    const waitlist = String(plan||"").toLowerCase()==="stage_waitlist";
-    if(waitlist){ try{ localStorage.setItem("turn-stage-waitlist-intent","1"); }catch(e){} }
     const valid = (window.CINEMA_PLANS||[]).some(p=>String(p.tier).toLowerCase()===String(plan).toLowerCase());
-    const p = waitlist ? "free" : (valid ? String(plan).toLowerCase() : "free");
+    const p = valid ? String(plan).toLowerCase() : "free";
     try{ localStorage.setItem("turn-intended-plan", p); localStorage.setItem("turn-intended-plan-at", String(Date.now())); }catch(e){}
     setIntendedPlan(p); openAuth("signup", { keepPlanIntent:true });
   };
@@ -493,21 +512,8 @@ function App(){
     if(!(session && session.user)) return;
     if(intendedPlan!=="free") return;
     if(!creditBalance) return;                         // wait for the ledger to load
-    let stageWaitlist = false;
-    try{ stageWaitlist = localStorage.getItem("turn-stage-waitlist-intent")==="1"; }catch(e){}
-    try{ localStorage.removeItem("turn-intended-plan"); localStorage.removeItem("turn-intended-plan-at"); }catch(e){}
+    try{ localStorage.removeItem("turn-intended-plan"); localStorage.removeItem("turn-intended-plan-at"); localStorage.removeItem("turn-stage-waitlist-intent"); }catch(e){}
     setIntendedPlan(null);                             // fires once, then never again
-    if(stageWaitlist){
-      try{ localStorage.removeItem("turn-stage-waitlist-intent"); }catch(e){}
-      (async()=>{ try{
-        const res = typeof window.cloudJoinStageWaitlist==="function" ? await window.cloudJoinStageWaitlist() : null;
-        if(res && res.error) throw new Error(res.error.message || "Could not join the Stage waitlist.");
-        if(typeof window.appToast==="function") window.appToast("You're on the Stage waitlist. We'll email you when production access opens.","success");
-      }catch(e){
-        if(typeof window.appToast==="function") window.appToast((e && e.message) || "Could not join the Stage waitlist yet.","error");
-      } })();
-      return;
-    }
   },[session, intendedPlan, creditBalance]);
   // load the admin's plan-card copy overrides (global, public-read) so the plan cards
   // and landing pricing show the edited copy for everyone, including signed-out visitors.
@@ -1407,6 +1413,11 @@ function App(){
   };
   const currentRoomEntitlements = ()=>{
     if(window.turnIsAdmin) return { writers_room:true, art_room:true, stage:true };
+    if(_projRow && _projRow.isShared){
+      if(shareRole==="producer_admin" || shareRole==="view_only") return { writers_room:true, art_room:true, stage:true };
+      if(shareRole==="art_director") return { writers_room:true, art_room:true, stage:false };
+      return { writers_room:true, art_room:false, stage:false };
+    }
     const b = window.turnCreditBalance;
     if(!b && session && session.user) return null;
     if(typeof window.turnRoomEntitlements==="function") return window.turnRoomEntitlements(b);
@@ -1414,6 +1425,7 @@ function App(){
   };
   const roomGateReady = ()=>{
     if(window.turnIsAdmin) return true;
+    if(_projRow && _projRow.isShared) return true;
     if(!(session && session.user)) return true;
     return !!window.turnCreditBalance;
   };
@@ -1431,6 +1443,13 @@ function App(){
     if(typeof window.turnOpenPlans==="function") window.turnOpenPlans();
   };
   const requireRoomEntitlement = (id)=>{
+    if(_projRow && _projRow.isShared){
+      if(typeof window.appToast==="function"){
+        const role = typeof window.teamRoleLabel==="function" ? window.teamRoleLabel(shareRole) : "collaborator";
+        window.appToast(`${role} access does not include ${id==="art"?"the Art Room":"the Stage"}.`, "info");
+      }
+      return;
+    }
     const plan = (typeof window.turnRoomRequiredPlan==="function") ? window.turnRoomRequiredPlan(id) : "the right";
     if(typeof window.appToast==="function"){
       window.appToast(`${id==="art"?"The Art Room":"The Stage"} requires the ${plan} plan.`, "info");
@@ -1438,7 +1457,8 @@ function App(){
     requirePlan("open "+(id==="art"?"the Art Room":id==="stage"?"the Stage":"this room"));
   };
   const guardedSetRoom = (id)=>{
-    if(id!=="writers" && !planActive()){ requirePlan("open "+(id==="art"?"the Art Room":id==="stage"?"the Stage":"this room")); return; }
+    const sharedProject = !!(_projRow && _projRow.isShared);
+    if(id!=="writers" && !sharedProject && !planActive()){ requirePlan("open "+(id==="art"?"the Art Room":id==="stage"?"the Stage":"this room")); return; }
     if(id!=="writers" && !canAccessRoom(id)){ requireRoomEntitlement(id); return; }
     if(id!=="writers" && !scenes.length){ requireStory(id==="stage" ? "The Stage" : "The Art Room"); return; }
     setRoom(id);
@@ -1957,7 +1977,8 @@ function App(){
     setDraftingLocIds(ids=> ids.filter(x=>x!==l.id));
   };
   // "Draft all locations" — the full locations pipeline in one click:
-  //   1) PULL any missing places from the script's sluglines (+ refresh scene lists)
+  //   1) PULL missing master places from screenplay scene headings (+ refresh scene lists)
+  //      and let each card derive implied INT/EXT side coverage from scene body text
   //   2) DRAFT every card's spec (The space + Significance + Look dev) from the script
   //   3) STAGE each location's depth grid off the freshly-designed space
   // Replaces the old separate "Pull from script" button.
@@ -2008,7 +2029,8 @@ function App(){
     }catch(e){}
     setDraftingStageId(null);
   };
-  // derive locations from the script's sluglines; dedups against existing
+  // derive master locations from screenplay scene headings; coverage sheets handle
+  // implied sub-locations/sides described inside the scene body
   const pullLocationsFromScript = React.useCallback(()=>{
     if(typeof deriveLocations!=="function") return;
     const derived = deriveLocations(scenes, locations, drafts);
@@ -2956,7 +2978,7 @@ function App(){
     const _locDrafted = (l)=> (typeof locVisualsDrafted==="function") ? locVisualsDrafted(l)
       : !!((l.architecture||"").trim() && (l.lighting||"").trim());
     const locscout = {
-      // pull places from the sluglines (new cards), and refresh scene lists / times on existing
+      // pull master places from screenplay headings (new cards), and refresh scene lists / times on existing
       pull: ()=>{
         if(typeof deriveLocations!=="function") return 0;
         const derived = deriveLocations(scenes, _locWork, drafts);          // new only
@@ -3527,7 +3549,7 @@ function App(){
 
       React.createElement("div",{className:"canvas"},
         React.createElement("div",{className:"canvas-head"},
-          React.createElement("div",null,
+          React.createElement("div",{className:"canvas-head-copy"},
             React.createElement("div",{className:"canvas-title"},
               view==="spine"?"Value-Charge Spine":view==="beats"?"Turn Audit":view==="script"?"Screenplay Draft":"Story Board"),
             React.createElement("div",{className:"canvas-sub"},

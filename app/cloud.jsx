@@ -122,15 +122,6 @@ async function cloudGetCreditBalance(){
 }
 window.cloudGetCreditBalance = cloudGetCreditBalance;
 
-async function cloudJoinStageWaitlist(){
-  const sb = sbClient(); if(!sb) return { error:{ message:"Cloud not configured." } };
-  try{
-    const { data, error } = await sb.rpc("turn_join_stage_waitlist");
-    return { data, error };
-  }catch(e){ return { error:{ message:(e && e.message) || "Could not join the Stage waitlist." } }; }
-}
-window.cloudJoinStageWaitlist = cloudJoinStageWaitlist;
-
 /* decrement after a successful render (supabase/credits.sql turn_spend_credit).
    Fire-and-forget from the render path; the UI refreshes via cloudGetCreditBalance
    on the "turn-credits-changed" event either way. Returns the new balance or null. */

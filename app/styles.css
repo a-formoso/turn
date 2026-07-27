@@ -527,8 +527,9 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 .canvas-head{
   display:flex;align-items:center;gap:14px;padding:14px 22px 0;flex:0 0 auto;
 }
+.canvas-head-copy{min-width:0;max-width:100%}
 .canvas-title{font-family:var(--f-display);font-size:15px;font-weight:600;color:var(--txt-0)}
-.canvas-sub{font-family:var(--f-mono);font-size:11px;color:var(--txt-2);letter-spacing:.03em}
+.canvas-sub{font-family:var(--f-mono);font-size:11px;line-height:1.35;color:var(--txt-2);letter-spacing:.03em}
 .legend{display:flex;align-items:center;gap:16px;margin-left:auto}
 .legend-item{display:flex;align-items:center;gap:7px;font-family:var(--f-mono);font-size:10.5px;letter-spacing:.05em;color:var(--txt-2);text-transform:uppercase}
 .legend-swatch{width:12px;height:12px;border-radius:3px}
@@ -680,6 +681,7 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
    the table scrolls sideways inside its own container instead of crushing */
 .audit-tablewrap{overflow-x:auto;overflow-y:hidden;scrollbar-width:none;border-radius:var(--r-l)}
 .audit-tablewrap::-webkit-scrollbar{display:none}
+.audit-mobile-list{display:none}
 
 /* turn verdict */
 .verdict{border-radius:var(--r-m);padding:13px 14px;display:flex;gap:11px;align-items:flex-start}
@@ -3957,9 +3959,31 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   .write-dock{top:auto;bottom:252px;transform:none;right:10px}
 
   .canvas-head{padding:12px 14px 0}
+  .canvas-head-copy{flex:1 1 auto}
   .canvas-title{font-size:14px}
-  .canvas-sub{font-size:10px}
+  .canvas-sub{font-size:10px;white-space:normal;overflow-wrap:anywhere}
   .canvas-scroll{padding:8px 12px 80px}
+
+  .audit-tablewrap{display:none}
+  .audit-mobile-list{display:grid;gap:8px}
+  .audit-mobile-card{
+    width:100%;text-align:left;border:1px solid var(--line);border-radius:var(--r-m);
+    background:var(--bg-2);padding:12px;display:grid;gap:8px;cursor:pointer;
+  }
+  .audit-mobile-card.sel{background:var(--bg-3);box-shadow:inset 0 0 0 1px var(--pos-line)}
+  .audit-mobile-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .audit-mobile-no{
+    font-family:var(--f-mono);font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--txt-3)
+  }
+  .audit-mobile-title{
+    font-family:var(--f-display);font-size:14px;font-weight:600;line-height:1.2;color:var(--txt-0)
+  }
+  .audit-mobile-meta{
+    font-family:var(--f-mono);font-size:9.5px;line-height:1.35;letter-spacing:.04em;color:var(--txt-3)
+  }
+  .audit-mobile-charge{display:flex;align-items:center;gap:6px}
+  .audit-mobile-arrow{display:flex;color:var(--txt-3)}
+  .audit-mobile-shift{font-size:12px;line-height:1.35;color:var(--txt-1)}
 
   /* WRITERS' ROOM editors reflow: the Beats tab's drive/react two-column grid
      stacks on a phone. The opening/closing charge boxes stay SIDE BY SIDE like

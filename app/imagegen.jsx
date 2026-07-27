@@ -97,8 +97,8 @@ function oaiHasKey(){ return !!oaiGetKey(); }
 window.oaiGetKey = oaiGetKey; window.oaiSetKey = oaiSetKey; window.oaiHasKey = oaiHasKey;
 
 /* is the server-side image proxy enabled? When on, providers run through the Edge
-   Function. A user-saved key may be sent for that request; otherwise the function
-   falls back to its server-side secret. */
+   Function. The platform server secret is used unless an administrator overrides
+   it for testing. */
 function imageProxyOn(){ return !!(window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxy); }
 window.imageProxyOn = imageProxyOn;
 
@@ -129,8 +129,8 @@ function isGptImageModel(model){
 }
 function nbProviderLabel(provider){ return provider==="fal" ? "fal.ai" : (provider==="openai" ? "GPT Image" : "Nano Banana"); }
 /* key presence per provider — used by the key bar and the batch/generate gates.
-   fal.ai image generation must go through the server proxy; the proxy can use either
-   the user's saved fal key or its own server secret. */
+   fal.ai image generation must go through the server proxy; the proxy uses the
+   platform server secret unless an administrator overrides it for testing. */
 function nbHasKeyForModel(model){ return providerOfModel(model)==="fal" ? imageProxyOn() : ((providerOfModel(model)==="openai" || imageProxyOn()) ? true : nbHasKey()); }
 function nbHasKeyForCurrent(){ return nbHasKeyForModel(nbGetModel()); }
 window.imageModelEntry = imageModelEntry; window.providerOfModel = providerOfModel; window.isGptImageModel = isGptImageModel; window.nbProviderLabel = nbProviderLabel;

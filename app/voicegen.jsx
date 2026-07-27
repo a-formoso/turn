@@ -1,8 +1,8 @@
 /* voicegen.jsx — the VOICE generation + persistence layer for the Stage (audio-first).
    Structural twin of imagegen.jsx's nb* layer, for ElevenLabs audio instead of images.
    Every call goes through the SAME server-side Supabase proxy (the `image-proxy`
-   Edge Function, task:"voice"), using a user-saved ElevenLabs key when present or
-   the proxy's server secret as fallback. Local-first persistence (IndexedDB); cloud is a
+   Edge Function, task:"voice"), using the proxy's ELEVENLABS_API_KEY server secret,
+   with admin API Keys able to override for testing. Local-first persistence (IndexedDB); cloud is a
    guarded extension hook (window.cloudCommitAudio) wired in a later turn.
 
    Public surface (mirrors the plan):
@@ -37,8 +37,8 @@ window.VG_DEFAULTS = VG_DEFAULTS; window.VG_TTS_MODEL = VG_TTS_MODEL; window.VG_
 window.vgDeliveryModelOf = vgDeliveryModelOf;
 
 /* voice always runs server-side — so it needs the proxy on, the Supabase client,
-   and a signed-in user. The proxy uses a user-saved ElevenLabs key when present,
-   otherwise its server secret. There is no browser-direct path. */
+   and a signed-in user. The proxy uses the platform server secret unless an
+   administrator overrides it for testing. There is no browser-direct path. */
 function voiceProxyReady(){
   return !!(window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxy
     && typeof window.sbClient==="function" && window.sbClient());
@@ -120,7 +120,7 @@ async function vgProxy(op, payload){
     const status=(error&&error.context&&error.context.status)||error.status||0;
     const _safe = window.turnSafeError || (x=>x);
     if(status===401) throw new Error("Sign in to render voice — it runs on your server, not the browser.");
-    if(status===404) throw new Error(_safe("The media proxy isn't deployed yet. Deploy supabase/functions/image-proxy (the voice route), then add an ElevenLabs key in API Keys or set ELEVENLABS_API_KEY."));
+    if(status===404) throw new Error(_safe("The media proxy isn't deployed yet. Deploy supabase/functions/image-proxy (the voice route), then have an administrator set ELEVENLABS_API_KEY."));
     throw new Error(_safe("Couldn't reach the voice proxy: "+((error&&error.message)||"unknown error")+"."));
   }
   if(data && data.error) throw new Error((window.turnSafeError||(x=>x))(data.error));   // ElevenLabs error relayed by the proxy

@@ -1,7 +1,7 @@
 /* videogen.jsx — VIDEO generation (Seedance 2.0 via fal.ai) for the Stage, Phase 3.
    The async twin of voicegen.jsx: a shot FRAME + the locked-voice LINE AUDIO →
    a lip-synced clip. Runs through the SAME server proxy (image-proxy, task:"video"),
-   using a user-saved fal key when present, otherwise the proxy's FAL_KEY secret.
+   using the proxy's FAL_KEY server secret, with admin API Keys able to override for testing.
    Videos take minutes, so the flow is
    SUBMIT → POLL (each proxy call is short; the waiting is the client's poll loop).
    See docs/Voice & Lip-Sync (Seedance) Plan.md §6A.
@@ -235,7 +235,7 @@ async function vidProxy(op, payload){
     const status=(error&&error.context&&error.context.status)||error.status||0;
     const _safe = window.turnSafeError || (x=>x);
     if(status===401) throw new Error("Sign in to render video — it runs on your server, not the browser.");
-    if(status===404) throw new Error(_safe("The media proxy isn't deployed yet. Deploy supabase/functions/image-proxy (the video route), then add a fal key in API Keys or set FAL_KEY."));
+    if(status===404) throw new Error(_safe("The media proxy isn't deployed yet. Deploy supabase/functions/image-proxy (the video route), then have an administrator set FAL_KEY."));
     throw new Error(_safe("Couldn't reach the video proxy: "+((error&&error.message)||"unknown error")+"."));
   }
   if(data && data.error) throw new Error((window.turnSafeError||(x=>x))(data.error));   // fal error relayed by the proxy

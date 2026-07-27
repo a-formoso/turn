@@ -234,7 +234,7 @@ Deno.serve(async (req) => {
   };
   const providerKey = (id: string, envName: string): string => userApiKey(id) || cleanApiKey(Deno.env.get(envName));
   const missingKey = (label: string, envName: string): string =>
-    `Missing ${label} API key. Add it in TURN's API Keys modal or set the ${envName} server secret.`;
+    `${label} is not configured on the server. An administrator can add it in TURN's API Keys modal for testing or set the ${envName} server secret.`;
   const mediaExt = (mime: string): string => {
     const m = (mime || "").toLowerCase();
     if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
