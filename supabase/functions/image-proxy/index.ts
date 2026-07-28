@@ -451,8 +451,47 @@ Deno.serve(async (req) => {
   // ElevenLabs field names/model ids move — confirm against current docs at deploy.
   if (task === "voice") {
     const elKey = providerKey("elevenlabs", "ELEVENLABS_API_KEY");
-    if (!elKey) return json({ error: missingKey("ElevenLabs", "ELEVENLABS_API_KEY") }, 500);
+    const falVoiceKey = providerKey("fal", "FAL_KEY");
+    // TTS and STT can run on fal's ElevenLabs endpoints (billed to the fal wallet), so
+    // the direct ElevenLabs key is only HARD-required for the voice-library operations
+    // (design / save / list / clone) that manage voices inside the ElevenLabs account.
+    const _opWanted = (body.op || "tts").toString();
+    const _falCanCover = (_opWanted === "tts" || _opWanted === "stt") && !!falVoiceKey;
+    if (!elKey && !_falCanCover) return json({ error: missingKey("ElevenLabs", "ELEVENLABS_API_KEY") }, 500);
     const EL = "https://api.elevenlabs.io/v1";
+    // run a fal ElevenLabs endpoint through the queue and return its result JSON
+    const falVoiceRun = async (endpoint: string, input: any) => {
+      const head = { "Authorization": "Key " + falVoiceKey, "Content-Type": "application/json" };
+      const sub = await fetch("https://queue.fal.run/" + endpoint, {
+        method: "POST", headers: head, body: JSON.stringify(input), signal: AbortSignal.timeout(380000) });
+      if (!sub.ok) {
+        // Keep fal's own words — a bare status code is what made the last round of
+        // voice/image failures impossible to diagnose.
+        let why = ""; try { why = (await sub.text()).slice(0, 400); } catch (_e) { /* noop */ }
+        throw new Error(`fal ${endpoint} rejected the request (${sub.status})${why ? ": " + why : "."}`);
+      }
+      let out: any = await sub.json();
+      if (out?.status_url && out?.response_url) {
+        const okHost = (u: string) => { try { return new URL(u).host.endsWith("fal.run"); } catch (_e) { return false; } };
+        if (!okHost(out.status_url) || !okHost(out.response_url)) throw new Error("Bad fal response URLs.");
+        let done = false;
+        for (let i = 0; i < 150; i++) {
+          const sr = await fetch(out.status_url, { headers: { "Authorization": "Key " + falVoiceKey } });
+          if (!sr.ok) throw new Error(`fal status failed (${sr.status}).`);
+          const sd = await sr.json();
+          const st = String(sd.status || "").toUpperCase();
+          if (st === "COMPLETED") {
+            const rr = await fetch(out.response_url, { headers: { "Authorization": "Key " + falVoiceKey } });
+            if (!rr.ok) throw new Error(`fal result failed (${rr.status}).`);
+            out = await rr.json(); done = true; break;
+          }
+          if (st === "FAILED" || st === "ERROR") throw new Error(String(sd?.error || sd?.detail || "fal voice request failed."));
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        if (!done) throw new Error("fal voice request took too long.");
+      }
+      return out;
+    };
     const op = (body.op || "tts").toString();
     const elErr = async (r: Response) => {
       let d = ""; try { const j = await r.json(); d = j?.detail?.message || (typeof j?.detail === "string" ? j.detail : "") || j?.message || ""; } catch (_e) { /* noop */ }
@@ -481,16 +520,50 @@ Deno.serve(async (req) => {
               style: s.style ?? 0.0,
               speed: s.speed ?? 1.0,
               use_speaker_boost: s.speakerBoost ?? true };
-        const r = await fetch(`${EL}/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${encodeURIComponent(fmt)}`, {
-          method: "POST",
-          headers: { "xi-api-key": elKey, "Content-Type": "application/json" },
-          body: JSON.stringify({ text, model_id: modelId, voice_settings: voiceSettings }),
-        });
-        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
-        const data = await r.json();
-        const ends = (data.alignment && data.alignment.character_end_times_seconds) || [];
-        const durationMs = ends.length ? Math.round(Number(ends[ends.length - 1]) * 1000) : 0;
-        return json({ audioB64: data.audio_base64, mime: "audio/mpeg", durationMs, alignment: data.alignment || null });
+        // ROUTE ORDER: the direct ElevenLabs call stays PRIMARY — it is the only one that
+        // carries the full voice settings (similarity, style, speed, speaker boost) and
+        // returns per-character alignment. fal's mirror of the same models is the FALLBACK,
+        // so a blocked ElevenLabs invoice stops billing, not the film.
+        let elWhy = "";
+        if (elKey) {
+          const r = await fetch(`${EL}/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps?output_format=${encodeURIComponent(fmt)}`, {
+            method: "POST",
+            headers: { "xi-api-key": elKey, "Content-Type": "application/json" },
+            body: JSON.stringify({ text, model_id: modelId, voice_settings: voiceSettings }),
+          });
+          if (r.ok) {
+            const data = await r.json();
+            const ends = (data.alignment && data.alignment.character_end_times_seconds) || [];
+            const durationMs = ends.length ? Math.round(Number(ends[ends.length - 1]) * 1000) : 0;
+            return json({ audioB64: data.audio_base64, mime: "audio/mpeg", durationMs, alignment: data.alignment || null, via: "elevenlabs" });
+          }
+          elWhy = await elErr(r);
+          if (!falVoiceKey) return json({ error: elWhy, status: r.status }, 200);
+        }
+        // Fallback: the same ElevenLabs models hosted on fal, billed to the fal wallet.
+        // Custom voices are addressed by the same voice id; timestamps keep the cut clock.
+        const falTtsEndpoint = modelId.indexOf("multilingual") >= 0 ? "fal-ai/elevenlabs/tts/multilingual-v2"
+          : modelId.indexOf("turbo") >= 0 ? "fal-ai/elevenlabs/tts/turbo-v2.5"
+          : "fal-ai/elevenlabs/tts/eleven-v3";
+        let falWhy = "";
+        try {
+          const fd = await falVoiceRun(falTtsEndpoint, {
+            text, voice: voiceId, timestamps: true, stability: voiceSettings.stability });
+          const fUrl = fd?.audio?.url || fd?.audio_url || (typeof fd?.audio === "string" ? fd.audio : "");
+          if (fUrl) {
+            const ar = await fetch(fUrl);
+            if (ar.ok) {
+              const b64 = arrayBufferToBase64(await ar.arrayBuffer());
+              const tsList = Array.isArray(fd?.timestamps) ? fd.timestamps : [];
+              const last = tsList.length ? tsList[tsList.length - 1] : null;
+              const durationMs = last ? Math.round(Number(last.end ?? last.end_time ?? last.time ?? 0) * 1000) : 0;
+              return json({ audioB64: b64, mime: "audio/mpeg", durationMs,
+                alignment: null, timestamps: tsList, via: "fal" });
+            }
+            falWhy = "fal returned an audio URL the proxy couldn't download.";
+          } else { falWhy = "fal returned no audio."; }
+        } catch (e) { falWhy = ((e as any)?.message || String(e)); }
+        return json({ error: (elWhy ? elWhy + " Backup route also failed — " : "Voice rendering is unavailable — ") + falWhy }, 200);
       }
 
       // Voice Design — returns candidate previews (each with a generated_voice_id).
@@ -576,14 +649,44 @@ Deno.serve(async (req) => {
         const blob = dataUrlToBlob("data:" + mime + ";base64," + audioB64);
         if (!blob) return json({ error: "Couldn't read the recorded audio." }, 400);
         const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : mime.includes("wav") ? "wav" : "webm";
-        const form = new FormData();
-        form.append("model_id", (body.modelId || "scribe_v1").toString());
-        form.append("file", blob, "answer." + ext);
-        if (body.languageCode) form.append("language_code", String(body.languageCode));
-        const r = await fetch(`${EL}/speech-to-text`, { method: "POST", headers: { "xi-api-key": elKey }, body: form });
-        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
-        const data = await r.json();
-        return json({ text: (data.text || "").toString() });
+        // Same route order as TTS: direct ElevenLabs first, fal's Scribe as the backup.
+        let sttWhy = "";
+        if (elKey) {
+          const form = new FormData();
+          form.append("model_id", (body.modelId || "scribe_v1").toString());
+          form.append("file", blob, "answer." + ext);
+          if (body.languageCode) form.append("language_code", String(body.languageCode));
+          const r = await fetch(`${EL}/speech-to-text`, { method: "POST", headers: { "xi-api-key": elKey }, body: form });
+          if (r.ok) {
+            const data = await r.json();
+            return json({ text: (data.text || "").toString(), via: "elevenlabs" });
+          }
+          sttWhy = await elErr(r);
+          if (!falVoiceKey) return json({ error: sttWhy, status: r.status }, 200);
+        }
+        // fal's Scribe endpoint takes a URL, so the recording is uploaded to fal storage first.
+        let falSttWhy = "";
+        try {
+          const up = await fetch("https://rest.alpha.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3", {
+            method: "POST", headers: { "Authorization": "Key " + falVoiceKey, "Content-Type": "application/json" },
+            body: JSON.stringify({ content_type: mime, file_name: "answer." + ext }),
+          });
+          if (!up.ok) throw new Error(`fal upload was refused (${up.status}).`);
+          const ud = await up.json();
+          const putUrl = (ud.upload_url || "").toString();
+          const okHost = (() => { try { const h = new URL(putUrl).host; return h.endsWith("fal.ai") || h.endsWith("fal.media"); } catch (_e) { return false; } })();
+          if (!putUrl || !okHost) throw new Error("fal returned no usable upload URL.");
+          const put = await fetch(putUrl, { method: "PUT", headers: { "Content-Type": mime }, body: blob });
+          if (!put.ok || !ud.file_url) throw new Error(`Uploading the recording to fal failed (${put.status}).`);
+          const fd = await falVoiceRun("fal-ai/elevenlabs/speech-to-text/scribe-v2", {
+            audio_url: ud.file_url, tag_audio_events: false, diarize: false,
+            ...(body.languageCode ? { language_code: String(body.languageCode) } : {}),
+          });
+          const txt = (fd?.text || "").toString();
+          if (txt) return json({ text: txt, via: "fal" });
+          falSttWhy = "fal transcribed nothing.";
+        } catch (e) { falSttWhy = ((e as any)?.message || String(e)); }
+        return json({ error: (sttWhy ? sttWhy + " Backup route also failed — " : "Speech-to-text is unavailable — ") + falSttWhy }, 200);
       }
 
       return json({ error: `Unknown voice op "${op}".` }, 400);

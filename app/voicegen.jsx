@@ -127,6 +127,24 @@ async function vgProxy(op, payload){
   return data||{};
 }
 
+// Measure a rendered line off the audio itself (fallback when the route reports no timing).
+function vgMeasureDuration(url){
+  return new Promise(function(resolve){
+    try{
+      const a = new Audio();
+      let done=false;
+      const finish=(ms)=>{ if(done) return; done=true; resolve(ms); };
+      a.addEventListener("loadedmetadata", ()=>{
+        const s = Number(a.duration);
+        finish(isFinite(s) && s>0 ? Math.round(s*1000) : 0);
+      });
+      a.addEventListener("error", ()=>finish(0));
+      setTimeout(()=>finish(0), 8000);
+      a.preload="metadata"; a.src=url;
+    }catch(e){ resolve(0); }
+  });
+}
+
 // ---- TTS one line: render + (with-timestamps) duration; cache by hash --------
 async function elGenerate(id, text, opts){
   opts = opts||{};
@@ -145,9 +163,13 @@ async function elGenerate(id, text, opts){
   const d = await vgProxy("tts", { voiceId, text:t, modelId, settings, outputFormat:VG_OUTPUT_FORMAT });
   if(!d.audioB64) throw new Error("The proxy returned no audio.");
   const audioUrl = "data:"+(d.mime||"audio/mpeg")+";base64,"+d.audioB64;
-  const meta = { durationMs:d.durationMs||0, voiceId, text:t, modelId, hash, alignment:d.alignment||null };
+  // Duration is the cut clock — every route must yield one. The with-timestamps route
+  // reports it; routes that don't get measured off the decoded audio instead.
+  let durationMs = d.durationMs||0;
+  if(!durationMs) durationMs = await vgMeasureDuration(audioUrl);
+  const meta = { durationMs, voiceId, text:t, modelId, hash, alignment:d.alignment||null };
   if(id) await elCommit(id, audioUrl, meta);
-  return { audioUrl, durationMs:d.durationMs||0, alignment:d.alignment||null, cached:false };
+  return { audioUrl, durationMs, alignment:d.alignment||null, cached:false };
 }
 window.elGenerate=elGenerate;
 
