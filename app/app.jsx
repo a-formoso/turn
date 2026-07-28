@@ -2476,7 +2476,28 @@ function App(){
   const renum = (arr)=>arr.map((s,i)=>({...s,no:i+1}));
   // human label describing a draft's provenance
   const labelOf = (v)=> !v ? null : v.edited ? "Manual edit" : v.polished ? "MUSE polish" : (v.ai ? "MUSE draft" : (v.auto ? "Structural draft" : "Original draft"));
-  // replace a scene's draft, pushing the old version onto its history stack
+
+  /* SCRIPT SUBTITLE — carries the open scene's PROVENANCE (which version this is, which
+     engine wrote it, and when) instead of a static explainer. The same badge used to sit
+     beside the scene title; it reads better as the page subtitle, and gaining the date
+     answers "is what I'm looking at current?" without hovering for a tooltip. */
+  const scriptSubtitle = ()=>{
+    const d = selId ? drafts[selId] : null;
+    if(!d) return "Subtext (beats) becomes text (screenplay)";
+    const lab = labelOf(d) || "Draft";
+    const by = (!d.edited && d.by && d.by.model) ? d.by : null;
+    const when = (by && by.at) ? new Date(by.at) : null;
+    const stamp = when
+      ? (when.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"})
+         +", "+when.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}))
+      : "";
+    return React.createElement("span",{
+        className:"sp-badge"+(d.polished?" polished":(d.auto?" structural":"")),
+        title: by ? ("Written by "+by.model+(when?(" \u2014 "+when.toLocaleString()):"")) : lab },
+      lab,
+      by && React.createElement("span",{className:"sp-badge-model"}," \u00b7 "+by.model),
+      stamp && React.createElement("span",{className:"sp-badge-when"}," \u00b7 "+stamp));
+  };  // replace a scene's draft, pushing the old version onto its history stack
   // undo depth per scene. CAPPED (like the image layer's 12 versions): every entry is a
   // full screenplay draft and `history` rides in the saved doc, so an uncapped stack grew
   // the doc on every commit — in local mode it eventually blew the localStorage quota and
@@ -3604,7 +3625,7 @@ function App(){
             React.createElement("div",{className:"canvas-sub"},
               view==="spine"?"The emotional charge of every scene, end to end":
               view==="beats"?(((typeof fwAuditOf==="function")&&fwAuditOf().subline)||"If a scene doesn't turn, cut it"):
-              view==="script"?"Subtext (beats) becomes text (screenplay)":"16 scenes across 3 acts")),
+              view==="script"?scriptSubtitle():"16 scenes across 3 acts")),
           view==="spine" && React.createElement("div",{className:"legend"},
             runtimeTotal>0 && React.createElement("div",{className:"legend-item",
               title:"Estimated total runtime, ≈1 page/min (drafted scenes from their script; undrafted roughly from beats)"},

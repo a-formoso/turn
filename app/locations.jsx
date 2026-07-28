@@ -352,8 +352,19 @@ function _locSideCueIndex(text, role){
   const i = s.search(re);
   return i>=0 ? i : 999999;
 }
-function deriveLocationCoverageSheets(l, scenes, drafts){
+function deriveLocationCoverageSheets(l, scenes, drafts, allLocations){
   if(!l) return [];
+  /* A sub-space sheet is a STAND-IN for a space the screenplay never slugged. Once that
+     space earns a real slugline it gets its own location card, plate and coverage — and
+     deriving a sheet for it too would mean designing the same booth twice, from two
+     records that can drift apart. Skip any sub-space that is now a location. */
+  const _allLocs = Array.isArray(allLocations) ? allLocations
+    : (((window.turnContinuity||{}).locations) || []);
+  const _isRealLocation = (nm)=>{
+    const n = String(nm||"").trim().toLowerCase();
+    if(!n) return false;
+    return _allLocs.some(x=> x && x.id!==l.id && String(x.name||"").trim().toLowerCase()===n);
+  };
   const clean = (s,n)=>{ const x=String(s||"").replace(/\s+/g," ").trim();
     return (typeof clipWords==="function") ? clipWords(x,n||180) : x.slice(0,n||180); };
   const locScenes = (Array.isArray(l.scenes) && l.scenes.length)
@@ -424,9 +435,15 @@ function deriveLocationCoverageSheets(l, scenes, drafts){
     const terminalish = /\bterminal|desk|counter|keyboard|monitor|console|lamp\b/i.test(entry.scan);
     if((/EXT/.test(sceneRole) || /EXT/.test(intExt)) && (insideM || (boothish && (throughGlass || terminalish)))){
       const hitIndex = insideM ? insideM.index : Math.max(0, entry.scan.search(/\bbooth\b/i));
-      const sub = insideM ? tidyPlace(insideM[1]) : (boothish ? "Booth" : "Interior");
+      /* the capture's {2,44} minimum pulls the ARTICLE in with the noun ("inside the
+         booth" captures "the booth"), which produced sheets named "Intake The Booth" —
+         wrong on the card, and it stopped the real-location check below from matching. */
+      const sub = (insideM ? tidyPlace(insideM[1]) : (boothish ? "Booth" : "Interior"))
+        .replace(/^(?:The|A|An)\s+/i, "").trim();
       const name = /intake/i.test(baseName) && !/intake/i.test(sub) ? ("Intake "+sub) : sub;
-      add("INT", name+" Interior",
+      // it has its own card now — don't design it twice (gate ONLY this add: a `return`
+      // here would also skip the exterior-cue sheet later in this same iteration)
+      if(!_isRealLocation(name)) add("INT", name+" Interior",
         "Interior coverage required by the screenplay even if the prose only names the space: action plays inside "+name+" while the parent scene is staged from "+baseName+". Infer the empty interior from the screenplay page, the parent exterior, working surfaces, glass/window relationship, controls and sightline to the exterior.",
         ["inside","interior","booth","glass","window","terminal","desk","counter","console"],
         baseOrder + hitIndex + 1, s, locationScriptExcerpt(s, drafts, hitIndex));

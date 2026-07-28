@@ -387,7 +387,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
 
 
   // ---- screenplay present: render the STORED draft directly (no blend) ----
-  let body = null, badge = null, polishUI = null, versionUI = null;
+  let body = null, polishUI = null, versionUI = null;
   const hb = history || {back:[],fwd:[]};
   if(screenplay){
     const groupByBeat = (blocks)=>{ const m={}, order=[]; blocks.forEach(b=>{ if(!m[b.beat]){m[b.beat]=[];order.push(b.beat);} m[b.beat].push(b); }); return {m,order}; };
@@ -398,16 +398,6 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
     const order = screenplayBeatNumbers(screenplay, beats);
     // mark a character cue as (CONT'D) when the same speaker returns after intervening action
     const contdSet = buildContdSet(screenplay.blocks);
-
-    const verLabel = labelOf(screenplay);
-    const isPolished = !!screenplay.polished;
-    // provenance metadata: which engine wrote THIS version (stamped by the drafters as
-    // `by:{model,modelId,at}`; manual edits clear it — pre-stamp drafts simply show none)
-    const verBy = (!screenplay.edited && screenplay.by && screenplay.by.model) ? screenplay.by : null;
-    badge = React.createElement("span",{className:`sp-badge ${isPolished?"polished":(screenplay.auto?"structural":"")}`,
-      title: verBy ? ("Written by "+verBy.model+(verBy.at?(" — "+new Date(verBy.at).toLocaleString()):"")) : undefined},
-      verLabel,
-      verBy && React.createElement("span",{className:"sp-badge-model"}," · "+verBy.model));
 
     // Polish: generate a NEW version (old one is pushed to history by commitVersion)
     const runPolish = async ()=>{
@@ -576,7 +566,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
     React.createElement("div",{className:"meta"},
       React.createElement("div",{className:"script-slug"},`SCENE ${String(scene.no).padStart(2,"0")} \u00b7 ${scene.loc}`),
       React.createElement("div",{className:"script-title-row"},
-        React.createElement("div",{className:"script-title"},scene.title), badge),
+        React.createElement("div",{className:"script-title"},scene.title)),
       // STATUS LINE — a real warning and a neutral note sit on one row rather than
       // stacking as two competing pills; see styles.css for why the note is quiet.
       (screenplay && missing.length>0) && React.createElement("div",{className:"script-status"},
