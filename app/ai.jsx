@@ -17,8 +17,8 @@ const WRITING_MODELS = [
   // Notes are written for FILMMAKERS (what the engine is good at), not provider trivia.
   // The app owns the default per TASK (WRITING_TASK_DEFAULTS below); every picker still
   // lets the user override, and a manual pick always wins everywhere.
-  { id:"claude-opus-5",      label:"Claude Opus 5",   provider:"anthropic", note:"richest screen prose — best for scripts & scenes" },
-  { id:"claude-fable-5",     label:"Claude Fable 5",  provider:"anthropic", note:"newest & most capable — deepest story reasoning" },
+  { id:"claude-opus-5",      label:"Opus 5",          provider:"anthropic", note:"richest screen prose — best for scripts & scenes" },
+  { id:"claude-fable-5",     label:"Fable 5",         provider:"anthropic", note:"newest & most capable — deepest story reasoning" },
   { id:"gemini-3.5-flash", label:"Gemini 3.5 Flash", provider:"google", note:"fast — ideal for specs, bibles & rebuilds" },
   { id:"gpt-5.5-2026-04-23", label:"GPT-5.5",       provider:"openai", note:"a different voice — good for alternative takes" },
   { id:"kimi-k3", label:"Kimi K3", provider:"moonshot", note:"deep reasoner, huge context — SLOW on long drafts; best for analysis & alt takes" },

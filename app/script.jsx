@@ -577,14 +577,16 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
   const header = React.createElement("div",{className:"script-head"},
     React.createElement("div",{className:"meta"},
       React.createElement("div",{className:"script-slug"},`SCENE ${String(scene.no).padStart(2,"0")} \u00b7 ${scene.loc}`),
-      React.createElement("div",{style:{display:"flex",alignItems:"center",gap:10}},
+      React.createElement("div",{className:"script-title-row"},
         React.createElement("div",{className:"script-title"},scene.title), badge),
-      // professional-completeness flag (only when something's missing AND the scene is drafted)
-      screenplay && missing.length>0 &&
-        React.createElement("div",{className:"script-missing"},React.createElement(Icon.alert,{s:12}),
-          "Missing: "+missing.join(", ")),
-      noteText &&
-        React.createElement("div",{className:"script-note"},React.createElement(Icon.layers,{s:12}),noteText)),
+      // STATUS LINE — a real warning and a neutral note sit on one row rather than
+      // stacking as two competing pills; see styles.css for why the note is quiet.
+      ((screenplay && missing.length>0) || noteText) && React.createElement("div",{className:"script-status"},
+        screenplay && missing.length>0 &&
+          React.createElement("div",{className:"script-missing"},React.createElement(Icon.alert,{s:12}),
+            "Missing: "+missing.join(", ")),
+        noteText &&
+          React.createElement("div",{className:"script-note"},React.createElement(Icon.layers,{s:12}),noteText))),
     // two groups so mobile can stack them as two lines with the SAME desktop look:
     // A = the housed glued strip (Continuity/Undo/Redo/Edit), B = Redraft + pager
     React.createElement("div",{className:"script-tools"},
