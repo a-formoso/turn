@@ -744,15 +744,28 @@ Deno.serve(async (req) => {
     if (!cfg) return json({ error: `Image model "${model}" is not allowed on the fal proxy.` }, 400);
 
     const falHead = { "Authorization": "Key " + falKey, "Content-Type": "application/json" };
+    // fal returns 422 validation errors as { detail: [{loc,msg,type}, …] }. Returning that
+    // array raw produced "[object Object],[object Object]" in the UI, which hid the actual
+    // reason a model was rejected — the field it objected to is exactly what you need.
     const falErr = async (r: Response) => {
       let d = "";
       try {
         const j = await r.json();
-        d = j?.detail || j?.error || j?.message || JSON.stringify(j);
+        const detail = j?.detail;
+        if (typeof detail === "string") d = detail;
+        else if (Array.isArray(detail)) {
+          d = detail.map((x: any) => {
+            if (typeof x === "string") return x;
+            const where = Array.isArray(x?.loc) ? x.loc.filter((p: any) => p !== "body").join(".") : "";
+            const msg = x?.msg || x?.message || x?.type || JSON.stringify(x);
+            return where ? `${where}: ${msg}` : msg;
+          }).join("; ");
+        } else if (detail && typeof detail === "object") d = JSON.stringify(detail);
+        if (!d) d = j?.error || j?.message || JSON.stringify(j);
       } catch (_e) {
         try { d = await r.text(); } catch (_e2) { /* noop */ }
       }
-      return d || `fal error (${r.status}).`;
+      return String(d || "").slice(0, 400) || `fal error (${r.status}).`;
     };
     const okFalHost = (u: string) => {
       try { return new URL(u).host.endsWith("fal.run"); } catch (_e) { return false; }
@@ -765,7 +778,14 @@ Deno.serve(async (req) => {
       const input: any = { prompt };
 
       if (cfg.family === "openai") {
-        input.image_size = sizeForAspect(aspect, imageSize);
+        // fal's openai/gpt-image-2 wrapper does NOT take OpenAI's "WxH" string. Its schema
+        // is either an enum (square_hd | landscape_16_9 | …) or an OBJECT {width,height}.
+        // Sending the string returned 422 on every request, so GPT Image 2 never worked
+        // through fal. Use the object form: it keeps TURN's exact aspect+resolution tiers,
+        // which the enum cannot express (no 16:9 at 2K, no 21:9 at all).
+        const wh = sizeForAspect(aspect, imageSize).split("x");
+        const w = parseInt(wh[0], 10), h = parseInt(wh[1], 10);
+        input.image_size = (Number.isFinite(w) && Number.isFinite(h)) ? { width: w, height: h } : "landscape_16_9";
         input.quality = quality || "medium";
         if (moderation) input.moderation = moderation;
         if (imageUrls.length) input.image_urls = imageUrls;
