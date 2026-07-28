@@ -444,6 +444,63 @@ function deriveLocationCoverageSheets(l, scenes, drafts){
 window.locationSceneText = locationSceneText;
 window.deriveLocationCoverageSheets = deriveLocationCoverageSheets;
 
+/* IMPLIED ENCLOSED SPACES — the shared detector.
+   A scene often plays partly inside a space the page never slugs ("Behind the booth
+   glass, ODESSA…", "Inside the booth, Odessa kills the lamp"). That space is a real set
+   — its own walls, light and geography — but because locations DERIVE FROM SLUGLINES it
+   gets no card, no plate and no coverage. The fix belongs in the screenplay: slug it.
+   Deterministic on purpose — the Consistency Check that consumes this is the FREE tier
+   and makes no model calls — and shared so the Writers' Room and the Art Room can never
+   disagree about what counts as an implied space.
+   Returns [{ name, role, time, evidence, atIndex, noun }], atIndex = the FIRST block that
+   plays inside, i.e. where the slugline belongs. Spaces already slugged are excluded. */
+const IMPLIED_SPACE_NOUNS = ("booth|cab|cabin|car|van|truck|trailer|container|cockpit|control room|kiosk|cell|closet|"+
+  "vault|elevator|lift|wheelhouse|confessional|airlock|hayloft|shed|tent|garage|basement|attic|kitchen|bathroom|"+
+  "stairwell|corridor|tunnel|cage|pen|stall|pod|capsule|carriage|compartment|galley|berth|office|room|hall|lobby|"+
+  "shop|store|booth window|ticket window|guard house|guardhouse|cupboard|pantry|cellar");
+function findImpliedSpaces(scene, blocks){
+  const out = [];
+  if(!scene || !Array.isArray(blocks) || !blocks.length) return out;
+  const parent = (typeof parseSlugline==="function") ? parseSlugline(scene.loc) : { place:String(scene.loc||""), time:"", intExt:"INT" };
+  const parentPlace = String((parent&&parent.place)||"").toUpperCase();
+  const time = (parent && parent.time) || "";
+  // every place ALREADY slugged in this scene (parent + any secondary slugline)
+  const slugged = new Set([parentPlace]);
+  blocks.forEach(b=>{ if(b && b.type==="scene" && b.text){
+    const p = (typeof parseSlugline==="function") ? parseSlugline(b.text) : null;
+    if(p && p.place) slugged.add(String(p.place).toUpperCase());
+  }});
+  const NOUN = IMPLIED_SPACE_NOUNS;
+  const reInside = new RegExp("\\b(?:inside|within)\\s+(?:the\\s+|a\\s+|an\\s+)?([a-z0-9'\u2019 -]{0,26}?\\b(?:"+NOUN+"))\\b","i");
+  const reBehind = new RegExp("\\bbehind\\s+the\\s+([a-z0-9'\u2019 -]{0,26}?\\b(?:"+NOUN+"))\\s+(?:glass|window|screen|door|counter)\\b","i");
+  const seen = new Set();
+  blocks.forEach((b, i)=>{
+    if(!b || b.type!=="action" || !b.text) return;
+    const t = String(b.text);
+    const m = reInside.exec(t) || reBehind.exec(t);
+    if(!m) return;
+    let noun = String(m[1]||"").replace(/\s+/g," ").trim();
+    if(!noun) return;
+    // a BARE generic noun ("booth") reads better qualified by its parent place
+    // ("INTAKE BOOTH") — but never double it up when the modifier is already there
+    let name = noun.toUpperCase();
+    const bare = noun.split(/\s+/).length===1;
+    const parentHead = parentPlace.split(/\s+/)[0] || "";
+    if(bare && parentHead && name.indexOf(parentHead)<0 && parentHead.length>2) name = parentHead+" "+name;
+    if(slugged.has(name) || seen.has(name)) return;
+    seen.add(name);
+    out.push({ name, role:"INT", time, noun,
+      evidence: t.replace(/\s+/g," ").trim().slice(0,180), atIndex:i });
+  });
+  return out;
+}
+function impliedSpaceSlugline(sp){
+  return "INT. "+String((sp&&sp.name)||"INTERIOR").toUpperCase()+((sp&&sp.time)?(" - "+String(sp.time).toUpperCase()):"");
+}
+window.IMPLIED_SPACE_NOUNS = IMPLIED_SPACE_NOUNS;
+window.findImpliedSpaces = findImpliedSpaces;
+window.impliedSpaceSlugline = impliedSpaceSlugline;
+
 /* true when the screenplay has any parseable scene-heading anchor we can pull into
    the tab. Implied side spaces still hang off those anchors as coverage sheets. */
 function scriptHasLocations(scenes){ return (scenes||[]).some(s=> !!parseSlugline(s.loc)); }

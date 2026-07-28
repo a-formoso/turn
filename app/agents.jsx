@@ -1618,6 +1618,46 @@ async function agentConsistency(ctx){
       }
     }
 
+    /* 0.5 — IMPLIED SPACE NEVER SLUGGED. A scene often plays partly inside a space the
+       page never slugs ("Behind the booth glass, ODESSA…"). That space is a real set with
+       its own walls, light and geography, but because locations DERIVE FROM SLUGLINES it
+       gets no card, no plate and no coverage — it is invisible to the whole Art Room.
+       The fix belongs in the screenplay, not in a parallel art record: slug it, and the
+       existing derive → draft → plate → shots chain picks it up with no new plumbing.
+       Deterministic (this tier makes no model calls); one card per scene. */
+    if(cards < MAX_CARDS && typeof window.findImpliedSpaces==="function"){
+      let implied = [];
+      try{ implied = window.findImpliedSpaces(scene, blocks) || []; }catch(e){ implied = []; }
+      // don't propose a space that already has its own location card
+      implied = implied.filter(sp=>{
+        const n = String(sp.name||"").toUpperCase();
+        return !(bible.locations||[]).some(l=> String(l.name||"").toUpperCase()===n);
+      });
+      if(implied.length){
+        cards++;
+        const lines = implied.map(sp=> window.impliedSpaceSlugline(sp)+"   ← from: \u201c"+sp.evidence+"\u201d");
+        const ok = await ctx.propose({
+          title:"Scene "+scene.no+" \u2014 slug the space"+(implied.length>1?"s":"")+" the action plays inside",
+          reason:implied.length+" enclosed space"+(implied.length===1?" is":"s are")+" played in but never slugged, so "+(implied.length===1?"it gets":"they get")+" no location card, no plate and no shot coverage.",
+          rationale:"Locations are derived from sluglines, so an unslugged space is invisible to the Art Room. Adding the heading is how the screenplay says \u201cwe cut inside here\u201d \u2014 and it makes the set designable. Time of day is inherited from the scene heading; nothing else in the page changes.",
+          before:implied.map(sp=>sp.evidence).join("\n\n"),
+          after:lines.join("\n\n") });
+        if(ctx.cancelled()) return;
+        if(ok){
+          // insert each heading BEFORE the first block that plays inside that space.
+          // Walk high index → low so earlier insertions don't shift later targets.
+          const nb = blocks.slice();
+          implied.slice().sort((a,b)=>b.atIndex-a.atIndex).forEach(sp=>{
+            const at = Math.max(0, Math.min(nb.length, sp.atIndex));
+            nb.splice(at, 0, { beat:(nb[at]&&nb[at].beat)||1, type:"scene", text:window.impliedSpaceSlugline(sp) });
+          });
+          ctx.model.drafts[scene.id] = {...draft, blocks:nb, edited:true};
+          fixes++;
+          ctx.emit({k:"ok", t:"Scene "+scene.no+" \u2014 slugged "+implied.map(sp=>sp.name).join(", ")+". Run \u201cDesign all locations\u201d to build the new set."});
+        } else sceneIssues.push("implied space left unslugged");
+      }
+    }
+
     /* 1 — PRONOUNS: they/them action lines under a gendered character starve the
        image & video models of usable info. */
     let pronounBlocks = [], ambiguous = 0;
