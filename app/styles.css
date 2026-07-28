@@ -860,16 +860,6 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 .script-title-row{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;min-width:0}
 .script-title{font-family:var(--f-display);font-size:20px;font-weight:600;color:var(--txt-0);line-height:1.25}
 .script-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:7px}
-/* A NOTE IS INFORMATION, NOT AN ALERT. This was drawn in --neg (the alert colour) inside
-   the same pill as .script-missing, so "this unit spans 3 sluglines" shouted as loudly as
-   a genuinely missing element — and it will appear far more often now that implied spaces
-   get their own sluglines. The pill and the colour are reserved for the real warning. */
-.script-note{
-  display:inline-flex;align-items:center;gap:6px;
-  font-family:var(--f-mono);font-size:10.5px;letter-spacing:.02em;color:var(--txt-3);
-  border:0;background:none;padding:0;
-}
-.script-note svg{flex:0 0 auto;opacity:.65}
 .script-missing{
   display:inline-flex;align-items:center;gap:7px;
   font-family:var(--f-mono);font-size:10.5px;letter-spacing:.02em;color:#e2a24e;

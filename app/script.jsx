@@ -387,7 +387,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
 
 
   // ---- screenplay present: render the STORED draft directly (no blend) ----
-  let body = null, badge = null, noteText = null, polishUI = null, versionUI = null;
+  let body = null, badge = null, polishUI = null, versionUI = null;
   const hb = history || {back:[],fwd:[]};
   if(screenplay){
     const groupByBeat = (blocks)=>{ const m={}, order=[]; blocks.forEach(b=>{ if(!m[b.beat]){m[b.beat]=[];order.push(b.beat);} m[b.beat].push(b); }); return {m,order}; };
@@ -398,8 +398,6 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
     const order = screenplayBeatNumbers(screenplay, beats);
     // mark a character cue as (CONT'D) when the same speaker returns after intervening action
     const contdSet = buildContdSet(screenplay.blocks);
-    const slugCount = screenplay.blocks.filter(b=>b.type==="scene").length;
-    noteText = screenplay.note || (slugCount>1 ? ("This unit is a sequence \u2014 it spans "+slugCount+" sluglines.") : null);
 
     const verLabel = labelOf(screenplay);
     const isPolished = !!screenplay.polished;
@@ -581,12 +579,9 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
         React.createElement("div",{className:"script-title"},scene.title), badge),
       // STATUS LINE — a real warning and a neutral note sit on one row rather than
       // stacking as two competing pills; see styles.css for why the note is quiet.
-      ((screenplay && missing.length>0) || noteText) && React.createElement("div",{className:"script-status"},
-        screenplay && missing.length>0 &&
-          React.createElement("div",{className:"script-missing"},React.createElement(Icon.alert,{s:12}),
-            "Missing: "+missing.join(", ")),
-        noteText &&
-          React.createElement("div",{className:"script-note"},React.createElement(Icon.layers,{s:12}),noteText))),
+      (screenplay && missing.length>0) && React.createElement("div",{className:"script-status"},
+        React.createElement("div",{className:"script-missing"},React.createElement(Icon.alert,{s:12}),
+          "Missing: "+missing.join(", ")))),
     // two groups so mobile can stack them as two lines with the SAME desktop look:
     // A = the housed glued strip (Continuity/Undo/Redo/Edit), B = Redraft + pager
     React.createElement("div",{className:"script-tools"},
