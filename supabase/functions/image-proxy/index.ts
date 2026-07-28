@@ -735,8 +735,10 @@ Deno.serve(async (req) => {
     if (!falKey) return json({ error: missingKey("fal.ai", "FAL_KEY") }, 500);
 
     const falImageModels: Record<string, { base: string; edit?: string; family: "nano" | "openai" }> = {
+      // NOTE the namespace: Lite is published under google/, not fal-ai/. Pointing it at
+      // fal-ai/nano-banana-2-lite 404s ("Application not found") — that is why it was dead.
+      "gemini-3.1-flash-lite-image": { base: "google/nano-banana-2-lite", family: "nano" },
       "gemini-3.1-flash-image":      { base: "fal-ai/nano-banana-2",      family: "nano" },
-      "gemini-3.1-flash-lite-image": { base: "fal-ai/nano-banana-2-lite", family: "nano" },
       "gemini-3-pro-image":          { base: "fal-ai/nano-banana-pro",    family: "nano" },
       "gpt-image-2":                 { base: "openai/gpt-image-2", edit: "openai/gpt-image-2/edit", family: "openai" },
     };

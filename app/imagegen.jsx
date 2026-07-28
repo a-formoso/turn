@@ -24,6 +24,7 @@ const NB_RES_KEY = "turn-nb-res";
 const _imageProxyOn = !!(window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxy);
 const NB_MODELS = [
   { id:"gemini-3.1-flash-image",      label:"Nano Banana 2",      provider:"fal", family:"nano",   falModel:"fal-ai/nano-banana-2",      note:"fal.ai \u00b7 fast \u00b7 high quality" },
+  { id:"gemini-3.1-flash-lite-image", label:"Nano Banana 2 Lite", provider:"fal", family:"nano",   falModel:"google/nano-banana-2-lite", note:"fal.ai \u00b7 fastest \u00b7 lowest cost" },
   { id:"gemini-3-pro-image",          label:"Nano Banana Pro",    provider:"fal", family:"nano",   falModel:"fal-ai/nano-banana-pro",    note:"fal.ai \u00b7 highest fidelity" },
   { id:"gpt-image-2",                 label:"GPT Image 2",        provider:"fal", family:"openai", falModel:"openai/gpt-image-2", falEditModel:"openai/gpt-image-2/edit", note:"fal.ai \u00b7 in-image text" },
 ];
