@@ -176,6 +176,261 @@ window.deriveLocations = deriveLocations;
 window.parseSlugline = parseSlugline;
 window.locSlug = locSlug;
 
+/* Derive SLUGLINE UNITS — the atomic filmable unit of a location: one
+   (place, INT/EXT side, time-of-day bucket) triple, e.g. "Intake Yard · EXT · Night".
+   A master location card groups everything at one PLACE (deriveLocations above);
+   a slugline unit splits that place by side and light, because coverage for
+   EXT·NIGHT is not coverage for INT·DAWN.
+   Rules (agreed design):
+   - recurring sluglines of the same triple — even twice inside one scene — share
+     ONE unit; story progression ("dawn and raining", "racks now stripped") lives
+     in a stored appearance-state overlay on the unit, NOT in derivation.
+   - every non-INTERCUT scene-heading block opens a unit context; the blocks that
+     follow belong to it until the next heading (INTERCUT / O.S. lines reference
+     another space but don't move the camera — they keep the previous unit).
+   - a heading with no real time of day (CONTINUOUS / SAME / LATER / untagged)
+     inherits the bucket of the context it follows (else the scene's own slug time).
+   Pure + deterministic: returns skeleton descriptors in first-appearance order.
+   User edits / appearance state / generated images reconcile ON TOP by unit key. */
+function deriveSluglineUnits(scenes, drafts){
+  const order = []; const byKey = {};
+  /* character-name exclusion set for dressing candidates — screenplay convention
+     capitalizes cast names in action prose, so every char cue (plus its
+     individual words) is vetoed from the ALL-CAPS object extractor. */
+  const charNames = {};
+  (scenes||[]).forEach(sc=>{
+    locationScreenplayBlocks(sc, drafts).forEach(b=>{
+      if(b && b.type==="char" && b.text){
+        const nm = String(b.text).replace(/\([^)]*\)/g," ").replace(/\s+/g," ").trim();
+        if(!nm) return;
+        charNames[nm.toLowerCase()] = true;
+        nm.split(/ +/).forEach(w=>{ if(w.length>2) charNames[w.toLowerCase()] = true; });
+      }
+    });
+  });
+  const clockBucket = (txt)=>{
+    const c = String(txt||"").match(/\b(\d{1,2}[:.]\d{2}\s*(?:am|pm)?|\d{1,2}\s*(?:am|pm))\b/i);
+    return c ? clockToTimeOfDay(c[1]) : "";
+  };
+  const fmtBlocks = (blks)=> blks.map(b=>{
+    const t = String(b&&b.text||"").replace(/\s+/g," ").trim(); if(!t) return "";
+    if(b.type==="scene") return t.toUpperCase();
+    if(b.type==="char") return "\n"+t.toUpperCase();
+    if(b.type==="dia") return "  "+t;
+    if(b.type==="paren") return "  ("+t.replace(/^\(|\)$/g,"")+")";
+    return t;
+  }).filter(Boolean).join("\n");
+  const stripNum = (t)=> String(t||"").replace(/^\s*\d+[\.\)]?\s+/,"");
+  (scenes||[]).forEach(sc=>{
+    if(!sc) return;
+    const blocks = locationScreenplayBlocks(sc, drafts);
+    if(!blocks.length) return;
+    // the scene's own slugline is the fallback context for leading non-heading
+    // blocks and for headings that omit side/time.
+    const prim = parseSlugline(sc.loc) || { intExt:"", place:"", time:"" };
+    let lastBucket = (prim.time && normalizeTOD(prim.time)) || clockBucket(sc.loc) || "";
+    let lastSide = prim.intExt || "";
+    let cur = null, curOcc = null;
+    const closeOcc = (idx)=>{ if(curOcc && curOcc.end==null) curOcc.end = idx; };
+    /* Open a unit context for a heading. The unit keys on the FULL normalized place
+       (area tails included — "Nebuchadnezzar · Core" and "· Training" are distinct
+       filmable spaces); locationKey is the head-only master-card key deriveLocations
+       uses, so units still group under the same master card. */
+    const open = (slugText, idx)=>{
+      const parsed = parseSlugline(slugText);
+      if(!parsed) return;
+      const primary = tidyPlace(splitCompoundPlace(parsed.place)[0]||"");
+      if(!primary) return;
+      const side = parsed.intExt || lastSide || "INT";
+      const bucket = (parsed.time && normalizeTOD(parsed.time)) || clockBucket(slugText) || lastBucket;
+      lastSide = side; if(bucket) lastBucket = bucket;
+      const head = primary.split(/[\u00b7\u2014,]/)[0].trim();
+      const key = locSlug(primary) + "|" + side + "|" + (bucket||"untimed");
+      if(!byKey[key]){
+        byKey[key] = {
+          key, name: primary, place: primary,
+          intExt: side, time: bucket || "",
+          locationKey: locSlug(head).split("-").slice(0,4).join("-"),
+          scenes: [], sceneNos: [], sluglines: [], occurrences: [], scriptText: "",
+          dressingDerived: [],
+        };
+        order.push(key);
+      }
+      cur = byKey[key];
+      curOcc = { sceneId: sc.id, sceneNo: sc.no, slug: String(slugText||"").trim(), start: idx, end: null };
+      cur.occurrences.push(curOcc);
+      if(cur.scenes.indexOf(sc.id)<0) cur.scenes.push(sc.id);
+      if(sc.no!=null && cur.sceneNos.indexOf(sc.no)<0) cur.sceneNos.push(sc.no);
+      const raw = String(slugText||"").trim();
+      if(raw && cur.sluglines.indexOf(raw)<0) cur.sluglines.push(raw);
+    };
+    let sawHeading = false;
+    blocks.forEach((b, idx)=>{
+      /* EVERY heading line is a HARD boundary — even one that fails to parse.
+         Closing the previous occurrence and opening nothing means its blocks own
+         nothing until the next parseable heading, rather than silently bleeding
+         into the previous unit. INTERCUT is tested after number-stripping so a
+         numbered "12 INTERCUT WITH:" can't slip past the guard. */
+      if(b && b.type==="scene" && b.text && !/^\s*INTERCUT\b/i.test(stripNum(b.text))){
+        sawHeading = true;
+        closeOcc(idx); cur = null; curOcc = null;
+        open(b.text, idx);
+      } else if(!sawHeading && !cur){
+        // leading prose before any heading (a draft with no heading blocks):
+        // it still belongs SOMEWHERE — anchor it to the scene's own slugline.
+        if(sc.loc){ open(sc.loc, 0); sawHeading = true; }
+      }
+    });
+    closeOcc(blocks.length);
+  });
+  order.forEach(k=>{
+    const u = byKey[k];
+    let txt = "", act = "";
+    u.occurrences.forEach(occ=>{
+      const sc = (scenes||[]).find(s=>s.id===occ.sceneId);
+      const blocks = locationScreenplayBlocks(sc, drafts);
+      const slice = blocks.slice(occ.start, occ.end==null ? blocks.length : occ.end);
+      const piece = fmtBlocks(slice);
+      if(piece) txt += (txt ? "\n\n" : "") + piece;
+      // dressing candidates come from ACTION prose only — never dialogue/cues
+      slice.forEach(b=>{ if(b && b.type==="action"){
+        const t = String(b.text||"").replace(/\s+/g," ").trim();
+        if(t) act += (act?" ":"")+t; } });
+    });
+    // generous but capped: this text rides image-gen prompts, not the saved doc
+    u.scriptText = txt.length>3600 ? txt.slice(0,3600).replace(/\s+\S*$/,"")+" …" : txt;
+    u.dressingDerived = deriveUnitDressing(act, charNames);
+  });
+  return order.map(k=>byKey[k]);
+}
+window.deriveSluglineUnits = deriveSluglineUnits;
+
+/* RECONCILIATION — derived skeletons (fresh from the script) + persisted OVERLAYS
+   (user data: appearance state, notes, generated image refs). The doc only ever
+   stores the overlay array (key + user fields) — never skeleton fields — so script
+   edits refresh the skeleton without orphaning user data, and the doc stays small.
+   Merge rule: derived skeleton fields win; overlay fields ride on top.
+   An overlay whose key is no longer derived (its slugline was edited away) comes
+   back flagged orphan:true — its assets are PRESERVED until the user explicitly
+   deletes the record (deleting a scene must never silently destroy paid images). */
+function reconcileSluglineUnits(derived, overlays){
+  const ov = {};
+  (Array.isArray(overlays)?overlays:[]).forEach(o=>{ if(o && o.key) ov[o.key]=o; });
+  const used = {};
+  const merged = (Array.isArray(derived)?derived:[]).map(u=>{
+    const o = ov[u.key] || null;
+    if(o) used[o.key] = true;
+    return {
+      ...u,
+      appearance: (o && o.appearance) || "",
+      notes: (o && o.notes) || "",
+      dressing: Array.isArray(o && o.dressing) ? o.dressing.slice() : [],
+      images: Array.isArray(o && o.images) ? o.images : [],
+      updatedAt: (o && o.updatedAt) || null,
+    };
+  });
+  // orphans: rebuild a display-minimal skeleton from the key parts ("place|side|bucket").
+  // Parse from the RIGHT so a corrupt/legacy key with extra "|" still yields a sane
+  // side+bucket and keeps everything before them as the place.
+  Object.keys(ov).sort().forEach(k=>{
+    if(used[k]) return;
+    const o = ov[k];
+    const parts = String(k).split("|");
+    const placeSlug = parts.length>2 ? parts.slice(0,-2).join("|") : (parts[0]||"");
+    const name = placeSlug.replace(/-/g," ").replace(/\b\w/g,c=>c.toUpperCase());
+    const side = parts.length>2 ? parts[parts.length-2] : "";
+    const bucket = parts.length>2 ? parts[parts.length-1] : "";
+    merged.push({
+      key:k, name: name||k, place: name||k,
+      intExt: side, time: (bucket && bucket!=="untimed") ? bucket : "",
+      locationKey: placeSlug.split("-").slice(0,4).join("-"),
+      scenes: [], sceneNos: [], sluglines: [], occurrences: [], scriptText: "",
+      appearance: o.appearance||"", notes: o.notes||"",
+      dressing: Array.isArray(o.dressing) ? o.dressing.slice() : [],
+      dressingDerived: [],
+      images: Array.isArray(o.images) ? o.images : [], updatedAt: o.updatedAt||null,
+      orphan: true,
+    });
+  });
+  return merged;
+}
+window.reconcileSluglineUnits = reconcileSluglineUnits;
+
+/* Upsert one overlay record by unit key. `patch` carries OVERLAY fields only
+   (appearance / notes / images …) — never skeleton fields, which stay derived.
+   A record emptied of every overlay field is dropped from the array, so a cleared
+   appearance note doesn't leave dead weight in the doc. */
+function upsertSluglineUnitOverlay(overlays, key, patch){
+  const list = (Array.isArray(overlays)?overlays:[]).slice();
+  const i = list.findIndex(o=>o && o.key===key);
+  const next = { ...(i>=0?list[i]:{ key }), ...(patch||{}), key, updatedAt: Date.now() };
+  // write-time normalization: trim, collapse whitespace, dedupe case-insensitively,
+  // cap — so rapid clicks or legacy casing/spacing can never persist duplicates
+  if(Array.isArray(next.dressing)){
+    const seen = {}; const norm = [];
+    next.dressing.forEach(x=>{ const v = String(x||"").replace(/\s+/g," ").trim();
+      const k = v.toLowerCase(); if(v && !seen[k]){ seen[k]=true; norm.push(v); } });
+    next.dressing = norm.slice(0,24);
+  }
+  const empty = !String(next.appearance||"").trim() && !String(next.notes||"").trim()
+    && !(Array.isArray(next.dressing) && next.dressing.length)
+    && !(Array.isArray(next.images) && next.images.length);
+  if(empty){ if(i>=0) list.splice(i,1); return list; }
+  if(i>=0) list[i]=next; else list.push(next);
+  return list;
+}
+window.upsertSluglineUnitOverlay = upsertSluglineUnitOverlay;
+
+/* stable, collision-safe image id for a slugline unit: readable slug prefix +
+   short djb2 hash of the FULL key, so distinct keys that sanitize to the same
+   slug (INT/EXT, separators, hyphens) never share an image slot/history. */
+function sluglineUnitImageId(key){
+  const slug = String(key||"").replace(/[^a-z0-9-]+/gi,"-").slice(0,48);
+  let h = 5381; const s = String(key||"");
+  for(let i=0;i<s.length;i++){ h = ((h<<5)+h+s.charCodeAt(i))>>>0; }
+  return "locunit-"+slug+"-"+h.toString(36);
+}
+window.sluglineUnitImageId = sluglineUnitImageId;
+
+/* SET-DRESSING candidates — deterministic extraction from the unit's OWN action
+   prose (never dialogue, never sluglines): screenplay-convention ALL-CAPS object
+   mentions plus a curated lexicon of physical set-dressing nouns. Pure derivation
+   (skeleton-only): suggestions refresh with the script; the user's curated
+   `dressing` list reconciles on top and is what prompts bind. */
+const DRESS_LEXICON = ["rack","booth","desk","chair","table","bench","stool","lamp","sign","signage","poster","notice","monitor","screen","tv","television","phone","paper","file","folder","clipboard","cot","bunk","locker","shelf","shelves","cabinet","drawer","crate","box","barrel","drum","bin","dumpster","cart","trolley","truck","van","car","bus","forklift","scaffold","ladder","stair","stairs","railing","fence","gate","chain","wire","cable","pipe","vent","fan","speaker","camera","mirror","curtain","blind","blinds","rug","carpet","mattress","pillow","blanket","tarp","puddle","graffiti","rust","moss","vines","ivy","stain","helmet","vest","radio","key","keys","mug","bottle","can","ashtray","cigarette","candle","clock","calendar","flag","banner","whiteboard","chalkboard","bulletin","urn","kettle","fridge","stove","sink","toilet","shower","towel","bucket","mop","broom","hose","extinguisher","generator","cone","cones","barrier","barricade","turnstile","door","window","awning","billboard","neon","chandelier","bookshelf","book","books","magazine","newspaper","envelope","suitcase","backpack","duffel","umbrella","coat","jacket","boots","gloves","rope","toolbox","wrench","hammer","plank","plywood","sandbag","pallet","pallets"];
+const DRESS_CAPS_STOP = new Set(["INT","EXT","EST","DAY","NIGHT","MORNING","EVENING","DAWN","DUSK","NOON","MIDNIGHT","LATER","CONTINUOUS","SAME","MOMENTS","AFTERNOON","TWILIGHT","OS","VO","OC","CU","INTERCUT","CUT","ANGLE","POV","CLOSE","WIDE","SUPER","TITLE","TITLES","END","FADE","IN","OUT","ON","OFF","BACK","TO","THE","AND","THEN","NEXT","OK","OKAY","SCENE","FLASHBACK","MONTAGE","SERIES","EVENTS","PRELAP","SMASH","MATCH","DISSOLVE","WIPE","INSERT","BEAT","NOTE","NOTES","OF"]);
+function deriveUnitDressing(actionText, exclude){
+  const text = String(actionText||"");
+  if(!text.trim()) return [];
+  const out = []; const seen = {};
+  const push = (raw)=>{
+    const v = String(raw||"").replace(/\s+/g," ").trim().replace(/^[,;:.()\[\]"']+|[,;:.()\[\]"']+$/g,"");
+    if(v.length<3 || v.length>40) return;
+    const k = v.toLowerCase();
+    if(seen[k]) return;
+    seen[k] = true; out.push(v);
+  };
+  // 1) screenplay-convention ALL-CAPS object mentions ("the RACKS shudder") —
+  //    but never character names: the same convention capitalizes cast names in
+  //    action, so `exclude` (char cues from the scene blocks) vetoes them.
+  const capsRe = /\b[A-Z][A-Z0-9'&-]{1,}(?: +[A-Z0-9'&-]{2,}){0,2}\b/g;
+  let m; while((m = capsRe.exec(text))){
+    const words = m[0].trim().split(/ +/);
+    const meaningful = words.filter(w=>!DRESS_CAPS_STOP.has(w.replace(/[.,;:]/g,"")));
+    if(!meaningful.length) continue;
+    if(exclude){
+      if(exclude[m[0].trim().toLowerCase()]) continue;
+      if(meaningful.every(w=>exclude[w.replace(/[.,;:]/g,"").toLowerCase()])) continue;
+    }
+    push(m[0].toLowerCase().replace(/\b\w/g,c=>c.toUpperCase()));
+  }
+  // 2) lexicon nouns in sentence-case prose ("rain pools around the intake racks")
+  const lexRe = new RegExp("\\b("+DRESS_LEXICON.join("|")+")s?\\b","gi");
+  while((m = lexRe.exec(text))) push(m[0]);
+  return out.slice(0,12);
+}
+window.deriveUnitDressing = deriveUnitDressing;
+
 function locationSceneText(scene, drafts){
   const bits = [scene&&scene.loc, scene&&scene.title, scene&&scene.summary, scene&&scene.objective, scene&&scene.turningPoint];
   const d = drafts && scene && drafts[scene.id];
@@ -352,7 +607,7 @@ function _locSideCueIndex(text, role){
   const i = s.search(re);
   return i>=0 ? i : 999999;
 }
-function deriveLocationCoverageSheets(l, scenes, drafts, allLocations){
+function deriveLocationCoverageSheets(l, scenes, drafts, allLocations, units){
   if(!l) return [];
   /* A sub-space sheet is a STAND-IN for a space the screenplay never slugged. Once that
      space earns a real slugline it gets its own location card, plate and coverage — and
@@ -417,13 +672,20 @@ function deriveLocationCoverageSheets(l, scenes, drafts, allLocations){
       if(other<999999) return baseOrder + other + 2;
       return baseOrder + (role==="EXT" ? 0 : 1);
     };
-    if(mixedSides && /EXT/.test(sceneRole)){
+    /* UNITS TAKE PRECEDENCE: a slugline unit already covers this master+side as a
+       real SLUGGED space (with its own time bucket and appearance state) — deriving
+       an INT/EXT side sheet for it too would design the same side twice from two
+       records that can drift apart. Sheets remain for IMPLIED, unslugged spaces. */
+    const _units = units || ((window.turnContinuity||{}).sluglineUnits) || [];
+    const _unitCovers = (role)=> _units.some(x=> x && !x.orphan && x.locationKey===l.key
+      && String(x.intExt||"").toUpperCase()===role);
+    if(mixedSides && /EXT/.test(sceneRole) && !_unitCovers("EXT")){
       add("EXT", baseName+" Exterior",
         "Exterior side required by the screenplay: render the empty outside of "+baseName+" with its approach, openings, weather, ground plane and sightline toward any interior side named by the scene.",
         ["outside","exterior","facade","front","street","yard","rain","window","glass"],
         cueOrder("EXT"), s, locationScriptExcerpt(s, drafts, firstExt<999999?firstExt:0));
     }
-    if(mixedSides && /INT/.test(sceneRole)){
+    if(mixedSides && /INT/.test(sceneRole) && !_unitCovers("INT")){
       add("INT", baseName+" Interior",
         "Interior side required by the screenplay: render the empty inside of "+baseName+" with the working areas, fixtures, openings and sightlines the scene plays through.",
         ["inside","interior","room","booth","window","glass","terminal","desk","counter"],
@@ -1062,6 +1324,59 @@ function buildLocationCoveragePrompt(l, sheet, project){
     + (neg ? ("\nAVOID: "+neg.replace(/\.$/,"")+".") : "");
 }
 window.buildLocationCoveragePrompt = buildLocationCoveragePrompt;
+
+/* SLUGLINE UNIT plate prompt — one (place, side, time-of-day) coverage plate.
+   Mirrors buildLocationCoveragePrompt but keys the spec to the unit: the time
+   bucket and the user's APPEARANCE STATE ("dawn and raining") are first-class,
+   binding spec fields, and the screenplay basis is ONLY this unit's owned blocks
+   (yard-at-night coverage never reads booth prose). */
+function buildSluglineUnitPrompt(l, u, project){
+  u = u || {};
+  const v = locVisualDefaults(l);
+  const role = String(u.intExt||"INT").toUpperCase();
+  const rules = (typeof locationNoCharactersRules==="function") ? locationNoCharactersRules(project, l).join(" ") : "empty of people and characters.";
+  const speciesCanon = (typeof locationSpeciesCanonText==="function") ? locationSpeciesCanonText(l) : "";
+  const clean = (x)=>String(x||"").replace(/\s+/g," ").trim().replace(/\.$/,"");
+  const parent = clean(l&&l.name) || "the parent location";
+  const name = clean(u.name) || (parent+" "+role);
+  const spec = {
+    task: "single full-frame location coverage plate for one slugline unit (place + side + time of day)",
+    coverage: {
+      role: role==="EXT" ? "exterior side" : "interior side",
+      name,
+      parent_location: parent+" ("+(l.intExt||"INT")+")",
+      time_of_day: clean(u.time) || undefined,
+      appearance_state: clean(u.appearance) || undefined,
+      // the user's curated list wins; derived script candidates are the fallback
+      set_dressing: (Array.isArray(u.dressing) && u.dressing.length ? u.dressing
+        : (Array.isArray(u.dressingDerived) && u.dressingDerived.length ? u.dressingDerived : undefined)),
+      sluglines: Array.isArray(u.sluglines) && u.sluglines.length ? u.sluglines : undefined,
+      screenplay_excerpt: clean(String(u.scriptText||"").slice(0,720)) || undefined,
+      scenes: Array.isArray(u.sceneNos) && u.sceneNos.length ? u.sceneNos : undefined,
+      rule: "render ONLY the space the screenplay needs for shots; no actors, no story action, no temporary performance moment",
+    },
+    relationship_to_parent: role==="INT"
+      ? "This is the inside/subspace of the parent location; preserve any glass, doorway, booth, window or threshold relationship back to the exterior when the script states it."
+      : "This is the outside/facade/context of the parent location; preserve entrances, windows, thresholds and approach geometry that connect to the interior when the script states it.",
+    environment_spec: {
+      architecture: clean(l.architecture) || undefined,
+      materials: clean(l.materials) || undefined,
+      lighting: clean(l.lighting) || undefined,
+      dramatic_use: clean(l.significance) || undefined,
+    },
+    ambient_species_canon: speciesCanon || undefined,
+    render: {
+      style: clean(v.renderStyle),
+      format: "ONE 16:9 cinematic environment reference image, not a grid, not a storyboard panel",
+      rules: [rules, "empty set only", "the TIME OF DAY, APPEARANCE STATE and SET DRESSING list are binding — light, sky and weather must match the first two, and every listed dressing item must be present in the space", "no text, no labels, no typography, no captions, no watermarks", "consistent with the parent location's materials, scale and light"],
+    },
+  };
+  const neg = [l.negativePrompt || v.negativePrompt || "", (typeof locationCharacterNegative==="function") ? locationCharacterNegative(project, l) : ""].filter(Boolean).join(", ").trim();
+  return "Render this slugline-unit location coverage plate EXACTLY as specified by this JSON spec:\n"
+    + JSON.stringify(spec, null, 1)
+    + (neg ? ("\nAVOID: "+neg.replace(/\.$/,"")+".") : "");
+}
+window.buildSluglineUnitPrompt = buildSluglineUnitPrompt;
 
 /* simplified fallback — fewer words, less likely to trip a content filter */
 function buildSimpleLocationPrompt(l){

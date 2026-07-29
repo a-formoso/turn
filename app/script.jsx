@@ -564,7 +564,6 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
   const missing = (typeof sceneMissing==="function") ? sceneMissing(scene, drafts) : [];
   const header = React.createElement("div",{className:"script-head"},
     React.createElement("div",{className:"meta"},
-      React.createElement("div",{className:"script-slug"},`SCENE ${String(scene.no).padStart(2,"0")} \u00b7 ${scene.loc}`),
       React.createElement("div",{className:"script-title-row"},
         React.createElement("div",{className:"script-title"},scene.title)),
       // STATUS LINE — a real warning and a neutral note sit on one row rather than

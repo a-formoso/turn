@@ -4162,7 +4162,7 @@ function ArtComingSoon({ tab }){
 function ArtRoom({ artView, setArtView, project, characters, scenes, props, drafts, trash, onRestoreChar, onPurgeChar, onRestoreProp, onPurgeProp, onRestoreLoc, onPurgeLoc, onEnsureOwner, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds, onCreateOwnedProp,
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropIds, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
-  locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocIds, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onSetWorldScale, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId,
+  locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocIds, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onSetWorldScale, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId, sluglineUnits, onUpdateUnit, onRemoveUnit,
   shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard, onDirectScene, onColorist, onShoot, onCast, onPropsMaster,
   lookbook, lookbookNote, onUpdateLookbook, onAddLookbook, onDeleteLookbook, onSetLookbookNote, onResearch, onClearLookbook,
   staleTabs, onApplyLookbook }){
@@ -4216,7 +4216,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
           lookbookStale:!!_stale.props,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("props"),
           onApplyLookbookDraftOnly:()=>onApplyLookbook&&onApplyLookbook("props","draft")})
     : artView==="locations" && LocationSheets
-      ? React.createElement(LocationSheets,{project,locations,scenes,drafts,onUpdate:onUpdateLocation,onDraft:onDraftLocation,onSetWorldScale,
+      ? React.createElement(LocationSheets,{project,locations,scenes,drafts,onUpdate:onUpdateLocation,onDraft:onDraftLocation,onSetWorldScale,sluglineUnits,onUpdateUnit,onRemoveUnit,
           onDraftAll:onDraftAllLocs,onAdd:onAddLocation,onDelete:onDeleteLocation,draftingIds:draftingLocIds,draftingAll:draftingAllLocs,
           trashItems:(trash&&trash.locations)||[],onRestore:onRestoreLoc,onPurge:onPurgeLoc,
           onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId,onScout,

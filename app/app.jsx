@@ -321,6 +321,13 @@ function App(){
   const [characters, setCharacters] = React.useState(()=> (saved && saved.characters) || []);
   const [props, setProps] = React.useState(()=> (saved && saved.props) || []);
   const [locations, setLocations] = React.useState(()=> (saved && saved.locations) || []);
+  // slugline-unit OVERLAYS (key + appearance/notes/images only) — the unit skeletons
+  // themselves derive live from the script (see sluglineUnits below); never persisted.
+  const [slugUnitsOv, setSlugUnitsOv] = React.useState(()=> (saved && saved.sluglineUnits) || []);
+  const updateSlugUnitOverlay = (key, patch)=> setSlugUnitsOv(ov=>
+    (typeof upsertSluglineUnitOverlay==="function") ? upsertSluglineUnitOverlay(ov, key, patch) : ov);
+  // explicit delete (orphan units) — removes the stored overlay record entirely
+  const removeSlugUnitOverlay = (key)=> setSlugUnitsOv(ov=> (ov||[]).filter(o=>o && o.key!==key));
   const [lookbook, setLookbook] = React.useState(()=> (saved && saved.lookbook) || []);
   const [lookbookNote, setLookbookNote] = React.useState(()=> (saved && saved.lookbookNote) || "");
   // per-department: the lookbook brief in effect the last time that dept was fully drafted (for staleness)
@@ -695,9 +702,17 @@ function App(){
   // live cast on a global so the scene drafter can read each character's canonical
   // pronouns (castPronounBlock) — the root-cause fix for bible<->script gender drift.
   React.useEffect(()=>{ window.turnCast = characters; },[characters]);
+  /* SLUGLINE UNITS — the atomic filmable location units ((place, side, TOD bucket)),
+     derived fresh from the script and reconciled with the user's persisted overlays
+     (appearance state / notes / images). Read-only consumers (Art Room UI, prompt
+     builders) take this list; edits go through updateSlugUnitOverlay. */
+  const sluglineUnits = React.useMemo(()=>
+    (typeof deriveSluglineUnits==="function" && typeof reconcileSluglineUnits==="function")
+      ? reconcileSluglineUnits(deriveSluglineUnits(scenes, drafts), slugUnitsOv) : [],
+    [scenes, drafts, slugUnitsOv]);
   // the CONTINUITY GRAPH, exposed for prompt builders that have no props/scenes/locations
   // params (e.g. the location plate folds in the environment props it owns — locations.jsx)
-  React.useEffect(()=>{ window.turnContinuity = { props, scenes, locations, characters, drafts }; },[props, scenes, locations, characters, drafts]);
+  React.useEffect(()=>{ window.turnContinuity = { props, scenes, locations, characters, drafts, sluglineUnits }; },[props, scenes, locations, characters, drafts, sluglineUnits]);
   const hydratingRef = React.useRef(false);
   const lastSentRef = React.useRef({});   // per-section save baseline (seeded by applyDoc)
   // bumped when a hydration pass finishes — lets effects that are gated on
@@ -708,14 +723,14 @@ function App(){
   /* A clean canvas — what every NEW registered user (and every "New film") starts
      from. No sample data: empty spine, cast, props, etc. The Matrix sample lives only
      in the seed (story-data.jsx) and in projects already saved to a user's account. */
-  const emptyDoc = ()=>({ scenes:[], characters:[], props:[], locations:[], lookbook:[], lookbookNote:"", lookbookApplied:{}, shots:[],
+  const emptyDoc = ()=>({ scenes:[], characters:[], props:[], locations:[], sluglineUnits:[], lookbook:[], lookbookNote:"", lookbookApplied:{}, shots:[],
     project:{ title:"Untitled film", genre:"", logline:"", controllingIdea:{} },
     drafts:{}, beatsMap:{}, history:{}, continuityMap:{},
     selId:null, room:"writers", view:"spine", artView:"lookbook", propsSeeded:false, locsSeeded:false, visualsSeeded:false,
     trash:{ characters:[], props:[], locations:[] }, blank:true });
   /* The Matrix sample as a full project doc — used ONLY to seed the admin
      account's first project (the demo lives in the admin account by default). */
-  const sampleDoc = ()=>({ scenes:SCENES, characters:CHARACTERS, props:(window.PROPS_SEED||[]), locations:[], lookbook:[], lookbookNote:"", lookbookApplied:{}, shots:[],
+  const sampleDoc = ()=>({ scenes:SCENES, characters:CHARACTERS, props:(window.PROPS_SEED||[]), locations:[], sluglineUnits:[], lookbook:[], lookbookNote:"", lookbookApplied:{}, shots:[],
     project:PROJECT, drafts:SCREENPLAY, beatsMap:BEATS, history:{}, continuityMap:CONTINUITY||{},
     selId:"s4", propsSeeded:false, locsSeeded:false, visualsSeeded:false });
   // `stale` (optional): a superseded load must NOT clear hydratingRef when its 500ms
@@ -731,6 +746,7 @@ function App(){
     setCharacters(d.characters||(isAdmin?CHARACTERS:[]));
     setProps(d.props||(isAdmin?(window.PROPS_SEED||[]):[]));
     setLocations(d.locations||[]);
+    setSlugUnitsOv(Array.isArray(d.sluglineUnits)?d.sluglineUnits:[]);
     setLookbook(d.lookbook||[]);
     setLookbookNote(d.lookbookNote||"");
     setLookbookApplied(d.lookbookApplied||{});
@@ -762,7 +778,7 @@ function App(){
        the whole-doc behaviour we're replacing. */
     try{
       const base = {};
-      ["scenes","characters","props","locations","lookbook","lookbookNote","lookbookApplied","shots",
+      ["scenes","characters","props","locations","sluglineUnits","lookbook","lookbookNote","lookbookApplied","shots",
        "project","drafts","beatsMap","history","continuityMap","trash","selId",
        "propsSeeded","locsSeeded","visualsSeeded"].forEach(k=>{
         if(d[k]!==undefined) base[k] = JSON.stringify(d[k]);
@@ -1225,6 +1241,7 @@ function App(){
   const _adoptTheirs = (cloudDoc, mineKeys)=>{
     if(!cloudDoc) return;
     const setters = { scenes:setScenes, characters:setCharacters, props:setProps, locations:setLocations,
+      sluglineUnits:setSlugUnitsOv,
       lookbook:setLookbook, lookbookNote:setLookbookNote, lookbookApplied:setLookbookApplied, shots:setShots,
       project:setProject, drafts:setDrafts, beatsMap:setBeatsMap, history:setHistory,
       continuityMap:setContinuityMap, trash:setTrash };
@@ -1253,7 +1270,7 @@ function App(){
     dirtyRef.current = true;
     saveTimer.current = setTimeout(()=>{
       if(hydratingRef.current){ dirtyRef.current = false; return; }
-      const doc = { scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash };
+      const doc = { scenes, characters, props, locations, sluglineUnits: slugUnitsOv, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash };
       // The full-doc overwrite would otherwise wipe the Home-wall metadata (the poster and
       // the user's manual order) that lives on the doc but NOT in story state — carry it over.
       const meta = (projectsRef.current||[]).find(p=>p.id===currentProjectId) || {};
@@ -1343,7 +1360,7 @@ function App(){
       }
     }, cloudMode ? 700 : 250);
     return ()=> clearTimeout(saveTimer.current);
-  },[scenes, characters, props, locations, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash, cloudMode, currentProjectId, currentShowId, currentEpisodeNo, retryTick, readOnlyShare]);
+  },[scenes, characters, props, locations, slugUnitsOv, lookbook, lookbookNote, lookbookApplied, shots, project, drafts, beatsMap, history, continuityMap, selId, room, view, artView, propsSeeded, locsSeeded, visualsSeeded, trash, cloudMode, currentProjectId, currentShowId, currentEpisodeNo, retryTick, readOnlyShare]);
 
   /* UNLOAD GUARD — saves are debounced (700ms) and can be mid-flight or retrying, so
      closing the tab at the wrong moment silently dropped the last edits with no warning.
@@ -2477,27 +2494,10 @@ function App(){
   // human label describing a draft's provenance
   const labelOf = (v)=> !v ? null : v.edited ? "Manual edit" : v.polished ? "MUSE polish" : (v.ai ? "MUSE draft" : (v.auto ? "Structural draft" : "Original draft"));
 
-  /* SCRIPT SUBTITLE — carries the open scene's PROVENANCE (which version this is, which
-     engine wrote it, and when) instead of a static explainer. The same badge used to sit
-     beside the scene title; it reads better as the page subtitle, and gaining the date
-     answers "is what I'm looking at current?" without hovering for a tooltip. */
-  const scriptSubtitle = ()=>{
-    const d = selId ? drafts[selId] : null;
-    if(!d) return "Subtext (beats) becomes text (screenplay)";
-    const lab = labelOf(d) || "Draft";
-    const by = (!d.edited && d.by && d.by.model) ? d.by : null;
-    const when = (by && by.at) ? new Date(by.at) : null;
-    const stamp = when
-      ? (when.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"})
-         +", "+when.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}))
-      : "";
-    return React.createElement("span",{
-        className:"sp-badge"+(d.polished?" polished":(d.auto?" structural":"")),
-        title: by ? ("Written by "+by.model+(when?(" \u2014 "+when.toLocaleString()):"")) : lab },
-      lab,
-      by && React.createElement("span",{className:"sp-badge-model"}," \u00b7 "+by.model),
-      stamp && React.createElement("span",{className:"sp-badge-when"}," \u00b7 "+stamp));
-  };  // replace a scene's draft, pushing the old version onto its history stack
+  // SCRIPT SUBTITLE — static explainer (the provenance badge that used to render here
+  // was removed by request; engine/version info still lives in the Undo/Redo tooltips).
+  const scriptSubtitle = ()=> "Subtext (beats) becomes text (screenplay)";
+  // replace a scene's draft, pushing the old version onto its history stack
   // undo depth per scene. CAPPED (like the image layer's 12 versions): every entry is a
   // full screenplay draft and `history` rides in the saved doc, so an uncapped stack grew
   // the doc on every commit — in local mode it eventually blew the localStorage quota and
@@ -3589,6 +3589,7 @@ function App(){
             locations,onUpdateLocation:updateLocation,onDraftLocation:draftLocationVisuals,onDraftAllLocs:draftAllLocations,
             onAddLocation:addLocation,onDeleteLocation:deleteLocation,draftingLocIds,draftingAllLocs,
             onPullFromScript:pullLocationsFromScript,scriptHasLocs:(typeof scriptHasLocations==="function" && scriptHasLocations(scenes)),
+            sluglineUnits,onUpdateUnit:updateSlugUnitOverlay,onRemoveUnit:removeSlugUnitOverlay,
             onAssignStyles:assignSceneStyles,assigningStyles,onSetStyleRefs:setStyleRefs,onSetScenePreset:setScenePreset,
             onSetWorldScale:setWorldScale,
             onAddStyleRefImages:addStyleRefImages,onRemoveStyleRefImage:removeStyleRefImage,

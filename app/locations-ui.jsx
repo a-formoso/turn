@@ -10,7 +10,7 @@ function locSwatch(intExt){
     : "linear-gradient(135deg,#4a5a78,#222c3e)";     // interior — slate
 }
 
-function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage, onIeClick }){
+function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage, onIeClick, sluglineUnits, onUpdateUnit, onRemoveUnit }){
   const d = locVisualDefaults(l);
   const scenePresets = (typeof locScenePresets==="function") ? locScenePresets(l, project) : [];
   const finalPrompt = combinedLocationPrompt(l, project, {});
@@ -76,13 +76,16 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
   React.useEffect(()=>{
     if(typeof deriveLocationCoverageSheets!=="function") return;
     const C = window.turnContinuity || {};
-    const derived = deriveLocationCoverageSheets(l, scenes, drafts||C.drafts||{});
+    // units passed EXPLICITLY (not read off window.turnContinuity) and in the deps,
+    // so the unit-precedence skip rule always recalculates when units change —
+    // a side sheet must never slip in before the latest units are visible.
+    const derived = deriveLocationCoverageSheets(l, scenes, drafts||C.drafts||{}, undefined, sluglineUnits);
     const cur = l.coverageSheets || [];
     const curById = {}; cur.forEach(v=>{ if(v&&v.id) curById[v.id]=v; });
     const merged = derived.map(v=>({ ...(curById[v.id]||{}), ...v }));
     const same = JSON.stringify(cur)===JSON.stringify(merged);
     if(!same) onUpdate(l.id, { coverageSheets: merged });
-  },[l.id, l.intExt, (l.scenes||[]).join(","), scenes, drafts]);
+  },[l.id, l.intExt, (l.scenes||[]).join(","), scenes, drafts, sluglineUnits]);
 
   const [masterRefs, setMasterRefs] = React.useState([]);
   const [masterRefOff, setMasterRefOff] = React.useState([]);
@@ -186,6 +189,9 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
   const sceneById = React.useMemo(()=>{ const m={}; (scenes||[]).forEach(s=>{ m[s.id]=s; }); return m; },[scenes]);
   const locScenes = (l.scenes||[]).map(id=>sceneById[id]).filter(Boolean).sort((a,b)=>(a.no||0)-(b.no||0));
   const coverageSheets = (l.coverageSheets || []).slice().sort((a,b)=>(Number(a.order||0)-Number(b.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
+  // slugline units belonging to this master (place × side × time-of-day), orphans last
+  const units = (sluglineUnits||[]).filter(u=>u && u.locationKey===String(l.key||""))
+    .sort((a,b)=> ((a.orphan?1:0)-(b.orphan?1:0)) || String(a.time||"").localeCompare(String(b.time||"")) || String(a.intExt||"").localeCompare(String(b.intExt||"")));
 
   // time-of-day / weather variants
   const addVariant = ()=>{
@@ -326,6 +332,13 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
 
       React.createElement(CardFold,{label:"Staging \u2014 Depth Grid",defaultOpen:false},
         React.createElement(StagingGrid,{l,onUpdate,onDraftStaging,draftingStage})),
+
+      React.createElement(CardFold,{label:"Slugline units",defaultOpen:units.length>0},
+        React.createElement("div",{className:"loc-variants"},
+          units.length
+            ? units.map(u=>React.createElement(SluglineUnitCard,{key:u.key, l, u, project, scenes, drafts,
+                parentGenUrl:gen.genUrl, onUpdateUnit, onRemoveUnit, onView}))
+            : React.createElement("div",{className:"loc-variants-empty"},"No slugline units derive for this place from the current screenplay."))),
 
       React.createElement(CardFold,{label:"Screenplay coverage sheets",defaultOpen:coverageSheets.length>0},
         React.createElement("div",{className:"loc-variants"},
@@ -581,7 +594,146 @@ function LocationVariant({ l, v, project, onTime, onRemove, onView }){
       React.createElement(window.QaCheckButton,{ gen, name:(l.name||"")+" \u00b7 "+v.time, noun:"time-of-day plate" })));
 }
 
-function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingIds, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, onSetWorldScale }){
+/* SLUGLINE UNIT card — the atomic filmable unit of this master location
+   (place × INT/EXT × time-of-day), with its own appearance state and coverage
+   plate. Reuses the coverage-sheet machinery: the unit shapes like a sheet
+   (sceneNos / scriptExcerpt / role) so the screenplay-snapshot references and
+   SheetFrame work unchanged. Generation is per-unit click ONLY (never batched,
+   never auto) and requires the parent master plate as its visual anchor. Orphan
+   units (slugline edited away) stay visible so their plate and notes aren't
+   silently lost; the user removes them explicitly. */
+function SluglineUnitCard({ l, u, project, scenes, drafts, parentGenUrl, onUpdateUnit, onRemoveUnit, onView }){
+  // collision-safe id: readable slug + djb2 hash of the FULL key (locations.jsx)
+  const imgId = (typeof sluglineUnitImageId==="function")
+    ? sluglineUnitImageId(u.key)
+    : "locunit-"+String(u.key||"").replace(/[^a-z0-9-]+/gi,"-");
+  const slotId = imgId.replace(/^locunit-/,"luslot-");
+  const role = String(u.intExt||"INT").toUpperCase();
+  const sceneNos = Array.isArray(u.sceneNos) ? u.sceneNos.filter(n=>n!=null) : [];
+  const sourceLabel = sceneNos.length
+    ? ((sceneNos.length>1 ? "Scenes " : "Scene ")+sceneNos.map(n=>String(n)).join(", "))
+    : "Scene";
+  const pseudo = { id:imgId, name:u.name, role, sceneNos,
+    scriptExcerpt:String(u.scriptText||"").slice(0,720),
+    summary:"Slugline unit: "+(u.sluglines||[]).join(" \u00b7 ") };
+  const [refPreview, setRefPreview] = React.useState([]);
+  const [refOff, setRefOff] = React.useState([]);
+  const refsKey = [l.id, imgId, u.scriptText, parentGenUrl, (scenes&&scenes.length)].join("|");
+  const buildUnitRefs = async ()=>{
+    const out = [];
+    const C = window.turnContinuity || {};
+    const scriptImgs = (typeof locationScreenplayReferenceImages==="function")
+      ? locationScreenplayReferenceImages(l, pseudo, scenes||C.scenes||[], drafts||C.drafts||{})
+      : [];
+    scriptImgs.forEach((scriptImg, i)=> out.push({ url:scriptImg, kind:"script", refId:"script-"+imgId+"-"+i, required:false, ready:true,
+      label:"Screenplay p"+(i+1), note:"screenplay page "+(i+1)+" for "+(u.name||"this unit")+" \u2014 use it to infer what the script implies, but do not render any text from it" }));
+    const grab = async (rid)=>{ let u2=(typeof nbGetImage==="function")?nbGetImage(rid):"";
+      if(!u2 && typeof nbLoadImage==="function"){ try{ u2=await nbLoadImage(rid); }catch(e){} } return u2||""; };
+    const parent = parentGenUrl || await grab(l.id);
+    out.push({ url:parent, kind:"location", refId:l.id, required:true, ready:!!parent,
+      label:(l.name||"Parent location"), note:(l.name||"parent location")+" master plate \u2014 preserve the same world, materials, scale and light" });
+    return out;
+  };
+  React.useEffect(()=>{
+    let alive = true;
+    (async ()=>{ const refs = await buildUnitRefs(); if(alive) setRefPreview(refs); })();
+    const onDone = (e)=>{ const rid = e && e.detail && e.detail.id;
+      if(rid===l.id || rid===imgId) buildUnitRefs().then(refs=>{ if(alive) setRefPreview(refs); }); };
+    window.addEventListener("nb-gen-done", onDone);
+    return ()=>{ alive=false; window.removeEventListener("nb-gen-done", onDone); };
+  },[refsKey]);
+  const missingRequired = refPreview.filter(r=>r.required && !r.ready);
+  const canGenerate = !u.orphan && refPreview.length>0 && missingRequired.length===0;
+  const toggleRef = (rid)=> setRefOff(off=> off.indexOf(rid)>=0 ? off.filter(x=>x!==rid) : [...off, rid]);
+  const collectRefs = async ()=> (await buildUnitRefs())
+    .filter(r=>r.ready && r.url && refOff.indexOf(r.refId)<0)
+    .map(r=>({ url:r.url, kind:r.kind==="script"?"script":"location", refId:r.refId, note:r.note }));
+  const gen = useImageGen({
+    id: imgId, slotId, entity: l,
+    buildFinal: ()=> (typeof buildSluglineUnitPrompt==="function")
+      ? buildSluglineUnitPrompt(l, u, project)
+      : buildLocationCoveragePrompt(l, pseudo, project),
+    buildSimple: ()=> buildSimpleLocationPrompt(l),
+    beforeGenerate: async ()=>{
+      const refs = await buildUnitRefs();
+      const missing = refs.filter(r=>r.required && !r.ready);
+      const ok = missing.length===0;
+      if(!ok && typeof window.appToast==="function")
+        window.appToast("Generate the parent location plate first \u2014 this unit needs it as a reference.");
+      return ok;
+    },
+    attachments: collectRefs,
+    attachmentsText: (refs)=> refs && refs.length
+      ? "REFERENCE IMAGES are attached in this order: "+refs.map((r,i)=>"Image "+(i+1)+" = "+r.note).join("; ")+". The screenplay page snapshots are context only: read the scene geography from them, but never copy their typography, page border, text, captions or layout into the location sheet."
+      : "",
+    buildEdit: (instr)=> "Edit this "+role+" coverage plate for "+(u.name||l.name||"the location")+(u.time?(" at "+u.time):"")+". Apply ONLY: "+instr+". Keep it consistent with the parent location's architecture, materials and light.",
+  });
+  return React.createElement("div",{className:"loc-variant loc-coverage-sheet loc-unit-card"+(u.orphan?" orphan":"")},
+    React.createElement("div",{className:"loc-variant-head"},
+      React.createElement("div",{className:"loc-coverage-title"},
+        React.createElement("span",{className:"loc-intext-badge "+(/EXT/.test(role)?"ext":"int")},role),
+        React.createElement("b",null,u.name||"Slugline unit"),
+        u.time && React.createElement("span",{className:"loc-time-badge"},u.time)),
+      React.createElement("span",{className:"loc-coverage-source",title:(u.sluglines||[]).join("\n")},sourceLabel)),
+    u.orphan && React.createElement("div",{className:"loc-unit-orphan"},
+      React.createElement(Icon.alert,{s:12}),
+      React.createElement("span",null,"No longer in the script \u2014 kept so its plate and notes aren't lost."),
+      onRemoveUnit && React.createElement("button",{className:"loc-unit-remove",
+        title:"Delete this unit's stored data and generated plate",
+        onClick:async ()=>{ if(typeof nbClearAsset==="function"){ try{ await nbClearAsset(imgId); }catch(e){} } onRemoveUnit(u.key); }},"Remove")),
+    React.createElement(SheetField,{label:"Appearance state",value:u.appearance||"",multiline:true,
+      placeholder:"How this unit looks in the film's present \u2014 \u201cdawn and raining\u201d, \u201cracks stripped to bare steel\u201d\u2026",
+      onCommit:(val)=>onUpdateUnit && onUpdateUnit(u.key,{ appearance:val })}),
+    React.createElement(UnitDressing,{ u, onUpdateUnit: u.orphan ? null : onUpdateUnit }),
+    React.createElement(SheetFrame,{ gen, slotId, name:(u.name||l.name||"Location")+" \u00b7 "+role+(u.time?(" \u00b7 "+u.time):""),
+      avatarColor:locSwatch(role), initials:role.slice(0,2), drafted:true, drafting:false,
+      entity:l, onView, slotPlaceholder:"Drop a finished unit plate", noun:"unit plate", compact:true,
+      referenceControls: React.createElement(CoverageReferenceStrip,{ refs:refPreview, excludedIds:refOff, onToggle:toggleRef, onView }),
+      generateDisabled:!canGenerate,
+      generateDisabledLabel: u.orphan ? "No longer in script" : "Generate parent plate first",
+      generateDisabledTitle: u.orphan
+        ? "This unit's slugline is no longer in the screenplay, so it can't generate new plates. Its existing plate and notes are kept until you Remove it."
+        : "This unit needs the parent location plate as a visual reference before it can generate." }),
+    gen.genUrl && window.QaCheckButton && React.createElement("div",{className:"card-qa-row"},
+      React.createElement(window.QaCheckButton,{ gen, name:(u.name||l.name||"")+" \u00b7 "+role, noun:"location unit plate" })));
+}
+
+/* per-unit SET DRESSING — the user's curated list (overlay `dressing`) plus
+   deterministic suggestions pulled from the unit's own action prose (skeleton
+   `dressingDerived`). Click a suggestion to accept it into the list; the curated
+   list is what the generation prompt binds. Orphans render read-only. */
+function UnitDressing({ u, onUpdateUnit }){
+  const [draft, setDraft] = React.useState("");
+  const list = Array.isArray(u.dressing) ? u.dressing : [];
+  const editable = !!onUpdateUnit;
+  if(!editable && !list.length) return null;
+  const lower = {}; list.forEach(x=>{ lower[String(x).toLowerCase()] = true; });
+  const sugg = editable
+    ? (Array.isArray(u.dressingDerived) ? u.dressingDerived : []).filter(x=>!lower[String(x).toLowerCase()])
+    : [];
+  const commit = (next)=> onUpdateUnit && onUpdateUnit(u.key, { dressing: next });
+  const add = (val)=>{ const v = String(val||"").replace(/\s+/g," ").trim();
+    setDraft("");
+    if(!v || lower[v.toLowerCase()]) return;
+    commit(list.concat([v])); };
+  return React.createElement("div",{className:"loc-dress"},
+    React.createElement("div",{className:"loc-dress-lab"},"Set dressing"),
+    React.createElement("div",{className:"loc-dress-row"},
+      list.map((x,i)=>React.createElement("span",{className:"loc-dress-chip",key:"d"+i},x,
+        editable && React.createElement("button",{title:"Remove",onClick:()=>commit(list.slice(0,i).concat(list.slice(i+1)))},"\u00d7"))),
+      editable && React.createElement("span",{className:"loc-dress-add"},
+        React.createElement("input",{value:draft,placeholder:"add item\u2026",
+          onChange:(e)=>setDraft(e.target.value),
+          onBlur:()=>add(draft),
+          onKeyDown:(e)=>{ if(e.key==="Enter"){ e.preventDefault(); add(draft); } }}),
+        React.createElement("button",{className:"loc-dress-sugg",title:"Add to set dressing",onClick:()=>add(draft)},"+"))),
+    sugg.length>0 && React.createElement("div",{className:"loc-dress-row sugg"},
+      React.createElement("span",{className:"loc-dress-sugg-lab"},"from the script:"),
+      sugg.map((x,i)=>React.createElement("button",{className:"loc-dress-sugg",key:"s"+i,
+        title:"Mentioned in this unit's action prose \u2014 click to add",onClick:()=>add(x)},"+ "+x))));
+}
+
+function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingIds, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, onSetWorldScale, sluglineUnits, onUpdateUnit, onRemoveUnit }){
   const [view, setView] = React.useState(null);
   if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   const [sceneFilter, setSceneFilter] = React.useState("");
@@ -741,7 +893,7 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
                   onIeClick:(k)=>setIeFilter(x=>x===k?"":k),
                   drafting:draftingId===l.id||(draftingIds||[]).indexOf(l.id)>=0||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
                   batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
-                  onDraftStaging,draftingStage:draftingStageId===l.id}))),
+                  onDraftStaging,draftingStage:draftingStageId===l.id,sluglineUnits,onUpdateUnit,onRemoveUnit}))),
               React.createElement(PagerBar,{pager,noun:"location"}))
           : React.createElement("div",{className:"prop-empty"},
               React.createElement("div",{className:"art-soon-t"}, sceneFilter ? "No locations in this scene" : ("No "+ieFilter+" locations")),

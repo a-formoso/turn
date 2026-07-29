@@ -6418,3 +6418,26 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
    the case that used to cause save conflicts */
 .presence-dot.self-other{background:var(--txt-3);color:var(--bg-1)}
 .presence-dot.more{background:var(--bg-3);color:var(--txt-2);border-color:var(--bg-1)}
+
+/* Slugline units (Location card) */
+.loc-time-badge{font-family:var(--f-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--txt-2);margin-left:6px}
+.loc-unit-orphan{display:flex;align-items:center;gap:8px;font-size:12px;color:#b45309;background:rgba(180,83,9,.06);border:1px dashed var(--line);border-radius:8px;padding:7px 10px;margin:6px 0}
+.loc-unit-orphan span{flex:1}
+.loc-unit-remove{font-size:11px;background:none;border:1px solid var(--line);border-radius:6px;padding:2px 8px;cursor:pointer;color:var(--txt-2)}
+.loc-unit-remove:hover{color:#b45309;border-color:#b45309}
+.loc-unit-card.orphan{opacity:.85}
+
+/* slugline unit set dressing */
+.loc-dress{margin:6px 0}
+.loc-dress-lab{font-size:11px;font-weight:600;color:var(--txt-3);letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px}
+.loc-dress-row{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.loc-dress-row.sugg{margin-top:5px}
+.loc-dress-chip{display:inline-flex;align-items:center;gap:2px;font-size:11px;padding:2px 4px 2px 9px;border-radius:99px;background:var(--bg-4);color:var(--txt-1);border:1px solid var(--line)}
+.loc-dress-chip button{background:none;border:none;cursor:pointer;color:var(--txt-3);font-size:12px;padding:0 4px;line-height:1}
+.loc-dress-chip button:hover{color:#b45309}
+.loc-dress-add{display:inline-flex;align-items:center;gap:4px}
+.loc-dress-add input{font-size:11px;padding:2px 9px;border-radius:99px;border:1px dashed var(--line);background:none;color:var(--txt-1);width:120px;outline:none}
+.loc-dress-add input:focus{border-color:var(--txt-3)}
+.loc-dress-sugg{font-size:10.5px;padding:2px 9px;border-radius:99px;border:1px dashed var(--line);background:none;color:var(--txt-3);cursor:pointer}
+.loc-dress-sugg:hover{color:var(--txt-1);border-color:var(--txt-3)}
+.loc-dress-sugg-lab{font-size:10px;color:var(--txt-3);margin-right:2px}
