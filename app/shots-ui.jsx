@@ -117,11 +117,17 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
     // or the prompt's image-map numbering mislabels the attached files
     const propSpec = inPr.map(id=>{ const p=ctx.propById[id];
       if(!p || (typeof shotPropAttachable==="function" && !shotPropAttachable(p, sh))) return null;
-      return { id, note:p.name+" prop sheet" }; }).filter(Boolean);
+      // STATE-AWARE: attach the active appearance-state variant when one exists —
+      // MUST resolve identically in buildShotPrompt's image map and generateShotFrame.
+      // CUSTODY-AWARE: the note names the scene's actual holder after a handover.
+      const _scs = (ctx.scenes || ((window.turnContinuity||{}).scenes) || []);
+      const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, scene, _scs) : { id:p.id, state:null };
+      const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, scene, _scs) : { name:p.ownerName, handover:null };
+      return { id:so.id, baseId:p.id, note:p.name+" prop sheet"+(so.state?(" \u2014 "+so.state.label):"")+(co.handover&&co.name?(" \u2014 "+co.name+" holds it now"):"") }; }).filter(Boolean);
     // same untick filter as generateShotFrame/buildShotPrompt — labels match files
     const _refOff = Array.isArray(sh.refOff) ? sh.refOff : [];
     const ordered = ((locWeight==="ambient") ? [...castSpec, ...locSpec, ...propSpec] : [...locSpec, ...castSpec, ...propSpec])
-      .filter(s=> _refOff.indexOf(s.id)<0);
+      .filter(s=> _refOff.indexOf(s.baseId||s.id)<0);
     const out = [];
     for(const s of ordered){ let u = await grab(s.id);
       if(u && s.locPanelQ!=null && typeof shotLocPanelCrop==="function"){ const cu=await shotLocPanelCrop(u, s.locPanelQ); if(cu) u=cu; }

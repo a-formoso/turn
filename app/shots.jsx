@@ -484,6 +484,10 @@ function propPhysicalScaleLabel(p){
   if(p.kind==="worn") bits.push("worn true-to-body scale"+(p.ownerName?(" on "+p.ownerName):""));
   else if(p.kind==="carried" || p.ownerName) bits.push("handheld/carried scale"+(p.ownerName?(" for "+p.ownerName):""));
   else bits.push("environment/set-dressing scale");
+  // owner-relative proportions ("hangs to mid-thigh") — keeps the object its size next
+  // to its owner in shots; skipped when it merely repeats the size field
+  const relScale = clean(p.scale);
+  if(relScale && relScale!==explicit) bits.push((p.ownerName?("against "+p.ownerName+"'s body: "):"")+relScale);
   const form = (typeof clipWords==="function") ? clipWords(clean(p.form),90) : clean(p.form).slice(0,90);
   if(form && !explicit) bits.push(form);
   return bits.join(" — ");
@@ -982,13 +986,29 @@ function buildShotPrompt(sh, ctx){
     const scale = (typeof canonicalScaleLabel==="function") ? canonicalScaleLabel(c) : (c.name||"character");
     return c.name+"'s character sheet — match the face, build, hair and wardrobe exactly; canonical scale: "+scale;
   });
+  // STATE-AWARE prop labels: when a prop's ACTIVE appearance state (story-order ≤ this
+  // scene) has a generated variant sheet, that variant is what attaches — the label must
+  // name the state so the numbered map matches the file (shotPropSheetId, sync-cache rule)
+  const _storyScenes = (ctx.scenes || ((window.turnContinuity||{}).scenes) || []);
+  // CUSTODY-AWARE holder: who actually holds the object in THIS scene (custodyOwnerAt —
+  // same story-order rule as appearance states). A handover names the new holder and
+  // orders the established design + accumulated wear preserved.
+  const _custodyBit = (p, co)=>{ if(!co || !co.handover) return "";
+    const hoSc = _storyScenes.find(s=>s.id===co.handover.fromSceneId);
+    return " — passed to "+co.name+(hoSc && hoSc.no!=null ? (" at Sc "+hoSc.no) : "")+"; keep its established design and accumulated wear"; };
   const _propLabels = props.filter(p=>_refOff.indexOf(p.id)<0).map(p=> {
     const scale = (typeof propPhysicalScaleLabel==="function") ? propPhysicalScaleLabel(p) : (p.name||"prop");
-    return "the "+p.name+" (prop sheet"+(p.ownerName?(", "+((p.kind==="worn")?"worn by ":"carried by ")+p.ownerName):"")+") — match it exactly as designed; physical scale: "+scale;
+    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, scene, _storyScenes) : { id:p.id, state:null };
+    const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, scene, _storyScenes) : { name:p.ownerName, handover:null };
+    const holder = co.name || p.ownerName;
+    return "the "+p.name+" (prop sheet"+(so.state?(", "+so.state.label+" state"):"")+(holder?(", "+((p.kind==="worn")?"worn by ":"carried by ")+holder):"")+")"+_custodyBit(p, co)+" — match it exactly as designed; physical scale: "+scale;
   });
   const _carriedLabels = (ctx.carriedForward||[]).filter(p=>_refOff.indexOf(p.id)<0).map(p=> {
     const scale = (typeof propPhysicalScaleLabel==="function") ? propPhysicalScaleLabel(p) : (p.name||"prop");
-    return "the "+p.name+" (prop sheet) — still in frame from an earlier beat; keep it present, matching its sheet; physical scale: "+scale;
+    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, scene, _storyScenes) : { id:p.id, state:null };
+    const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, scene, _storyScenes) : { name:p.ownerName, handover:null };
+    const holder = co.name || p.ownerName;
+    return "the "+p.name+" (prop sheet"+(so.state?(", "+so.state.label+" state"):"")+(holder?(", "+((p.kind==="worn")?"worn by ":"carried by ")+holder):"")+")"+_custodyBit(p, co)+" — still in frame from an earlier beat; keep it present, matching its sheet; physical scale: "+scale;
   });
   if(locWeight==="ambient"){ _castLabels.forEach(l=>imgs.push(l)); _locLabels.forEach(l=>imgs.push(l)); }
   else { _locLabels.forEach(l=>imgs.push(l)); _castLabels.forEach(l=>imgs.push(l)); }
@@ -1116,15 +1136,25 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   // same dressing gate as buildShotPrompt/collectShotRefs — labels must match files
   const propSpec = inPr.map(id=>{ const p=(ctx.propById||{})[id];
     if(!p || !shotPropAttachable(p, sh)) return null;   // worn attach only on tight shots WITH a generated close-up sheet
-    return { id, note:p.name+" prop sheet" }; }).filter(Boolean);
-  const carrySpec= carried.map(id=>{ const p=(ctx.propById||{})[id]; return p?{ id, note:p.name+" prop sheet (carried over from an earlier beat)" }:null; }).filter(Boolean);
+    // STATE-AWARE: attach the active appearance-state variant when one exists (baseId
+    // keeps the user's refOff untick working against the prop's own id). CUSTODY-AWARE:
+    // the note names the scene's actual holder after a handover.
+    const _scs = (ctx.scenes || ((window.turnContinuity||{}).scenes) || []);
+    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, ctx.scene, _scs) : { id:p.id, state:null };
+    const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, ctx.scene, _scs) : { name:p.ownerName, handover:null };
+    return { id:so.id, baseId:p.id, note:p.name+" prop sheet"+(so.state?(" \u2014 "+so.state.label):"")+(co.handover&&co.name?(" \u2014 "+co.name+" holds it now"):"") }; }).filter(Boolean);
+  const carrySpec= carried.map(id=>{ const p=(ctx.propById||{})[id]; if(!p) return null;
+    const _scs = (ctx.scenes || ((window.turnContinuity||{}).scenes) || []);
+    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, ctx.scene, _scs) : { id:p.id, state:null };
+    const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, ctx.scene, _scs) : { name:p.ownerName, handover:null };
+    return { id:so.id, baseId:p.id, note:p.name+" prop sheet (carried over from an earlier beat)"+(so.state?(" \u2014 "+so.state.label):"")+(co.handover&&co.name?(" \u2014 "+co.name+" holds it now"):"") }; }).filter(Boolean);
   // user-unticked sheets (sh.refOff) drop out here AND in buildShotPrompt's image
   // map together — the numbered labels always match the attached files
   const _refOff = Array.isArray(sh.refOff) ? sh.refOff : [];
   const orderedSpecs = ((locWeight==="ambient")
     ? [...castSpec, ...locSpec, ...propSpec, ...carrySpec]   // tight: the cast leads, the set recedes
     : [...locSpec, ...castSpec, ...propSpec, ...carrySpec])  // wide: the set leads
-    .filter(s=> _refOff.indexOf(s.id)<0);
+    .filter(s=> _refOff.indexOf(s.baseId||s.id)<0);
   const refs = [];
   for(const s of orderedSpecs){ let u=await grab(s.id);
     if(u && s.locPanelQ!=null && typeof shotLocPanelCrop==="function"){ const cu=await shotLocPanelCrop(u, s.locPanelQ); if(cu) u=cu; }

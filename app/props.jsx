@@ -43,6 +43,7 @@ function buildPropRefPrompt(p, project){
   const form = clean(p.form);
   const material = clean(p.material);
   const detail = clean(p.detail);
+  const relation = clean(p.relation);   // how the owner relates to it — drives wear & condition
   const _size = clean(p.size);
   const scale = p.kind==="worn" ? ("wearable, true-to-body scale"+(_size?(", "+_size):""))
               : p.kind==="carried" ? ("handheld scale"+(_size?(", "+_size):""))
@@ -68,7 +69,9 @@ function buildPropRefPrompt(p, project){
       form: form || undefined,
       material: material || undefined,
       signature_feature: detail || undefined,
+      owner_relationship: relation || undefined,
       scale: scale,
+      scale_against_owner: (p.ownerId && clean(p.scale)) || undefined,
     },
     layout: {
       format: "a 4-panel object reference sheet in 16:9 landscape: four EQUAL-width tall vertical panels divided by thin clean vertical lines \u2014 hero, front, side and detail; the SAME object throughout",
@@ -88,6 +91,7 @@ function buildPropRefPrompt(p, project){
       identity_rule: "the SAME identical object \u2014 form, colour, materials, wear and construction \u2014 in every view",
       material_rule: material ? ("rendered in "+material+", with accurate surface texture and finish in every panel") : "accurate, consistent material and finish in every panel",
       feature_rule: detail ? ("its signature feature \u2014 "+((typeof clipWords==="function")?clipWords(detail,90):detail.slice(0,90))+" \u2014 present and consistent in every view") : undefined,
+      relationship_rule: relation ? ("the owner's relationship to it \u2014 "+((typeof clipWords==="function")?clipWords(relation,90):relation.slice(0,90))+" \u2014 is visible in its condition: wear, repairs, handling marks and how carefully it has been kept") : undefined,
     },
     render: {
       style: styleText,
@@ -427,11 +431,153 @@ window.propOwnerSheetUrl = propOwnerSheetUrl;
 /* the instruction that tells the model to match the referenced character sheet. */
 function propOwnerNote(p){
   const who = (p && p.ownerName) || "the owner";
-  return (p && p.kind==="worn")
+  const rel = (p && p.relation) ? String(p.relation).replace(/\.$/,"").trim() : "";
+  const relNote = rel ? (" "+who+"'s relationship to this object: "+rel+" \u2014 let that history show in its condition, wear and repairs.") : "";
+  return ((p && p.kind==="worn")
     ? "Reference image: "+who+"'s character sheet. This prop is WORN by "+who+" — render it in the SAME visual style, materials, colour palette, surface wear and finish as that character, so it looks like it belongs on their body."
-    : "Reference image: "+who+"'s character sheet. Render this prop in the SAME visual style, palette and world as that character so it reads as theirs.";
+    : "Reference image: "+who+"'s character sheet. Render this prop in the SAME visual style, palette and world as that character so it reads as theirs.") + relNote;
 }
 window.propOwnerNote = propOwnerNote;
+
+/* shared useImageGen plumbing for prop sheets (the base card AND state variants):
+   the owner's character sheet rides as the style/belonging anchor, tagged refId so
+   anchor recording stays transaction-derived. */
+function propOwnerAttachments(p){
+  return async ()=>{
+    const out = [];
+    const u = (typeof propOwnerSheetUrl==="function") ? await propOwnerSheetUrl(p) : "";
+    if(u) out.push({ url:u, note:(p.ownerName||"owner")+" character sheet", refId:p.ownerId });
+    // IN-HAND anchor: when the object was rendered in the owner's hand first, that render
+    // rides too — the sheet is DERIVED from it (grip, scale against the body, world)
+    let hu = (typeof nbGetImage==="function") ? nbGetImage(p.id+":inhand") : "";
+    if(!hu && typeof nbLoadImage==="function"){ try{ hu = await nbLoadImage(p.id+":inhand"); }catch(e){} }
+    if(hu) out.push({ url:hu, note:(p.name||"the object")+" in "+(p.ownerName||"the owner")+"\u2019s hand \u2014 derive the sheet from THIS exact design, scale and finish", refId:p.id+":inhand" });
+    return out;
+  };
+}
+/* the reference sentence for prop generation, aware of WHICH refs actually attached:
+   the owner-sheet note only when the owner sheet rode in, the in-hand derivation note
+   only when the in-hand render rode in. */
+function propAttachmentsText(p){
+  return (attach)=>{
+    const hasOwner  = (attach||[]).some(a=>a && a.refId===p.ownerId);
+    const hasInhand = (attach||[]).some(a=>a && a.refId===p.id+":inhand");
+    let t = hasOwner ? ((typeof propOwnerNote==="function") ? propOwnerNote(p) : "") : "";
+    if(hasInhand)
+      t += (t?" ":"") + "A further reference shows "+(p.name||"the object")+" in "+(p.ownerName||"the owner")+"\u2019s hand \u2014 derive the object\u2019s design, scale, grip proportions and wear from it exactly.";
+    return t;
+  };
+}
+window.propAttachmentsText = propAttachmentsText;
+/* the IN-HAND anchor prompt: owner + object in one render (owner sheet as ref) — the
+   design the standalone sheet is then derived from. */
+function buildPropInHandPrompt(p, project){
+  const clean = (x)=>String(x||"").replace(/\.$/,"").trim();
+  const who = p.ownerName || "the owner";
+  const rel = clean(p.relation);
+  let s = "Character-with-prop reference: "+who+" holding "+(p.name||"the object")+". ";
+  s += "The reference image is "+who+"'s character sheet \u2014 match their face, wardrobe, render style and world EXACTLY. ";
+  s += "THE OBJECT: "+(p.name||"object")+(clean(p.form)?(" \u2014 "+clean(p.form)):"")+(clean(p.material)?(", "+clean(p.material)):"")
+    +(clean(p.detail)?(". Significance: "+clean(p.detail)):"")+". ";
+  if(rel) s += who+"'s relationship to it: "+rel+" \u2014 show it in how they hold it and in its condition. ";
+  s += "SCALE: the object at its true size relative to "+who+"'s body"+(clean(p.size)?(" ("+clean(p.size)+")"):"")+(clean(p.scale)?(" \u2014 "+clean(p.scale)):"")+". ";
+  s += "COMPOSITION: a single clean three-quarter view, "+who+" standing, holding the object naturally and clearly visible \u2014 grip, proportion against the body and handling all readable. ";
+  s += "Flat off-white / very light neutral background, even and clean, soft studio lighting, no text or labels. ";
+  s += "This image is the design anchor: the standalone object reference sheet will be derived from it, so the object must be crisp and unobstructed.";
+  return s;
+}
+window.buildPropInHandPrompt = buildPropInHandPrompt;
+/* records WHICH owner-sheet version a prop sheet (base or state variant) was anchored
+   against — ONLY when the owner ref verifiably rode in THIS generation (refsUsed).
+   Simple-mode / ref-less generations record nothing → never false-stale. */
+function propAnchorMetaExtra(p){
+  return async ({ refsUsed })=>{
+    if(!p.ownerId || typeof nbLoadDetailsAsset!=="function") return undefined;
+    const used = (refsUsed||[]).some(r=> r && r.refId===p.ownerId);
+    if(!used) return undefined;
+    try{
+      const d = await nbLoadDetailsAsset(p.ownerId);
+      const iso = d && d.meta && d.meta.iso;
+      return iso ? { anchorOwnerId:p.ownerId, anchorOwnerName:(p.ownerName||""), anchorIso:iso } : undefined;
+    }catch(e){ return undefined; }
+  };
+}
+window.propOwnerAttachments = propOwnerAttachments;
+window.propAnchorMetaExtra = propAnchorMetaExtra;
+
+/* the STATE-AWARE sheet for a prop in a scene: if the prop has appearance states and
+   the ACTIVE state (story-order ≤ this scene, same rule as activeStateForScene) has a
+   generated variant sheet, shots attach THAT, labelled with the state. SYNC-cache
+   existence check only — matches shotPropAttachable's rule, so the prompt's numbered
+   image map and the async attach paths (generateShotFrame / collectShotRefs) always
+   agree. Fail-safe: any doubt → the base sheet. */
+function shotPropSheetId(p, scene, scenes){
+  const base = { id: p.id, state: null };
+  try{
+    if(!(p && Array.isArray(p.states) && p.states.length)) return base;
+    if(typeof activeStateForScene!=="function") return base;
+    const r = activeStateForScene(p, scene, scenes);
+    if(!r || !r.state) return base;
+    const gid = p.id+":"+r.state.id;
+    if(typeof nbGetImage==="function" && nbGetImage(gid)) return { id: gid, state: r.state };
+  }catch(e){}
+  return base;
+}
+window.shotPropSheetId = shotPropSheetId;
+
+/* CUSTODY — who holds the object AT a scene. p.custody = ordered handovers
+   [{id, charId, charName, fromSceneId, note}]; the canonical owner (p.ownerId) holds it
+   from the start. Resolution mirrors activeStateForScene: the latest handover pinned at
+   or before the scene in story order wins; fail-safe = the canonical owner. The card,
+   sheets and style anchor stay with the canonical owner — custody only moves the HOLDER. */
+function custodyOwnerAt(p, scene, scenes){
+  const base = { id: p.ownerId||"", name: p.ownerName||"", handover: null };
+  try{
+    const chain = Array.isArray(p.custody) ? p.custody : [];
+    if(!chain.length || !scene || !Array.isArray(scenes)) return base;
+    const idx = scenes.findIndex(s=>s && s.id===scene.id);
+    if(idx<0) return base;
+    let best = null, bestIdx = -1;
+    for(const e of chain){
+      if(!e || !e.charId) continue;
+      const ei = scenes.findIndex(s=>s && s.id===e.fromSceneId);
+      // >= so a LATER chain entry wins a same-scene tie (chain order is the handover order)
+      if(ei>=0 && ei<=idx && ei>=bestIdx){ best = e; bestIdx = ei; }
+    }
+    if(best) return { id: best.charId||"", name: best.charName||"", handover: best };
+  }catch(e){}
+  return base;
+}
+window.custodyOwnerAt = custodyOwnerAt;
+/* "Marisol \u2192 Diego (Sc 12)" chain label for UI + bibles. */
+function custodyChainLabel(p, scenes){
+  const chain = (Array.isArray(p.custody)?p.custody:[]).filter(e=>e && e.charName);
+  if(!chain.length) return "";
+  const names = [p.ownerName||"?"];
+  chain.forEach(e=>{
+    const sc = (scenes||[]).find(s=>s && s.id===e.fromSceneId);
+    names.push(e.charName + (sc && sc.no!=null ? (" (Sc "+sc.no+")") : ""));
+  });
+  return names.join(" \u2192 ");
+}
+window.custodyChainLabel = custodyChainLabel;
+
+/* FITTING CRITIQUE prompt — vision judge for "does this object belong to this character".
+   The exact reply shape keeps the verdict machine-readable; notes stay human prose. */
+function buildPropFittingPrompt(p, hasOwner){
+  const clean = (x)=>String(x||"").replace(/\.$/,"").trim();
+  let s = hasOwner
+    ? "Image 1 is the character reference sheet for "+(p.ownerName||"the owner")+". Image 2 is the reference sheet for "+(p.name||"their object")+" ("+(p.kind||"carried")+"). "
+    : "This is the reference sheet for "+(p.name||"an object")+" belonging to "+(p.ownerName||"a character")+" ("+(p.kind||"carried")+"). ";
+  s += "SPEC \u2014 form: "+(clean(p.form)||"unspecified")+"; material: "+(clean(p.material)||"unspecified")
+    +"; significance: "+(clean(p.detail)||"unspecified")
+    +(clean(p.relation)?("; relationship: "+clean(p.relation)):"")
+    +(clean(p.scale)?("; scale against the owner: "+clean(p.scale)):"")+". ";
+  s += "Judge whether this object BELONGS to this character: (1) render style & medium match, (2) material and finish coherent with their wardrobe and world, (3) scale plausibility against their body, (4) the stated relationship readable in its condition. ";
+  s += "Reply in EXACTLY this shape:\nVERDICT: belongs | drifted | mismatch\nNOTES: 3\u20136 short observations, one per line\nFIX: one sentence \u2014 the single most valuable change to the OBJECT (or 'none').";
+  return s;
+}
+window.buildPropFittingPrompt = buildPropFittingPrompt;
 
 async function generatePropSheet(p, project){
   const _ep = (typeof nbEpoch==="function") ? nbEpoch() : null;   // asset scope at generation start
@@ -439,8 +585,13 @@ async function generatePropSheet(p, project){
   const basePrompt = (typeof combinedPropPrompt==="function") ? combinedPropPrompt(p, project) : (p.name||"prop reference");
   // reference the OWNER's character sheet (if generated) so the prop matches their look
   const ownerUrl = await propOwnerSheetUrl(p);
-  const prompt = basePrompt + (ownerUrl ? (" "+propOwnerNote(p)) : "");
-  const refOpts = ownerUrl ? { extraImages:[ownerUrl] } : {};
+  // IN-HAND anchor: when the object was rendered in the owner's hand first, derive from it
+  let inhandUrl = (typeof nbGetImage==="function") ? nbGetImage(p.id+":inhand") : "";
+  if(!inhandUrl && typeof nbLoadImage==="function"){ try{ inhandUrl = await nbLoadImage(p.id+":inhand"); }catch(e){} }
+  const inhandNote = inhandUrl ? (" The reference shows "+(p.name||"the object")+" in "+(p.ownerName||"the owner")+"\u2019s hand \u2014 derive the object\u2019s design, scale and wear from it exactly.") : "";
+  const prompt = basePrompt + (ownerUrl ? (" "+propOwnerNote(p)) : "") + inhandNote;
+  const refImgs = [ownerUrl, inhandUrl].filter(Boolean);
+  const refOpts = refImgs.length ? { extraImages:refImgs } : {};
   const model  = (typeof nbGetModel==="function")  ? nbGetModel()  : "";
   const aspect = (typeof nbGetAspect==="function") ? nbGetAspect() : "16:9";
   const size   = (typeof nbGetRes==="function")    ? nbGetRes()    : "2K";
@@ -454,8 +605,14 @@ async function generatePropSheet(p, project){
     catch(e){
       // same fallback the card uses: an empty/"no image" result retries simplified
       if(/no image/i.test((e&&e.message)||"") && typeof buildSimplePropPrompt==="function"){
-        url = await nbGenerate(buildSimplePropPrompt(p) + (ownerUrl?(" "+propOwnerNote(p)):""), refOpts);
+        url = await nbGenerate(buildSimplePropPrompt(p) + (ownerUrl?(" "+propOwnerNote(p)):"") + inhandNote, refOpts);
       } else { throw e; }
+    }
+    // record WHICH owner-sheet version this sheet is anchored against — the card's
+    // "anchored to a previous plate" badge compares it against the owner's current meta
+    let anchorIso = "";
+    if(ownerUrl && p.ownerId && typeof nbLoadDetailsAsset==="function"){
+      try{ const d = await nbLoadDetailsAsset(p.ownerId); anchorIso = (d && d.meta && d.meta.iso) || ""; }catch(e){}
     }
     const now = new Date();
     const mEntry = (window.NB_MODELS||[]).find(m=>m.id===model) || {};
@@ -465,7 +622,10 @@ async function generatePropSheet(p, project){
         ? ((typeof window.nbGetOaiQuality==="function") ? window.nbGetOaiQuality() : "medium") : undefined,
       date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
       time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
-      iso: now.toISOString(), prompt, mode:"final", version:1 };
+      iso: now.toISOString(), prompt, mode:"final", version:1,
+      anchorOwnerId: (ownerUrl && p.ownerId) ? p.ownerId : undefined,
+      anchorOwnerName: (ownerUrl && p.ownerId) ? (p.ownerName||"") : undefined,
+      anchorIso: anchorIso || undefined };
     await nbCommit(p.id, url, meta, [], "prop", _ep);
     // let any mounted card (the prop's own, or a char card watching its props) adopt it
     try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:p.id, url } })); }catch(e){}
@@ -505,6 +665,170 @@ function propSwatch(kind){
     : "linear-gradient(135deg,#b8412e,#5a2018)";
 }
 
+/* PropStateRow — one appearance-state variant of a prop (mirrors the character StateRow):
+   its own v2+ sheet at p.id+":"+st.id, built FROM the base sheet when one exists so the
+   object stays identical except the described change. The owner's character sheet rides
+   as the same belonging anchor, so a state variant never drifts from the character. */
+function PropStateRow({ p, st, index, project, scenes, baseGenUrl, onView, onChange, onDelete }){
+  const vtag = "v"+(index+2);
+  const gid = p.id+":"+st.id;
+  const baseFinal = (typeof combinedPropPrompt==="function") ? combinedPropPrompt(p, project) : buildPropRefPrompt(p, project);
+  const changeText = ()=> (st.change||"").replace(/\.$/,"").trim();
+  const buildFromBase = ()=>
+    "Edit this prop reference sheet for "+(p.name||"the object")+". "
+    +"Apply this appearance change: "+(changeText()||"(no specific change given)")+". "
+    +"Keep the EXACT same object \u2014 shape, proportions, materials and identity \u2014 in every panel; only the described change should differ. "
+    +"Maintain the sheet's EXISTING 4-panel layout (hero \u00b7 front \u00b7 side \u00b7 detail), render style and framing. Do not re-imagine the object.";
+  const buildFinal = ()=> baseFinal + " APPEARANCE STATE \u2014 "+(st.label||"variant")+": "
+    + (changeText()||"") + ". Render the object in THIS changed state consistently across every panel \u2014 same identity, new condition.";
+  const buildSimple = ()=> ((typeof buildSimplePropPrompt==="function") ? buildSimplePropPrompt(p) : (p.name||"prop reference"))
+    + ". " + (changeText()||"");
+
+  const gen = useImageGen({
+    id: gid, slotId: "propref-"+gid,
+    entity: p,
+    buildFinal: buildFinal,
+    buildFromBase: baseGenUrl ? buildFromBase : null,
+    referenceFallback: baseGenUrl ? (()=>baseGenUrl) : null,
+    buildFromPhoto: ()=> buildFromBase(),
+    buildSimple: buildSimple,
+    // the SAME belonging anchor as the base sheet — a state variant still belongs to the owner
+    attachments: propOwnerAttachments(p),
+    attachmentsText: propAttachmentsText(p),
+    metaExtra: propAnchorMetaExtra(p),
+    buildEdit: (instr)=>
+      "Edit this prop reference sheet for "+(p.name||"the object")+" ("+(st.label||"variant")+" state). "
+      +"Apply ONLY this change: "+instr+". Preserve the same object identity and the "+(st.label||"variant")
+      +" appearance otherwise, in every panel. Keep the sheet's existing layout. Do not re-imagine the object.",
+  });
+  const viewEntity = { ...p, name: p.name+" \u2014 "+(st.label||"variant") };
+
+  return React.createElement("div",{className:"state-row"},
+    React.createElement("div",{className:"state-row-head"},
+      React.createElement("span",{className:"state-vtag"},vtag),
+      React.createElement("div",{className:"state-label"},
+        React.createElement(EditText,{value:st.label,placeholder:"State name\u2026",onCommit:val=>onChange({label:val})})),
+      React.createElement("button",{className:"state-del",title:"Remove state",onClick:onDelete},React.createElement(Icon.x,{s:13}))),
+    React.createElement(SheetFrame,{ gen, slotId:"propref-"+gid, name:viewEntity.name,
+      avatarColor:propSwatch(p.kind), initials:vtag, drafted:true, drafting:false, onDraft:()=>{}, entity:viewEntity,
+      onView, slotPlaceholder:"Drop reference art for this state", noun:vtag+" sheet" }),
+    gen.genUrl && window.QaCheckButton && React.createElement("div",{className:"card-qa-row"},
+      React.createElement(window.QaCheckButton,{ gen, name:(viewEntity.name||"")+" \u00b7 "+(st.label||vtag), noun:vtag+" sheet",
+        specFields:()=>({ what_changed:(st.change||"") }),
+        onApplySpec:(patch)=>{ if(patch.what_changed!=null) onChange({ change:patch.what_changed }); } })),
+    !baseGenUrl && React.createElement("div",{className:"state-hint"},
+      React.createElement(Icon.alert,{s:11}),
+      "Generate the base sheet above for design-locked results \u2014 until then this builds from the text spec."),
+    React.createElement(SheetField,{label:"What changed",value:st.change,multiline:true,
+      placeholder:"The visible difference from the base object \u2014 crumpled, taped repair, scorched, bloodied, emptied\u2026",
+      onCommit:val=>onChange({change:val})}),
+    React.createElement("div",{className:"sheet-field"},
+      React.createElement("div",{className:"obj-lab"},"First appears in"),
+      React.createElement("select",{className:"prop-select",value:st.sceneId||"",onChange:e=>onChange({sceneId:e.target.value})},
+        React.createElement("option",{value:""},"Not pinned"),
+        (scenes||[]).map(s=>React.createElement("option",{key:s.id,value:s.id},"Sc "+s.no+" \u00b7 "+s.title)))));
+}
+
+/* PropInHandRow — the IN-HAND anchor for carried, owned props: render the object in the
+   owner's hand FIRST; the base sheet (and state variants) then derive from that render
+   via propOwnerAttachments — grip, scale against the body and world locked by construction. */
+function PropInHandRow({ p, project, onView }){
+  const gid = p.id+":inhand";
+  const gen = useImageGen({
+    id: gid, slotId: "propref-"+gid,
+    entity: p,
+    buildFinal: ()=> (typeof buildPropInHandPrompt==="function") ? buildPropInHandPrompt(p, project) : (p.name||"prop in hand"),
+    buildSimple: ()=> (typeof buildPropInHandPrompt==="function") ? buildPropInHandPrompt(p, project) : (p.name||"prop in hand"),
+    attachments: propOwnerAttachments(p),   // the owner sheet rides in (its own :inhand can't exist on first render)
+    attachmentsText: propAttachmentsText(p),   // presence-aware: no "character sheet" mislabel on in-hand-only regens
+    metaExtra: propAnchorMetaExtra(p),
+    buildEdit: (instr)=>
+      "Edit this character-with-prop reference. Apply ONLY this change: "+instr+". "
+      +"Keep the same person (identical face & wardrobe), the same object design, the same framing and style.",
+  });
+  if((p.kind||"carried")!=="carried" || !p.ownerId) return null;
+  const first = String(p.ownerName||"the owner").split(/\s+/)[0];
+  return React.createElement("div",{className:"prop-worn-note",style:{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}},
+    React.createElement(Icon.sparkles,{s:11}),
+    React.createElement("span",{style:{flex:1,minWidth:220}},
+      gen.genUrl
+        ? "In-hand anchor rendered \u2014 this prop\u2019s sheets now derive from it (grip, scale & world locked)."
+        : React.createElement(React.Fragment,null,"Render ",React.createElement("b",null,(p.name||"the object"))," in ",React.createElement("b",null,(p.ownerName||"the owner")),"\u2019s hand first \u2014 every sheet then derives from that render, so grip, scale and world match by construction.")),
+    gen.genUrl && React.createElement("img",{src:gen.genUrl,alt:(p.name||"object")+" in hand",
+      style:{width:56,height:32,objectFit:"cover",borderRadius:4,cursor:"zoom-in"},
+      onClick:()=>onView&&onView(gen.genUrl,p)}),
+    React.createElement("button",{className:"char-draft-btn"+(gen.gening?" busy":""),disabled:gen.gening,onClick:()=>gen.generate(),
+      title: gen.genUrl ? "Re-render the in-hand anchor (existing sheets keep their design until regenerated)" : "Render "+(p.name||"the object")+" in "+(p.ownerName||"the owner")+"\u2019s hand \u2014 future sheets derive from it"},
+      gen.gening ? "Rendering\u2026" : (gen.genUrl ? "Re-render in hand" : ("In "+first+"\u2019s hand"))));
+}
+
+/* PropFittingModal — the FITTING view: owner sheet and prop sheet side by side, with an
+   optional vision critique ("does this object belong to this character?"). Read-only;
+   fixes stay manual (Regenerate / the QA apply flow). */
+function PropFittingModal({ p, propUrl, onClose }){
+  const [ownerUrl, setOwnerUrl] = React.useState("");
+  const [inhandUrl, setInhandUrl] = React.useState("");
+  const [crt, setCrt] = React.useState(null);   // null | {busy:true} | {text,verdict} | {error}
+  React.useEffect(()=>{ let live=true;
+    (async()=>{
+      try{ const u = (typeof propOwnerSheetUrl==="function") ? await propOwnerSheetUrl(p) : "";
+        if(live) setOwnerUrl(u||""); }catch(e){}
+      try{ let h = (typeof nbGetImage==="function") ? nbGetImage(p.id+":inhand") : "";
+        if(!h && typeof nbLoadImage==="function"){ try{ h = await nbLoadImage(p.id+":inhand"); }catch(e){} }
+        if(live) setInhandUrl(h||""); }catch(e){}
+    })();
+    return ()=>{ live=false; };
+  },[p.id, p.ownerId]);
+  const runCritique = async ()=>{
+    if(typeof aiVisionComplete!=="function" || (crt && crt.busy)) return;
+    setCrt({busy:true});
+    try{
+      const r = await aiVisionComplete(
+        [{ role:"user", content: buildPropFittingPrompt(p, !!ownerUrl) }],
+        [ownerUrl, propUrl].filter(Boolean));
+      // fail safe like the other QA paths: a text-only (blind) response gets NO verdict
+      if(r && r.vision===false){
+        setCrt({ error:"The vision model didn\u2019t receive the images \u2014 no verdict. Check the writing engine / image-proxy and try again." });
+        return;
+      }
+      const m = /^VERDICT:\s*(belongs|drifted|mismatch)\s*$/im.exec((r && r.text) || "");
+      setCrt({ text:(r&&r.text)||"", verdict: m ? m[1].toLowerCase() : "" });
+    }catch(e){ setCrt({ error:(e&&e.message)||"Critique failed" }); }
+  };
+  const fig = (url, lab)=> React.createElement("figure",{style:{margin:0,flex:1,minWidth:160}},
+    url
+      ? React.createElement("img",{src:url,alt:lab,style:{width:"100%",borderRadius:10,display:"block"}})
+      : React.createElement("div",{className:"state-empty"},"No sheet yet"),
+    React.createElement("figcaption",{className:"obj-lab",style:{margin:"4px 0 0"}},lab));
+  const RD = (typeof ReactDOM!=="undefined") ? ReactDOM : window.ReactDOM;
+  return RD.createPortal(
+    React.createElement("div",{style:{position:"fixed",inset:0,zIndex:90,display:"flex",alignItems:"center",justifyContent:"center",padding:20,background:"rgba(6,6,10,.72)"},
+      onClick:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
+      React.createElement("div",{className:"qa-modal",style:{width:"min(880px,94vw)"}},
+        React.createElement("div",{className:"qa-head"},
+          React.createElement("span",{className:"qa-orb"},React.createElement(Icon.box,{s:18})),
+          React.createElement("div",{style:{flex:1}},
+            React.createElement("div",{style:{fontWeight:600}},(p.name||"Object")+" \u00b7 fitting"),
+            React.createElement("div",{className:"obj-lab"},"against "+(p.ownerName||"its owner"))),
+          React.createElement("button",{className:"ag-x",title:"Close",onClick:onClose},React.createElement(Icon.x,{s:14}))),
+        React.createElement("div",{style:{display:"flex",gap:14,alignItems:"flex-start",flexWrap:"wrap"}},
+          fig(ownerUrl, (p.ownerName||"Owner")+" \u2014 character sheet"),
+          fig(propUrl, (p.name||"Object")+" \u2014 prop sheet"),
+          inhandUrl && fig(inhandUrl, "In-hand anchor")),
+        !ownerUrl && React.createElement("div",{className:"state-hint",style:{marginTop:10}},
+          React.createElement(Icon.alert,{s:11}),
+          "Generate "+(p.ownerName||"the owner")+"\u2019s sheet for a true fitting \u2014 the critique then judges against their actual look."),
+        React.createElement("div",{style:{display:"flex",gap:10,alignItems:"center",marginTop:12}},
+          React.createElement("button",{className:"state-add-btn",disabled:!!(crt&&crt.busy),onClick:runCritique},
+            crt&&crt.busy ? "Judging\u2026" : (crt&&(crt.text||crt.error) ? "Re-run critique" : "Critique the fit")),
+          crt && crt.verdict && React.createElement("span",{className:"obj-lab",style:{margin:0,display:"inline-flex",alignItems:"center",gap:6}},
+            React.createElement("span",{className:"qa-dot "+(crt.verdict==="belongs"?"minor":"major")}),crt.verdict)),
+        crt && crt.error && React.createElement("div",{className:"state-hint",style:{marginTop:8}},
+          React.createElement(Icon.alert,{s:11}),crt.error),
+        crt && crt.text && React.createElement("pre",{style:{whiteSpace:"pre-wrap",font:"inherit",fontSize:12,margin:"10px 0 0",opacity:.92}},crt.text))),
+    document.body);
+}
+
 function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft, onEnsureOwner, drafting, onView, batchActiveId, onBatchDone, onChipClick, onTagOne, taggingScene, dupIds, dupProps, onMerge, derivedScenes, onKindClick }){
   const d = propDefaults(p);
   const finalPrompt = combinedPropPrompt(p, project);
@@ -522,6 +846,8 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
   },[p.renderStyleKey]);
   const propBible = ()=> [p.name&&("Name: "+p.name), p.ownerName&&("Owner: "+p.ownerName),
     p.form&&("Form: "+p.form), p.material&&("Material: "+p.material), p.detail&&("Significance: "+p.detail),
+    p.relation&&("Relationship: "+p.relation), p.scale&&("Scale against owner: "+p.scale),
+    (typeof custodyChainLabel==="function" && custodyChainLabel(p, scenes)) && ("Custody: "+custodyChainLabel(p, scenes)),
     (project&&project.genre)&&("Genre: "+project.genre)].filter(Boolean).join("\n");
   const rollSurprise = async ()=>{
     if(!(typeof aiSurpriseStyleText==="function" && typeof aiAvailable==="function" && aiAvailable())) return;
@@ -562,9 +888,12 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
     buildSimple: ()=> buildSimplePropPrompt(p),
     // reference the OWNER's character sheet so the prop matches their look (worn props
     // especially must read as part of THAT body, not a generic grey object).
-    attachments: async ()=>{ const u = (typeof propOwnerSheetUrl==="function") ? await propOwnerSheetUrl(p) : "";
-      return u ? [{ url:u, note:(p.ownerName||"owner")+" character sheet" }] : []; },
-    attachmentsText: ()=> (typeof propOwnerNote==="function") ? propOwnerNote(p) : "",
+    attachments: propOwnerAttachments(p),
+    attachmentsText: propAttachmentsText(p),
+    // record WHICH owner-sheet version this sheet was anchored against (transaction-derived)
+    metaExtra: propAnchorMetaExtra(p),
+    // clearing the base sheet also clears this prop's state-variant + in-hand sheets (no orphans)
+    relatedClearIds: ()=> [...(Array.isArray(p.states)?p.states:[]).map(s=> p.id+":"+s.id), p.id+":inhand"],
     buildEdit: (instr)=>
       "Edit this prop reference sheet for "+(p.name||"the object")+". "
       +"Apply ONLY this change: "+instr+". "
@@ -577,6 +906,15 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
   // sheet yet, generate it first (drafting the owner's spec if needed), THEN the prop —
   // so the owner sheet is present as a reference. No-op for ownerless / already-sheeted.
   const genWithOwner = React.useCallback(async (...a)=>{
+    // no silent WORLD-GENERIC sheets: an ownerless carried prop has no character
+    // anchor, so confirm before generating one by hand (batch skips these outright)
+    if((p.kind||"carried")==="carried" && !p.ownerId && typeof window.appConfirm==="function"){
+      const ok = await window.appConfirm({
+        title:"No owner \u2014 generate world-generic?",
+        body:(p.name||"This prop")+" isn't assigned to a character, so its sheet will be generated with no character anchor \u2014 generic world style, nothing that ties it to a person. Assign an owner first for a prop that belongs to someone.",
+        confirmLabel:"Generate anyway", cancelLabel:"Cancel" });
+      if(!ok) return false;
+    }
     if(onEnsureOwner){ try{ await onEnsureOwner(p); }catch(e){} }
     return gen.generate(...a);
   },[gen, onEnsureOwner, p]);
@@ -605,6 +943,47 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
     }
     wasGening.current = gen.gening;
   },[batchActiveId, gen.gening, p.id]);
+
+  // ANCHOR STALENESS — this sheet recorded the owner-sheet version it was generated
+  // against (meta.anchorIso). If the owner's sheet has been regenerated since, this
+  // prop is anchored to a previous plate: say so and offer a re-anchor regenerate.
+  const [anchorStale, setAnchorStale] = React.useState(false);
+  const [fitOpen, setFitOpen] = React.useState(false);   // the fitting view (owner sheet · prop sheet side by side)
+  React.useEffect(()=>{
+    let live = true;
+    if(!p.ownerId || !gen.genUrl || typeof nbLoadDetailsAsset!=="function"){ setAnchorStale(false); return; }
+    (async ()=>{
+      try{
+        const own = await nbLoadDetailsAsset(p.id);
+        const aIso = own && own.meta && own.meta.anchorIso;
+        const aOwner = own && own.meta && own.meta.anchorOwnerId;
+        if(!aIso || (aOwner && aOwner!==p.ownerId)){ if(live) setAnchorStale(false); return; }
+        const cur = await nbLoadDetailsAsset(p.ownerId);
+        const curIso = cur && cur.meta && cur.meta.iso;
+        if(live) setAnchorStale(!!(curIso && curIso!==aIso));
+      }catch(e){ if(live) setAnchorStale(false); }
+    })();
+    return ()=>{ live=false; };
+  },[p.id, p.ownerId, gen.genUrl]);
+
+  // APPEARANCE STATES — how this object changes along the story (crumpled, repaired,
+  // bloodied). A state applies from its pinned scene onward (activeStateForScene); shots
+  // from that scene on attach the state's variant sheet instead of the base (shotPropSheetId).
+  const states = Array.isArray(p.states) ? p.states : [];
+  const addState = ()=> onUpdate(p.id, { states:[...states, { id:"st-"+Date.now().toString(36), label:"New state", change:"", sceneId:"" }] });
+  const updateState = (id,patch)=> onUpdate(p.id, { states: states.map(s=>s.id===id?{...s,...patch}:s) });
+  const deleteState = (id)=>{
+    if(typeof nbClearAsset==="function") nbClearAsset(p.id+":"+id);
+    onUpdate(p.id, { states: states.filter(s=>s.id!==id) });
+  };
+
+  // CUSTODY — ordered handovers of this object between characters. The canonical owner
+  // (Owner field) holds it from the start; shots resolve the holder per scene
+  // (custodyOwnerAt) so one object can pass hands without rewriting its identity.
+  const custody = Array.isArray(p.custody) ? p.custody : [];
+  const addCustody = ()=> onUpdate(p.id, { custody:[...custody, { id:"cu-"+Date.now().toString(36), charId:"", charName:"", fromSceneId:"", note:"" }] });
+  const updateCustody = (id,patch)=> onUpdate(p.id, { custody: custody.map(e=>e.id===id?{...e,...patch}:e) });
+  const deleteCustody = (id)=> onUpdate(p.id, { custody: custody.filter(e=>e.id!==id) });
 
   // scenes this prop appears in, as {no,id} sorted by story order. A stored map wins;
   // an OWNED but never-mapped prop shows its derived owner-presence scenes instead
@@ -662,8 +1041,14 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
           React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(p)},
             React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft details"),
           window.QaCheckButton && React.createElement(window.QaCheckButton,{ gen:genForFrame, name:p.name, noun:"prop sheet",
-            specFields:()=>({ form:(p.form||""), material:(p.material||""), detail:(p.detail||""), size:(p.size||"") }),
+            specFields:()=>({ form:(p.form||""), material:(p.material||""), detail:(p.detail||""), size:(p.size||""), scale:(p.scale||"") }),
             onApplySpec:(patch)=>onUpdate(p.id, patch) }),
+          // FITTING — side-by-side owner sheet · prop sheet with an optional vision critique
+          (p.ownerId && gen.genUrl) && React.createElement("button",{className:"char-draft-btn ghost",
+            title:"Fitting view \u2014 "+(p.name||"the object")+" side by side with "+(p.ownerName||"its owner")+"\u2019s sheet, with an optional AI critique of whether they belong together",
+            onClick:()=>setFitOpen(true)},
+            React.createElement(Icon.box,{s:12}),"Fitting"),
+          fitOpen && React.createElement(PropFittingModal,{ p, propUrl:gen.genUrl, onClose:()=>setFitOpen(false) }),
           onTagOne && React.createElement("button",{className:"char-draft-btn ghost"+(taggingScene?" busy":""),disabled:!!taggingScene,onClick:()=>onTagOne(p),
             title:"Re-map which scenes this prop appears in \u2014 without re-drafting its spec. Use after the script changes."},
             React.createElement(Icon.layers,{s:12}), taggingScene?"Mapping\u2026":"Re-map scenes"))),
@@ -707,6 +1092,11 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
             title:"Merge all of these into THIS card \u2014 this card's art & spec are kept, their scenes are combined"},
             React.createElement(Icon.layers,{s:12}),"Merge \u2014 keep this card"))),
 
+      anchorStale && React.createElement("div",{className:"prompt-drift-note"},
+        (p.ownerName||"The owner")+"'s character sheet has changed since this sheet was generated \u2014 Regenerate to re-anchor it to the current one."),
+
+      React.createElement(PropInHandRow,{ p, project, onView }),
+
       React.createElement(CardFold,{label:"Object",defaultOpen:(!drafted && !!p.manual)},
         React.createElement("div",{className:"sheet-2col"},
           React.createElement("div",{className:"sheet-field"},
@@ -723,6 +1113,13 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
               React.createElement("option",{value:"carried"},"Carried"),
               React.createElement("option",{value:"worn"},"Worn"),
               React.createElement("option",{value:"dressing"},"Set dressing")))),
+        // RELATIONSHIP — one line on how the owner relates to this object; feeds the
+        // sheet prompt (condition/wear/repairs express it) and bakes into the owner's
+        // character sheet for worn items. Belonging = character truth, not just style.
+        p.ownerId && React.createElement(SheetField,{label:"Relationship \u2014 how "+(p.ownerName||"the owner")+" relates to it",value:p.relation,
+          placeholder:"treasured \u2014 a gift from her mother \u00b7 resented \u00b7 stolen \u00b7 inherited \u00b7 borrowed \u00b7 made it themselves\u2026",
+          title:"Feeds this prop's sheet prompt \u2014 its condition, wear and repairs express the relationship \u2014 and bakes into "+(p.ownerName||"the owner")+"'s character sheet for worn items.",
+          onCommit:val=>onUpdate(p.id,{relation:val})}),
         // FIXTURE OF — a set-dressing object belongs to a PLACE (it bakes into that
         // location's plate and inherits its render style). Auto = the one location
         // every mapped scene resolves to; pick explicitly for e.g. apartment furniture.
@@ -740,11 +1137,69 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
         // real-world measurement \u2014 the scale system sizes the object against the cast
         // in every shot from this ('Design all props' drafts it; edit to correct)
         React.createElement(SheetField,{label:"Physical size \u2014 full real-world dimensions",value:p.size,
-          placeholder:"~1.2 m tall \u00d7 ~60 cm wide \u00d7 ~45 cm deep \u00b7 or ~18 cm long \u00d7 ~7 cm diameter\u2026",onCommit:val=>onUpdate(p.id,{size:val})})),
+          placeholder:"~1.2 m tall \u00d7 ~60 cm wide \u00d7 ~45 cm deep \u00b7 or ~18 cm long \u00d7 ~7 cm diameter\u2026",onCommit:val=>onUpdate(p.id,{size:val})}),
+        // SCALE AGAINST THE OWNER — proportions relative to the body ("hangs to mid-
+        // thigh"); shot prompts carry it so the object never shrinks or grows next to them
+        p.ownerId && React.createElement(SheetField,{label:"Scale against "+(p.ownerName||"the owner"),value:p.scale,
+          placeholder:"hangs from her shoulder to mid-thigh \u00b7 the size of his forearm \u00b7 fills both hands\u2026",
+          title:"Proportions relative to the owner\u2019s body \u2014 shot prompts carry this so the object keeps its size next to them.",
+          onCommit:val=>onUpdate(p.id,{scale:val})})),
 
       React.createElement(CardFold,{label:"Significance",defaultOpen:false},
         React.createElement(SheetField,{label:"What it means in the story",value:p.detail,multiline:true,
           placeholder:"Why this object matters \u2014 what it represents, how it's used\u2026",onCommit:val=>onUpdate(p.id,{detail:val})})),
+
+      React.createElement(CardFold,{label:"Continuity \u00b7 appearance states",count:states.length||null,defaultOpen:false},
+        React.createElement("div",{className:"sheet-props-note"},
+          React.createElement(Icon.sparkles,{s:11}),
+          "How this object changes along the story \u2014 crumpled, repaired, bloodied, emptied. Each state can become its own v"+(states.length+2)+" sheet; shots from its pinned scene onward attach it automatically."),
+        React.createElement("div",{className:"state-actions"},
+          React.createElement("button",{className:"state-add-btn",onClick:addState},
+            React.createElement(Icon.plus,{s:12}),"Add state")),
+        states.length
+          ? React.createElement("div",{className:"state-list"},
+              React.createElement("div",{className:"state-row state-base"},
+                React.createElement("span",{className:"state-vtag base"},"v1"),
+                React.createElement("span",{className:"state-base-lab"},"Base condition \u2014 the canonical sheet above")),
+              states.map((st,i)=>React.createElement(PropStateRow,{key:st.id,p,st,index:i,project,scenes,
+                baseGenUrl:gen.genUrl,onView,
+                onChange:(patch)=>updateState(st.id,patch),onDelete:()=>deleteState(st.id)})))
+          : React.createElement("div",{className:"state-empty"},
+              "No appearance states yet \u2014 the base sheet covers the whole film. Add one where the object changes: a letter gets crumpled, a gun gets scratched, a bouquet wilts.")),
+
+      React.createElement(CardFold,{label:"Custody \u00b7 who holds it",count:custody.length||null,defaultOpen:false},
+        React.createElement("div",{className:"sheet-props-note"},
+          React.createElement(Icon.sparkles,{s:11}),
+          "Objects that CHANGE HANDS along the story \u2014 the letter passed to Diego at Sc 12. Shots resolve who actually holds it in each scene; the design, its sheets and its wear states stay anchored to the owner above."),
+        p.ownerId
+          ? React.createElement("div",{className:"state-actions"},
+              React.createElement("button",{className:"state-add-btn",onClick:addCustody},
+                React.createElement(Icon.plus,{s:12}),"Add handover"))
+          : React.createElement("div",{className:"state-hint"},
+              React.createElement(Icon.alert,{s:11}),
+              "Assign an owner above first \u2014 custody tracks where the object goes FROM them."),
+        React.createElement("div",{className:"state-row state-base"},
+          React.createElement("span",{className:"state-vtag base"},"start"),
+          React.createElement("span",{className:"state-base-lab"},(p.ownerName||"Unassigned")+" \u2014 holds it from the start")),
+        custody.map(e=>React.createElement("div",{key:e.id,className:"state-row"},
+          React.createElement("div",{className:"state-row-head"},
+            React.createElement(Icon.box,{s:12}),
+            React.createElement("select",{className:"prop-select",value:e.charId||"",
+              onChange:ev=>{ const ch=(characters||[]).find(x=>x.id===ev.target.value);
+                updateCustody(e.id,{charId:ev.target.value, charName:ch?ch.name:""}); }},
+              React.createElement("option",{value:""},"New holder\u2026"),
+              (characters||[]).filter(ch=>ch && ch.id!==p.ownerId)
+                .map(ch=>React.createElement("option",{key:ch.id,value:ch.id},ch.name||"Unnamed"))),
+            React.createElement("button",{className:"state-del",title:"Remove handover",onClick:()=>deleteCustody(e.id)},
+              React.createElement(Icon.x,{s:13}))),
+          React.createElement("div",{className:"sheet-field"},
+            React.createElement("div",{className:"obj-lab"},"Takes it from scene"),
+            React.createElement("select",{className:"prop-select",value:e.fromSceneId||"",onChange:ev=>updateCustody(e.id,{fromSceneId:ev.target.value})},
+              React.createElement("option",{value:""},"Not pinned"),
+              (scenes||[]).map(s=>React.createElement("option",{key:s.id,value:s.id},"Sc "+s.no+" \u00b7 "+s.title)))),
+          React.createElement(SheetField,{label:"How it changes hands",value:e.note,
+            placeholder:"Diego finds it on the desk \u00b7 Marisol presses it into his hands\u2026",
+            onCommit:val=>updateCustody(e.id,{note:val})})))),
 
       React.createElement(CardFold,{label:"Look dev",defaultOpen:false},
         React.createElement(SheetField,{label:"Render style \u2014 edit freely",value:p.renderStyle||d.renderStyle,multiline:true,
@@ -782,6 +1237,8 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
     ? (list[0].renderStyleKey||defaultStyleKey) : "";
   const propBibleOf = (p)=> [p.name&&("Name: "+p.name), p.ownerName&&("Owner: "+p.ownerName),
     p.form&&("Form: "+p.form), p.material&&("Material: "+p.material), p.detail&&("Significance: "+p.detail),
+    p.relation&&("Relationship: "+p.relation), p.scale&&("Scale against owner: "+p.scale),
+    (typeof custodyChainLabel==="function" && custodyChainLabel(p, ((window.turnContinuity||{}).scenes)||[])) && ("Custody: "+custodyChainLabel(p, ((window.turnContinuity||{}).scenes)||[])),
     (project&&project.genre)&&("Genre: "+project.genre)].filter(Boolean).join("\n");
   const applyStyleAll = async (key)=>{
     if(!key || allStyling) return;
@@ -857,6 +1314,8 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   // to the focused scene — they match the scene dropdown's "(N props)" — instead of
   // always showing the whole-film totals.
   const kindCountBase = (sceneFilter ? list.filter(p=>inScene(p, sceneFilter)) : list).filter(matchesQuery);
+  // carried props with no owner — they'd generate WORLD-GENERIC (no character anchor)
+  const unassignedCarried = list.filter(p=> kindOf(p)==="carried" && !p.ownerId);
   const shown = kindCountBase.filter(p=> !kindFilter || kindOf(p)===kindFilter);
   // 9-up pagination; suspended while a batch runs so the queue can reach every card
   const pager = usePager(shown.length, !!batchActiveId);
@@ -923,6 +1382,9 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
   // character prompt), so ONLY CARRIED and DRESSING props are generated as separate sheets
   // (a dressing sheet is optional — it can ride plate edits as a reference image).
   const draftedIds = (subset)=> subset.filter(p=>propVisualsDrafted(p) && p.kind!=="worn").map(p=>p.id);
+  // batch never makes a WORLD-GENERIC carried prop: an owned object needs its owner's
+  // sheet as the style anchor, so ownerless carried props are skipped (assign first)
+  const anchorReady = (p)=> !!(p && !((p.kind||"carried")==="carried" && !p.ownerId));
   const startSceneBatch = ()=>{
     if(!sceneFilter || batchActiveId) return;
     if(kindFilter) setKindFilter("");   // the scene batch covers ALL kinds in the scene
@@ -932,20 +1394,29 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
     // (setKindFilter only takes effect next render), so using it would run the batch on
     // just the filtered kind and mis-count the "already have a sheet" / skipped totals.
     const inSceneAll = list.filter(p=>inScene(p, sceneFilter));   // scene only — search cleared above
-    const eligible = draftedIds(inSceneAll);
+    const draftedScene = draftedIds(inSceneAll);
+    const eligible = draftedScene.filter(id=> anchorReady(byId[id]));
     if(!eligible.length){
       const nonWorn = inSceneAll.filter(p=>p.kind!=="worn");
-      batch.setMsg(!nonWorn.length
-        ? "Every prop mapped to this scene is WORN \u2014 worn items render on their owner\u2019s character sheet (Characters tab), not here. Nothing separate to generate."
-        : "Draft these props first (\u201cDraft details\u201d on each card) \u2014 nothing in this scene is ready to generate yet.");
+      batch.setMsg(draftedScene.length
+        ? "The drafted carried props in this scene have no owner \u2014 assign one on each card first (batch generation won't make world-generic sheets)."
+        : (!nonWorn.length
+          ? "Every prop mapped to this scene is WORN \u2014 worn items render on their owner\u2019s character sheet (Characters tab), not here. Nothing separate to generate."
+          : "Draft these props first (\u201cDraft details\u201d on each card) \u2014 nothing in this scene is ready to generate yet."));
       return;
     }
     batch.begin(eligible, inSceneAll.length - eligible.length);
   };
   const startAllBatch = ()=>{
     if(batchActiveId) return;
-    const eligible = draftedIds(list);
-    if(!eligible.length){ batch.setMsg("Draft the props first \u2014 nothing is ready to generate yet."); return; }
+    const draftedAll = draftedIds(list);
+    const eligible = draftedAll.filter(id=> anchorReady(byId[id]));
+    if(!eligible.length){
+      batch.setMsg(draftedAll.length
+        ? "Every drafted carried prop has no owner \u2014 assign one on each card first (batch generation won't make world-generic sheets)."
+        : "Draft the props first \u2014 nothing is ready to generate yet.");
+      return;
+    }
     // clear the SEARCH too, not just the scene/kind filters: the queue advances only
     // when the target CARD is mounted, so a batch whose first target was filtered out
     // by a search box never generated anything and hung until Cancel
@@ -980,6 +1451,11 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
             title:"Generate (or regenerate) the reference sheet for every drafted prop \u2014 you choose whether to redo ones that already have a sheet"},
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all props", typeof window.nbCostChip==="function" && window.nbCostChip(1))))),
     window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,onDraftOnly:onApplyLookbookDraftOnly,label:"these props",dept:"props"}),
+    unassignedCarried.length>0 && React.createElement("div",{className:"prompt-drift-note",style:{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}},
+      React.createElement("span",{style:{flex:1,minWidth:220}},
+        React.createElement("b",null,unassignedCarried.length+" carried prop"+(unassignedCarried.length!==1?"s":"")),
+        " ha"+(unassignedCarried.length!==1?"ve":"s")+" no owner \u2014 assign one on each card so its sheet is anchored to a character, not generated world-generic."),
+      React.createElement("button",{className:"char-draft-btn ghost",onClick:()=>setKindFilter("carried")},"Show carried")),
     BatchBar && React.createElement(BatchBar,{batch,noun:"prop"}),
     window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{items:trashItems,kind:"prop",onRestore,onPurge}),
     // free-text search — filter prop cards by name or owner as you type

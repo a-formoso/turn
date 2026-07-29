@@ -984,6 +984,16 @@ window.RenderStylePicker = RenderStylePicker;
    + accessories (continuity canon), height/scale, genre/period tone. NOTE
    "true-to-design anatomy", not "real human proportions" \u2014 the cast includes
    non-humans, and humanizing them is exactly the drift to avoid. */
+/* signature of the worn-prop text baked into a character sheet (name/form/material/
+   detail/relation per worn card). Stored in the sheet's image meta at generation; the
+   card compares it against the CURRENT cards afterwards — a difference means the sheet
+   was generated before a worn-prop edit and its baked accessories are stale. */
+function wornPropsSig(props, charId){
+  return (props||[]).filter(p=>p && p.ownerId===charId && p.kind!=="carried")
+    .map(p=>[p.name,p.form,p.material,p.detail,p.relation].map(x=>String(x||"").trim()).join("|"))
+    .sort().join(";;");
+}
+window.wornPropsSig = wornPropsSig;
 function buildCharRefPrompt(c, project, props){
   const P = project || {};
   const v = charVisualDefaults(c);
@@ -998,7 +1008,8 @@ function buildCharRefPrompt(c, project, props){
   const _norm = (s)=> String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
   const worn = (props||[]).filter(p=> p && p.ownerId===c.id && p.kind!=="carried" && clean(p.name));
   const propDesc = (p)=>{ const tail=[clean(p.form), clean(p.material)].filter(Boolean).join(", ");
-    return clean(p.name) + (tail ? (" ("+tail+")") : ""); };
+    const rel = clean(p.relation);   // how the owner relates to it — wear with a meaning
+    return clean(p.name) + (tail ? (" ("+tail+(rel?("; "+rel):"")+")") : (rel ? (" ("+rel+")") : "")); };
   const wornDescs = worn.map(propDesc).filter(Boolean);
   const wornKeys = new Set(worn.map(p=>_norm(p.name)));
   // CARRIED prop names never render on the neutral sheet (hands stay empty; they attach
@@ -1452,6 +1463,14 @@ function useImageGen(opts){
         editInstruction: isEditMode ? (gopts.editInstruction||"") : "",
         version: priorCount + 1
       };
+      // caller-supplied extra meta (e.g. a prop's owner-sheet anchor version, a
+      // character sheet's baked worn-prop signature) — powers the staleness badges
+      if(typeof opts.metaExtra==="function"){
+        try{ const extra = await opts.metaExtra({ mode, refsUsed, prompt: genPrompt });
+          if(extra && typeof extra==="object") Object.assign(meta, extra); }catch(e){}
+      }
+      // re-check cancel after the async meta work — a cancelled generate must never commit
+      if(window.__nbGenCancel && window.__nbGenCancel[id]) throw { __cancelled:true };
       const assetKind = (typeof slotAssetKind==="function") ? slotAssetKind(slotId) : "character";
       const saveResult = await nbCommit(id, url, meta, refsUsed, assetKind, _genEpoch);
       committedUrl = (saveResult && saveResult.url) || url;
@@ -2787,6 +2806,10 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
   /* props this character owns (carried/worn) — their generated sheets become extra
      visual references when generating this character's sheet */
   const ownedProps = (props||[]).filter(p=>p.ownerId===c.id);
+  /* CUSTODY handovers TO this character (canonical owner is someone else) — informational
+     chips only; the prop's card, sheets and style anchor stay with its owner. */
+  const custodyProps = (props||[]).filter(p=> p && p.ownerId && p.ownerId!==c.id
+    && Array.isArray(p.custody) && p.custody.some(e=>e && e.charId===c.id));
   // Only WORN props become part of the character SHEET (glasses, coat, watch — the
   // permanent look). CARRIED props (phone, gun, pills) are situational, so they're
   // attached at the SHOT level instead, never baked into the neutral turnaround.
@@ -2861,6 +2884,23 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
     }
     return out;
   };
+  // WORN-PROP STALENESS — the sheet meta recorded wornPropsSig at generation; if a worn
+  // card's form/material/detail/relation changed since, the baked accessories on this
+  // sheet are out of date (the canon desynced): say so and offer a re-bake regenerate.
+  const [wornStale, setWornStale] = React.useState(false);
+  React.useEffect(()=>{
+    let live = true;
+    if(!gen.genUrl || typeof nbLoadDetailsAsset!=="function" || typeof wornPropsSig!=="function"){ setWornStale(false); return; }
+    (async ()=>{
+      try{
+        const d = await nbLoadDetailsAsset(c.id);
+        const baked = d && d.meta && d.meta.wornSig;
+        if(!baked){ if(live) setWornStale(false); return; }
+        if(live) setWornStale(baked !== wornPropsSig(wornProps, c.id));
+      }catch(e){ if(live) setWornStale(false); }
+    })();
+    return ()=>{ live=false; };
+  },[c.id, gen.genUrl, wornPropsSig(wornProps, c.id)]);   // recompute on ANY worn-card change (rename included)
   /* which owned props currently have a generated sheet (for the linked-props indicator) */
   const [ownedSheetMap, setOwnedSheetMap] = React.useState({});
   const [sheetTick, setSheetTick] = React.useState(0);   // bump to re-check sheet presence
@@ -2977,6 +3017,9 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
     buildFromPhoto: ()=> buildRefFromPhotoPrompt(c, project),
     buildSimple: ()=> (typeof buildSimpleCharPrompt==="function") ? buildSimpleCharPrompt(c) : finalPrompt,
     attachments: wornProps.length ? collectAttachments : null,
+    // record WHICH worn-prop text was baked into this sheet — the card's stale badge
+    // compares it against the current cards (edits after generation desync the canon)
+    metaExtra: ()=>({ wornSig: (typeof wornPropsSig==="function") ? wornPropsSig(wornProps, c.id) : "" }),
     /* warn-and-confirm: if any linked prop has no sheet, it'll be drawn from text
        only (not a locked reference). Three choices: generate the missing prop sheets
        inline first (no tab switch), continue without, or cancel. */
@@ -3152,6 +3195,9 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
         React.createElement("button",{className:"scs-act",onClick:()=>setCameoOpen(true)},"Recapture"),
         React.createElement("button",{className:"scs-act danger",onClick:removeCameo},"Remove")),
 
+      wornStale && React.createElement("div",{className:"prompt-drift-note"},
+        "A worn item's prop card changed since this sheet was generated \u2014 its baked accessories are out of date. Regenerate to re-bake them."),
+
       !drafted && !gen.genUrl && React.createElement("div",{className:"sheet-undrafted"},
         React.createElement(Icon.alert,{s:13}),
         React.createElement("span",null,"Visuals not drafted yet \u2014 click ",
@@ -3241,6 +3287,16 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
             onItemRemoved: onRemoveOwnedItem ? (txt=>onRemoveOwnedItem(c.id,txt)) : null,
             onItemRenamed: onRenameOwnedItem ? ((oldTxt,newTxt)=>onRenameOwnedItem(c.id,oldTxt,newTxt)) : null,
             placeholder:"Recurring objects \u2014 phone, weapon, talisman\u2026",onCommit:val=>onUpdate(c.id,{props:val})})),
+        custodyProps.length>0 && React.createElement("div",{className:"linked-prop-list"},
+          custodyProps.map(p=>{
+            const e = (p.custody||[]).filter(x=>x && x.charId===c.id).slice(-1)[0];
+            const sc = (scenes||[]).find(s=>s.id===(e&&e.fromSceneId));
+            return React.createElement("div",{key:"cu-"+p.id,className:"linked-prop shot",
+              title:"Custody handover \u2014 "+(p.name||"the object")+" passes from "+(p.ownerName||"its owner")+" to "+(c.name||"this character")+(sc&&sc.no!=null?(" at Sc "+sc.no):"")+". Its card and sheets stay anchored to "+(p.ownerName||"the owner")+" in the Props tab."},
+              React.createElement(Icon.box,{s:12}),
+              React.createElement("span",{className:"linked-prop-name"},p.name),
+              React.createElement("span",{className:"linked-prop-orphan-tag"},"from "+(p.ownerName||"owner")+(sc&&sc.no!=null?(" \u00b7 Sc "+sc.no):"")));
+          })),
         linkedRows.length>0 && React.createElement("div",{className:"linked-props"},
           React.createElement("div",{className:"linked-props-head"},
             React.createElement("div",{className:"obj-lab",style:{margin:0}},
