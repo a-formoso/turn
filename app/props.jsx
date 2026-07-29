@@ -802,7 +802,7 @@ function PropSheets({ project, props, characters, scenes, drafts, onUpdate, onDr
         if(r) onUpdate(need[i].id, { surpriseRender:r, renderStyle:r.style }); }catch(e){} }
     setAllStyling(null);
   };
-  const sceneList = (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const sceneList = scenesInStoryOrder(scenes);
   // EFFECTIVE scene map. A prop seeded from the cast may never have been scene-mapped
   // (p.scenes === undefined) — those used to silently vanish from every scene focus
   // and from the dropdown counts, while still showing under "All scenes" (the

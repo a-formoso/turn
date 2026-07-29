@@ -974,7 +974,16 @@ async function proxyGenerate(prompt, opts, provider){
     const _safe = window.turnSafeError || (x=>x);
     if(status===404) throw new Error(_safe("The image proxy isn't deployed yet. Deploy supabase/functions/image-proxy and set imageProxy:true in supabase-config.js."));
     if(status===504) throw new Error("The image generation exceeded the server time limit. Cinema Machine preserved your selected quality and resolution; try again, or manually choose a faster setting if you prefer.");
-    if(status===502 || status===503) throw new Error("The image server took too long or is temporarily unavailable. High-quality GPT Image renders can take several minutes — try again, or drop the quality/resolution a notch for a faster render.");
+    if(status===502 || status===503){
+      // the function relays the SPECIFIC upstream reason in its JSON body ("Proxy
+      // failed to reach fal: <cause>") — surface it instead of swallowing it behind
+      // the generic advice, or every failure looks identical and undebuggable.
+      let relayed = "";
+      try{ const j = error.context && await error.context.json(); relayed = (j && (j.error || j.message)) || ""; }catch(e){}
+      throw new Error("The image server took too long or is temporarily unavailable."
+        + (relayed ? " Server said: "+_safe(relayed)
+                   : " High-quality GPT Image renders can take several minutes — try again, or drop the quality/resolution a notch for a faster render."));
+    }
     throw new Error(_safe("Couldn't reach the image proxy: "+((error && error.message) || "unknown error")+"."));
   }
   if(data && data.error){

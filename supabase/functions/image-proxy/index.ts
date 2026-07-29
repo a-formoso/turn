@@ -254,12 +254,19 @@ Deno.serve(async (req) => {
     const bucket = Deno.env.get("TURN_BUCKET") || "turn-assets";
     const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(36).slice(2)).replace(/-/g, "");
     const path = `${authUser.id}/stage-tmp/${Date.now()}-${kind}-${idx}-${id}.${mediaExt(blob.type || "")}`;
-    const up = await sbAuth.storage.from(bucket).upload(path, blob, {
+    // Staging uses the SERVICE-ROLE client, not the user-scoped sbAuth: auth and the
+    // entitlement gate have already run above, and user-client storage writes depend
+    // on the live RLS policies on storage.objects — a missing/drifted insert policy
+    // turns EVERY generation with reference inputs into "new row violates row-level
+    // security policy". Service role bypasses RLS; the path still scopes the file to
+    // the user's own folder, and signed URLs expire after 1h.
+    const sbStage = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const up = await sbStage.storage.from(bucket).upload(path, blob, {
       contentType: blob.type || "application/octet-stream",
       upsert: false,
     });
     if (up.error) throw new Error(`Could not stage ${kind} input for generation: ${up.error.message || "storage upload failed"}`);
-    const signed = await sbAuth.storage.from(bucket).createSignedUrl(path, 3600);
+    const signed = await sbStage.storage.from(bucket).createSignedUrl(path, 3600);
     if (signed.error || !signed.data?.signedUrl) throw new Error(`Could not sign staged ${kind} input for generation.`);
     return signed.data.signedUrl;
   };
@@ -909,7 +916,10 @@ Deno.serve(async (req) => {
         method: "POST",
         headers: falHead,
         body: JSON.stringify(input),
-        signal: AbortSignal.timeout(380000),
+        // enqueue is a single POST — 30s is generous. The old 380s budget could
+        // outlive the Supabase gateway's ~150s wall-clock: the isolate was then
+        // hard-killed and the client got an opaque 502/503 instead of a real error.
+        signal: AbortSignal.timeout(30000),
       });
       if (!submit.ok) return json({ error: await falErr(submit), status: submit.status }, 200);
       let result: any = await submit.json();
@@ -919,7 +929,12 @@ Deno.serve(async (req) => {
         const responseUrl = String(result.response_url || "");
         if (!okFalHost(statusUrl) || !okFalHost(responseUrl)) return json({ error: "Bad fal image response URLs." }, 200);
         let completed = false;
-        for (let i = 0; i < 190; i++) {
+        // POLL BUDGET: 60 × 2s ≈ 2 min — safely under the gateway's ~150s wall-clock.
+        // The old 190-iteration loop (~6.3 min) could never complete: the gateway
+        // killed the isolate first, surfacing as an unexplained 502/503 client-side.
+        // Renders that exceed the budget now return this function's OWN descriptive
+        // "took too long" error instead of dying silently.
+        for (let i = 0; i < 60; i++) {
           const sr = await fetch(statusUrl, { headers: { "Authorization": "Key " + falKey } });
           if (!sr.ok) return json({ error: await falErr(sr), status: sr.status }, 200);
           const sd = await sr.json();
@@ -934,7 +949,7 @@ Deno.serve(async (req) => {
           if (st === "FAILED" || st === "ERROR") return json({ error: sd?.error || sd?.detail || "fal image generation failed." }, 200);
           await wait(2000);
         }
-        if (!completed) return json({ error: "fal.ai image generation took too long to complete." }, 200);
+        if (!completed) return json({ error: "fal.ai's render queue is congested — the image didn't finish within the server's time budget. Try again in a minute, or drop the quality/resolution a notch for a faster render." }, 200);
       }
 
       const imageList = Array.isArray(result?.images) ? result.images
@@ -958,7 +973,7 @@ Deno.serve(async (req) => {
       return await finishImage({ b64: arrayBufferToBase64(await ir.arrayBuffer()), mime, falModel: endpoint, grounded: !!groundSearch }, "fal", model);
     } catch (e) {
       if ((e as any)?.name === "TimeoutError")
-        return json({ error: "fal.ai took too long to answer (over 6 minutes) — the request was cancelled server-side. Try again, or choose a faster quality/resolution." }, 200);
+        return json({ error: "fal.ai's queue didn't accept the submission within 30s — the request was cancelled server-side. Try again, or choose a faster quality/resolution." }, 200);
       return json({ error: "Proxy failed to reach fal: " + ((e as any)?.message || e) }, 502);
     }
   }

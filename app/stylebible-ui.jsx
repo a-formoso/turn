@@ -111,7 +111,7 @@ function SbMetaRow({ k, v }){
    gradient (its dominant alone is often near-black, so cells would look identical). */
 function StyleFilmStrip({ scenes, project, presets, onSetScenePreset }){
   const { sceneStyles } = styleBibleOf(project);
-  const sorted = (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const sorted = scenesInStoryOrder(scenes);
   const presetOf = (pid)=> presets.find(x=>x.id===pid) || null;
   const swatchOf = (p)=>{ const pal=(p&&p.palette)||[]; return pal.length>=3
     ? `linear-gradient(135deg, ${pal[0]} 0%, ${pal[1]} 55%, ${pal[2]} 100%)` : (pal[0]||null); };
@@ -167,7 +167,7 @@ function StyleFilmStrip({ scenes, project, presets, onSetScenePreset }){
 
 function StyleBibleModal({ project, scenes, onClose, onAssign, assigning }){
   const { presets, sceneStyles } = styleBibleOf(project);
-  const scenesFor = (pid)=> (scenes||[]).filter(s=>sceneStyles[s.id]===pid).sort((a,b)=>(a.no||0)-(b.no||0));
+  const scenesFor = (pid)=> scenesInStoryOrder((scenes||[]).filter(s=>sceneStyles[s.id]===pid));
   const assignedCount = (scenes||[]).filter(s=>sceneStyles[s.id]).length;
   return React.createElement("div",{className:"lb-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
     React.createElement("div",{className:"sb-panel"},
@@ -310,7 +310,7 @@ window.InfoTip = InfoTip;
    (scene-level, the source of truth); characters / locations / shots merely READ it. */
 function StyleBibleView({ project, scenes, onAssign, assigning, onSetRefs, onSetScenePreset, onAddRefImages, onRemoveRefImage, onColorist, lookbookStale, onApplyLookbook }){
   const { presets, sceneStyles, refs, refImages } = styleBibleOf(project);
-  const scenesFor = (pid)=> (scenes||[]).filter(s=>sceneStyles[s.id]===pid).sort((a,b)=>(a.no||0)-(b.no||0));
+  const scenesFor = (pid)=> scenesInStoryOrder((scenes||[]).filter(s=>sceneStyles[s.id]===pid));
   const assignedCount = (scenes||[]).filter(s=>sceneStyles[s.id]).length;
   return React.createElement("div",{className:"art-scroll"},
     React.createElement("div",{className:"art-intro"},

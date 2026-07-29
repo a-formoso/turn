@@ -800,7 +800,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     foldSeeded.current = true;
     if(Object.keys(collapsed).length) return;   // the user has a real fold state already
     const m = {};
-    (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0)).forEach((s,i)=>{ if(i>0) m[s.id]=true; });
+    scenesInStoryOrder(scenes).forEach((s,i)=>{ if(i>0) m[s.id]=true; });
     setCollapsed(m);
   },[(scenes||[]).length]);
 
@@ -838,7 +838,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   const ctxFor = (scene)=>({ scene, location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null,
     charById, propById, project, locations:locations||[] });
 
-  const ordered = React.useMemo(()=> (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0)),[scenes]);
+  const ordered = React.useMemo(()=> scenesInStoryOrder(scenes),[scenes]);
   const shotsByScene = React.useMemo(()=>{ const m={}; (shots||[]).forEach(s=>{ (m[s.sceneId]=m[s.sceneId]||[]).push(s); });
     Object.values(m).forEach(arr=>arr.sort((a,b)=>(a.order||0)-(b.order||0) || (a.beatN||0)-(b.beatN||0))); return m; },[shots]);
   const scenesWithShots = ordered.filter(s=>(shotsByScene[s.id]||[]).length);

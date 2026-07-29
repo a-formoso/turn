@@ -114,22 +114,16 @@ function splitCompoundPlace(place){
   return String(place||"").split(/\s*\/\s*/).map(x=>x.trim()).filter(Boolean);
 }
 
-/* Derive canonical master locations from screenplay scene headings.
-   Groups scenes by a normalised key on the PRIMARY place so "NEBUCHADNEZZAR · CORE"
-   and "NEBUCHADNEZZAR · TRAINING" land under one "Nebuchadnezzar" (areas recorded).
-   Secondary headings inside the screenplay also create master cards; implied rooms,
-   sides and threshold spaces inside action prose are handled by coverage sheets on
-   the relevant master card. Returns new location objects only (deduped against
-   `existing`). */
-function deriveLocations(scenes, existing, drafts){
-  const have = existing || [];
-  const seen = new Set(have.map(l=>l.key || locSlug(l.name)));
-  const order = []; const byKey = {};
+/* Collect every slugged place record + entry from screenplay headings — shared
+   by deriveLocations (master cards) and deriveSubspaceFold (sub-space grouping).
+   A scene's own slugline is read PLUS any secondary (mid-scene) sluglines the
+   draft carries — a chase that cuts INT. HALL → EXT. ROOF names real places.
+   INTERCUT lines are skipped (they reference already-slugged places, they don't
+   introduce one). */
+function collectSluggedPlaces(scenes, drafts){
+  const recOrder = []; const recByKey = {}; const entries = [];
   (scenes||[]).forEach(sc=>{
-    // the scene's own slugline, PLUS any secondary (mid-scene) sluglines the draft
-    // carries — a chase that cuts INT. HALL → EXT. ROOF names real places that need
-    // location cards too. INTERCUT lines are skipped (they reference already-slugged
-    // places, they don't introduce one).
+    if(!sc) return;
     const slugTexts = [sc.loc];
     const dBlocks = drafts && drafts[sc.id] && drafts[sc.id].blocks;
     if(Array.isArray(dBlocks)) dBlocks.forEach(b=>{
@@ -137,24 +131,118 @@ function deriveLocations(scenes, existing, drafts){
         slugTexts.push(b.text);
     });
     slugTexts.forEach(slugText=>{
-    const parsed = parseSlugline(slugText);
-    if(!parsed) return;
-    const places = splitCompoundPlace(parsed.place);
-    const primary = tidyPlace(places[0]);
-    const key = locSlug(primary.split(/[\u00b7\u2014,]/)[0]).split("-").slice(0,4).join("-");
-    if(!key) return;
-    if(!byKey[key]){ byKey[key] = {
-      key, name: primary.split(/[\u00b7\u2014]/)[0].trim(),
-      intExt: parsed.intExt, times: new Set(), areas: new Set(), scenes: [],
-    }; order.push(key); }
-    const L = byKey[key];
-    if(parsed.time) L.times.add(parsed.time);
-    const areaTail = primary.split(/\u00b7/).slice(1).join(" \u00b7 ").trim();
-    if(areaTail) L.areas.add(areaTail);
-    places.slice(1).forEach(p=> L.areas.add(tidyPlace(p)));
-    if(sc.id && L.scenes.indexOf(sc.id)<0) L.scenes.push(sc.id);
-    if(parsed.intExt && L.intExt && parsed.intExt!==L.intExt) L.intExt = "INT/EXT";
+      const parsed = parseSlugline(slugText);
+      if(!parsed) return;
+      const places = splitCompoundPlace(parsed.place);
+      const primary = tidyPlace(places[0]);
+      const key = locSlug(primary.split(/[\u00b7\u2014,]/)[0]).split("-").slice(0,4).join("-");
+      if(!key) return;
+      if(!recByKey[key]){ recByKey[key] = { key, name:primary.split(/[\u00b7\u2014]/)[0].trim(), scenes:[] }; recOrder.push(key); }
+      const R = recByKey[key];
+      if(sc.id && R.scenes.indexOf(sc.id)<0) R.scenes.push(sc.id);
+      entries.push({ key, sc, parsed, places, primary });
     });
+  });
+  return { recOrder, recByKey, entries };
+}
+
+/* SUB-SPACE FOLD — "INT. INTAKE BOOTH - NIGHT" inside a scene that also visits
+   "EXT. INTAKE YARD - NIGHT": the booth is a sub-structure of the yard complex,
+   not a master location of its own. A slugged place folds under a parent place
+   when its name carries a sub-structure noun (booth, kiosk, gatehouse, office,
+   cabin…), shares its FIRST name token with the parent (same named complex),
+   and never appears in a scene the parent doesn't. Generic rooms / halls / cars
+   do NOT fold — a police car is not the police station; compound sluglines
+   ("PARENT · ROOM") remain the way to group those. The sub-place keeps its own
+   slugline unit and stable unit key; only master-card grouping moves. */
+const SUBSPACE_TAIL = /\b(?:booth|kiosk|gatehouse|cabin|hut|shed|stall|office|annex|porch|garage|workshop)\b/i;
+function foldSubspaceKeys(recs){
+  const headTok = (n)=> String(n||"").trim().split(/\s+/)[0].toLowerCase();
+  const low = (n)=> String(n||"").trim().toLowerCase();
+  /* RULE B — PREFIX CONTAINMENT: "PARENT - AREA" / "PARENT AREA" names an area OF
+     the parent by construction ("E-waste Canals - Flooded Junction" ⊂ "E-waste
+     Canals"). The name itself declares containment, so no scene-subset or lexicon
+     is required; a trailing name boundary is, so "Yardbird" never folds under "Yard". */
+  const startsArea = (subN, parN)=>{
+    if(!parN || subN===parN || subN.indexOf(parN)!==0) return false;
+    const rest = subN.slice(parN.length);
+    return /^\s*[-\u00b7\u2014,]/.test(rest) || /^\s/.test(rest);
+  };
+  const out = {};
+  (recs||[]).forEach(sub=>{
+    if(!sub || !sub.key) return;
+    // RULE A — SUB-STRUCTURE NOUN + shared first token + scene containment
+    // ("Intake Booth" only ever plays inside scenes that also visit "Intake Yard").
+    if(SUBSPACE_TAIL.test(sub.name)){
+      const tok = headTok(sub.name);
+      if(tok){
+        const parents = (recs||[]).filter(p=> p && p.key!==sub.key
+          && !SUBSPACE_TAIL.test(p.name)
+          && headTok(p.name)===tok
+          && sub.scenes.every(sid=> p.scenes.indexOf(sid)>=0));
+        if(parents.length){
+          parents.sort((a,b)=> b.scenes.length - a.scenes.length);   // the most-visited sibling is the complex's master
+          out[sub.key] = parents[0].key;
+          return;
+        }
+      }
+    }
+    // RULE B — longest matching prefix parent wins; chains ("A - B - C" under
+    // "A - B" under "A") resolve transitively when the fold is applied.
+    const prefixes = (recs||[]).filter(p=> p && p.key!==sub.key && startsArea(low(sub.name), low(p.name)));
+    if(prefixes.length){
+      prefixes.sort((a,b)=> String(b.name||"").length - String(a.name||"").length);
+      out[sub.key] = prefixes[0].key;
+    }
+  });
+  return out;
+}
+/* chase a fold chain to its ultimate master, with a cycle guard */
+function resolveFoldKey(fold, key){
+  const seen = {}; let cur = key;
+  while(fold[cur] && !seen[cur]){ seen[cur] = true; cur = fold[cur]; }
+  return cur;
+}
+function deriveSubspaceFold(scenes, drafts){
+  const c = collectSluggedPlaces(scenesInStoryOrder(scenes), drafts);
+  const fold = foldSubspaceKeys(c.recOrder.map(k=>c.recByKey[k]));
+  const resolved = {};
+  Object.keys(fold).forEach(k=>{ resolved[k] = resolveFoldKey(fold, k); });
+  return resolved;
+}
+window.deriveSubspaceFold = deriveSubspaceFold;
+
+/* Derive canonical master locations from screenplay scene headings.
+   Groups scenes by a normalised key on the PRIMARY place so "NEBUCHADNEZZAR · CORE"
+   and "NEBUCHADNEZZAR · TRAINING" land under one "Nebuchadnezzar" (areas recorded).
+   Secondary headings inside the screenplay also create master cards; implied rooms,
+   sides and threshold spaces inside action prose are handled by coverage sheets on
+   the relevant master card. Sub-structure places (booth, kiosk…) fold under their
+   complex's master via the sub-space fold. Returns new location objects only
+   (deduped against `existing`). */
+function deriveLocations(scenes, existing, drafts){
+  scenes = scenesInStoryOrder(scenes);
+  const have = existing || [];
+  const seen = new Set(have.map(l=>l.key || locSlug(l.name)));
+  const c = collectSluggedPlaces(scenes, drafts);
+  const fold = foldSubspaceKeys(c.recOrder.map(k=>c.recByKey[k]));
+  const order = []; const byKey = {};
+  c.entries.forEach(e=>{
+    const parentKey = resolveFoldKey(fold, e.key);
+    const parentRec = c.recByKey[parentKey];
+    if(!parentRec) return;
+    if(!byKey[parentKey]){ byKey[parentKey] = {
+      key:parentKey, name: parentRec.name,
+      intExt: e.parsed.intExt, times: new Set(), areas: new Set(), scenes: [],
+    }; order.push(parentKey); }
+    const L = byKey[parentKey];
+    if(fold[e.key]) L.areas.add(e.primary.split(/[\u00b7\u2014]/)[0].trim());   // folded sub-structure recorded as an area of its parent
+    if(e.parsed.time) L.times.add(e.parsed.time);
+    const areaTail = e.primary.split(/\u00b7/).slice(1).join(" \u00b7 ").trim();
+    if(areaTail) L.areas.add(areaTail);
+    e.places.slice(1).forEach(p=> L.areas.add(tidyPlace(p)));
+    if(e.sc.id && L.scenes.indexOf(e.sc.id)<0) L.scenes.push(e.sc.id);
+    if(e.parsed.intExt && L.intExt && e.parsed.intExt!==L.intExt) L.intExt = "INT/EXT";
   });
   const out = [];
   order.forEach(key=>{
@@ -193,6 +281,7 @@ window.locSlug = locSlug;
    Pure + deterministic: returns skeleton descriptors in first-appearance order.
    User edits / appearance state / generated images reconcile ON TOP by unit key. */
 function deriveSluglineUnits(scenes, drafts){
+  scenes = scenesInStoryOrder(scenes);
   const order = []; const byKey = {};
   /* character-name exclusion set for dressing candidates — screenplay convention
      capitalizes cast names in action prose, so every char cue (plus its
@@ -283,6 +372,19 @@ function deriveSluglineUnits(scenes, drafts){
     });
     closeOcc(blocks.length);
   });
+  /* SUB-SPACE FOLD — a unit's own identity (place × side × bucket, and its stable
+     overlay key) never changes, but its master-card grouping follows the complex
+     it belongs to: the Intake Booth unit renders INSIDE the Intake Yard card
+     instead of a booth card of its own. */
+  const placeRecs = {};
+  order.forEach(k=>{ const u = byKey[k];
+    const pk = locSlug(u.place.split(/[\u00b7\u2014,]/)[0]).split("-").slice(0,4).join("-");
+    if(!placeRecs[pk]) placeRecs[pk] = { key:pk, name:String(u.place).split(/[\u00b7\u2014]/)[0].trim(), scenes:[] };
+    u.scenes.forEach(sid=>{ if(placeRecs[pk].scenes.indexOf(sid)<0) placeRecs[pk].scenes.push(sid); }); });
+  const unitFold = foldSubspaceKeys(Object.values(placeRecs));
+  order.forEach(k=>{ const u = byKey[k];
+    const pk = locSlug(u.place.split(/[\u00b7\u2014,]/)[0]).split("-").slice(0,4).join("-");
+    if(unitFold[pk]) u.locationKey = resolveFoldKey(unitFold, pk); });
   order.forEach(k=>{
     const u = byKey[k];
     let txt = "", act = "";
@@ -570,12 +672,23 @@ window.locationScreenplayReferenceImages = locationScreenplayReferenceImages;
 window.locationScreenplayReferenceImage = locationScreenplayReferenceImage;
 function locationMasterPanelPlan(l, scenes, drafts){
   const sheets = (typeof deriveLocationCoverageSheets==="function") ? deriveLocationCoverageSheets(l, scenes||[], drafts||{}) : [];
-  const roles = sheets.map(s=>String(s.role||"").toUpperCase());
+  /* Slugline units supersede legacy side coverage sheets, so sheets alone can no
+     longer tell us whether the master location spans INT + EXT. Read the current
+     screenplay units too: they are the source of truth for explicitly slugged
+     spaces and preserve the scene-specific TOD separately from this neutral master. */
+  const units = (typeof deriveSluglineUnits==="function")
+    ? deriveSluglineUnits(scenes||[], drafts||{}).filter(u=>u && String(u.locationKey||"")===String(l.key||""))
+    : [];
+  const roles = sheets.map(s=>String(s.role||"").toUpperCase())
+    .concat(units.map(u=>String(u.intExt||"").toUpperCase()));
   const mixed = roles.indexOf("INT")>=0 && roles.indexOf("EXT")>=0;
   if(!mixed) return null;
-  const firstRole = String((sheets[0]&&sheets[0].role)||"EXT").toUpperCase();
-  const extName = (sheets.find(s=>String(s.role).toUpperCase()==="EXT")||{}).name || ((l&&l.name)||"Location")+" Exterior";
-  const intName = (sheets.find(s=>String(s.role).toUpperCase()==="INT")||{}).name || ((l&&l.name)||"Location")+" Interior";
+  const ordered = units.length ? units : sheets;
+  const firstRole = String((ordered[0]&&(ordered[0].intExt||ordered[0].role))||"EXT").toUpperCase();
+  const extName = (units.find(u=>String(u.intExt).toUpperCase()==="EXT")
+    || sheets.find(s=>String(s.role).toUpperCase()==="EXT")||{}).name || ((l&&l.name)||"Location")+" Exterior";
+  const intName = (units.find(u=>String(u.intExt).toUpperCase()==="INT")
+    || sheets.find(s=>String(s.role).toUpperCase()==="INT")||{}).name || ((l&&l.name)||"Location")+" Interior";
   const threshold = "the visible threshold/sightline relationship between "+extName+" and "+intName+" — windows, glass, doors, booth walls, openings, approach path and eyeline geometry must line up";
   if(firstRole==="INT") return {
     layout: "exactly 4 views in a 2x2 grid, planned from the screenplay's first playable space",
@@ -587,7 +700,7 @@ function locationMasterPanelPlan(l, scenes, drafts){
   };
   return {
     layout: "exactly 4 views in a 2x2 grid, planned from the screenplay's first playable space",
-    top_left: "EXTERIOR wide establishing view of "+extName+" because the scene opens outside — show the whole playable geography, approach, ground plane, weather and major landmarks",
+    top_left: "EXTERIOR wide establishing view of "+extName+" because the scene opens outside — show the whole playable geography, approach, ground plane and permanent major landmarks in neutral continuity conditions",
     top_right: "EXTERIOR-to-INTERIOR relationship view: "+threshold,
     bottom_left: "INTERIOR establishing view of "+intName+" — the empty room/subspace the script later plays inside, with working surfaces and openings",
     bottom_right: "key close/detail from the screenplay that proves the location can stage the action: terminal, desk, counter, rack, window/glass, doorway or other named functional feature",
@@ -615,10 +728,15 @@ function deriveLocationCoverageSheets(l, scenes, drafts, allLocations, units){
      records that can drift apart. Skip any sub-space that is now a location. */
   const _allLocs = Array.isArray(allLocations) ? allLocations
     : (((window.turnContinuity||{}).locations) || []);
+  const _units = units || ((window.turnContinuity||{}).sluglineUnits) || [];
   const _isRealLocation = (nm)=>{
     const n = String(nm||"").trim().toLowerCase();
     if(!n) return false;
-    return _allLocs.some(x=> x && x.id!==l.id && String(x.name||"").trim().toLowerCase()===n);
+    return _allLocs.some(x=> x && x.id!==l.id && String(x.name||"").trim().toLowerCase()===n)
+      /* a slugged sub-space folds under its parent's master card — it has no card
+         of its own anymore, but its slugline UNIT is still the real record, so a
+         stand-in coverage sheet must not be derived for it either. */
+      || _units.some(u=> u && !u.orphan && String(u.place||u.name||"").trim().toLowerCase()===n);
   };
   const clean = (s,n)=>{ const x=String(s||"").replace(/\s+/g," ").trim();
     return (typeof clipWords==="function") ? clipWords(x,n||180) : x.slice(0,n||180); };
@@ -676,7 +794,6 @@ function deriveLocationCoverageSheets(l, scenes, drafts, allLocations, units){
        real SLUGGED space (with its own time bucket and appearance state) — deriving
        an INT/EXT side sheet for it too would design the same side twice from two
        records that can drift apart. Sheets remain for IMPLIED, unslugged spaces. */
-    const _units = units || ((window.turnContinuity||{}).sluglineUnits) || [];
     const _unitCovers = (role)=> _units.some(x=> x && !x.orphan && x.locationKey===l.key
       && String(x.intExt||"").toUpperCase()===role);
     if(mixedSides && /EXT/.test(sceneRole) && !_unitCovers("EXT")){
@@ -711,7 +828,10 @@ function deriveLocationCoverageSheets(l, scenes, drafts, allLocations, units){
         baseOrder + hitIndex + 1, s, locationScriptExcerpt(s, drafts, hitIndex));
     }
     const exteriorCueIdx = entry.scan.search(/\b(?:outside|exterior|facade|front|street|yard|parking|through\s+(?:the\s+)?window|through\s+(?:the\s+)?glass)\b/i);
-    if(/INT/.test(sceneRole) && exteriorCueIdx>=0){
+    /* unit precedence applies here too: a slugged EXT unit already covers this
+       master's exterior — the cue (often just the place name echoed inside the
+       scene's own slugline) must not duplicate it as a stand-in sheet. */
+    if(/INT/.test(sceneRole) && exteriorCueIdx>=0 && !_unitCovers("EXT")){
       add("EXT", baseName+" Exterior",
         "Exterior coverage required by the screenplay: the scene looks out from the interior or cuts to the outside of this place. Render the empty exterior/facade, approach, openings and sightline back toward the interior.",
         ["outside","exterior","facade","front","street","yard","window","glass"],
@@ -1086,7 +1206,10 @@ function buildLocationRefPrompt(l, project, opts){
   const period = P.setting && P.setting.period ? P.setting.period.split(/[\u2014,]/)[0].trim() : "";
   const tone = [P.genre, period].filter(Boolean).join(", ");
   const intExt = l.intExt || "INT";
-  const time = opts.time || (l.times&&l.times[0]) || "";
+  /* The parent plate is canonical geography across the whole film. Never inherit
+     the first scene's TOD: NIGHT/rain and DAWN are appearance-state overlays on
+     their respective slugline-unit plates, not properties of the master space. */
+  const time = opts.time || "";
 
   /* JSON environment spec (the director's template as a key:value spec, 2026-06):
      EXACTLY 4 views in a 2\u00d72 grid \u2014 wide establishing front, high-angle three-quarter
@@ -1170,6 +1293,12 @@ function buildLocationRefPrompt(l, project, opts){
         capacity: _capacity>1 ? ("the space must comfortably hold up to "+_capacity+" people at once when scenes play") : undefined,
       } : undefined,
       screenplay_context: screenplayContext || undefined,
+      screenplay_reference_contract: {
+        purpose: "all attached screenplay pages jointly describe permanent geography, architecture, fixtures, sightlines and action affordances for this ONE location",
+        not_a_panel_map: "do NOT assign one screenplay page or one scene to each quadrant; the four quadrants are four camera views chosen by the views plan below",
+        continuity_rule: "aggregate only features that must persist across scenes; do NOT bake scene-specific time of day, weather, temporary dressing, damage or story progression into this neutral master plate",
+        unit_examples: "NIGHT/rain and DAWN belong on separate slugline-unit appearance plates when the screenplay calls for them",
+      },
       tone: tone || undefined,
     },
     fixtures: fixtures.length ? fixtures : undefined,

@@ -75,7 +75,7 @@ function ColoristProposal({ proposal }){
   const p = proposal||{};
   const presets = p.presets||[];
   const byId = {}; presets.forEach(pr=>{ byId[pr.id]=pr; });
-  const scenes = (p.scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const scenes = scenesInStoryOrder(p.scenes);
   const ss = p.sceneStyles||{};
   const why = (p.rationale && p.rationale.scenes) || {};
   const stock = (window.FILM_STOCKS||[]).find(f=>f.id===p.filmStock);

@@ -879,7 +879,7 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
   const batch = (typeof useBatchGen==="function") ? useBatchGen() : { activeId:null, begin:()=>{}, advance:()=>{}, setMsg:()=>{} };
   const batchActiveId = batch.activeId;
 
-  const ordered = React.useMemo(()=> (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0)), [scenes]);
+  const ordered = React.useMemo(()=> scenesInStoryOrder(scenes), [scenes]);
   const shotsByScene = React.useMemo(()=>{
     const m={}; (shots||[]).forEach(s=>{ (m[s.sceneId]=m[s.sceneId]||[]).push(s); });
     Object.values(m).forEach(arr=>arr.sort((a,b)=>(a.order||0)-(b.order||0) || (a.beatN||0)-(b.beatN||0)));

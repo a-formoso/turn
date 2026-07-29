@@ -1395,7 +1395,17 @@ window.turnDownscaleDataUrl = turnDownscaleDataUrl;
 async function aiVisionComplete(messages, images){
   const sb = (typeof window.sbClient==="function") ? window.sbClient() : null;
   if(!sb || !sb.functions) throw new Error("The vision QC runs on your server — sign in to use it.");
-  const m = WRITING_MODELS.find(x=>x.id===getWritingModelId()) || WRITING_MODELS[0];
+  /* Respect the selected writing engine only when its proxy route actually accepts
+     image blocks. Moonshot/Kimi is text-only in image-proxy; previously choosing it
+     made QA return `vision:false` and claim the deployed proxy was text-only. Fall
+     back deterministically to the Art Room's vision-capable recommendation instead. */
+  const picked = WRITING_MODELS.find(x=>x.id===getWritingModelId()) || WRITING_MODELS[0];
+  const visionProviders = new Set(["google","openai","anthropic"]);
+  const m = visionProviders.has(picked.provider)
+    ? picked
+    : (WRITING_MODELS.find(x=>x.id===recommendedWritingModelId("specs") && visionProviders.has(x.provider))
+      || WRITING_MODELS.find(x=>visionProviders.has(x.provider))
+      || picked);
   const fnName = (window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxyFn) || "image-proxy";
   let data, error;
   try{ ({ data, error } = await sb.functions.invoke(fnName, { body:{ task:"text", usageKind:"vision", provider:m.provider, model:m.id, messages, images,
@@ -1472,7 +1482,8 @@ window.aiQcShotFrame = aiQcShotFrame;
    editInstruction, promptFix} | {unsupported:true} | null on failure. */
 async function aiImageQA(item){
   if(!item || !item.url || !item.prompt) return null;
-  const img = await turnDownscaleDataUrl(item.url, 896); if(!img) return null;
+  const img = await turnDownscaleDataUrl(item.url, 896);
+  if(!img) throw new Error("The current image could not be prepared for QA. Reload the card and try again.");
   const prompt =
     "You are a film studio's QA INSPECTOR doing visual QC on a generated "+(item.kind||"reference image")+". "
     +"The attached IMAGE is the candidate. The GENERATION PROMPT below is the CONTRACT — judge the image ONLY against it, never against taste.\n\n"
@@ -1484,15 +1495,20 @@ async function aiImageQA(item){
     +"4) action = 'keep' (faithful — nits at most), 'edit' (one or two LOCALIZED fixes an image-edit instruction can repair — fill editInstruction with ONE imperative instruction, max 200 chars), or 'regenerate' (SYSTEMIC drift — wrong style, wrong space, wrong layout — an edit can't save it).\n"
     +"5) promptFix = the ONE most useful concrete change to the prompt text to prevent this failure on the next run (e.g. resolve a contradiction between the style field and the prose, or make an angle explicit). Empty if the prompt is fine and the model simply missed.\n"
     +'Return ONLY compact JSON: {"verdict":"pass|minor|major","deviations":[{"what":"...","where":"...","severity":"minor|major"}],"inventions":["..."],"action":"keep|edit|regenerate","editInstruction":"...","promptFix":"..."}';
-  let res;
-  try{ res = await aiVisionComplete([{ role:"user", content:prompt }], [img]); }catch(e){ return null; }
+  const res = await aiVisionComplete([{ role:"user", content:prompt }], [img]);
   if(!res.vision) return { unsupported:true };
   const j = extractJSON(res.text);
   if(!j || !j.verdict) return null;
   const W = (x,n)=> (typeof clipWords==="function") ? clipWords(scrubBrand(String(x||"")), n) : scrubBrand(String(x||"")).slice(0,n);
   return {
     verdict: /^(pass|minor|major)$/.test(String(j.verdict).toLowerCase()) ? String(j.verdict).toLowerCase() : "minor",
-    deviations: (Array.isArray(j.deviations)?j.deviations:[]).filter(d=>d&&d.what).slice(0,5)
+    // Vision models occasionally return a deviation as a bare string despite the
+    // requested object schema. Preserve it as an overall/minor finding instead of
+    // dropping it — otherwise the modal can show "Minor drift" with an empty,
+    // contradictory "nothing to fix" body.
+    deviations: (Array.isArray(j.deviations)?j.deviations:[])
+      .map(d=> typeof d==="string" ? { what:d, where:"overall", severity:"minor" } : d)
+      .filter(d=>d&&d.what).slice(0,5)
       .map(d=>({ what:W(d.what,220), where:W(d.where||"overall",40), severity:(String(d.severity)==="major"?"major":"minor") })),
     inventions: (Array.isArray(j.inventions)?j.inventions:[]).map(x=>W(x,160)).filter(Boolean).slice(0,3),
     action: /^(keep|edit|regenerate)$/.test(String(j.action).toLowerCase()) ? String(j.action).toLowerCase() : "keep",
@@ -2600,7 +2616,7 @@ async function aiAssignSceneStyles(scenes, seedPresets, drafts, project){
   if(P.theme||P.themes) ctx += "Theme: "+(P.theme||P.themes)+"\n";
   ctx += "\nVALUE-CHARGE SPINE \u2014 the film's emotional arc, scene by scene. Charge runs -3 (bleakest) to +3 (peak). "+
     "Format: #no title [ACT n] openValue(charge) \u2192 closeValue(charge) | turn :: script:\n";
-  scenes.slice().sort((a,b)=>(a.no||0)-(b.no||0)).forEach(s=>{
+  scenesInStoryOrder(scenes).forEach(s=>{
     const scr = (typeof sceneScriptText==="function" ? sceneScriptText(s.id, drafts) : "").replace(/\s+/g," ").slice(0,150);
     ctx += "#"+s.no+" "+(s.title||"")+" [ACT "+(s.act||1)+"] "+
       (s.openValue||"?")+"("+cs(s.openCharge||0)+") \u2192 "+(s.closeValue||"?")+"("+cs(s.closeCharge||0)+")"+
@@ -2750,6 +2766,7 @@ window.sceneScriptText = sceneScriptText;
 
 async function aiPropScenes(props, scenes, drafts, characters){
   if(!props || !props.length || !scenes || !scenes.length) return null;
+  const orderedScenes = scenesInStoryOrder(scenes);
   const charOf = (id)=> (characters||[]).find(c=>c.id===id);
   const out = {};
 
@@ -2765,17 +2782,17 @@ async function aiPropScenes(props, scenes, drafts, characters){
 
   // --- carried items: AI reads the script and pins exact scenes ---
   if(carried.length && aiAvailable()){
-    const noToId = {}; scenes.forEach(s=>{ noToId[String(s.no)] = s.id; });
+    const noToId = {}; orderedScenes.forEach(s=>{ noToId[String(s.no)] = s.id; });
     // compact per-scene digest the model can read
     let digest = "SCENES (number | title | what happens):\n";
-    scenes.forEach(s=>{
+    orderedScenes.forEach(s=>{
       const script = sceneScriptText(s.id, drafts).replace(/\s+/g," ").slice(0,700);
       const owner = charOf(s.driver);
       digest += "#"+s.no+" "+(s.title||"")+(owner?(" [driven by "+owner.name+"]"):"")+" \u2014 "
         + (s.summary||"").replace(/\s+/g," ").slice(0,200)
         + (script?(" | script: "+script):"") + "\n";
     });
-    const noOf = {}; scenes.forEach(s=>{ noOf[s.id]=s.no; });
+    const noOf = {}; orderedScenes.forEach(s=>{ noOf[s.id]=s.no; });
     // process carried props in batches so the JSON output stays small
     const runBatch = async (items)=>{
       let list = "\nCARRIED PROPS \u2014 for each, narrow its CANDIDATE scenes (where the owner is present) down to the ones the object is actually in:\n";
@@ -2821,7 +2838,7 @@ async function aiPropScenes(props, scenes, drafts, characters){
   }
 
   // order each prop's scene list by scene order
-  const order = {}; scenes.forEach((s,i)=>{ order[s.id]=i; });
+  const order = {}; orderedScenes.forEach((s,i)=>{ order[s.id]=i; });
   Object.keys(out).forEach(id=>{ out[id] = (out[id]||[]).slice().sort((a,b)=>(order[a]??99)-(order[b]??99)); });
   return out;
 }
@@ -2840,7 +2857,7 @@ async function aiDeriveSetDressing(scenes, drafts, project){
   const period = P.setting && P.setting.period ? P.setting.period : "";
   let ctx = "FILM: "+(P.title||"Untitled")+" — "+(P.genre||"")+". "+(period?("Period/setting: "+period):"")+
     "\n\nSCENES (number | what happens | action):\n";
-  scenes.slice().sort((a,b)=>(a.no||0)-(b.no||0)).forEach(s=>{
+  scenesInStoryOrder(scenes).forEach(s=>{
     const script = (typeof sceneScriptText==="function" ? sceneScriptText(s.id, drafts) : "").replace(/\s+/g," ").slice(0,600);
     ctx += "#"+s.no+" "+(s.title||"")+" — "+(s.summary||"").replace(/\s+/g," ").slice(0,180)+(script?(" | action: "+script):"")+"\n";
   });
@@ -2900,7 +2917,7 @@ async function aiResearchLookbook(scenes, project, existing){
   let ctx = "FILM: "+(P.title||"Untitled")+" — "+(P.genre||"")+".\n";
   if(P.premise) ctx += "Logline: "+P.premise+"\n";
   if(P.setting && P.setting.period) ctx += "Period/setting: "+P.setting.period+"\n";
-  const ordered = (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const ordered = scenesInStoryOrder(scenes);
   if(ordered.length) ctx += "Beats: "+ordered.slice(0,12).map(s=>(s.title||"")).filter(Boolean).join("; ")+"\n";
   if(userRefs) ctx += "The director already named these touchstones (HONOUR them, build on them): "+userRefs+"\n";
   // a re-run targets the GAPS: it must not repeat sources, and it fills the routed

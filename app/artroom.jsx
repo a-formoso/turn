@@ -2110,10 +2110,21 @@ function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec, sh
       judgedSpec = !!contract;
     }
     if(!contract){ if(window.appToast) window.appToast("Nothing to judge against yet — Draft details first, so this card has a spec."); return; }
-    if(typeof window.aiImageQA!=="function") return;
+    if(typeof window.aiImageQA!=="function"){
+      if(window.appToast) window.appToast("QA check is unavailable in this build — reload the app and try again.","info");
+      return;
+    }
     setBusy(true);
-    const rep = await window.aiImageQA({ kind:noun||"sheet", name, url:gen.genUrl, prompt:contract });
-    setBusy(false);
+    let rep = null;
+    try{
+      rep = await window.aiImageQA({ kind:noun||"sheet", name, url:gen.genUrl, prompt:contract });
+    }catch(e){
+      const msg = (window.turnSafeError||((x)=>x))((e&&e.message)||"The QA read failed.");
+      if(window.appToast) window.appToast(msg||"The QA read failed — try again.","info");
+      return;
+    }finally{
+      setBusy(false);
+    }
     if(!rep){ if(window.appToast) window.appToast("The QA read failed — try again.","info"); return; }
     if(rep.unsupported){ if(window.appToast) window.appToast("Your server proxy is text-only — redeploy it to enable vision QA.","info"); return; }
     setReport({ ...rep, judgedSpec });
@@ -2756,7 +2767,7 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
       ? scenesWhereCharacterAppears(c.id, c.name, scenes, drafts)
       : drivenScenes.map(s=>s.id);
     const set = new Set(ids);
-    return (scenes||[]).filter(s=>set.has(s.id)).sort((a,b)=>(a.no||0)-(b.no||0));
+    return scenesInStoryOrder((scenes||[]).filter(s=>set.has(s.id)));
   },[c.id, c.name, scenes, drafts]);
   // role packs FUNCTION · ARCHETYPE — IDENTITY in one string; show & edit each
   // part as its own labelled line, re-composed back into c.role on every edit.
@@ -3843,7 +3854,7 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
   const list = characters || [];
   const q = query.trim().toLowerCase();
   const matchesQuery = (c)=> (typeof searchWordMatch==="function") ? searchWordMatch((c.name||"")+" "+(c.role||""), q) : (!q || (c.name||"").toLowerCase().indexOf(q)>=0);
-  const sceneList = (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const sceneList = scenesInStoryOrder(scenes);
   // which characters appear in each scene — DERIVED (characters have no `scenes` field):
   // the scene's driver + everyone in its shots' subjects + the beats' reactor (by name).
   const charsInSceneMap = React.useMemo(()=>{

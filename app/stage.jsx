@@ -2571,7 +2571,7 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
     _setVisualSource(next);
     try{ localStorage.setItem("turn_stage_visual_source", next); }catch(e){}
   },[]);
-  const ordered = React.useMemo(()=> (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0)), [scenes]);
+  const ordered = React.useMemo(()=> scenesInStoryOrder(scenes), [scenes]);
   const charById = React.useMemo(()=>{ const m={}; (characters||[]).forEach(c=>{ m[c.id]=c; }); return m; }, [characters]);
   const propById = React.useMemo(()=>{ const m={}; (props||[]).forEach(p=>{ m[p.id]=p; }); return m; }, [props]);
   const shotsByScene = React.useMemo(()=>{ const m={}; (shots||[]).forEach(s=>{ (m[s.sceneId]=m[s.sceneId]||[]).push(s); });

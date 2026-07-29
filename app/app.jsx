@@ -221,7 +221,7 @@ function buildFilmBible(doc){
   const locations = doc.locations || [];
   const drafts = doc.drafts || {};
   const lookbook = doc.lookbook || [];
-  const ordered = scenes.slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const ordered = scenesInStoryOrder(scenes);
   const noOf = {}; ordered.forEach(s=>{ noOf[s.id]=s.no; });
   const charById = {}; characters.forEach(c=>{ charById[c.id]=c; });
   const undef = (x)=>{ const v=(x==null?"":String(x)).trim(); return v||undefined; };
@@ -2046,6 +2046,96 @@ function App(){
     }catch(e){}
     setDraftingStageId(null);
   };
+  /* SUB-SPACE CLEANUP — when the screenplay folds a sub-structure place ("INT.
+     INTAKE BOOTH - NIGHT") under its complex's master card (deriveSubspaceFold),
+     a standalone card an earlier derivation created for it is stale. Remove it
+     ONLY when it holds nothing the user made (no drafted fields, no variants or
+     coverage sheets, no generated plate) — anything with content stays, assets
+     preserved. Removed cards go to trash like a manual delete, so the fold is
+     recoverable. */
+  /* FOLD DISPOSAL — fully async and image-safe. EVERY folded fromScript card
+     folds away (user-confirmed rule, 2026-07-29): drafted text, variants and
+     coverage sheets park with the card in trash (recoverable), and when the
+     card has a master plate it is first COPIED onto its slugline unit's plate
+     slot inside the parent card. Image presence is resolved ASYNC — sync caches
+     can be cold in cloud mode AND in local mode (large sheets live in
+     IndexedDB, not the sync mirror) — because a false "empty" would either
+     skip the plate transfer or clobber a unit plate. Nothing regenerates; a
+     failed plate transfer keeps the card (its plate stays visible). */
+  const urlToDataUrl = async (url)=>{
+    if(!url) return "";
+    if(/^data:/.test(url)) return url;
+    try{
+      const blob = await (await fetch(url)).blob();
+      return await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(String(fr.result||"")); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(blob); });
+    }catch(e){ return ""; }
+  };
+  const locationsRef = React.useRef([]); locationsRef.current = locations;
+  const scenesRef = React.useRef([]); scenesRef.current = scenes;
+  const draftsRef = React.useRef({}); draftsRef.current = drafts;
+  const foldStaleRef = React.useRef(false);
+  const foldStaleLocations = async (ls)=>{
+    if(foldStaleRef.current) return;
+    if(typeof deriveSubspaceFold!=="function" || typeof deriveSluglineUnits!=="function") return;
+    if(typeof nbCommit!=="function" || typeof sluglineUnitImageId!=="function") return;
+    const fold = deriveSubspaceFold(scenes, drafts);
+    const cands = (ls||[]).filter(l=> l && l.fromScript && fold[l.key]);
+    if(!cands.length) return;
+    const units = deriveSluglineUnits(scenes, drafts);
+    const placeKeyOf = (place)=>{
+      const head = String(place||"").split(/[·—,]/)[0];
+      const slug = (typeof locSlug==="function") ? locSlug(head)
+        : head.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+      return slug.split("-").slice(0,4).join("-");
+    };
+    foldStaleRef.current = true;
+    const toTrash = [], movedIds = {};
+    try{
+      for(const l of cands){
+        try{
+          let url = (typeof nbRemoteImageUrl==="function") ? (await nbRemoteImageUrl(l.id)) : "";
+          if(!url && typeof nbLoadImage==="function") url = await nbLoadImage(l.id);
+          if(!url){ toTrash.push(l); continue; }                     // truly content-free
+          // plate-only → move the plate onto the unit's plate slot first
+          const u = units.find(x=> placeKeyOf(x.place)===l.key);
+          if(!u) continue;
+          const unitImgId = sluglineUnitImageId(u.key);
+          const existing = (typeof nbLoadImage==="function") ? await nbLoadImage(unitImgId) : "";
+          if(existing) continue;                          // never clobber an existing unit plate
+          const dataUrl = await urlToDataUrl(url);        // cloudCommit accepts data: URLs only
+          if(!dataUrl) continue;
+          const det = (typeof nbLoadDetailsAsset==="function") ? await nbLoadDetailsAsset(l.id, url) : { meta:null };
+          const r = await nbCommit(unitImgId, dataUrl, (det&&det.meta)||null, [], "locunit");
+          if(!r || r.tier==="error" || r.tier==="stale" || !r.url) continue;
+          toTrash.push(l); movedIds[l.id] = true;
+        }catch(e){ /* keep the card on any failure */ }
+      }
+    } finally { foldStaleRef.current = false; }
+    if(!toTrash.length) return;
+    // REVALIDATE against current state — the card may have been deleted, and a
+    // script edit during the awaits above may have changed the fold map itself;
+    // only remove cards that are still present AND still folded right now
+    // (drafted content no longer blocks the fold — it parks in trash with the
+    // card, recoverable).
+    const curNow = locationsRef.current || [];
+    const foldNow = deriveSubspaceFold(scenesRef.current, draftsRef.current);
+    const finalTrash = toTrash.filter(t=>{
+      if(!foldNow[t.key]) return false;                    // un-folded by a script edit mid-run
+      const now = curNow.find(x=>x && x.id===t.id);
+      return !!now && now.key===t.key;
+    });
+    if(!finalTrash.length) return;
+    setTrash(t=>({ ...t, locations:[ ...finalTrash.map(_trashStamp), ...(t.locations||[]) ] }));
+    setLocations(cur=>cur.filter(x=> x && !finalTrash.some(y=>y.id===x.id)));
+    try{ if(window.appToast){
+      const moved = finalTrash.filter(t=>movedIds[t.id]).map(t=>t.name);
+      const folded = finalTrash.filter(t=>!movedIds[t.id]).map(t=>t.name);
+      const parts = [];
+      if(moved.length) parts.push(moved.join(", ")+" (plate moved onto its slugline unit)");
+      if(folded.length) parts.push(folded.join(", "));
+      window.appToast("Folded "+parts.join(" and ")+" into its parent location — card"+(finalTrash.length>1?"s are":" is")+" in trash (recoverable)");
+    } }catch(e){}
+  };
   // derive master locations from screenplay scene headings; coverage sheets handle
   // implied sub-locations/sides described inside the scene body
   const pullLocationsFromScript = React.useCallback(()=>{
@@ -2066,6 +2156,15 @@ function App(){
     if(locations.length){ setLocsSeeded(true); return; }
     if(typeof scriptHasLocations==="function" && scriptHasLocations(scenes)) pullLocationsFromScript();
   },[room, artView, locsSeeded, locations.length, scenes, pullLocationsFromScript, hydrationTick]);
+  // fold stale standalone sub-space cards (e.g. an "Intake Booth" card the old
+  // derivation created for a slug that belongs inside "Intake Yard") — runs when
+  // locations/scenes/drafts settle; a no-op once nothing stale remains. All
+  // disposal is async + image-safe (foldStaleLocations): drafted cards are kept,
+  // plate-only cards transfer their plate onto the slugline unit first.
+  React.useEffect(()=>{
+    if(hydratingRef.current || !scenes.length || !locations.length) return;
+    foldStaleLocations(locations);
+  },[locations, scenes, drafts]);
   // read the whole film, design a BESPOKE per-film palette and color-script it
   // along the value-charge spine (see aiAssignSceneStyles).
   // merge an aiAssignSceneStyles result into project.styleBible. Shared by the quick
@@ -2402,7 +2501,7 @@ function App(){
     if(draftingAllShots) return;
     setDraftingAllShots(true);
     try{
-      const ordered = scenes.slice().sort((a,b)=>(a.no||0)-(b.no||0));
+      const ordered = scenesInStoryOrder(scenes);
       const have = new Set(shots.map(s=>s.sceneId));
       const todo = ordered.filter(s=>!have.has(s.id));   // non-destructive: skip scenes already broken down
       for(let i=0;i<todo.length;i+=3){
@@ -2794,7 +2893,7 @@ function App(){
   // generation primitive, and the vision QC. Scoped to one scene when launched
   // from a scene group's "Direct scene", or the whole film from the header.
   const sceneDirectorCtxFactory = ({ emit, propose, cancelled })=>{
-    const ordered = scenes.slice().sort((a,b)=>(a.no||0)-(b.no||0));
+    const ordered = scenesInStoryOrder(scenes);
     const charById = {}; characters.forEach(c=>{ charById[c.id]=c; });
     const propById = {}; props.forEach(p=>{ propById[p.id]=p; });
     const byScene = {}; (shots||[]).forEach(s=>{ (byScene[s.sceneId]=byScene[s.sceneId]||[]).push(s); });
@@ -2817,7 +2916,7 @@ function App(){
   };
 
   const artAgentCtxFactory = ({ input, emit, propose, cancelled, agentName, force })=>{
-    const ordered = scenes.slice().sort((a,b)=>(a.no||0)-(b.no||0));
+    const ordered = scenesInStoryOrder(scenes);
     const charById = {}; characters.forEach(c=>{ charById[c.id]=c; });
     const propById = {}; props.forEach(p=>{ propById[p.id]=p; });
     const shotsByScene = {};

@@ -616,7 +616,7 @@ async function agentTableRead(ctx){
    ========================================================= */
 async function agentScriptBreakdown(ctx){
   if(!ctx.ai || !ctx.ai.available){ ctx.emit({k:"flag", t:"The model isn't available — the breakdown needs it."}); ctx.emit({k:"done",t:"Aborted."}); return; }
-  const scenes = (ctx.model.scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const scenes = scenesInStoryOrder(ctx.model.scenes);
   const written = scenes.filter(s=> ctx.model.drafts[s.id]);
   if(!written.length){ ctx.emit({k:"flag", t:"No scenes are written yet — build the script first (New Story / Adaptation), then run the breakdown."}); ctx.emit({k:"done",t:"Nothing to break down."}); return; }
   ctx.emit({k:"plan", t:"Breaking down "+written.length+" written scene"+(written.length>1?"s":"")+" — tagging each beat's characters, features, props and set dressing, and checking the script against the cast sheets."});
@@ -1488,7 +1488,7 @@ async function agentConsistency(ctx){
   const bible = ctx.bible || { props:[], locations:[], shots:[], patchProp:()=>{}, patchLocation:()=>{} };
   const cast = ctx.model.characters.map(c=>({ id:c.id, name:c.name, styleKey:c.renderStyleKey||"",
     g:_CONS_GENDER[String(c.pronouns||"").toLowerCase().trim()]||null, pronouns:c.pronouns||"" }));
-  const drafted = ctx.model.scenes.slice().sort((a,b)=>(a.no||0)-(b.no||0))
+  const drafted = scenesInStoryOrder(ctx.model.scenes)
     .filter(s=> ctx.model.drafts[s.id] && (ctx.model.drafts[s.id].blocks||[]).length);
   ctx.emit({k:"plan", t:"Auditing "+drafted.length+" drafted scene"+(drafted.length===1?"":"s")+" — the script and beats are canon; props, locations, staging, styles and pronouns are diffed against them. No model calls, so this pass is free."});
   if(!drafted.length){ ctx.emit({k:"done", t:"No drafted scenes to audit yet — write or draft a scene first."}); return; }

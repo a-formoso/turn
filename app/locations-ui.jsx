@@ -93,8 +93,8 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
     const out = [];
     const C = window.turnContinuity || {};
     const list = (Array.isArray(l.scenes) && l.scenes.length)
-      ? (scenes||C.scenes||[]).filter(s=>l.scenes.indexOf(s.id)>=0).sort((a,b)=>(a.no||0)-(b.no||0))
-      : (scenes||C.scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+      ? scenesInStoryOrder((scenes||C.scenes||[]).filter(s=>l.scenes.indexOf(s.id)>=0))
+      : scenesInStoryOrder(scenes||C.scenes);
     for(const sc of list){
       const imgs = (typeof locationScreenplayReferenceImages==="function")
         ? locationScreenplayReferenceImages(l, { name:l.name, sceneNos:[sc.no] }, scenes||C.scenes||[], drafts||C.drafts||{})
@@ -125,7 +125,11 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
       .filter(r=>r.url && masterRefOff.indexOf(r.refId)<0)
       .map(r=>({ url:r.url, kind:"script", refId:r.refId, note:r.note })),
     attachmentsText: (refs)=> refs && refs.length
-      ? "REFERENCE IMAGES are attached: "+refs.map((r,i)=>"Image "+(i+1)+" = "+r.note).join("; ")+". These are screenplay snapshots for production-design context only: use them to decide the 2x2 plate geography, but never copy their typography, page border, text, captions or layout."
+      ? "REFERENCE IMAGES are attached: "+refs.map((r,i)=>"Image "+(i+1)+" = "+r.note).join("; ")
+        +". Read ALL pages together as evidence for the permanent geography of ONE location. "
+        +"They are NOT a quadrant map: do not make one panel per page or per scene. The 2x2 is four different camera views of the same coherent space, following the prompt's panel plan. "
+        +"Aggregate architecture, fixtures, sightlines and action affordances only. Do NOT bake in scene-specific time of day, weather or progression (for example NIGHT/rain versus DAWN); those belong to each slugline unit's appearance plate. "
+        +"Never copy screenplay typography, page borders, text, captions or layout."
       : "",
     /* NO set-dressing refs at generation — the clean plate anchors the look;
        fixtures are painted in afterwards via the Edit panel's Set-dressing buttons */
@@ -187,11 +191,12 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
   };
 
   const sceneById = React.useMemo(()=>{ const m={}; (scenes||[]).forEach(s=>{ m[s.id]=s; }); return m; },[scenes]);
-  const locScenes = (l.scenes||[]).map(id=>sceneById[id]).filter(Boolean).sort((a,b)=>(a.no||0)-(b.no||0));
+  const locScenes = scenesInStoryOrder((l.scenes||[]).map(id=>sceneById[id]).filter(Boolean));
   const coverageSheets = (l.coverageSheets || []).slice().sort((a,b)=>(Number(a.order||0)-Number(b.order||0)) || String(a.name||"").localeCompare(String(b.name||"")));
-  // slugline units belonging to this master (place × side × time-of-day), orphans last
+  // Units arrive in first screenplay-appearance order from deriveSluglineUnits.
+  // Preserve that order here; only move preserved, no-longer-scripted orphans last.
   const units = (sluglineUnits||[]).filter(u=>u && u.locationKey===String(l.key||""))
-    .sort((a,b)=> ((a.orphan?1:0)-(b.orphan?1:0)) || String(a.time||"").localeCompare(String(b.time||"")) || String(a.intExt||"").localeCompare(String(b.intExt||"")));
+    .sort((a,b)=> (a.orphan?1:0)-(b.orphan?1:0));
 
   // time-of-day / weather variants
   const addVariant = ()=>{
@@ -682,12 +687,20 @@ function SluglineUnitCard({ l, u, project, scenes, drafts, parentGenUrl, onUpdat
         title:"Delete this unit's stored data and generated plate",
         onClick:async ()=>{ if(typeof nbClearAsset==="function"){ try{ await nbClearAsset(imgId); }catch(e){} } onRemoveUnit(u.key); }},"Remove")),
     React.createElement(SheetField,{label:"Appearance state",value:u.appearance||"",multiline:true,
-      placeholder:"How this unit looks in the film's present \u2014 \u201cdawn and raining\u201d, \u201cracks stripped to bare steel\u201d\u2026",
+      // per-unit prompt built from THIS unit's own slugline facts (name, TOD, scenes) —
+      // a static example ("dawn and raining") read as if every location should be dawn
+      // and raining. Mirrors how character appearance state is framed: what THIS unit
+      // looks like at THIS point in the story.
+      placeholder:"How "+(u.name||l.name||"this space")+" looks"
+        +(u.time?(" at "+String(u.time).toLowerCase()):"")
+        +(sceneNos.length?(" in "+sourceLabel.toLowerCase()):"")
+        +" \u2014 weather, light, wear, and what's changed here by this point in the story\u2026",
       onCommit:(val)=>onUpdateUnit && onUpdateUnit(u.key,{ appearance:val })}),
     React.createElement(UnitDressing,{ u, onUpdateUnit: u.orphan ? null : onUpdateUnit }),
     React.createElement(SheetFrame,{ gen, slotId, name:(u.name||l.name||"Location")+" \u00b7 "+role+(u.time?(" \u00b7 "+u.time):""),
       avatarColor:locSwatch(role), initials:role.slice(0,2), drafted:true, drafting:false,
       entity:l, onView, slotPlaceholder:"Drop a finished unit plate", noun:"unit plate", compact:true,
+      dropToImport:true,
       referenceControls: React.createElement(CoverageReferenceStrip,{ refs:refPreview, excludedIds:refOff, onToggle:toggleRef, onView }),
       generateDisabled:!canGenerate,
       generateDisabledLabel: u.orphan ? "No longer in script" : "Generate parent plate first",
@@ -773,7 +786,7 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
         if(r) onUpdate(need[i].id, { surpriseRender:r, renderStyle:r.style }); }catch(e){} }
     setAllStyling(null);
   };
-  const sceneList = (scenes||[]).slice().sort((a,b)=>(a.no||0)-(b.no||0));
+  const sceneList = scenesInStoryOrder(scenes);
   const inScene = (l, sid)=> Array.isArray(l.scenes) && l.scenes.indexOf(sid)>=0;
   const q = query.trim().toLowerCase();
   const matchesQuery = (l)=> (typeof searchWordMatch==="function") ? searchWordMatch((l.name||"")+" "+(l.intExt||""), q) : (!q || (l.name||"").toLowerCase().indexOf(q)>=0);
