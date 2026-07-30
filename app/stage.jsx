@@ -474,6 +474,15 @@ function stageRenderCost(tierObj, resolution, durationSec){
   return Math.max(1, Math.ceil(s*r*scale));
 }
 window.SEEDANCE_MODELS = SEEDANCE_MODELS;
+/* tier creditRates are COPIES of the pricing table (turnVideoCreditRates builds a
+   new object), so an admin-applied pricing override would leave them stale —
+   refresh them in place whenever the table changes. */
+window.addEventListener("turn-pricing-changed", ()=>{
+  SEEDANCE_MODELS.forEach(m=> (m.tiers||[]).forEach(t=>{
+    const r = (typeof window.turnVideoCreditRates==="function") && window.turnVideoCreditRates(m.id, t.id);
+    if(r) t.creditRate = r;
+  }));
+});
 /* per-shot seconds interval grid for the Multi-shot composer (bounded per model) */
 window.STAGE_MS_STEPS = [4, 8, 12, 15];
 

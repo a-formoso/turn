@@ -530,6 +530,11 @@ function App(){
       const ov = await window.cloudGetAppConfig("plans-copy");
       if(ov && typeof window.turnApplyPlanCopy==="function") window.turnApplyPlanCopy(ov);
     }catch(e){} })();
+    // pricing overrides (admin-applied fal price updates) load the same way —
+    // globally, for everyone — so credit costs derive from the CURRENT numbers.
+    (async()=>{ try{
+      if(typeof window.turnPricingWatchLoadOverrides==="function") await window.turnPricingWatchLoadOverrides();
+    }catch(e){} })();
   },[]);
   React.useEffect(()=>{
     if(!(typeof cloudConfigured==="function" && cloudConfigured())){ setAuthReady(true); return; }
@@ -613,7 +618,10 @@ function App(){
   // is admin-only: every other user (and signed-out local mode) never sees Matrix data.
   const isAdmin = (((typeof cloudUserEmail==="function" && cloudUserEmail(session))||"").toLowerCase()==="admin@infinitestudioai.com");
   // expose for leaf components that have no session prop (e.g. the Art Room key bar)
-  React.useEffect(()=>{ window.turnIsAdmin = isAdmin; },[isAdmin]);
+  React.useEffect(()=>{ window.turnIsAdmin = isAdmin;
+    // admin-only fal price-drift check (throttled inside; shows a card on drift)
+    if(isAdmin && typeof window.turnPricingWatchStart==="function") window.turnPricingWatchStart();
+  },[isAdmin]);
   // expose the signed-in user's email so leaf components can scope per-user data
   // (locked render styles live in localStorage keyed by this email). Empty in local/signed-out mode.
   const userEmail = ((typeof cloudUserEmail==="function" && cloudUserEmail(session))||"").toLowerCase();

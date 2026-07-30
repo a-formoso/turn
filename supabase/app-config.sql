@@ -2,11 +2,15 @@
 -- Cinema Machine — app config (admin-editable global settings)
 --
 -- A tiny key/value store for platform-wide config that an ADMIN edits in-app and
--- EVERY visitor (including signed-out ones on the landing page) reads. Today it
--- holds "plans-copy": the marketing copy (name, blurb, feature bullets, the
--- "most popular" flag) for the plan cards. Price and credits are NOT here — those
--- are owned by Stripe (the product price + plan_credits metadata) so the card can
--- never misrepresent the real charge/grant.
+-- EVERY visitor (including signed-out ones on the landing page) reads. Keys:
+--   "plans-copy"        — plan-card marketing copy (name, blurb, feature bullets,
+--                         "most popular" flag). Price and credits are NOT here —
+--                         those are owned by Stripe (product price + plan_credits
+--                         metadata) so the card can never misrepresent the charge.
+--   "pricing-overrides" — admin-applied provider-USD price updates from the fal
+--                         price-drift watcher (app/pricing-watch.jsx + the
+--                         pricing-watch Edge Function). Validated + applied over
+--                         app/pricing.jsx's TURN_PRICING at boot for everyone.
 --
 -- Run once in the Supabase SQL editor.
 -- ============================================================================

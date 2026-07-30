@@ -6444,3 +6444,23 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .loc-dress-sugg{font-size:10.5px;padding:2px 9px;border-radius:99px;border:1px dashed var(--line);background:none;color:var(--txt-3);cursor:pointer}
 .loc-dress-sugg:hover{color:var(--txt-1);border-color:var(--txt-3)}
 .loc-dress-sugg-lab{font-size:10px;color:var(--txt-3);margin-right:2px}
+
+/* ── fal.ai price-drift card (admin-only, mounted by app/pricing-watch.jsx) ── */
+.pricing-watch-card{position:fixed;right:18px;bottom:18px;z-index:99998;width:min(420px,92vw);max-height:70vh;overflow:auto;background:#2a2622;color:#f4efe9;border-radius:13px;padding:14px 15px 12px;box-shadow:0 14px 40px rgba(0,0,0,.45),0 0 0 1px rgba(220,170,60,.35);font-size:13px;line-height:1.45;animation:turn-toast-in .18s ease-out}
+.pricing-watch-card .pw-title{font-weight:700;font-size:14px;color:#ffd98a;margin-bottom:3px}
+.pricing-watch-card .pw-sub{color:#d9d2c8;font-size:12px;margin-bottom:9px}
+.pricing-watch-card .pw-rows{display:flex;flex-direction:column;gap:4px;margin-bottom:9px}
+.pricing-watch-card .pw-row{display:flex;align-items:baseline;gap:7px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,.05);font-variant-numeric:tabular-nums}
+.pricing-watch-card .pw-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.pricing-watch-card .pw-label em{font-style:normal;font-size:10.5px;color:#b8ac96;opacity:.9}
+.pricing-watch-card .pw-old{color:#e8a795;text-decoration:line-through;font-size:12px}
+.pricing-watch-card .pw-arrow{color:#8f857a;font-size:11px}
+.pricing-watch-card .pw-new{color:#a8e6bf;font-weight:700;font-size:12.5px}
+.pricing-watch-card .pw-fail{font-size:11px;color:#c9ab74;margin-bottom:7px}
+.pricing-watch-card .pw-when{font-size:10.5px;color:#8f857a;margin-bottom:9px}
+.pricing-watch-card .pw-actions{display:flex;gap:8px;justify-content:flex-end}
+.pricing-watch-card .pw-btn{font-size:12.5px;padding:6px 13px;border-radius:9px;border:1px solid rgba(255,255,255,.18);background:none;color:#e8e2d8;cursor:pointer}
+.pricing-watch-card .pw-btn:hover{background:rgba(255,255,255,.07)}
+.pricing-watch-card .pw-btn.primary{background:#caa24a;border-color:#caa24a;color:#241d10;font-weight:700}
+.pricing-watch-card .pw-btn.primary:hover{background:#dab35b}
+.pricing-watch-card .pw-btn:disabled{opacity:.55;cursor:default}

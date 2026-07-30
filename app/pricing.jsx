@@ -117,6 +117,45 @@
     };
   }
 
+  /* ── admin pricing overrides (fal price drift) ─────────────────────────────
+     Applied at runtime from turn_app_config "pricing-overrides" (written only
+     by the admin's reviewed one-click apply in the price-drift card — see
+     app/pricing-watch.jsx). Mutates the LIVE table objects IN PLACE so every
+     consumer that holds a reference (imagegen's NB_IMG_USD is the same object)
+     sees the new numbers; listeners on "turn-pricing-changed" (stage.jsx tier
+     rates, cost chips) refresh their derived copies.
+     FAIL-SAFE: only keys that already exist in the table are writable, and a
+     value outside sane provider-USD bounds is rejected — a garbage or zero
+     price can never land here. */
+  function _ovNumOk(v){ v = Number(v); return Number.isFinite(v) && v > 0.0002 && v < 100; }
+  function turnApplyPricingOverrides(ov){
+    if(!ov || typeof ov !== "object") return false;
+    let applied = 0;
+    const img = ov.image || {};
+    Object.keys(img).forEach(m=>{
+      const t = TURN_PRICING.image.providerUsd[m]; if(!t || typeof img[m]!=="object") return;
+      Object.keys(img[m]||{}).forEach(k=>{
+        if(Object.prototype.hasOwnProperty.call(t,k) && _ovNumOk(img[m][k])){ t[k] = Number(img[m][k]); applied++; }
+      });
+    });
+    const vid = ov.video || {};
+    Object.keys(vid).forEach(m=>{
+      const mt = TURN_PRICING.video.providerUsdPerSecond[m]; if(!mt || typeof vid[m]!=="object") return;
+      Object.keys(vid[m]||{}).forEach(tier=>{
+        const tt = mt[tier]; if(!tt || typeof vid[m][tier]!=="object") return;
+        Object.keys(vid[m][tier]||{}).forEach(r=>{
+          if(Object.prototype.hasOwnProperty.call(tt,r) && _ovNumOk(vid[m][tier][r])){ tt[r] = Number(vid[m][tier][r]); applied++; }
+        });
+      });
+    });
+    if(applied){
+      if(ov.version) TURN_PRICING.version = String(ov.version);
+      try{ window.dispatchEvent(new CustomEvent("turn-pricing-changed")); }catch(e){}
+    }
+    return applied > 0;
+  }
+  window.turnApplyPricingOverrides = turnApplyPricingOverrides;
+
   window.CREDIT_SCALE = CREDIT_SCALE;
   window.TURN_PRICING = TURN_PRICING;
   window.turnProviderUsdPerBaseCredit = turnProviderUsdPerBaseCredit;
