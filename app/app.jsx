@@ -1951,6 +1951,79 @@ function App(){
     setTaggingSceneId(null);
   };
 
+  /* AUTO RE-MAP — a screenplay change (any path that lands in `drafts`: scene
+     edits, polish, undo/redo, scene delete, import) silently stales every PINNED
+     prop→scene map, and those maps decide what rides into shots and how states
+     and custody resolve. Debounced re-derivation of pinned maps ONLY — unmapped
+     props derive live (effMap: owner presence / name-matching) and never go
+     stale. A prop the re-map EXPLICITLY empties (it HAD appearances, now it has
+     none — a scene cut or a removed mention) is park-deleted to trash with a
+     toast: recoverable, same rule as the sub-space fold, never hard-deleted.
+     Set dressing is exempt from the cull — it belongs to its location, not to
+     scene presence. Fail-safes: any mapper failure/no-op leaves every card
+     untouched (the AI's parse-failure fallback is owner-presence, never a false
+     empty), and a prop whose map changed mid-flight (e.g. a manual Re-map
+     during the await) is skipped — the next debounced pass reconciles it. */
+  const propsRef = React.useRef([]); propsRef.current = props;
+  const charactersRef = React.useRef([]); charactersRef.current = characters;
+  const tagBusyRef = React.useRef(false);
+  tagBusyRef.current = !!(taggingScenes || taggingSceneId || draftingAllProps);
+  const autoRetagRef = React.useRef(false);
+  React.useEffect(()=>{
+    if(readOnlyShare) return;
+    if(typeof aiPropScenes!=="function") return;
+    const t = setTimeout(async ()=>{
+      if(hydratingRef.current || tagBusyRef.current || autoRetagRef.current) return;
+      const pinned = (propsRef.current||[]).filter(p=> p && Array.isArray(p.scenes));
+      if(!pinned.length) return;
+      autoRetagRef.current = true;
+      const base = {}; pinned.forEach(p=>{ base[p.id] = p.scenes.join("|"); });   // mid-flight change detector
+      // EPOCH gate — the screenplay/scene set identity at send time. If either
+      // moves during the AI await (another edit, undo, scene delete — which also
+      // schedules a FRESH debounced pass), this result is stale: applying it
+      // could trash a prop the newer script still uses. Abort instead; the
+      // newer pass reconciles.
+      const draftsEpoch = draftsRef.current, scenesEpoch = scenesRef.current;
+      try{
+        const map = await aiPropScenes(pinned, scenesRef.current, draftsRef.current, charactersRef.current);
+        if(!map) return;
+        // revalidate at APPLY time: script moved, or a manual Re-map / Design all
+        // props started while we awaited — either way this pass must not land.
+        if(draftsRef.current!==draftsEpoch || scenesRef.current!==scenesEpoch) return;
+        if(tagBusyRef.current || hydratingRef.current) return;
+        const gone = [];
+        setProps(ps=>{
+          const fresh = (p)=> p && Array.isArray(p.scenes) && (p.id in map) && p.scenes.join("|")===base[p.id];
+          const nextOf = (p)=> Array.isArray(map[p.id]) ? map[p.id] : [];
+          const keep = ps.filter(p=>{
+            if(!fresh(p)) return true;
+            const next = nextOf(p);
+            // cull only when the empty verdict is well-founded: the prop had
+            // appearances, it isn't set dressing (belongs to its location), and
+            // it HAS an owner — ownerless carried props get "candidate scenes:
+            // none" from the mapper, which biases the AI toward empty, so an
+            // empty verdict there is weak evidence and never trashes.
+            if(!next.length && p.scenes.length && (p.kind||"carried")!=="dressing" && (p.ownerId||p.ownerName)){ gone.push(p); return false; }
+            return true;
+          });
+          return keep.map(p=>{
+            if(!fresh(p)) return p;
+            const next = nextOf(p);
+            return (next.join("|")===p.scenes.join("|")) ? p : {...p, scenes: next};
+          });
+        });
+        if(gone.length){
+          setTrash(t2=>({ ...t2, props:[ ...gone.map(_trashStamp), ...(t2.props||[]).filter(x=> x && !gone.some(g=>g.id===x.id)) ] }));
+          try{ if(window.appToast) window.appToast(
+            gone.map(p=>p.name||"Untitled prop").join(", ")+" no longer appear"+(gone.length>1?"":"s")+" in the script — moved to trash (recoverable)","info");
+          }catch(e){}
+        }
+      }catch(e){}
+      finally{ autoRetagRef.current = false; }
+    }, 2500);
+    return ()=> clearTimeout(t);
+  },[drafts]);
+
   // ---- Art Room: LOCATIONS ----
   const updateLocation = (id,patch)=>setLocations(ls=>ls.map(l=>l.id===id?{...l,...patch}:l));
   // per-card location drafts run CONCURRENTLY — a set of ids currently drafting, so you

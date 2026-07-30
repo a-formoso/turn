@@ -874,6 +874,9 @@ html[data-theme="light"] .seg-stale-dot{box-shadow:0 0 0 2px var(--bg-3)}
 .sp-gut{
   padding:18px 18px 6px 0;text-align:right;border-right:1px solid var(--line-2);
   position:relative;cursor:pointer;transition:.12s;
+  /* the gutter is a TAP TARGET (focus the beat), not content — without this, touch
+     devices pop the text-selection UI (blue handles + highlight) on accidental presses */
+  user-select:none;-webkit-user-select:none;
 }
 .sp-gut:hover{background:rgba(255,255,255,.02)}
 .sp-gut .bnum{
@@ -4384,10 +4387,10 @@ image-slot[id^="charref-"]::part(frame), image-slot[id^="propref-"]::part(frame)
   /* a touch smaller play button on phones */
   .lp-video-play{width:54px;height:54px}
   .lp-video-play svg{width:18px;height:18px}
-  /* hero: tighter top, full-width stacked CTAs */
+  /* hero: tighter top; CTAs stay SIDE BY SIDE (inline) even on phones */
   .lp-hero{padding-top:36px;padding-bottom:22px}
-  .lp-hero-cta{flex-direction:column;align-items:stretch;gap:10px}
-  .lp-hero-cta .lp-btn{width:100%}
+  .lp-hero-cta{flex-direction:row;flex-wrap:wrap;align-items:center;gap:10px}
+  .lp-hero-cta .lp-btn{width:auto;flex:1 1 0;white-space:nowrap}
   .lp-lede{font-size:15.5px}
   /* sections: a touch less air, comfortable card padding */
   .lp-section{padding:44px 20px}

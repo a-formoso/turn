@@ -455,6 +455,24 @@ function propOwnerAttachments(p){
     return out;
   };
 }
+/* the IN-HAND row's own attachments: the owner sheet, plus — on RE-render — the BASE
+   PROP SHEET as the object-design lock. NEVER the previous anchor: it is a full
+   person+object composition, so a superseded anchor (wrong/old person) drags that
+   person straight back into the re-render — a feedback loop no prompt text can win
+   against. The base sheet is person-free by construction, so it locks the object's
+   design without leaking any figure. First render: no sheet exists, owner sheet only. */
+function propInHandAttachments(p){
+  return async ()=>{
+    const out = [];
+    const u = (typeof propOwnerSheetUrl==="function") ? await propOwnerSheetUrl(p) : "";
+    if(u) out.push({ url:u, note:(p.ownerName||"owner")+" character sheet", refId:p.ownerId });
+    let bu = (typeof nbGetImage==="function") ? nbGetImage(p.id) : "";
+    if(!bu && typeof nbLoadImage==="function"){ try{ bu = await nbLoadImage(p.id); }catch(e){} }
+    if(bu) out.push({ url:bu, note:(p.name||"the object")+" reference sheet", refId:p.id });
+    return out;
+  };
+}
+window.propInHandAttachments = propInHandAttachments;
 /* the reference sentence for prop generation, aware of WHICH refs actually attached:
    the owner-sheet note only when the owner sheet rode in, the in-hand derivation note
    only when the in-hand render rode in. */
@@ -469,14 +487,22 @@ function propAttachmentsText(p){
   };
 }
 window.propAttachmentsText = propAttachmentsText;
-/* the IN-HAND anchor prompt: owner + object in one render (owner sheet as ref) — the
-   design the standalone sheet is then derived from. */
+/* the IN-HAND anchor prompt: owner + object in one render — the design the standalone
+   sheet is then derived from. The owner sheet rides as an attachment when it exists; the
+   "match the reference" claim lives in PropInHandRow's presence-aware attachmentsText
+   (NEVER claim a reference that didn't verifiably ride — the model would invent a
+   person). The owner's written spec always rides as a floor. */
 function buildPropInHandPrompt(p, project){
   const clean = (x)=>String(x||"").replace(/\.$/,"").trim();
   const who = p.ownerName || "the owner";
   const rel = clean(p.relation);
   let s = "Character-with-prop reference: "+who+" holding "+(p.name||"the object")+". ";
-  s += "The reference image is "+who+"'s character sheet \u2014 match their face, wardrobe, render style and world EXACTLY. ";
+  const oc = (project && (project.characters||[]).find(x=>x && x.id===p.ownerId)) || null;
+  if(oc){
+    const bits = [oc.archetype, oc.identity, oc.physique, (oc.wardrobeMask||oc.wardrobe), oc.look]
+      .map(v=>clean(v)).filter(Boolean);
+    if(bits.length) s += who+" must be unmistakably themselves \u2014 "+bits.join(". ")+". ";
+  }
   s += "THE OBJECT: "+(p.name||"object")+(clean(p.form)?(" \u2014 "+clean(p.form)):"")+(clean(p.material)?(", "+clean(p.material)):"")
     +(clean(p.detail)?(". Significance: "+clean(p.detail)):"")+". ";
   if(rel) s += who+"'s relationship to it: "+rel+" \u2014 show it in how they hold it and in its condition. ";
@@ -739,9 +765,30 @@ function PropInHandRow({ p, project, onView }){
     entity: p,
     buildFinal: ()=> (typeof buildPropInHandPrompt==="function") ? buildPropInHandPrompt(p, project) : (p.name||"prop in hand"),
     buildSimple: ()=> (typeof buildPropInHandPrompt==="function") ? buildPropInHandPrompt(p, project) : (p.name||"prop in hand"),
-    attachments: propOwnerAttachments(p),   // the owner sheet rides in (its own :inhand can't exist on first render)
-    attachmentsText: propAttachmentsText(p),   // presence-aware: no "character sheet" mislabel on in-hand-only regens
+    attachments: (typeof propInHandAttachments==="function") ? propInHandAttachments(p) : propOwnerAttachments(p),
+    attachmentsText: (attach)=>{   // presence-aware: claims ONLY for refs that verifiably rode
+      const hasOwner = (attach||[]).some(a=>a && a.refId===p.ownerId);
+      const hasSheet = (attach||[]).some(a=>a && a.refId===p.id);
+      let t = "";
+      if(hasOwner) t += "The reference image is "+(p.ownerName||"the owner")+"'s character sheet \u2014 the person in this render MUST be that exact character: same head, face and helmet design, same wardrobe, materials, colours and render style. Do not redesign, reinterpret or genericise them.";
+      if(hasSheet) t += (t?" ":"")+"A further reference is "+(p.name||"the object")+"'s reference sheet \u2014 continue its exact object design, materials and wear. It contains NO person: the person comes ONLY from "+(p.ownerName||"the owner")+"'s character sheet.";
+      return t;
+    },
     metaExtra: propAnchorMetaExtra(p),
+    /* gate: with no owner sheet the anchor would invent a person — and every derived
+       prop sheet inherits them. Warn clearly; rendering from text stays a choice. */
+    beforeGenerate: async ()=>{
+      const u = (typeof propOwnerSheetUrl==="function") ? await propOwnerSheetUrl(p) : "";
+      if(u || typeof window.appConfirm!=="function") return true;
+      const choice = await window.appConfirm({
+        title: (p.ownerName||"The owner")+" has no character sheet yet",
+        body: "The in-hand anchor locks "+(p.ownerName||"the owner")+"\u2019s look FROM their character sheet \u2014 without it, the render invents a person and every prop sheet derived from this anchor inherits them. Best: generate their sheet in the Characters tab first.",
+        note: "You can still render now from the text description only.",
+        confirmLabel: "Render anyway",
+        cancelLabel: "Cancel",
+      });
+      return choice!==false;
+    },
     buildEdit: (instr)=>
       "Edit this character-with-prop reference. Apply ONLY this change: "+instr+". "
       +"Keep the same person (identical face & wardrobe), the same object design, the same framing and style.",

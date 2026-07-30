@@ -2884,23 +2884,6 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
     }
     return out;
   };
-  // WORN-PROP STALENESS — the sheet meta recorded wornPropsSig at generation; if a worn
-  // card's form/material/detail/relation changed since, the baked accessories on this
-  // sheet are out of date (the canon desynced): say so and offer a re-bake regenerate.
-  const [wornStale, setWornStale] = React.useState(false);
-  React.useEffect(()=>{
-    let live = true;
-    if(!gen.genUrl || typeof nbLoadDetailsAsset!=="function" || typeof wornPropsSig!=="function"){ setWornStale(false); return; }
-    (async ()=>{
-      try{
-        const d = await nbLoadDetailsAsset(c.id);
-        const baked = d && d.meta && d.meta.wornSig;
-        if(!baked){ if(live) setWornStale(false); return; }
-        if(live) setWornStale(baked !== wornPropsSig(wornProps, c.id));
-      }catch(e){ if(live) setWornStale(false); }
-    })();
-    return ()=>{ live=false; };
-  },[c.id, gen.genUrl, wornPropsSig(wornProps, c.id)]);   // recompute on ANY worn-card change (rename included)
   /* which owned props currently have a generated sheet (for the linked-props indicator) */
   const [ownedSheetMap, setOwnedSheetMap] = React.useState({});
   const [sheetTick, setSheetTick] = React.useState(0);   // bump to re-check sheet presence
@@ -3099,6 +3082,26 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
     if(batchStarted.current && wasGening.current && !gen.gening){ batchStarted.current=false; onBatchDone && onBatchDone(c.id); }
     wasGening.current = gen.gening;
   },[batchActiveId, gen.gening, c.id]);
+
+  // WORN-PROP STALENESS — the sheet meta recorded wornPropsSig at generation; if a worn
+  // card's form/material/detail/relation changed since, the baked accessories on this
+  // sheet are out of date (the canon desynced): say so and offer a re-bake regenerate.
+  // NOTE: must live BELOW `const gen = useImageGen(...)` — a deps-array read of
+  // gen.genUrl before that const initializes is a TDZ crash on every card render.
+  const [wornStale, setWornStale] = React.useState(false);
+  React.useEffect(()=>{
+    let live = true;
+    if(!gen.genUrl || typeof nbLoadDetailsAsset!=="function" || typeof wornPropsSig!=="function"){ setWornStale(false); return; }
+    (async ()=>{
+      try{
+        const d = await nbLoadDetailsAsset(c.id);
+        const baked = d && d.meta && d.meta.wornSig;
+        if(!baked){ if(live) setWornStale(false); return; }
+        if(live) setWornStale(baked !== wornPropsSig(wornProps, c.id));
+      }catch(e){ if(live) setWornStale(false); }
+    })();
+    return ()=>{ live=false; };
+  },[c.id, gen.genUrl, wornPropsSig(wornProps, c.id)]);   // recompute on ANY worn-card change (rename included)
 
   return React.createElement("div",{className:"sheet-card"+(batchActiveId===c.id?" batch-on":""),"data-char-card":c.id},
     React.createElement(SheetFrame,{ gen, slotId:"charref-"+c.id, name:c.name, avatarColor:c.color,

@@ -838,6 +838,36 @@ window.shotRenderStyleLine = shotRenderStyleLine;
 
 /* ---- THE COMPOSER: a shot → one final image prompt ---------------------------- */
 /* ctx = { scene, location, charById, propById, project, prevShot } */
+/* SCREENPLAY SLICE — the beat's own script lines (action + dialogue), pulled from the
+   scene's draft blocks (every block is beat-tagged by realignBlockBeats; both shot-
+   creation paths store sh.beatN). Rides in the shot prompt as FIDELITY text — the
+   exact business and wording of the beat — SUBORDINATE to the staging line, which
+   still decides framing and who's in frame. Fail-safe: no beat number, no draft, or
+   no blocks tagged to the beat → "" and the prompt is unchanged. */
+function shotScreenplaySlice(scene, beatN){
+  const n = Number(beatN);
+  if(!scene || !Number.isFinite(n) || n<=0) return "";
+  const drafts = (window.turnContinuity||{}).drafts || {};
+  const d = drafts[scene.id];
+  const blocks = (d && (d.blocks||d)) || [];
+  if(!Array.isArray(blocks) || !blocks.length) return "";
+  const mine = blocks.filter(b=> b && b.type!=="scene" && Number(b.beat||1)===n);
+  if(!mine.length) return "";
+  let out = "";
+  mine.forEach(b=>{
+    const tx = String(b.text||"").replace(/\s+/g," ").trim();
+    if(!tx) return;
+    if(b.type==="char") out += (out?"  ":"") + tx.toUpperCase() + ": ";
+    else if(b.type==="paren") out += "("+tx+") ";
+    else if(b.type==="dia") out += tx;
+    else out += (out?"  ":"") + tx;   // action, mini-slugline, transition
+  });
+  out = out.replace(/\s+/g," ").trim();
+  if(!out) return "";
+  return (typeof clipWords==="function") ? clipWords(out, 60) : out.slice(0,420);
+}
+window.shotScreenplaySlice = shotScreenplaySlice;
+
 function buildShotPrompt(sh, ctx){
   ctx = ctx || {};
   const scene = ctx.scene || {};
@@ -1027,6 +1057,11 @@ function buildShotPrompt(sh, ctx){
 
   // ---- ASSEMBLE: image map, then the style spine, then the staging line, then constraints ----
   let out = MAP + "\n\n" + STYLE_SPINE + "\n\n— " + STAGING;
+  // the beat's own screenplay lines sharpen WHAT HAPPENS and WHAT IS SAID (the action
+  // text is a compression of them) — but stay subordinate: the staging line above
+  // remains the framing & cast authority.
+  const _slice = (typeof shotScreenplaySlice==="function") ? shotScreenplaySlice(scene, sh.beatN) : "";
+  if(_slice) out += "\n\nFrom the scene text (this beat's exact business and wording — the staging above still decides framing and who is in frame): " + _slice;
   out += "\n\nConstraints: " + shotNegativePrompt(sh, _styleKey) + ".";
   return out;
 }
