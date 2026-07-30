@@ -892,16 +892,25 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     let i = fromIdx;
     while(i<ids.length){ const s=shotById[ids[i]]; if(s && (force || !shotIsDone(s))) break; i++; }
     if(i>=ids.length){ setChain(null); batch.setMsg("Chain complete \u2014 every shot rendered in order."); return; }
-    setChain({ ids, idx:i, total:ids.length, force:!!force });
+    // remember what frame (if any) the shot had BEFORE this run — the self-heal below can
+    // then tell "the run committed a NEW frame" apart from "the old frame is still there".
+    const preFrame = (typeof nbGetImage==="function") ? (nbGetImage(ids[i])||"") : "";
+    setChain({ ids, idx:i, total:ids.length, force:!!force, preFrame });
     batch.run([ids[i]]); batch.setMsg("Rendering shot "+(i+1)+" of "+ids.length+" in order\u2026");
   };
   // a chain step finished. Did it actually produce a frame? A FAILED / timed-out / cancelled
   // render commits nothing (nbGetImage stays empty).
-  const handleBatchDone = (id)=>{
+  const handleBatchDone = (id, opts)=>{
     batch.advance(id);
     const c = chainRef.current;
     if(!c || c.ids[c.idx]!==id) return;           // a lone (non-chain) generation \u2014 just advance
-    const hasFrame = (typeof nbGetImage==="function") ? !!nbGetImage(id) : true;
+    const _u = (typeof nbGetImage==="function") ? (nbGetImage(id)||"") : "";
+    // STRICT mode (the self-heal): the card never confirmed the run, so an unchanged frame
+    // proves nothing — the old frame merely survived a failed re-render. Only a NEW frame
+    // counts as success; anything else fail-safes to a stop, never an auto-lock/advance.
+    const hasFrame = (opts && opts.strict)
+      ? (!!_u && _u !== (c.preFrame||""))
+      : ((typeof nbGetImage==="function") ? !!_u : true);
     if(!hasFrame){
       // STOP the chain here \u2014 do NOT advance. Every later shot is seeded by THIS frame as its
       // continuity anchor, so we can't render the next one without it. The shot is left UNLOCKED
@@ -921,19 +930,36 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     if(batchActiveId && typeof nbCancelGen==="function") nbCancelGen(batchActiveId);
     setChain(null); batch.cancel();
   };
+  // SELF-HEAL a stuck chain. The batch queue advances itself even when the active card is
+  // unmounted (global nb-gen-done listener + watchdog in useBatchGen) — but the CHAIN only
+  // advances through the card's onBatchDone callback. If the batch moves on without us
+  // (watchdog fired on a dead render, card unmounted mid-run), `chain` stays set forever
+  // while the batch sits idle — and every Generate button silently ignores clicks. Detect
+  // that state (chain set, batch idle for a beat) and reconcile exactly like handleBatchDone
+  // would have: advance past a shot that DID commit a frame, stop the chain if it didn't.
+  React.useEffect(()=>{
+    if(!chain || batchActiveId) return;
+    const t = setTimeout(()=>{
+      const c = chainRef.current;
+      if(!c) return;
+      handleBatchDone(c.ids[c.idx], { strict:true });
+    }, 800);
+    return ()=>clearTimeout(t);
+  },[chain, batchActiveId]);
 
-  const startScene = (scene)=>{ if(batchActiveId||chain) return; if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
+  const chainBusyNotice = ()=> setNotice("A render is already in progress \u2014 wait for it to finish, or press Stop on the running shot first.");
+  const startScene = (scene)=>{ if(batchActiveId||chain){ chainBusyNotice(); return; } if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
     const ids = chainOrderIds(shotsByScene[scene.id]); if(!ids.length) return;
     setCollapsed(c=>({ ...c, [scene.id]:false }));   // keep the scene's cards mounted through the run
     stepChain(ids, 0, false); };
-  const startAll = ()=>{ if(batchActiveId||chain) return; if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
+  const startAll = ()=>{ if(batchActiveId||chain){ chainBusyNotice(); return; } if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
     const ids = scenesWithShots.flatMap(s=>chainOrderIds(shotsByScene[s.id]));
     if(!ids.length){ batch.setMsg("Draft the shots first \u2014 nothing to generate yet."); return; }
     setCollapsed({});   // expand all so each card is mounted as the chain reaches it
     stepChain(ids, 0, false); };
   // re-run a scene's chain from the shot AFTER `sh` \u2014 used after re-rolling a frame so the
   // propagated state stays current. Unlocks the downstream shots so they actually re-render.
-  const onRegenDownstream = (sh)=>{ if(batchActiveId||chain || !sh) return; if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
+  const onRegenDownstream = (sh)=>{ if(!sh) return; if(batchActiveId||chain){ chainBusyNotice(); return; } if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
     const ids = chainOrderIds(shotsByScene[sh.sceneId]); const at = ids.indexOf(sh.id);
     if(at<0 || at>=ids.length-1){ batch.setMsg("No later shots in this scene to regenerate."); return; }
     ids.slice(at+1).forEach(id=> onUpdateShot(id,{ locked:false }));
@@ -944,13 +970,20 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   // DON'T silently render it \u2014 we ask the user to generate the earlier shot first, so
   // they stay in control of the chain order. Only the clicked shot renders here.
   const startShot = async (id)=>{
-    if(batchActiveId || chain || chainStartingRef.current || !id) return;
+    if(!id) return;
+    // never swallow the click silently — say WHY nothing is starting
+    if(batchActiveId || chain || chainStartingRef.current){
+      setNotice("A render is already in progress \u2014 wait for it to finish, or press Stop on the running shot first.");
+      return;
+    }
     if(!chainKeyOk()){ batch.setMsg("Set your image-model API key first (top of this tab)."); return; }
     chainStartingRef.current=true;
     try{
-      const target=shotById[id]; if(!target) return;
-      const orderedShots=(typeof sceneShotsOrdered==="function")?sceneShotsOrdered(shotsByScene[target.sceneId]):shotsByScene[target.sceneId];
-      const at=orderedShots.findIndex(s=>s.id===id); if(at<0) return;
+      const target=shotById[id];
+      if(!target){ setNotice("That shot can't be found any more \u2014 the shot list may have changed. Refresh and try again."); return; }
+      const orderedShots=(typeof sceneShotsOrdered==="function")?sceneShotsOrdered(shotsByScene[target.sceneId]):(shotsByScene[target.sceneId]||[]);
+      const at=orderedShots.findIndex(s=>s.id===id);
+      if(at<0){ setNotice("That shot isn't in its scene's running order \u2014 refresh and try again."); return; }
       // A deliberately marked Fresh shot is a hard-cut head. It starts a new
       // sub-chain; otherwise find the nearest earlier Fresh boundary.
       let startAt=0;

@@ -530,8 +530,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
               onMouseEnter:()=>setActiveBeat(n),
               onClick:()=>{ setActiveBeat(n); onBeatFocus && onBeatFocus(n); }},
               React.createElement("div",{className:"bnum"},n),
-              React.createElement("div",{className:"blab"}, r ? r.drive.a : "Unmapped beat"),
-              React.createElement("div",{className:"bsub"}, scriptBeat ? ("\u2192 "+scriptBeat) : "No screenplay text")),
+              React.createElement("div",{className:"blab"}, r ? r.drive.a : "Unmapped beat")),
             React.createElement("div",{className:"sp-page"},
               React.createElement("div",{className:"sp-page-inner"},
                 (fg[n]||[]).length
