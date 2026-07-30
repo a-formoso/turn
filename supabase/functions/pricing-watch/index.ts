@@ -27,7 +27,13 @@
 //   AbsItem  = { kind:"abs",  path, usd, source }
 //   RateItem = { kind:"rate", id, rate, unit, defaultRef, paths, source, note }
 //
-// Auth: requires a signed-in ADMIN (same email allowlist as image-proxy).
+// Auth: requires a signed-in ADMIN (same email allowlist as image-proxy), OR a
+// scheduled caller presenting the x-cron-secret header (pg_cron + pg_net job,
+// which sends the anon key as Bearer to pass gateway JWT verification). The
+// scheduled path additionally PERSISTS the check result to turn_app_config key
+// "pricing-watch-last" (service-role write) so drift found while nobody has the
+// app open surfaces the moment the admin next signs in — applying prices stays
+// a reviewed admin click in the browser, never automatic.
 // Deploy (per project convention — server-side bundling, JWT verification ON):
 //   npx -y supabase@latest functions deploy pricing-watch --project-ref <ref> --use-api
 
@@ -274,22 +280,28 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Use POST." }, 405);
 
-  // ── auth: signed-in ADMIN only (mirrors image-proxy's own check) ───────────
+  // ── auth: scheduled caller (shared secret) OR signed-in ADMIN ─────────────
+  const cronSecret = Deno.env.get("PRICING_WATCH_CRON_SECRET") || "";
+  const scheduled = !!cronSecret &&
+    (req.headers.get("x-cron-secret") || "") === cronSecret;
+
   const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
-  if (!token) return json({ error: "Sign in required." }, 401);
-  try {
-    const sb = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: `Bearer ${token}` } } },
-    );
-    const { data: { user }, error } = await sb.auth.getUser(token);
-    if (error || !user) return json({ error: "Sign in required." }, 401);
-    if (!ADMIN_EMAILS.includes(String(user.email || "").toLowerCase())) {
-      return json({ error: "Admin only." }, 403);
+  if (!scheduled) {
+    if (!token) return json({ error: "Sign in required." }, 401);
+    try {
+      const sb = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        { global: { headers: { Authorization: `Bearer ${token}` } } },
+      );
+      const { data: { user }, error } = await sb.auth.getUser(token);
+      if (error || !user) return json({ error: "Sign in required." }, 401);
+      if (!ADMIN_EMAILS.includes(String(user.email || "").toLowerCase())) {
+        return json({ error: "Admin only." }, 403);
+      }
+    } catch (_e) {
+      return json({ error: "Could not verify your session." }, 401);
     }
-  } catch (_e) {
-    return json({ error: "Could not verify your session." }, 401);
   }
 
   const items: Item[] = [];
@@ -307,5 +319,31 @@ Deno.serve(async (req) => {
     failures.push(...c.failures);
   }));
 
-  return json({ ok: true, checkedAt: new Date().toISOString(), items, failures });
+  const result = {
+    ok: true,
+    checkedAt: new Date().toISOString(),
+    items,
+    failures,
+    via: scheduled ? "cron" : "admin",
+  };
+
+  // ── scheduled path: persist the check so drift surfaces on next admin visit.
+  // Fail-safe: parse failures are stored as failures (no invented prices), and
+  // NOTHING is ever applied here — the browser card stays the only apply path.
+  if (scheduled) {
+    try {
+      const svc = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      );
+      const { error } = await svc
+        .from("turn_app_config")
+        .upsert({ key: "pricing-watch-last", value: result }, { onConflict: "key" });
+      if (error) throw error;
+    } catch (e) {
+      return json({ ...result, ok: false, persistError: String((e as Error)?.message || e) });
+    }
+  }
+
+  return json(result);
 });

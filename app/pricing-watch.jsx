@@ -161,12 +161,31 @@
     _root.render(window.React.createElement(DriftCard,{ rows, failures, checkedAt }));
   }
 
+  /* ── scheduled-check pickup: the Supabase pg_cron job runs the same Edge
+     Function daily and persists its result to turn_app_config
+     "pricing-watch-last". When the browser throttle would skip a live check,
+     we still read that record (public-read) and show any drift found while
+     nobody had the app open. Same fail-safe diff (buildRows) — parse failures
+     produce no rows, and applying stays the admin's reviewed click. */
+  const STORED_MAX_AGE_MS = 48 * 60 * 60 * 1000;   // ignore stale records
+  async function showStoredCheck(){
+    try{
+      if(typeof window.cloudGetAppConfig!=="function") return;
+      const rec = await window.cloudGetAppConfig("pricing-watch-last");
+      if(!rec || !rec.ok || !rec.checkedAt) return;
+      if(Date.now() - new Date(rec.checkedAt).getTime() > STORED_MAX_AGE_MS) return;
+      if(_savedOverrides===null) await turnPricingWatchLoadOverrides();
+      const rows = buildRows(rec.items);
+      if(rows.length) mountCard(rows, rec.failures, rec.checkedAt);
+    }catch(e){}
+  }
+
   /* ── the check itself (admin-only; force=true skips the 12h throttle) ───── */
   let _checking = false;
   async function turnPricingWatchCheck(force){
     if(!window.turnIsAdmin || _checking) return;
     if(!force){
-      try{ if(Date.now() - Number(localStorage.getItem(STAMP_KEY)||0) < CHECK_EVERY_MS) return; }catch(e){}
+      try{ if(Date.now() - Number(localStorage.getItem(STAMP_KEY)||0) < CHECK_EVERY_MS){ showStoredCheck(); return; } }catch(e){}
     }
     const sb = (typeof window.sbClient==="function") ? window.sbClient() : null;
     if(!sb || !sb.functions) return;
