@@ -44,6 +44,29 @@ create table if not exists public.turn_stripe_events (
 );
 alter table public.turn_stripe_events enable row level security;
 
+-- Grant failures: a paid Stripe event the webhook could NOT turn into credits
+-- (missing/malformed product metadata, unknown customer, zero credits). Written
+-- by the stripe-webhook edge function (service role) so missed grants are
+-- findable without Stripe dashboard access:
+--   select * from public.turn_grant_failures order by created_at desc;
+create table if not exists public.turn_grant_failures (
+  id                 uuid primary key default gen_random_uuid(),
+  event_id           text,
+  event_type         text,
+  reason             text not null,
+  stripe_customer_id text,
+  stripe_session_id  text,
+  stripe_sub_id      text,
+  stripe_product_id  text,
+  uid                uuid,
+  details            jsonb not null default '{}'::jsonb,
+  created_at         timestamptz not null default now()
+);
+alter table public.turn_grant_failures enable row level security;
+-- no policies: service-role/SQL-editor only, invisible to app users.
+create index if not exists turn_grant_failures_created_idx
+  on public.turn_grant_failures(created_at desc);
+
 -- Append-only spend ledger. This is deliberately boring: every successful paid
 -- text/image generation records provider/model/task/credits and any provider
 -- usage details the proxy can extract. Failed/blocked attempts may also be
