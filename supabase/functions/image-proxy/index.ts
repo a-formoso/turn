@@ -490,9 +490,17 @@ Deno.serve(async (req) => {
           if (st === "COMPLETED") {
             const rr = await fetch(out.response_url, { headers: { "Authorization": "Key " + falVoiceKey } });
             if (!rr.ok) {
-              // same rule as submit-time: keep fal's own words — the detail body names the
-              // exact field that failed (e.g. "Voice not found: <id>" for custom voices).
-              let why = ""; try { why = (await rr.text()).slice(0, 400); } catch (_e) { /* noop */ }
+              // same rule as submit-time: keep fal's own words — but pull the human "msg"
+              // out of the JSON detail so a phone toast doesn't drown in loc/type/url noise.
+              let why = "";
+              try {
+                const raw = await rr.text();
+                try {
+                  const j = JSON.parse(raw);
+                  const msgs = Array.isArray(j?.detail) ? j.detail.map((d: any) => d?.msg).filter(Boolean) : [];
+                  why = (msgs.length ? msgs.join("; ") : (j?.message || j?.error || raw)).slice(0, 300);
+                } catch (_p) { why = raw.slice(0, 300); }
+              } catch (_e) { /* noop */ }
               throw new Error(`fal result failed (${rr.status})${why ? ": " + why : "."}`);
             }
             out = await rr.json(); done = true; break;
