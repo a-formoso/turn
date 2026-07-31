@@ -470,7 +470,10 @@ Deno.serve(async (req) => {
     const falVoiceRun = async (endpoint: string, input: any) => {
       const head = { "Authorization": "Key " + falVoiceKey, "Content-Type": "application/json" };
       const sub = await fetch("https://queue.fal.run/" + endpoint, {
-        method: "POST", headers: head, body: JSON.stringify(input), signal: AbortSignal.timeout(380000) });
+        // Same budget as the image route: enqueue is one POST, and anything longer than
+        // the gateway's ~150s wall clock gets the isolate killed — the client then sees
+        // an opaque 502 instead of an error that says what happened.
+        method: "POST", headers: head, body: JSON.stringify(input), signal: AbortSignal.timeout(30000) });
       if (!sub.ok) {
         // Keep fal's own words — a bare status code is what made the last round of
         // voice/image failures impossible to diagnose.
@@ -482,7 +485,10 @@ Deno.serve(async (req) => {
         const okHost = (u: string) => { try { return new URL(u).host.endsWith("fal.run"); } catch (_e) { return false; } };
         if (!okHost(out.status_url) || !okHost(out.response_url)) throw new Error("Bad fal response URLs.");
         let done = false;
-        for (let i = 0; i < 150; i++) {
+        // POLL BUDGET: 60 × 1.5s = 90s, under the gateway's ~150s wall clock. A line of
+        // dialogue renders in seconds; the old 150-iteration loop (225s) could never
+        // finish — the isolate died first and took the real error with it.
+        for (let i = 0; i < 60; i++) {
           const sr = await fetch(out.status_url, { headers: { "Authorization": "Key " + falVoiceKey } });
           if (!sr.ok) throw new Error(`fal status failed (${sr.status}).`);
           const sd = await sr.json();
@@ -508,7 +514,7 @@ Deno.serve(async (req) => {
           if (st === "FAILED" || st === "ERROR") throw new Error(String(sd?.error || sd?.detail || "fal voice request failed."));
           await new Promise((r) => setTimeout(r, 1500));
         }
-        if (!done) throw new Error("fal voice request took too long.");
+        if (!done) throw new Error("the backup voice route didn't finish within the server's time budget.");
       }
       return out;
     };
