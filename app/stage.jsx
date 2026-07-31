@@ -139,9 +139,55 @@ function _normStageText(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9
 function stageBeatRow(beatsMap, sceneId, beatN){
   return (((beatsMap||{})[sceneId]||{}).rows||[]).find(r=>Number(r.n)===Number(beatN)) || null;
 }
+function stageShotMicroTexts(sh){
+  // the micro-beats this shot COVERS are the story canon ("what happens"); sh.action is
+  // the camera's staging of them. Coverage is explicit (sh.covers, 1-based into
+  // beatPlan.micro); older shots drafted before covers existed fall back to the SAME fuzzy
+  // matcher the Shots UI badges use — never a second, divergent heuristic.
+  const micro = (sh && sh.beatPlan && Array.isArray(sh.beatPlan.micro)) ? sh.beatPlan.micro : [];
+  if(!micro.length) return [];
+  let nums = [];
+  if(Array.isArray(sh.covers) && sh.covers.length) nums = sh.covers;
+  else if(typeof window.microCoverage==="function" && sh.id){
+    // window.microCoverage explicitly (not a bare global): vm test harnesses isolate
+    // globals, and a silent no-op here would only surface as missing prompt text.
+    // force:true bypasses the UI's no-data-no-signal gate — see microCoverage.
+    try{
+      const r = window.microCoverage([sh], micro, {force:true});
+      const s = r && r.map && r.map[sh.id];
+      if(s && s.size) nums = Array.from(s);
+    }catch(e){}
+  }
+  const out = nums.map(n=>String(micro[Number(n)-1]||"").replace(/\s+/g," ").trim()).filter(Boolean);
+  // legacy clips carry a baked-in "\u2026" (180-char drafting cap) — heal against the
+  // beat's screenplay canon so prompts and the shoot package get the FULL sentence
+  if(out.some(t=>/\u2026\s*$/.test(t)) && typeof window.microHealText==="function"
+      && typeof window.beatScriptText==="function" && sh.sceneId){
+    const canon = window.beatScriptText(sh.sceneId, sh.beatN);
+    if(canon) return out.map(t=>window.microHealText(t, canon));
+  }
+  return out;
+}
 function stageShotScriptText(scene, drafts, sh, max){
+  // resolve through the beat's micro-beats first: the covered micro-beat is the complete,
+  // canonical statement of the event (and names characters the camera line may only imply,
+  // which the cast-sheet scan relies on). sh.action is appended as staging detail when it
+  // adds information beyond the micro-beat. Beat prose is the last-resort fallback for
+  // shots with neither — reading it FIRST stamped the whole beat's prose onto every shot.
+  const M = max||160;
+  const own = String((sh&&sh.action)||"").replace(/\s+/g," ").trim();
+  const microT = stageShotMicroTexts(sh).join(" ").replace(/\s+/g," ").trim();
+  let base = "";
+  if(microT && own){
+    const a = _normStageText(microT), b = _normStageText(own);
+    if(a && b && a!==b && a.indexOf(b)<0 && b.indexOf(a)<0) base = microT+" "+own;
+    else base = (own.length >= microT.length) ? own : microT; // one contains the other: keep the fuller
+  } else base = microT || own;
+  if(base){
+    return base.length<=M ? base : base.slice(0, Math.max(0, M-1)).replace(/\s+\S*$/,"")+"\u2026";
+  }
   if(typeof screenplayBeatTitle==="function"){
-    const t = screenplayBeatTitle(scene, drafts||{}, sh&&sh.beatN, max||160);
+    const t = screenplayBeatTitle(scene, drafts||{}, sh&&sh.beatN, M);
     if(t) return t;
   }
   return "";
@@ -236,8 +282,24 @@ function buildClipData(scene, g, ctx){
   const first = shots[0]||{};
   // in-frame cast (union across the clip's shots), de-duped, names + ids
   const castIds = [];
-  shots.forEach(sh=>{ const inc=(typeof inFrameCast==="function")?inFrameCast(sh, scene, ctx.characters||[]):(sh.subjects||[]);
-    inc.forEach(id=>{ if(castIds.indexOf(id)<0) castIds.push(id); }); });
+  shots.forEach(sh=>{
+    const inc=(typeof inFrameCast==="function")?inFrameCast(sh, scene, ctx.characters||[]):(sh.subjects||[]);
+    // ALSO scan the text the prompt actually SPEAKS (the vidText override or the beat-prose
+    // canon line, composed exactly as panelLines does): beat prose can name characters the
+    // per-shot action line omits ("the rear door clunks. MARCUS folds in…"), and anyone the
+    // prompt names MUST have their identity sheet attached or the model invents them.
+    const spoken = String(sh.vidText||"").trim()
+      || ((typeof stageShotCanonLine==="function") ? stageShotCanonLine(scene, ctx.drafts, ctx.beatsMap, sh, 190) : "");
+    // dialogue surfaces too: the voice-cast preamble, lip-sync recipes and audio role
+    // labels all name the SPEAKER — a speaker-only character (never in the prose) still
+    // needs their identity sheet attached or lip-sync renders an invented face.
+    const dlg = String(sh.dialogue||"");
+    const spk = dlg.trim() && (typeof stageDialogueSpeaker==="function")
+      ? stageDialogueSpeaker(scene, ctx.drafts, ctx.beatsMap, sh, ctx) : null;
+    const named = (typeof scanTextForChars==="function")
+      ? scanTextForChars([spoken, dlg, (spk&&spk.name)||""].filter(Boolean).join("\n"), ctx.characters||[]) : [];
+    inc.concat(named).forEach(id=>{ if(castIds.indexOf(id)<0) castIds.push(id); });
+  });
   const cast = castIds.map(id=>({ id, name:(ctx.charById[id]||{}).name||"" })).filter(c=>c.name);
   // in-frame props (union)
   const propIds = [];
@@ -245,8 +307,40 @@ function buildClipData(scene, g, ctx){
   try{ propLedger = (typeof sceneContinuityLedger==="function") ? sceneContinuityLedger(scene, shots, ctx.charById, ctx.propById) : {}; }catch(e){}
   shots.forEach(sh=>{ const inc=(typeof inFrameProps==="function")?inFrameProps(sh, scene, ctx.charById, ctx.propById):[];
     (inc||[]).concat((propLedger&&propLedger[sh.id])||[]).forEach(id=>{ if(propIds.indexOf(id)<0) propIds.push(id); }); });
-  const clipProps = propIds.map(id=>({ id, name:(ctx.propById[id]||{}).name||"" })).filter(p=>p.name);
+  // STATE + CUSTODY aware prop resolution — the same story-order rules the Shots room
+  // uses: the prop's ACTIVE appearance-state variant sheet attaches (never the stale
+  // base), and the reference label names who actually holds it in this scene.
+  const _storyScenes = ctx.scenes || ((window.turnContinuity||{}).scenes) || [];
+  const clipProps = propIds.map(id=>{
+    const p = ctx.propById[id];
+    if(!p || !p.name) return null;
+    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, scene, _storyScenes) : { id:p.id, state:null };
+    const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, scene, _storyScenes) : { name:p.ownerName, handover:null };
+    return { id:p.id, sheetId:so.id||p.id, name:p.name, kind:p.kind||"",
+      stateLabel:(so.state&&so.state.label)||"", holder:co.name||p.ownerName||"", handover:co.handover||null };
+  }).filter(Boolean);
   const loc = (typeof locationForScene==="function") ? locationForScene(ctx.locations, scene.id) : null;
+  // coverage-sheet resolution: the screenplay-derived unit/coverage sheet (e.g. "Minicab
+  // · NIGHT") beats the master plate when the clip's shots call for it — the same
+  // resolver the Shots room's frame pipeline uses, run over every shot in the clip.
+  let locSheet = null;
+  if(loc && typeof shotLocationCoverageSpecs==="function"){
+    const drafts0 = ctx.drafts || ((window.turnContinuity||{}).drafts) || {};
+    const recs = (Array.isArray(loc.coverageSheets)&&loc.coverageSheets.length) ? loc.coverageSheets
+      : ((typeof deriveLocationCoverageSheets==="function") ? (deriveLocationCoverageSheets(loc,[scene],drafts0)||[]) : []);
+    const seen = {};
+    for(const sh of shots){
+      const specs = shotLocationCoverageSpecs(loc, sh, scene, drafts0) || [];
+      for(const sp of specs){
+        if(!sp || sp.id===loc.id || seen[sp.id]) continue;
+        seen[sp.id] = true;
+        const suffix = String(sp.id).slice(String(loc.id).length+1);
+        const rec = (recs||[]).find(v=>v.id===suffix);
+        if(!locSheet) locSheet = { id:sp.id, name:(rec&&rec.name)||loc.name||"Location", role:sp.role||(rec&&rec.role)||"" };
+      }
+      if(locSheet) break;
+    }
+  }
   const preset = (typeof scenePreset==="function") ? scenePreset(ctx.project, scene.id) : null;
   // camera arc: first -> last distinct move label
   const moves = _uniq(shots.map(sh=> (typeof shotMoveOf==="function") ? shotMoveOf(sh.move).label : (sh.move||"")).filter(Boolean));
@@ -257,13 +351,23 @@ function buildClipData(scene, g, ctx){
   const panelLines = shots.map((sh,i)=>{
     const meta = stageSheetPanelMeta(g, i);
     const speaker = String(sh&&sh.dialogue||"").trim() ? stageDialogueSpeaker(scene, ctx.drafts, ctx.beatsMap, sh, ctx) : null;
+    // the Shots tab's camera grammar, preserved PER SHOT — the clip-level "camera arc"
+    // flattens these into one description; the shoot package and timeline recipes need
+    // each setup intact (size · angle · move · lens + the composition note).
+    const camSpec = (typeof shotSizeOf==="function")
+      ? [shotSizeOf(sh.size).label, shotAngleOf(sh.angle).label, shotMoveOf(sh.move).label, shotLensOf(sh.lens).label].filter(Boolean).join(" · ")
+      : "";
     return { shotId:sh.id, beatN:sh.beatN, sheetPage:meta.page, sheetPanel:meta.panel, half:meta.half,
       // sh.vidText = the user's per-shot VIDEO description override (Multi-shot
       // editor) — video-only, never touches the canon action the image side uses
       text: String(sh.vidText||"").trim() || stageShotCanonLine(scene, ctx.drafts, ctx.beatsMap, sh, 190),
       script:stageShotScriptText(scene, ctx.drafts, sh, 190),
       sheet:stageShotSheetText(scene, ctx.beatsMap, sh, 190),
-      speaker };
+      speaker,
+      camera:camSpec, composition:String((sh&&sh.composition)||"").trim(),
+      dur:(typeof stageShotRuntime==="function") ? stageShotRuntime(sh) : 0,
+      dialogue:String((sh&&sh.dialogue)||"").trim(),
+      micro:stageShotMicroTexts(sh) };
   });
   const actions = _uniq(panelLines.map(p=>String(p.text||"").trim()).filter(Boolean));
   // multi-line: one action per line, sections separated by blank lines — readable
@@ -282,7 +386,10 @@ function buildClipData(scene, g, ctx){
     preset && { k:"style", v:preset.name.toLowerCase() },
     preset && { k:"mood", v:String(preset.grade||"").trim().toLowerCase(), label:_firstWords(preset.grade, 4).toLowerCase() },
   ].filter(Boolean);
-  return { shots, first, cast, props:clipProps, loc, preset, camera, lighting, lead, prompt, chips, setting, panelLines,
+  // the beat's PROTECT line travels with the clip — the shoot package shows it as a
+  // story obligation so the render never quietly drops what the beat exists to protect
+  const protect = shots.map(sh=>sh&&sh.beatPlan&&String(sh.beatPlan.protect||"").trim()).find(Boolean) || "";
+  return { shots, first, cast, props:clipProps, loc, locSheet, preset, camera, lighting, lead, prompt, chips, setting, panelLines, protect,
     dur:_clipDur(g), lineShots: shots.filter(sh=>String(sh.dialogue||"").trim()) };
 }
 
@@ -362,7 +469,9 @@ function stageClipSourcePlan(clip, imgs){
   else mode = (framesReady && (shots.length+refSlots)<=9) ? "frames"
     : hasSheet ? "sheet" : hasHalves ? "halves" : "frames";
   if(mode==="frames" && shots.length<=1) mode = "frame";
-  const ready = mode==="halves" ? hasHalves : mode==="sheet" ? hasSheet : frameReady;
+  // frames mode needs EVERY shot's frame — checking only the first green-lit clips
+  // whose later shots had no anchor at all
+  const ready = mode==="halves" ? hasHalves : mode==="sheet" ? hasSheet : mode==="frames" ? framesReady : frameReady;
   return { mode, ready, hasHalves, hasSheet, frameReady, framesReady,
     ...(STAGE_SOURCE_MODES[mode]||STAGE_SOURCE_MODES.frame) };
 }
@@ -848,32 +957,85 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     }
     if(_mRefs){
       d.cast.forEach(c=>{ const u=imgs[c.id]; out.push({ key:"c:"+c.id, kind:"image", label:c.name+" reference", url:u, ready:!!u, id:c.id }); });
-      if(d.loc){ const u=imgs[d.loc.id]; out.push({ key:"loc", kind:"image", label:(d.loc.name||"Location")+" plate", url:u, ready:!!u, id:d.loc.id }); }
-      d.props.forEach(p=>{ const u=imgs[p.id]; if(u) out.push({ key:"p:"+p.id, kind:"image", label:p.name, url:u, ready:true, id:p.id }); });
+      if(d.loc){
+        // prefer the screenplay-derived coverage sheet (TOD/side accurate) when its
+        // image exists; the master plate is the fallback, never the blind default
+        const useCov = d.locSheet && imgs[d.locSheet.id];
+        const lid = useCov ? d.locSheet.id : d.loc.id;
+        const llab = useCov
+          ? (d.locSheet.name+(d.locSheet.role?(" \u00b7 "+d.locSheet.role):"")+" coverage sheet")
+          : (d.loc.name||"Location")+" plate";
+        out.push({ key:"loc", kind:"image", label:llab, url:imgs[lid]||"", ready:!!imgs[lid], id:lid });
+      }
+      d.props.forEach(p=>{
+        // the ACTIVE appearance-state variant sheet (never the stale base), labelled with
+        // its state and current holder so the References block tells the video model
+        // exactly who carries/wears it in this scene. A MISSING sheet must surface as a
+        // missing ingredient — silently dropping it made the render invent the prop.
+        const sid = p.sheetId || p.id;
+        const u = imgs[sid];
+        const plab = p.name+(p.stateLabel?(" \u2014 "+p.stateLabel):"")+(p.holder?(" \u00b7 "+(p.kind==="worn"?"worn by ":"carried by ")+p.holder):"");
+        out.push({ key:"p:"+p.id, kind:"image", label:plab, url:u||"", ready:!!u, id:sid });
+      });
+      // SCENE-WIDE references: every cast/prop sheet used ANYWHERE in the scene is
+      // available to TICK IN — per-clip packing defaults them OFF (they're not in this
+      // clip's frame); whole-scene packing already lists them via d.cast/d.props, so
+      // this only adds what the current clip doesn't already carry.
+      const _inClip = {}; d.cast.forEach(c=>{ _inClip["c:"+c.id]=true; }); d.props.forEach(p=>{ _inClip["p:"+p.id]=true; });
+      const _seenScene = {};
+      (clipsInScene||[]).forEach(c2=>{
+        const dd = (c2&&c2.data)||{};
+        (dd.cast||[]).forEach(c=>{
+          if(!c || !c.id || !c.name || _inClip["c:"+c.id] || _seenScene["c:"+c.id]) return;
+          _seenScene["c:"+c.id]=true;
+          const u = imgs[c.id];
+          out.push({ key:"c:"+c.id, kind:"image", label:c.name+" reference (scene)", url:u||"", ready:!!u, id:c.id, sceneOnly:true });
+        });
+        (dd.props||[]).forEach(p=>{
+          if(!p || !p.id || !p.name || _inClip["p:"+p.id] || _seenScene["p:"+p.id]) return;
+          _seenScene["p:"+p.id]=true;
+          const sid = p.sheetId || p.id, u = imgs[sid];
+          out.push({ key:"p:"+p.id, kind:"image",
+            label:p.name+(p.stateLabel?(" \u2014 "+p.stateLabel):"")+(p.holder?(" \u00b7 "+(p.kind==="worn"?"worn by ":"carried by ")+p.holder):"")+" (scene)",
+            url:u||"", ready:!!u, id:sid, sceneOnly:true });
+        });
+      });
       if(prevVideo) out.push({ key:"prev", kind:"video", label:"Previous clip (continuity)", url:prevVideo, ready:true });
     }
     // every dialogue line IN THE CLIP (not just the previewed shot) is a candidate lip-sync
     // audio reference — a merged multi-shot clip needs all of its speakers' lines.
     // Only in LOCKED mode on a refs-capable model — and DESELECTABLE (not locked): a
     // user can drop a line's audio and let the model play that moment natively.
-    if(_mAud && dialogueAudio==="locked") (d.lineShots||[]).forEach((sh,i)=>{ const u=auds[sh.id]; if(u){
+    if(_mAud && dialogueAudio==="locked") (d.lineShots||[]).forEach((sh,i)=>{
+      const u=auds[sh.id];
       const p = (d.panelLines||[]).find(x=>x.shotId===sh.id);
       const speaker = (p&&p.speaker&&p.speaker.name) || (sh.lineAudio&&sh.lineAudio.speaker) || "Line";
-      out.push({ key:"a:"+sh.id, kind:"audio", label:speaker+" line", url:u, ready:true, shotId:sh.id });
-    } });
+      // an unvoiced dialogue line is a MISSING ingredient, not an absent one — the
+      // package must show it or the user only learns at lip-sync time
+      out.push({ key:"a:"+sh.id, kind:"audio", label:speaker+" line", url:u||"", ready:!!u, shotId:sh.id });
+    });
     return out;
-  }, [clip.id, activeShot.id, sourceMode, dialogueAudio, modelId, shotStartFrame, JSON.stringify((storyAssets.halves||[]).map(h=>h.id+":"+!!h.url)), storyAssets.top, storyAssets.bottom, storyAssets.sheet, prevVideo, JSON.stringify(d.cast), JSON.stringify(d.props), d.loc&&d.loc.id, imgs, auds]);
+  }, [clip.id, activeShot.id, sourceMode, dialogueAudio, modelId, shotStartFrame, JSON.stringify((storyAssets.halves||[]).map(h=>h.id+":"+!!h.url)), storyAssets.top, storyAssets.bottom, storyAssets.sheet, prevVideo, JSON.stringify(d.cast), JSON.stringify(d.props), d.loc&&d.loc.id, d.locSheet&&d.locSheet.id, JSON.stringify((clipsInScene||[]).map(c=>c.id+":"+JSON.stringify((c.data&&c.data.cast)||[])+":"+JSON.stringify(((c.data&&c.data.props)||[]).map(p=>p.id+"|"+(p.sheetId||"")+"|"+(p.stateLabel||"")+"|"+(p.holder||""))))), imgs, auds]);
 
   // assets default ON when ready; user can toggle (off set). @tags number the INCLUDED
   // assets only — attachment order is what fal sees, so excluding @Image2 must renumber
   // the rest or every later label points at the wrong file.
   const [off, setOff] = React.useState(()=>new Set());
+  // scene-wide references default OFF (not in this clip's frame) — ticking one adds it
+  // to extraOn; clip-derived references keep the include-by-default off-set. Both are
+  // id-keyed, so choices carry sensibly across clips of the same scene.
+  const [extraOn, setExtraOn] = React.useState(()=>new Set());
+  const [imgFail, setImgFail] = React.useState(()=>new Set());   // "key|url" pairs whose image failed to load — keyed BY URL so a regenerated/refreshed image (new URL) automatically retries instead of staying stuck on the placeholder
+  const imgFailed = (a)=> imgFail.has(a.key+"|"+(a.url||""));
+  const noteImgFail = (a)=> setImgFail(s=>{ const k=a.key+"|"+(a.url||""); if(s.has(k)) return s; const n=new Set(s); n.add(k); return n; });
+  const on = (a)=> a.ready && (a.sceneOnly ? extraOn.has(a.key) : !off.has(a.key));
   const tagged = React.useMemo(()=>{ const n={text:0,image:0,video:0,audio:0};
     return assets.map(a=>{
-      if(!(a.ready && !off.has(a.key))) return { ...a, tag:"" };
-      n[a.kind]++; return { ...a, tag:"@"+a.kind+n[a.kind] }; }); }, [assets, off]);
-  const on = (a)=> a.ready && !off.has(a.key);
-  const toggle = (a)=>{ if(a.locked||!a.ready) return; setOff(s=>{ const n=new Set(s); n.has(a.key)?n.delete(a.key):n.add(a.key); return n; }); };
+      if(!on(a)) return { ...a, tag:"" };
+      n[a.kind]++; return { ...a, tag:"@"+a.kind+n[a.kind] }; }); }, [assets, off, extraOn]);
+  const toggle = (a)=>{ if(a.locked||!a.ready) return;
+    const set = a.sceneOnly ? setExtraOn : setOff;
+    set(s=>{ const n=new Set(s); n.has(a.key)?n.delete(a.key):n.add(a.key); return n; }); };
   const assetState = (a)=> !a.ready ? "missing" : a.locked ? "required" : on(a) ? "included" : "excluded";
   const assetStateLabel = (a)=> assetState(a)==="required" ? "Required" : assetState(a)==="included" ? "Included" : assetState(a)==="excluded" ? "Excluded" : "Missing";
   const assetTitle = (a)=>{
@@ -899,8 +1061,12 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   const budgetState = assetOver ? "over" : budgetLeft===0 ? "full" : budgetLeft<=2 ? "near" : "ok";
   const budgetText = assetOver ? (budgetOverBy+" over cap") : budgetLeft===0 ? "At cap" : (budgetLeft+" slot"+(budgetLeft!==1?"s":"")+" left");
   const counts = { text:tagged.filter(a=>a.kind==="text" && on(a)).length, images:onImages.length, videos:onVideos.length, audio:onAudios.length };
+  // the planner is the single source of truth for source readiness — in frames mode
+  // EVERY shot's frame must exist (sourcePlan.ready), not just the first, or Generate
+  // green-lights a clip whose later shots have no anchor at all
   const sourceReady = sourceMode==="halves" ? sourcePlan.hasHalves
     : sourceMode==="sheet" ? sourcePlan.hasSheet
+    : sourceMode==="frames" ? sourcePlan.framesReady
     : !!(imgs[(d.first||{}).id] || shotStartFrame);
   const sourceLabel = sourceMeta.label;
 
@@ -969,17 +1135,14 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     const ok = SEEDANCE_MODELS.find(m=>m.status==="active" && planAllowsModel(m.id));
     if(ok){ setModelId(ok.id); const t0=seedanceTierOf(ok, tier); if(t0) setTier(t0.id); }
   }, [modelId, planGate && planGate.tier]);
-  // AUTO MODEL — pick the most appropriate engine for the clip until the user picks
-  // one by hand (then their choice rules): a clip whose lines are already VOICED
-  // (locked ElevenLabs audio) wants Seedance's voice-locked lip-sync; anything else
-  // multi-beat wants Kling's native multi-shot. Tier gates always respected.
+  // DEFAULT MODEL — Seedance 2.0 for every clip until the user picks one by hand
+  // (then their choice rules): voice-locked lip-sync, per-shot frames and identity
+  // refs in one budget. Tier gates always respected.
   const modelTouchedRef = React.useRef(false);
   React.useEffect(()=>{
     if(modelTouchedRef.current) return;
-    const shots = ((clip.data&&clip.data.shots)||[]);
-    const hasVoiced = shots.some(sh=> sh && sh.lineAudio && sh.lineAudio.durationMs);
-    const want = hasVoiced ? "seedance-2.0" : (shots.length>=2 ? "kling-3.0" : null);
-    if(!want || want===modelId) return;
+    const want = "seedance-2.0";
+    if(want===modelId) return;
     const m = seedanceModelOf(want);
     if(m.id!==want || m.status!=="active" || !planAllowsModel(want)) return;
     setModelId(want); const t0=seedanceTierOf(m, tier); if(t0) setTier(t0.id);
@@ -1487,14 +1650,17 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         onClick:()=>toggle(a)},
         a.kind==="text" ? _stEl("span",{className:"stage2-gen-asset-text"},"T")
         : a.kind==="audio" ? _stEl("span",{className:"stage2-gen-asset-icon"},Icon.mic&&_stEl(Icon.mic,{s:14}))
-        : a.url ? (a.kind==="video"
+        : (a.url && !imgFailed(a)) ? (a.kind==="video"
             ? _stEl("video",{src:a.url,muted:true,playsInline:true,preload:"metadata"})
-            : _stEl("img",{src:a.url,alt:"",loading:"lazy"}))
-        : _stEl("span",{className:"stage2-gen-asset-icon"},Icon.image&&_stEl(Icon.image,{s:14})),
-        (a.url && (a.kind==="image"||a.kind==="video")) && _stEl("span",{className:"stage2-gen-asset-max",role:"button","aria-label":"Maximise",title:"Maximise "+a.label,
+            : _stEl("img",{src:a.url,alt:"",loading:"lazy",
+                onError:()=>noteImgFail(a)}))
+        : _stEl("span",{className:"stage2-gen-asset-ph"+(a.ready?"":" miss")},
+            a.kind==="video" ? (Icon.play&&_stEl(Icon.play,{s:13})) : (Icon.image&&_stEl(Icon.image,{s:13})),
+            _stEl("small",null,a.label)),
+        (a.url && !imgFailed(a) && (a.kind==="image"||a.kind==="video")) && _stEl("span",{className:"stage2-gen-asset-max",role:"button","aria-label":"Maximise",title:"Maximise "+a.label,
           onClick:(e)=>{ e.stopPropagation(); e.preventDefault(); setMaxImg({url:a.url, label:a.label, kind:a.kind}); }},
           Icon.maximize&&_stEl(Icon.maximize,{s:10})),
-        a.kind!=="text" && _stEl("span",{className:"stage2-gen-asset-tag",title:"Reference this asset in the prompt as "+stageAssetMention(a)}, stageAssetTagShort(a)),
+        a.kind!=="text" && a.ready && _stEl("span",{className:"stage2-gen-asset-tag",title:"Reference this asset in the prompt as "+stageAssetMention(a)}, stageAssetTagShort(a)),
         on(a) && _stEl("span",{className:"stage2-gen-asset-check"},Icon.check&&_stEl(Icon.check,{s:10}))))),
     // prompt recipe — the structure lever, promoted to the composer itself. In
     // whole-scene packing a dedicated "Whole scene" tab leads: the combined scene
@@ -1676,7 +1842,9 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         Icon.alert&&_stEl(Icon.alert,{s:14}),
         _stEl("span",{className:"stage2-blocker-text"}, blocker.text),
         blocker.actionLabel && _stEl("button",{type:"button",className:"stage2-blocker-act",disabled:blocker.busy,onClick:blocker.action}, blocker.actionLabel)),
-      blockers.slice(1).map(b=>_stEl("div",{key:b.key,className:"stage2-warn"}, Icon.alert&&_stEl(Icon.alert,{s:12}), b.text)),
+      blockers.slice(1).map(b=>_stEl("div",{key:b.key,className:"stage2-warn"}, Icon.alert&&_stEl(Icon.alert,{s:12}),
+        _stEl("span",{className:"stage2-warn-text"}, b.text),
+        b.actionLabel && _stEl("button",{type:"button",className:"stage2-warn-act",disabled:b.busy,onClick:b.action}, b.actionLabel))),
       genErr && _stEl("div",{className:"stage2-warn"}, Icon.alert&&_stEl(Icon.alert,{s:12}), genErr),
       recipeHint && _stEl("div",{className:"stage2-hint"}, Icon.script&&_stEl(Icon.script,{s:12}), recipeHint),
       soundCueMissing && _stEl("div",{className:"stage2-hint"}, Icon.mic&&_stEl(Icon.mic,{s:12}), "Native audio is on but the prompt has no sound direction — name the sounds you want (ambience, effects, music) or the soundtrack comes out generic."),
@@ -1794,8 +1962,9 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         _stEl("div",{className:"stage2-asset-vis"},
           a.kind==="text" ? _stEl("span",{className:"stage2-asset-textic"},"T")
           : a.kind==="audio" ? _stEl("span",{className:"stage2-asset-icon"}, Icon.mic&&_stEl(Icon.mic,{s:16}))
-          : a.url ? _stEl(React.Fragment,null,
-              a.kind==="video" ? _stEl("video",{src:a.url,muted:true,playsInline:true,preload:"metadata"}) : _stEl("img",{src:a.url,alt:"",loading:"lazy"}),
+          : (a.url && !imgFailed(a)) ? _stEl(React.Fragment,null,
+              a.kind==="video" ? _stEl("video",{src:a.url,muted:true,playsInline:true,preload:"metadata"}) : _stEl("img",{src:a.url,alt:"",loading:"lazy",
+                onError:()=>noteImgFail(a)}),
               (a.kind==="image"||a.kind==="video") && _stEl("span",{className:"stage2-asset-max",role:"button","aria-label":"Maximise",title:"Maximise",
                 onClick:(e)=>{ e.stopPropagation(); e.preventDefault(); setMaxImg({url:a.url, label:a.label, kind:a.kind}); }},
                 Icon.maximize&&_stEl(Icon.maximize,{s:11})))
@@ -1810,7 +1979,11 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
       needsVoice && _stEl("div",{className:"stage2-warn"}, Icon.alert&&_stEl(Icon.alert,{s:12}), "Voice this clip before rendering so timing and lip-sync stay locked."),
       !sourceReady && _stEl("div",{className:"stage2-warn"}, Icon.alert&&_stEl(Icon.alert,{s:12}), usePanels ? "No storyboard source is ready yet." : "This clip has no shot frame yet."),
       assetOver && _stEl("div",{className:"stage2-warn"}, Icon.alert&&_stEl(Icon.alert,{s:12}), "Too many inputs selected. Exclude "+budgetOverBy+" optional asset"+(budgetOverBy!==1?"s":"")+" before rendering."),
-      creditInfo.empty && _stEl("div",{className:"stage2-warn"}, Icon.alert&&_stEl(Icon.alert,{s:12}), "No generation credits remaining."),
+      creditInfo.empty && _stEl("div",{className:"stage2-warn"}, Icon.alert&&_stEl(Icon.alert,{s:12}),
+        _stEl("span",{className:"stage2-warn-text"}, "Not enough generation credits — this render needs "+totalCost+(creditInfo.known?(", "+creditInfo.remaining+" remaining"):"")+"."),
+        _stEl("button",{type:"button",className:"stage2-warn-act",
+          title:"Top up your balance with a one-off credit pack, or subscribe for a monthly allowance",
+          onClick:()=>{ if(typeof window.turnOpenPlans==="function") window.turnOpenPlans(); }}, "Get credits")),
       genErr && _stEl("div",{className:"stage2-warn"}, Icon.alert&&_stEl(Icon.alert,{s:12}), genErr))
     /* Target Stage UI keeps supporting beat/story/reference context out of the main surface. */,
     false && _stEl("div",{className:"stage2-midcards"},
@@ -1878,6 +2051,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
               : m.label,
           onClick:()=>{ if(m.status!=="active") return;
             if(planLocked){ openPlansUpsell(); return; }
+            modelTouchedRef.current = true;   // hand-pick from the settings panel also stands down the auto default
             setModelId(m.id); const t0=seedanceTierOf(m,tier); if(t0) setTier(t0.id); }},
           m.label,
           m.status==="soon" && _stEl("span",{className:"sd-gen-model-soon"},"Soon"),
@@ -2617,11 +2791,19 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
     scenesWithShots.forEach(s=>{ m[s.id]=(typeof sceneSequences==="function")?sceneSequences(shotsByScene[s.id]||[], clipMax, packOpts):[]; });
     return m; }, [scenesWithShots, shotsByScene, clipMax, modelId, packMode]);
 
-  const ctx = { characters, charById, props, propById, locations, project, beatsMap, drafts };
+  // ctx.scenes = the story-ORDERED list — shotPropSheetId/custodyOwnerAt resolve by story
+  // position, so the raw array would mis-resolve active states/holders out of order
+  const ctx = { characters, charById, props, propById, locations, project, beatsMap, drafts, scenes:ordered };
   const aspect = _stageAspect(project);
   const charSig = JSON.stringify((characters||[]).map(c=>[c.id,c.name]));
-  const propSig = JSON.stringify((props||[]).map(p=>[p.id,p.name]));
-  const locSig = JSON.stringify((locations||[]).map(l=>[l.id,l.name,(l.scenes||[]).join("|")]));
+  // CONTENT-based signatures — a state/custody/coverage edit that keeps the same counts
+  // (re-pinned scene, renamed holder, new trigger words) must still bust the clip memo
+  const propSig = JSON.stringify((props||[]).map(p=>[p.id,p.name,
+    (p.states||[]).map(st=>[st.id,st.sceneId,st.label]).join("|"),
+    (p.custody||[]).map(cu=>[cu.charId,cu.charName,cu.fromSceneId]).join("|"),
+    p.ownerId||p.ownerName||""]));
+  const locSig = JSON.stringify((locations||[]).map(l=>[l.id,l.name,(l.scenes||[]).join("|"),
+    (l.coverageSheets||[]).map(v=>[v.id,v.role,v.name,(v.triggerWords||[]).join("~")]).join("|")]));
   const draftSig = JSON.stringify(Object.entries(drafts||{}).map(([id,d])=>[id,(d&&d.version)||"",((d&&d.blocks)||[]).map(b=>[b.beat,b.type,b.text]).join("|")]));
   const beatsSig = JSON.stringify(Object.entries(beatsMap||{}).map(([id,b])=>[id,((b&&b.rows)||[]).map(r=>[r.n,r&&r.drive&&r.drive.d,r&&r.react&&r.react.d]).join("|")]));
 
@@ -2657,7 +2839,11 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
       }
     });
     allClips.forEach(c=>{ const ids=storyboardClipIds(c); (ids.all||[]).forEach(id=>s.add(id)); });
-    return Array.from(s); }, [shotIdsKey, charIdsKey, locIdsKey, propIdsKey, allClips.map(c=>c.id).join(","), scenesWithShots.map(s=>s.id).join(",")]);
+    // the clip-derived VARIANT ids too — a prop's active state sheet and the scene's
+    // coverage sheet aren't in the base id lists above, so they'd never be fetched
+    allClips.forEach(c=>{ const dd=c.data||{}; (dd.props||[]).forEach(p=>s.add(p.sheetId||p.id)); if(dd.locSheet&&dd.locSheet.id) s.add(dd.locSheet.id); });
+    return Array.from(s); }, [shotIdsKey, charIdsKey, locIdsKey, propIdsKey, allClips.map(c=>c.id).join(","), scenesWithShots.map(s=>s.id).join(","),
+      JSON.stringify(allClips.map(c=>[(((c.data||{}).props)||[]).map(p=>p.sheetId||p.id).join("|"), (((c.data||{}).locSheet)||{}).id||""]))]);
   const [imgs, setImgs] = React.useState({});
   const [imgTick, setImgTick] = React.useState(0);
   React.useEffect(()=>{ const h=()=>setImgTick(x=>x+1); window.addEventListener("nb-gen-done", h); window.addEventListener("nb-prefetched", h); return ()=>{ window.removeEventListener("nb-gen-done", h); window.removeEventListener("nb-prefetched", h); }; }, []);

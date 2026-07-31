@@ -2471,6 +2471,9 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
               ? (other && React.createElement("button",{className:"sheet-gen-err-btn primary",onClick:()=>generate({model:other.id})},"Switch to "+other.label))
               : React.createElement("button",{className:"sheet-gen-err-btn",onClick:()=>generate({simple:true})},"Try simplified prompt")),
         !browserGate && other && React.createElement("button",{className:"sheet-gen-err-btn",onClick:()=>generate({model:other.id})},"Try "+other.label))); })(),
+    // caption row only exists when it has something real to say — an EMPTY slot used to
+    // render a dangling "REFERENCE FRAME" label under the buttons with nothing above it.
+    (genUrl || slotHasRef || genTier==="session" || genTier==="memory") &&
     React.createElement("div",{className:"sheet-frame-cap"},
       slotHasRef && React.createElement("span",{className:"sheet-ref-chip"},
         React.createElement(Icon.bolt,{s:9,sw:2.2}),"Ref"),
@@ -2508,7 +2511,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
               if(!d) return null;
               return React.createElement("span",{className:"sheet-meta-item",title:"Generated"+(genMeta.time?(" \u00b7 "+genMeta.time):"")},
                 React.createElement((Icon.calendar||Icon.clock),{s:10,sw:1.8}), d); })())
-        : React.createElement("span",{className:"sheet-frame-cap-label"},genUrl?"Generated":"Reference frame")),
+        : (genUrl || slotHasRef) && React.createElement("span",{className:"sheet-frame-cap-label"},genUrl?"Generated":"Reference frame")),
     /* Portal to <body>: the card has content-visibility:auto (paint/layout
        containment), which would otherwise make this card the containing block for
        the modal's position:fixed — trapping the overlay inside the card instead of

@@ -422,7 +422,31 @@ function beatScriptText(sceneId, n){
   return parts.join("  ");
 }
 
-/* circled micro-beat numerals: 1..20 -> \u2460.. ; beyond that "#n" */
+/* legacy micro-beats were clipped to 180 chars with a baked-in "\u2026" at drafting.
+   Heal them against the beat's SCREENPLAY canon (where the micro-beat text was derived
+   from): find the clipped prefix in the canon and extend to the end of that sentence.
+   Never invents — if the canon no longer contains the prefix, the clipped text stands. */
+function microHealText(text, canon){
+  const t = String(text||"").trim();
+  if(!/\u2026\s*$/.test(t)) return t;
+  const prefix = t.replace(/\u2026\s*$/,"").trim();
+  if(prefix.length < 12) return t;
+  const cn = String(canon||"");
+  if(!cn) return t;
+  const words = prefix.split(/\s+/).filter(Boolean).slice(0, 12)
+    .map(w=>w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"));
+  if(!words.length) return t;
+  let m = null;
+  try{ m = (new RegExp(words.join("\\W+"), "i")).exec(cn); }catch(e){ return t; }
+  if(!m) return t;
+  const from = m.index + m[0].length;
+  // sentence end: punctuation optionally followed by a closing quote/bracket, then
+  // whitespace or end-of-text — plain /[.!?](?=\s|$)/ over-extends past ." or .”
+  const stop = cn.slice(from).search(/[.!?][\u201D\u201C"')\]\u2019]*(?=\s|$)/);
+  const end = stop>=0 ? from + stop + 1 : cn.length;
+  return cn.slice(m.index, end).replace(/\s+/g," ").trim();
+}
+window.microHealText = microHealText;
 function _circ(n){ return (n>=1&&n<=20) ? String.fromCharCode(0x245F+n) : ("#"+n); }
 /* MICRO-BEAT COVERAGE \u2014 which micro-beats each shot films.
    A shot's explicit `covers` array is the truth and always wins. A shot WITHOUT covers is
@@ -438,11 +462,16 @@ function _circ(n){ return (n>=1&&n<=20) ? String.fromCharCode(0x245F+n) : ("#"+n
 const _MB_STOP = new Set(("the and a an of to in on at as is are was were be been being for with into from over under this that it its his her hers him she they them their then out off up down back again while when where who how not no one two has had have does did doing goes go get gets"
   ).split(" "));
 function _mbToks(s){ const set=new Set(); String(s||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/).forEach(w=>{ if(w.length>=3 && !_MB_STOP.has(w)) set.add(w); }); return set; }
-function microCoverage(shots, microTexts){
+function microCoverage(shots, microTexts, opts){
   const rowToks = (microTexts||[]).map(_mbToks);
   const list = shots || [];
-  // no shots at all \u2192 nothing films anything, so the uncovered flags ARE the right signal
-  const mapped = !list.length || list.some(sh=>Array.isArray(sh.covers) && sh.covers.length>0);
+  // no shots at all → nothing films anything, so the uncovered flags ARE the right signal.
+  // opts.force (Stage's text resolver): run fuzzy inference even when NO shot carries
+  // explicit covers — the mapped gate exists so the UI never invents a coverage signal,
+  // but a best-effort text match is exactly right when deriving prompt canon for legacy
+  // shots. Per-shot thresholds (hit>=2, cosine>=0.34) are list-independent, so a
+  // singleton call under force yields the same set a beat-wide call would.
+  const mapped = !!((opts&&opts.force) || !list.length || list.some(sh=>Array.isArray(sh.covers) && sh.covers.length>0));
   const map = {};
   list.forEach(sh=>{
     if(Array.isArray(sh.covers) && sh.covers.length){ map[sh.id] = new Set(sh.covers); return; }
@@ -569,7 +598,7 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
           const covering = L.shots.map((sh,idx)=>({sh,idx})).filter(x=> microCov[x.sh.id] && microCov[x.sh.id].has(n));
           const flag = microMapped && !covering.length;   // genuinely unfilmed
           return _el("div",{key:n,className:"bc-micro-row"+(flag?" uncovered":"")},
-            _el("span",{className:"bc-micro-t"},_circ(n)+" "+String(m).replace(/^\s*\d+[\.\)]\s*/,"")),
+            _el("span",{className:"bc-micro-t"},_circ(n)+" "+microHealText(String(m).replace(/^\s*\d+[\.\)]\s*/,""), beatText)),
             covering.length
               ? _el("span",{className:"bc-micro-shots"},covering.map(x=>_el("button",{key:x.sh.id,className:"bc-micro-shotlink",
                   title:"Filmed in Shot "+letterOf(x.idx)+" \u2014 click to open it",

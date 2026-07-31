@@ -5086,7 +5086,7 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 
 /* prompt recipe picker — replaces the old inert "Prompt Library" stub */
 .stage2-recipe-row{display:flex;gap:4px;background:var(--bg-3,#f3f1ea);border:1px solid var(--line-2);border-radius:8px;padding:3px}
-.stage2-recipe{border:0;background:transparent;color:var(--txt-2);font:700 10px var(--f-ui);letter-spacing:.01em;padding:5px 8px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.stage2-recipe{border:0;background:transparent;color:var(--txt-2);font:700 10px var(--f-ui);letter-spacing:.01em;padding:5px 8px;border-radius:6px;cursor:pointer;white-space:nowrap;flex:0 0 auto}
 .stage2-recipe:hover{color:var(--txt-0)}
 .stage2-recipe.on{background:#fff;color:var(--brand);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 
@@ -5150,7 +5150,7 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .stage2-asset small{display:block;margin-top:2px;font-family:var(--f-mono);font-size:8.5px;color:var(--txt-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:lowercase}
 .stage2-asset.on small,.stage2-asset.required small{color:var(--brand)}
 .stage2-assets-warnings{display:grid;gap:7px;margin-top:8px}
-.stage2-assets-warnings .stage2-warn{margin-top:0;border:1px solid var(--neg-line,rgba(224,105,138,.3));border-radius:8px;background:var(--neg-soft,rgba(224,105,138,.1));padding:8px 10px}
+.stage2-assets-warnings .stage2-warn{margin-top:0;border:1px solid var(--neg-line,rgba(224,105,138,.3));border-radius:8px;background:var(--neg-soft,rgba(224,105,138,.1));padding:6px 9px;align-items:center;font-size:11px}
 .stage2-midcards{margin-top:18px}
 .stage2-panel.video-gen{background:#f7f5ef;padding:14px;border-left:1px solid #e5ded3}
 .sd-gen-panel{padding:0;background:transparent;gap:12px}
@@ -5463,8 +5463,17 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 /* the asset's @mention handle — connects each chip to the prompt grammar (@Img2 = @Image2) */
 .stage2-gen-asset-tag{position:absolute;left:2px;bottom:2px;padding:1px 3px;border-radius:3px;background:rgba(0,0,0,.6);color:#fff;
   font:700 7.5px var(--f-mono);letter-spacing:.02em;pointer-events:none}
-/* recipe row inside the composer (shares .stage2-recipe-row visuals) */
-.stage2-gen-recipes{display:inline-flex;margin:0 0 11px}
+/* URL-less or failed-to-load ref tile: kind icon + the asset's own name, so a missing
+   sheet reads as "wedding ring — nothing to send yet", never a broken-picture glyph */
+.stage2-gen-asset-ph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  color:var(--txt-3);padding:2px}
+.stage2-gen-asset-ph small{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%;
+  font:600 6.8px/1.25 var(--f-ui);letter-spacing:.01em;text-align:center;word-break:break-word;color:var(--txt-2)}
+.stage2-gen-asset-ph.miss,.stage2-gen-asset-ph.miss small{color:var(--neg,#c0395f)}
+/* recipe row inside the composer (shares .stage2-recipe-row visuals) — scrolls sideways
+   on narrow devices instead of overflowing past the card edge */
+.stage2-gen-recipes{display:flex;max-width:100%;margin:0 0 11px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.stage2-gen-recipes::-webkit-scrollbar{display:none}
 /* auto reference-role preview — appended to the prompt at render, shown read-only here */
 .stage2-gen-refs{display:grid;gap:3px;margin-top:10px;border:1px dashed var(--line-2);border-radius:10px;padding:9px 11px;background:var(--bg-2,#faf9f5)}
 .stage2-gen-refs b{font:700 9px var(--f-mono);letter-spacing:.1em;color:var(--txt-3)}
@@ -5477,12 +5486,12 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 /* the PRIMARY blocker — the one thing stopping Generate. Prominent + actionable in
    place (deliberately not a modal: persistent state, not an event). Clicking the
    blocked Generate button shakes it and scrolls it into view. */
-.stage2-blocker{display:flex;align-items:center;gap:11px;border:1.5px solid var(--brand,#d67e00);background:var(--accent-soft,rgba(214,126,0,.1));
-  color:var(--txt-0);border-radius:12px;padding:12px 14px;font:600 12.5px/1.45 var(--f-ui);box-shadow:0 8px 22px rgba(214,126,0,.14)}
+.stage2-blocker{display:flex;align-items:center;gap:8px;border:1.5px solid var(--brand,#d67e00);background:var(--accent-soft,rgba(214,126,0,.1));
+  color:var(--txt-0);border-radius:10px;padding:8px 11px;font:600 11.5px/1.4 var(--f-ui);box-shadow:0 4px 14px rgba(214,126,0,.12)}
 .stage2-blocker svg{flex:0 0 auto;color:var(--brand,#d67e00)}
 .stage2-blocker-text{flex:1;min-width:0}
 .stage2-blocker-act{flex:0 0 auto;border:0;border-radius:7px;background:var(--brand,#d67e00);color:var(--ink-on-accent,#2c2722);
-  font:800 11.5px var(--f-ui);padding:9px 13px;cursor:pointer;white-space:nowrap}
+  font:800 11px var(--f-ui);padding:7px 11px;cursor:pointer;white-space:nowrap}
 .stage2-blocker-act:hover:not(:disabled){filter:brightness(1.06)}
 .stage2-blocker-act:disabled{opacity:.6;cursor:default}
 .stage2-blocker.pulse{animation:stage2BlockerPulse .8s ease}
@@ -5564,7 +5573,13 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .stage2-gen-submit-neon:active:not(:disabled){filter:brightness(.96)}
 .stage2-gen-submit-neon:disabled{opacity:.45;cursor:default;filter:saturate(.55)}
 .stage2-gen-notices{display:grid;gap:7px;margin-top:10px}
-.stage2-gen-notices .stage2-warn{margin:0;border:1px solid var(--neg-line,rgba(224,105,138,.35));background:var(--neg-soft,rgba(224,105,138,.1));color:var(--neg,#c0395f);border-radius:10px;padding:8px 10px}
+.stage2-gen-notices .stage2-warn{margin:0;border:1px solid var(--neg-line,rgba(224,105,138,.35));background:var(--neg-soft,rgba(224,105,138,.1));color:var(--neg,#c0395f);border-radius:10px;padding:6px 9px;align-items:center;font-size:11px}
+/* warning rows carry their own one-click fix (e.g. credits → plans/top-ups) */
+.stage2-warn-text{flex:1;min-width:0}
+.stage2-warn-act{flex:0 0 auto;margin-left:auto;border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;
+  font:750 10.5px var(--f-ui);padding:4px 9px;cursor:pointer;white-space:nowrap}
+.stage2-warn-act:hover:not(:disabled){filter:brightness(.93)}
+.stage2-warn-act:disabled{opacity:.6;cursor:default}
 .stage2-gen-composer.no-credits .stage2-gen-box{box-shadow:inset 0 0 0 1px var(--neg-line,rgba(224,105,138,.35))}
 @media (max-width:760px){
   .stage2-gen-prompt{width:100%;padding-bottom:11px}

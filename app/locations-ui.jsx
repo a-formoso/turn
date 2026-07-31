@@ -540,6 +540,9 @@ function LocationCoverageSheet({ l, v, project, scenes, drafts, previousSheets, 
     React.createElement(SheetFrame,{ gen, slotId:"loccov-"+id, name:(v.name||l.name||"Location")+" \u00b7 "+(v.role||"INT"),
       avatarColor:locSwatch(v.role), initials:(v.role||"?").slice(0,2).toUpperCase(), drafted:true, drafting:false,
       entity:l, onView, slotPlaceholder:"Drop a finished side plate", noun:"coverage sheet", compact:true,
+      // match the unit-plate card: the empty slot itself imports on drop/click, which also
+      // drops the redundant "Upload a finished coverage sheet" button below the generate CTA
+      dropToImport:true,
       referenceControls: React.createElement(CoverageReferenceStrip,{ refs:refPreview, excludedIds:coverageRefOff, onToggle:toggleCoverageRef, onView }),
       generateDisabled:!canGenerateCoverage,
       generateDisabledLabel: missingPrev ? "Generate earlier coverage first" : "Generate parent plate first",
