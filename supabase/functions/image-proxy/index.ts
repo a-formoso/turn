@@ -489,7 +489,12 @@ Deno.serve(async (req) => {
           const st = String(sd.status || "").toUpperCase();
           if (st === "COMPLETED") {
             const rr = await fetch(out.response_url, { headers: { "Authorization": "Key " + falVoiceKey } });
-            if (!rr.ok) throw new Error(`fal result failed (${rr.status}).`);
+            if (!rr.ok) {
+              // same rule as submit-time: keep fal's own words — the detail body names the
+              // exact field that failed (e.g. "Voice not found: <id>" for custom voices).
+              let why = ""; try { why = (await rr.text()).slice(0, 400); } catch (_e) { /* noop */ }
+              throw new Error(`fal result failed (${rr.status})${why ? ": " + why : "."}`);
+            }
             out = await rr.json(); done = true; break;
           }
           if (st === "FAILED" || st === "ERROR") throw new Error(String(sd?.error || sd?.detail || "fal voice request failed."));
@@ -570,6 +575,9 @@ Deno.serve(async (req) => {
             falWhy = "fal returned an audio URL the proxy couldn't download.";
           } else { falWhy = "fal returned no audio."; }
         } catch (e) { falWhy = ((e as any)?.message || String(e)); }
+        // a custom ElevenLabs voice can NEVER ride the fal backup (stock voices only) —
+        // say so plainly instead of leaving "Voice not found" to be misread as downtime.
+        if (/voice not found/i.test(falWhy)) falWhy += " The fal backup only renders STOCK ElevenLabs voices — this line's voice is custom, so the backup can't cover it; resolving the ElevenLabs invoice restores the primary route.";
         return json({ error: (elWhy ? elWhy + " Backup route also failed — " : "Voice rendering is unavailable — ") + falWhy }, 200);
       }
 
