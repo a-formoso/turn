@@ -4774,6 +4774,13 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .stage2-scene-pick.on::before{content:"";position:absolute;left:-9px;top:50%;transform:translateY(-50%);width:2px;height:17px;background:var(--brand);border-radius:2px}
 .stage2-scene-pick.on .stage2-scene-ttl{color:var(--txt-0)}
 .stage2-scene-meta{font-family:var(--f-mono);font-size:10px;color:var(--txt-3);flex:0 0 auto}
+/* per-scene render rollup — rendered/total clips in the header + a thin fill bar
+   beneath. Done state matches the chip ✓ styling (var(--pos)). */
+.stage2-scene-prog{font-family:var(--f-mono);font-size:10px;font-weight:700;color:var(--txt-2);flex:0 0 auto;white-space:nowrap}
+.stage2-scene-prog.done{color:var(--pos)}
+.stage2-scene-bar{height:2px;margin:1px 8px 4px 32px;border-radius:2px;background:var(--bg-3);overflow:hidden}
+.stage2-scene-bar-fill{height:100%;border-radius:2px;background:var(--brand);transition:width .25s ease}
+.stage2-scene-bar.done .stage2-scene-bar-fill{background:var(--pos)}
 /* per-clip chips under each scene row — label + visual-source glyph + readiness.
    Horizontal and compact (a checklist), not the old vertical per-beat list. */
 .stage2-clip-chips{display:flex;flex-wrap:wrap;gap:4px;padding:2px 8px 4px 32px}

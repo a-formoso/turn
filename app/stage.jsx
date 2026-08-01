@@ -3133,14 +3133,25 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
     const sceneShots = shotsByScene[scene.id]||[];
     const sceneDur = sceneShots.reduce((t,sh)=>t+stageShotRuntime(sh),0);
     const done = sceneClips.filter(c=>clipVideoReady(c, vids)).length;
+    const total = sceneClips.length;
+    const allDone = total>0 && done===total;
     return _stEl("div",{key:scene.id,className:"stage2-scene-block"},
-      _stEl("button",{type:"button",className:"stage2-scene-headrow"+(selectedScene.id===scene.id?" on":""),
+      _stEl("button",{type:"button",className:"stage2-scene-headrow"+(selectedScene.id===scene.id?" on":"")+(allDone?" done":""),
           onClick:()=>{ if(sceneClips[0]) onSelectClip(sceneClips[0].id); },
-          title:"Select Scene "+_pad2(scene.no)},
+          title:"Select Scene "+_pad2(scene.no)+" · "+done+" of "+total+" clip"+(total!==1?"s":"")+" rendered · "+_fmtSecs(sceneDur)+" runtime"},
         _stEl("span",{className:"tree-scene-no"}, _pad2(scene.no)),
-        _stEl("span",{className:"tree-scene-dot",style:{background:done===sceneClips.length&&sceneClips.length?"var(--pos)":chargeColor(scene)}}),
+        _stEl("span",{className:"tree-scene-dot",style:{background:allDone?"var(--pos)":chargeColor(scene)}}),
         _stEl("span",{className:"stage2-scene-ttl"}, scene.title||scene.loc),
+        // per-scene rollup: rendered/total clips (✓-green when complete, matching the
+        // chip done styling) + the scene's total runtime — the at-a-glance answer to
+        // "how far along is this scene?" without scanning chips
+        _stEl("span",{className:"stage2-scene-prog"+(allDone?" done":"")}, allDone?"✓ ":"", done+"/"+total),
         _stEl("span",{className:"stage2-scene-meta"}, _fmtSecs(sceneDur))),
+      // thin progress bar that fills as clips render
+      _stEl("div",{className:"stage2-scene-bar"+(allDone?" done":""),role:"progressbar",
+          "aria-valuenow":done,"aria-valuemin":0,"aria-valuemax":total,
+          "aria-label":"Scene "+_pad2(scene.no)+" render progress"},
+        _stEl("div",{className:"stage2-scene-bar-fill",style:{width:(total?Math.round(done/total*100):0)+"%"}})),
       // one chip per CLIP — and the Multi-shot composer edits ONE beat at a time, so
       // each chip also names its beat: label + beat name + visual-source glyph
       // (▢ frame · ▢▢ per-shot frames · ▤ 2-panel half · ▦ 4-panel sheet) +
