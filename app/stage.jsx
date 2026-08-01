@@ -2187,14 +2187,16 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   // segmented pattern): MODEL (engine + quality), INPUTS (what feeds the render),
   // DIRECTOR (how it's staged). Voice/errors/Generate stay persistent below. ----
   const panelTabs = [["model","Model"],["inputs","Inputs"],["director","Director"]];
-  const tabModel = _stEl(React.Fragment,null,
-    // the capability card follows the SELECTED model — its rows come from the registry
-    _stEl("div",{className:"sd-gen-capability"},
-      _stEl("div",{className:"sd-gen-cap-head"},
-        _stEl("b",null,model.label),
-        _stEl("span",null,tierObj?tierObj.label:(model.status==="soon"?"Soon":""))),
-      (model.capabilities||[]).map((txt,i)=>
-        _stEl("div",{className:"sd-gen-cap-row",key:i},Icon.sparkles&&_stEl(Icon.sparkles,{s:12}),txt))),
+  // ---- the unified RENDER card: EVERY cost-bearing choice (model · tier · resolution ·
+  // duration) plus the LIVE credit cost and the model's capabilities as compact chips —
+  // one glanceable answer to "what will this render cost and why". Always visible above
+  // the tabs; the tabs below keep only the advanced knobs (seed, bitrate, batch, end frame). ----
+  const renderCard = _stEl("div",{className:"stage2-rendercard"},
+    _stEl("div",{className:"stage2-rc-head"},
+      _stEl("span",{className:"eyebrow"},"Render"),
+      _stEl("b",{className:"stage2-rc-cost"+(creditInfo.empty?" empty":""),
+        title:renderCostTitle+". "+creditInfo.title},
+        Icon.sparkles&&_stEl(Icon.sparkles,{s:11}), totalCost+" credit"+(totalCost!==1?"s":""))),
     // model picker — data-driven from SEEDANCE_MODELS; a future model is one registry
     // entry, so it shows up here (disabled, with its note as a tooltip) automatically.
     _stEl("div",{className:"sd-gen-modelrow",role:"radiogroup","aria-label":"Model"},
@@ -2214,17 +2216,9 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
           m.status==="soon" && _stEl("span",{className:"sd-gen-model-soon"},"Soon"),
           planLocked && _stEl("span",{className:"sd-gen-model-soon plan"},"Director"));
       })),
-    _stEl("label",{className:"sd-gen-label"},"Render tier"),
-    !!(model.tiers||[]).length && _stEl("div",{className:"sd-gen-quality"},
+    !!(model.tiers||[]).length && _ctrlRow("Tier", _stEl("div",{className:"sd-gen-quality"},
       model.tiers.map(t0=>_stEl("button",{key:t0.id,className:tier===t0.id?"on":"",type:"button",title:t0.note,onClick:()=>setTier(t0.id)},
-        t0.fast&&Icon.sparkles&&_stEl(Icon.sparkles,{s:12}),t0.label))),
-    _stEl("div",{className:"sd-gen-modegrid"},
-      MODES.map(([id,label])=>_stEl("button",{key:id,type:"button",
-        className:"sd-gen-mode "+(mode===id?"on":""),
-        onClick:()=>setModeOverride(id===autoMode?null:id),
-        title:id===autoMode?"Auto-selected from current inputs":"Use "+label},
-        label.split(" ").map((w,i)=>_stEl(React.Fragment,{key:w+i},i===2?_stEl("br",null):null,w+(i===label.split(" ").length-1?"":" ")))))),
-    _stEl("label",{className:"sd-gen-label"},"Quality"),
+        t0.fast&&Icon.sparkles&&_stEl(Icon.sparkles,{s:12}),t0.label)))),
     _ctrlRow("Resolution", _stEl("div",{className:"stage2-respills"},
       STAGE_RESOLUTIONS.map(r=>{
         const planLocked = stageResAllowed(tierObj, r) && !planAllowsRes(r);
@@ -2237,6 +2231,41 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         return _stEl("button",{key:r,type:"button",className:"stage2-respill"+(resolution===r?" on":""),
           disabled, title:disabled?(reachable?(r+" needs the Standard tier"):(r+" isn't available on "+model.label)):(r==="4K"?"4K — ~5× the 720p credit rate":r), onClick:()=>setResolution(r)}, r);
       }))),
+    _ctrlRow("Duration", _stEl("select",{value:String(duration),
+        title: durationLocked ? ("Minimum "+_fmtSecs(measuredSec)+" — the measured voice + breathing room; extend for more acting time") : "Clip duration",
+        onChange:e=>{ const v=Number(e.target.value); setDurationOverride(durationLocked && v===measuredSec ? null : v); }},
+        _uniq([duration, measuredSec||0, 4,5,6,8,10,12,15, model.maxClipSec||15])
+          .filter(v=> v>0 && v<=(model.maxClipSec||15) && (!durationLocked || v>=measuredSec))
+          .sort((a,b)=>a-b)
+          .map(v=>_stEl("option",{key:v,value:String(v)},_fmtSecs(v)+(durationLocked&&v===measuredSec?" · voice + air (min)":""))))),
+    // the cost math, spelled out — updates live with any choice above (and the batch pill)
+    _stEl("div",{className:"stage2-rc-math",title:creditInfo.title},
+      (batchN>1 ? (batchN+" takes × ") : "")+_fmtSecs(duration)+" × "+resolution+" × "+tierObj.label
+        +" = "+totalCost+" credit"+(totalCost!==1?"s":"")
+        +(creditInfo.known ? (" · "+creditInfo.remaining+" remaining") : "")),
+    // capabilities as compact chips (full text on hover) — replaces the long text list
+    _stEl("div",{className:"stage2-rc-caps"},
+      (model.capabilities||[]).map((txt,i)=>
+        _stEl("span",{key:i,className:"stage2-rc-cap",title:txt}, _firstWords(txt, 4)))));
+  const tabModel = _stEl(React.Fragment,null,
+    _stEl("div",{className:"sd-gen-modegrid"},
+      MODES.map(([id,label])=>_stEl("button",{key:id,type:"button",
+        className:"sd-gen-mode "+(mode===id?"on":""),
+        onClick:()=>setModeOverride(id===autoMode?null:id),
+        title:id===autoMode?"Auto-selected from current inputs":"Use "+label},
+        label.split(" ").map((w,i)=>_stEl(React.Fragment,{key:w+i},i===2?_stEl("br",null):null,w+(i===label.split(" ").length-1?"":" ")))))),
+    _stEl("label",{className:"sd-gen-label"},"Advanced"),
+    // batch takes — parallel renders with distinct seeds; the Render card's cost
+    // multiplies live as this changes (same state as the composer's batch pill)
+    _ctrlRow("Batch takes", _stEl("div",{className:"stage2-seedrow stage2-batchrow"},
+      _stEl("button",{type:"button",className:"stage2-seed-btn",title:"Fewer takes","aria-label":"Fewer takes",
+        disabled:batchN<=1||gening,onClick:()=>setBatchN(n=>Math.max(1,n-1))},"−"),
+      _stEl("span",{className:"stage2-batchrow-n",
+        title:"Takes per Generate — "+batchN+" parallel render"+(batchN!==1?"s":"")+" with distinct seeds ("+totalCost+" credits total)"},
+        batchN+" / "+planMaxBatch),
+      _stEl("button",{type:"button",className:"stage2-seed-btn",disabled:batchN>=4||gening,
+        title:batchN>=planMaxBatch&&planMaxBatch<4 ? "Batch takes need the Studio plan — click to upgrade" : "More takes",
+        onClick:()=>{ if(batchN>=planMaxBatch){ if(planMaxBatch<4) openPlansUpsell(); return; } setBatchN(n=>Math.min(4,n+1)); }},"+"))),
     // bitrate is a Seedance-only lever — Sora-class engines have no bitrate_mode
     modelRefs && _ctrlRow("Bitrate", _stEl("select",{value:bitrate,
         title:"Compression of the delivered file — no cost difference",
@@ -2305,13 +2334,6 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
       : _stEl("select",{value:nativeAudio?"on":"off",onChange:e=>setNativeAudio(e.target.value==="on")},
           _stEl("option",{value:"on"},"Generate native audio"),
           _stEl("option",{value:"off"},"Silent — no audio"))),
-    _ctrlRow("Clip duration", _stEl("select",{value:String(duration),
-        title: durationLocked ? ("Minimum "+_fmtSecs(measuredSec)+" — the measured voice + breathing room; extend for more acting time") : "Clip duration",
-        onChange:e=>{ const v=Number(e.target.value); setDurationOverride(durationLocked && v===measuredSec ? null : v); }},
-        _uniq([duration, measuredSec||0, 4,5,6,8,10,12,15, model.maxClipSec||15])
-          .filter(v=> v>0 && v<=(model.maxClipSec||15) && (!durationLocked || v>=measuredSec))
-          .sort((a,b)=>a-b)
-          .map(v=>_stEl("option",{key:v,value:String(v)},_fmtSecs(v)+(durationLocked&&v===measuredSec?" · voice + air (min)":""))))),
     _ctrlRow("Seed", modelRefs ? _stEl("div",{className:"stage2-seedrow"},
       _stEl("input",{className:"stage2-seed-input",type:"text",inputMode:"numeric",placeholder:"Random",
         value:seedInput, onChange:e=>setSeedInput(e.target.value.replace(/[^0-9]/g,""))}),
@@ -2332,6 +2354,8 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         _stEl("span",{style:{marginLeft:7}},"Render settings")),
       _stEl("button",{className:"panel-collapse",onClick:()=>setSettingsOpen(false),title:"Collapse render settings"},
         Icon.chevR&&_stEl(Icon.chevR,{s:14}))),
+    // the unified Render card leads — cost-bearing choices + live price, above the tabs
+    _stEl("div",{className:"stage2-rc-wrap"}, renderCard),
     // the Writers' Room INSPECTOR tab style (underline .insp-tab), reused verbatim
     _stEl("div",{className:"insp-tabs stage2-settings-tabs"},
       panelTabs.map(([id,lab])=>_stEl("button",{key:id,className:"insp-tab"+(panelTab===id?" on":""),type:"button",

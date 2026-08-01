@@ -5114,6 +5114,26 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 /* the panel's tabs — the Writers' Room INSPECTOR underline strip, reused verbatim */
 .stage2-settings-tabs{flex:0 0 auto;padding-top:4px}
 .stage2-settings-drawer .sd-gen-panel{padding:12px 14px 26px}
+
+/* ---- unified RENDER card — every cost-bearing choice (model · tier · resolution ·
+   duration) + the live credit cost + capability chips, in one glanceable card above
+   the settings tabs. ---- */
+.stage2-rc-wrap{flex:0 0 auto;padding:10px 14px 2px}
+.stage2-rendercard{display:flex;flex-direction:column;gap:10px;padding:12px 13px;
+  background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(39,35,29,.05)}
+.stage2-rc-head{display:flex;align-items:center;justify-content:space-between}
+.stage2-rc-cost{display:inline-flex;align-items:center;gap:5px;font-family:var(--f-mono);font-size:11.5px;font-weight:700;
+  color:var(--brand);background:var(--pos-soft);border:1px solid var(--pos-line);border-radius:20px;padding:3px 10px}
+.stage2-rc-cost.empty{color:var(--alert);background:var(--alert-soft);border-color:var(--alert)}
+.stage2-rc-math{font-family:var(--f-mono);font-size:10px;letter-spacing:.02em;color:var(--txt-2);
+  padding:7px 9px;background:var(--bg-1);border:1px dashed var(--line-2);border-radius:7px}
+.stage2-rc-caps{display:flex;flex-wrap:wrap;gap:5px}
+.stage2-rc-cap{font-family:var(--f-mono);font-size:9px;letter-spacing:.03em;text-transform:uppercase;color:var(--txt-2);
+  background:var(--bg-1);border:1px solid var(--line-2);border-radius:20px;padding:2px 8px;white-space:nowrap;cursor:default}
+.stage2-rc-cap:hover{color:var(--txt-1);border-color:var(--line-3)}
+/* batch-takes advanced row (settings tab) */
+.stage2-batchrow{justify-content:flex-start}
+.stage2-batchrow-n{font-family:var(--f-mono);font-size:11.5px;color:var(--txt-1);min-width:44px;text-align:center}
 @media (max-width:900px){
   /* stacked fallback: panel rides below the console content, strip hidden */
   .stage2-console-composer > .strip{display:none}
