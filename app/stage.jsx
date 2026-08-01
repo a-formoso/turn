@@ -885,6 +885,268 @@ function stageAssetRole(a){
   return T+" is "+(label||"a reference")+".";
 }
 
+/* ---- In-text @mention CHIP editor (Seedance-style). A contentEditable prompt box
+   where resolved @Image/@Video/@Audio tokens render as inline chips — thumbnail +
+   token + a caret that opens a same-kind swap picker — while the canonical value
+   stays the PLAIN STRING the recipes/generate path already use (chips serialize back
+   to their raw token). Caret positions are tracked as absolute offsets into that
+   string (a chip counts as its token's length), so autocomplete, insert-at-caret and
+   maxLength all keep working exactly as they did on the old <textarea>. */
+function StageMentionEditor({ value, mentionables, maxLen, placeholder, onChange, onKeyDown, onBlur, apiRef }){
+  const elRef = React.useRef(null);
+  const lastVal = React.useRef(null);          // last value REFLECTED in the DOM
+  const [swap, setSwap] = React.useState(null); // {tok, start, kind} — chip swap picker
+  const swapRef = React.useRef(null); swapRef.current = swap;
+  const byTokRef = React.useRef({});
+  byTokRef.current = {}; (mentionables||[]).forEach(m=>{ byTokRef.current[String(m.t||"").toLowerCase()] = m; });
+  const tokRe = ()=>/@(?:Image|Video|Audio)\d+/gi;
+  const isChip = (n)=> n && n.nodeType===1 && n.getAttribute && n.getAttribute("data-token");
+
+  /* DOM -> string. Only text nodes, chips and BRs exist after our own renders; DIVs
+     (rare browser artifacts) serialize defensively as newline + contents. */
+  const serialize = ()=>{
+    let out = "";
+    const walk = (n)=>{ Array.from(n.childNodes).forEach(c=>{
+      if(c.nodeType===3) out += c.nodeValue;
+      else if(c.nodeType===1){
+        if(isChip(c)) out += c.getAttribute("data-token");
+        else if(c.tagName==="BR") out += "\n";
+        else { if(out && !/\n$/.test(out)) out += "\n"; walk(c); }
+      } }); };
+    if(elRef.current) walk(elRef.current);
+    return out;
+  };
+  const caretOffset = ()=>{
+    const el = elRef.current, sel = window.getSelection();
+    const cur = lastVal.current||"";
+    if(!el || !sel || !sel.rangeCount) return cur.length;
+    const fN = sel.focusNode, fO = sel.focusOffset;
+    if(!el.contains(fN)) return cur.length;
+    let off = 0, done = false;
+    const walk = (n)=>{
+      const kids = Array.from(n.childNodes);
+      for(let i=0;i<kids.length;i++){
+        if(n===fN && n.nodeType===1 && i===fO){ done = true; return; }
+        const c = kids[i];
+        if(c.nodeType===3){
+          if(c===fN){ off += Math.min(fO, c.nodeValue.length); done = true; return; }
+          off += c.nodeValue.length;
+        } else if(c.nodeType===1){
+          if(isChip(c)){ const L = c.getAttribute("data-token").length;
+            if(c===fN || c.contains(fN)){ off += L; done = true; return; }
+            off += L; }
+          else if(c.tagName==="BR") off += 1;
+          else { if(c===fN && fO===0){ done = true; return; } walk(c); if(done) return; }
+        }
+      }
+      if(n===fN && n.nodeType===1 && kids.length<=fO) done = true;
+    };
+    walk(el);
+    return done ? off : cur.length;
+  };
+  const setCaret = (off)=>{
+    const el = elRef.current; if(!el) return;
+    const sel = window.getSelection(), r = document.createRange();
+    let rem = Math.max(0, off), placed = false;
+    const place = (node, o)=>{ r.setStart(node, o); r.collapse(true); placed = true; };
+    const walk = (n)=>{
+      for(const c of Array.from(n.childNodes)){
+        if(placed) return;
+        if(c.nodeType===3){
+          if(rem <= c.nodeValue.length){ place(c, rem); return; }
+          rem -= c.nodeValue.length;
+        } else if(c.nodeType===1){
+          const p = c.parentNode, idx = Array.prototype.indexOf.call(p.childNodes, c);
+          if(isChip(c)){ const L = c.getAttribute("data-token").length;
+            if(rem <= L){ place(p, rem===0 ? idx : idx+1); return; }  // inside a chip snaps AFTER it
+            rem -= L; }
+          else if(c.tagName==="BR"){ if(rem===0){ place(p, idx); return; } rem -= 1; }
+          else { walk(c); if(placed) return; }
+        }
+      }
+    };
+    walk(el);
+    if(!placed){ r.selectNodeContents(el); r.collapse(false); }
+    try{ sel.removeAllRanges(); sel.addRange(r); }catch(_e){}
+  };
+  /* absolute string-offset of a node (chips count as their token length) */
+  const nodeStartOffset = (target)=>{
+    let off = 0, found = false;
+    const walk = (n)=>{
+      for(const c of Array.from(n.childNodes)){
+        if(found) return;
+        if(c===target){ found = true; return; }
+        if(c.nodeType===3) off += c.nodeValue.length;
+        else if(c.nodeType===1){
+          if(isChip(c)) off += c.getAttribute("data-token").length;
+          else if(c.tagName==="BR") off += 1;
+          else { walk(c); if(found) return; }
+        }
+      }
+    };
+    if(elRef.current) walk(elRef.current);
+    return found ? off : -1;
+  };
+  const chipEl = (m)=>{
+    const s = document.createElement("span");
+    s.className = "stage2-chip "+(m.kind||""); s.contentEditable = "false";
+    s.setAttribute("data-token", m.t);
+    s.title = m.t+(m.label ? " — "+m.label : "");
+    if(m.kind==="image" && m.url){ const img = document.createElement("img"); img.src = m.url; img.alt = ""; s.appendChild(img); }
+    else { const t = document.createElement("span"); t.className = "stage2-chip-tile"; t.textContent = m.kind==="video" ? "▸" : "♪"; s.appendChild(t); }
+    const b = document.createElement("b"); b.textContent = m.t; s.appendChild(b);
+    const car = document.createElement("span");
+    car.className = "stage2-chip-caret"; car.textContent = "▾";
+    car.setAttribute("role","button"); car.title = "Swap the referenced asset";
+    car.addEventListener("mousedown", (e)=>{ e.preventDefault(); e.stopPropagation(); });
+    car.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation();
+      const start = nodeStartOffset(s);
+      if(start>=0) setSwap(sw => (sw && sw.start===start) ? null : { tok:m.t, start, kind:m.kind }); });
+    s.appendChild(car);
+    return s;
+  };
+  const renderDom = (txt)=>{
+    const el = elRef.current; if(!el) return;
+    txt = String(txt||"");
+    el.textContent = "";
+    const frag = document.createDocumentFragment();
+    const re = tokRe(); let last = 0, m;
+    while((m = re.exec(txt))){
+      if(m.index>last) frag.appendChild(document.createTextNode(txt.slice(last, m.index)));
+      const mm = byTokRef.current[m[0].toLowerCase()];
+      frag.appendChild(mm ? chipEl(mm) : document.createTextNode(m[0]));
+      last = m.index + m[0].length;
+    }
+    if(last<txt.length) frag.appendChild(document.createTextNode(txt.slice(last)));
+    el.appendChild(frag);
+  };
+  /* raw (not-yet-chip) resolved tokens sitting in plain text nodes, as [start,end) */
+  const rawResolvedRanges = ()=>{
+    const out = []; let off = 0;
+    const walk = (n)=>{
+      for(const c of Array.from(n.childNodes)){
+        if(c.nodeType===3){
+          const re = tokRe(); let m;
+          while((m = re.exec(c.nodeValue))){
+            if(byTokRef.current[m[0].toLowerCase()]) out.push({ start:off+m.index, end:off+m.index+m[0].length });
+          }
+          off += c.nodeValue.length;
+        } else if(c.nodeType===1){
+          if(isChip(c)) off += c.getAttribute("data-token").length;
+          else if(c.tagName==="BR") off += 1;
+          else walk(c);
+        }
+      }
+    };
+    if(elRef.current) walk(elRef.current);
+    return out;
+  };
+  const handleInput = ()=>{
+    if(swapRef.current) setSwap(null);
+    let txt = serialize();
+    let caret = caretOffset();
+    if(maxLen && txt.length>maxLen){          // e.g. a drop that slipped past beforeinput
+      txt = txt.slice(0, maxLen); caret = Math.min(caret, maxLen);
+      lastVal.current = txt; renderDom(txt); setCaret(caret);
+    } else {
+      lastVal.current = txt;
+      // chipify tokens the caret is NOT touching — a token still being typed stays text
+      if(rawResolvedRanges().some(r=> caret<r.start || caret>r.end)){ renderDom(txt); setCaret(caret); }
+    }
+    onChange && onChange(lastVal.current, caret);
+  };
+  const handleKeyDown = (e)=>{
+    if(e.key==="Escape" && swapRef.current){ e.preventDefault(); setSwap(null); return; }
+    if(onKeyDown) onKeyDown(e);
+    if(e.defaultPrevented) return;
+    if(e.key==="Enter"){                       // keep newlines predictable (BR, serialized "\n")
+      e.preventDefault();
+      try{ if(!document.execCommand("insertLineBreak")) document.execCommand("insertText", false, "\n"); }
+      catch(_e){ try{ document.execCommand("insertText", false, "\n"); }catch(_e2){} }
+    }
+  };
+  const handlePaste = (e)=>{
+    e.preventDefault();
+    const t = (e.clipboardData && e.clipboardData.getData("text/plain")) || "";
+    if(!t) return;
+    const sel = window.getSelection();
+    const selLen = (sel && sel.rangeCount) ? sel.getRangeAt(0).toString().length : 0;
+    const room = (maxLen||1e9) - ((lastVal.current||"").length - selLen);
+    const ins = t.slice(0, Math.max(0, room)).replace(/\r\n?/g,"\n");
+    if(ins){ try{ document.execCommand("insertText", false, ins); }catch(_e){} }
+  };
+  const doSwap = (m)=>{
+    const sw = swapRef.current; if(!sw) return;
+    const cur = lastVal.current||"";
+    if(m.t!==sw.tok && cur.slice(sw.start, sw.start+sw.tok.length).toLowerCase()===sw.tok.toLowerCase()){
+      const next = (cur.slice(0, sw.start)+m.t+cur.slice(sw.start+sw.tok.length)).slice(0, maxLen||1e9);
+      lastVal.current = next; renderDom(next);
+      onChange && onChange(next, null);
+    }
+    setSwap(null);
+    const el = elRef.current; if(el){ try{ el.focus(); setCaret(sw.start+m.t.length); }catch(_e){} }
+  };
+  // external value changes (recipe recompiles, chip buttons, insertMention) rebuild the DOM
+  React.useEffect(()=>{
+    if(value===lastVal.current) return;
+    lastVal.current = String(value||"");
+    setSwap(null);
+    renderDom(lastVal.current);
+  },[value]);
+  // asset set changed — tokens may (un)resolve; re-chipify, preserving the caret if focused
+  const mentionSig = (mentionables||[]).map(m=>m.t+":"+(m.url||"")).join("|");
+  React.useEffect(()=>{
+    const el = elRef.current; if(!el) return;
+    const focused = document.activeElement===el;
+    const caret = focused ? caretOffset() : null;
+    renderDom(lastVal.current||"");
+    if(focused && caret!=null){ el.focus(); setCaret(caret); }
+  },[mentionSig]);
+  // maxLength guard at the source (native beforeinput — React's synthetic one is unreliable here)
+  React.useEffect(()=>{
+    const el = elRef.current; if(!el || !maxLen) return;
+    const onBI = (e)=>{
+      const t = String(e.inputType||"");
+      if(t.indexOf("insert")!==0 || t==="insertFromPaste") return;   // paste is pre-sliced
+      const ins = (e.data!=null) ? e.data : ((t==="insertLineBreak"||t==="insertParagraph") ? "\n" : "");
+      const sel = window.getSelection();
+      const selLen = (sel && sel.rangeCount) ? sel.getRangeAt(0).toString().length : 0;
+      if(((lastVal.current||"").length - selLen + ins.length) > maxLen) e.preventDefault();
+    };
+    el.addEventListener("beforeinput", onBI);
+    return ()=> el.removeEventListener("beforeinput", onBI);
+  },[maxLen]);
+  React.useEffect(()=>{
+    if(!apiRef) return;
+    apiRef.current = {
+      caretOffset,
+      applyValue:(txt, pos)=>{ lastVal.current = String(txt||""); renderDom(lastVal.current);
+        const el = elRef.current; if(el){ try{ el.focus(); if(pos!=null) setCaret(pos); }catch(_e){} } },
+      focus:()=>{ try{ elRef.current && elRef.current.focus(); }catch(_e){} },
+      el:elRef.current
+    };
+  });
+  const swapItems = swap ? (mentionables||[]).filter(m=>m.kind===swap.kind) : [];
+  return _stEl("div",{className:"stage2-gen-prompt-shell"},
+    _stEl("div",{ref:elRef, className:"stage2-gen-prompt stage2-gen-prompt-rich",
+      contentEditable:true, suppressContentEditableWarning:true, spellCheck:false,
+      role:"textbox","aria-multiline":"true","aria-label":placeholder||"Prompt",
+      "data-placeholder":placeholder||"",
+      onInput:handleInput, onKeyDown:handleKeyDown, onPaste:handlePaste,
+      onBlur:(e)=>{ setTimeout(()=>setSwap(null),120); onBlur && onBlur(e); }}),
+    swap && swapItems.length>0 && _stEl("div",{className:"stage2-mention-box stage2-swap-box"},
+      _stEl("div",{className:"stage2-swap-head"},"Swap "+swap.tok+" →"),
+      swapItems.map(m=>_stEl("button",{key:m.t,type:"button",
+        className:"stage2-mention-item"+(m.t===swap.tok?" hi":""),
+        onMouseDown:e=>{ e.preventDefault(); doSwap(m); }},
+        m.kind==="image" && m.url
+          ? _stEl("img",{className:"stage2-mention-thumb",src:m.url,alt:""})
+          : _stEl("span",{className:"stage2-mention-thumb tile"}, m.kind==="video" ? "▸" : "♪"),
+        _stEl("span",{className:"stage2-mention-main"},
+          _stEl("b",null,m.t), m.label && _stEl("span",{className:"stage2-mention-label"},m.label)),
+        m.t===swap.tok && _stEl("span",{className:"stage2-mention-kind"},"Current")))));
+}
+
 function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId, aspect, visualSource, setVisualSource, creditBalance, onVoiceLine, onUpdateShot, onSelectClip, modelId, setModelId, packMode, setPackMode, onOpenVersions, pendingReuse, onReuseConsumed, beatPromptFocus, onBeatPromptFocusConsumed }){
   const scene = clip.scene, g = clip.g, d = clip.data;
   // the CLIP is the unit of generation — it may bundle 2+ merged shots (Art Room Shots
@@ -1334,6 +1596,35 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   // unresolved-token warning. mentionables = this render's INCLUDED assets only.
   const mentionables = tagged.filter(a=>a.kind!=="text" && on(a))
     .map(a=>({ t:stageAssetMention(a), label:String(a.label||""), kind:a.kind, url:String(a.url||"") }));
+  const [mentionBox, setMentionBox] = React.useState(null);  // {start, query, hi}
+  const promptRef = React.useRef(null);                      // StageMentionEditor imperative API
+  const mentionItems = (q)=>{ q=String(q||"").toLowerCase();
+    return mentionables.filter(m=>!q || m.t.toLowerCase().indexOf(q)>=0 || m.label.toLowerCase().indexOf(q)>=0).slice(0,8); };
+  // the chip editor reports (text, absolute caret offset) — same @-token detection
+  // the old textarea did against selectionStart
+  const onPromptChange = (text, caret)=>{ const t = String(text||"").slice(0,PANEL_PROMPT_MAX);
+    setPrompt(t);
+    const pos = (caret==null) ? t.length : Math.min(caret, t.length);
+    const m = /(?:^|[\s\n])@([A-Za-z0-9]*)$/.exec(t.slice(0, pos));
+    setMentionBox(m ? { start:pos-m[1].length-1, query:m[1], hi:0 } : null); };
+  const insertMention = (tok)=>{ const api=promptRef.current; if(!api||!mentionBox) return;
+    const caret = api.caretOffset();
+    const next = (prompt.slice(0,mentionBox.start)+tok+" "+prompt.slice(caret)).slice(0,PANEL_PROMPT_MAX);
+    const pos = Math.min(mentionBox.start+tok.length+1, next.length);
+    setPrompt(next); setMentionBox(null);
+    requestAnimationFrame(()=>{ try{ api.applyValue(next, pos); }catch(_e){} }); };
+  const onPromptKeyDown = (e)=>{ if(!mentionBox) return;
+    const items = mentionItems(mentionBox.query);
+    if(e.key==="ArrowDown"||e.key==="ArrowUp"){ e.preventDefault();
+      setMentionBox(b=>({ ...b, hi:(b.hi+(e.key==="ArrowDown"?1:-1)+Math.max(1,items.length))%Math.max(1,items.length) })); }
+    else if((e.key==="Enter"||e.key==="Tab") && items.length){ e.preventDefault();
+      insertMention(items[Math.min(mentionBox.hi, items.length-1)].t); }
+    else if(e.key==="Escape"){ setMentionBox(null); } };
+  // tokens that don't resolve to an included asset (typo, or the asset was excluded)
+  const badMentions = (()=>{ const known = new Set(mentionables.map(m=>m.t.toLowerCase()));
+    const out = [], re = /@(image|video|audio)\d+/gi; let mm;
+    while((mm = re.exec(prompt))){ if(!known.has(mm[0].toLowerCase()) && out.indexOf(mm[0])<0) out.push(mm[0]); }
+    return out; })();
   const [modeOverride, setModeOverride] = React.useState(null);
   const [voicingClip, setVoicingClip] = React.useState(false);
   const [maxImg, setMaxImg] = React.useState(null);   // {url,label,kind} — maximised reference viewer
@@ -1950,9 +2241,28 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     _stEl("div",{className:"stage2-gen-box"+(recipe==="multishot"?" ms-mode":"")},
       // in Multi-shot mode the ROWS are the prompt editor — the compiled text is
       // hidden (it still compiles and renders; switch to Timeline to read it)
-      recipe!=="multishot" && _stEl(StagePromptArea,{
-        className:"stage2-gen-prompt",value:prompt,setValue:setPrompt,mentionables,
-        placeholder:"Describe the video you want to create…",maxLength:PANEL_PROMPT_MAX}),
+      // composer uses the CHIP editor (resolved @tokens render as inline chips);
+      // other prompt boxes (Director, multi-shot rows) keep the shared StagePromptArea
+      recipe!=="multishot" && _stEl("div",{className:"stage2-gen-promptwrap"},
+        _stEl(StageMentionEditor,{apiRef:promptRef, value:prompt, mentionables,
+          maxLen:PANEL_PROMPT_MAX, placeholder:"Describe the video you want to create…",
+          onChange:onPromptChange, onKeyDown:onPromptKeyDown,
+          onBlur:()=>setTimeout(()=>setMentionBox(null),120)}),
+        badMentions.length>0 && _stEl("div",{className:"stage2-mention-warn"},
+          "⚠ "+badMentions.join(", ")+" — not among this render's included assets; the model will guess. Fix the token or include the asset."),
+        mentionBox && mentionItems(mentionBox.query).length>0 && _stEl("div",{className:"stage2-mention-box"},
+          mentionItems(mentionBox.query).map((m,i)=>_stEl("button",{key:m.t,type:"button",
+            className:"stage2-mention-item"+(i===mentionBox.hi?" hi":""),
+            onMouseDown:e=>{ e.preventDefault(); insertMention(m.t); }},
+            // thumbnail, Seedance-style: the asset's image, or a glyph tile for video/audio
+            m.kind==="image" && m.url
+              ? _stEl("img",{className:"stage2-mention-thumb",src:m.url,alt:""})
+              : _stEl("span",{className:"stage2-mention-thumb tile"},
+                  m.kind==="video" ? (Icon.film&&_stEl(Icon.film,{s:13})) : (Icon.mic&&_stEl(Icon.mic,{s:13}))),
+            _stEl("span",{className:"stage2-mention-main"},
+              _stEl("b",null,m.t), m.label && _stEl("span",{className:"stage2-mention-label"},m.label)),
+            _stEl("span",{className:"stage2-mention-kind"},
+              m.kind==="image"?"Image":m.kind==="video"?"Video":"Audio"))))),
       _stEl("div",{className:"stage2-gen-controls"},
         // References/Elements trays + tier/bitrate/audio moved to the Render settings
         // panel (labelled) — the composer keeps only the per-take creative levers.
