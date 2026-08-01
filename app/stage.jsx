@@ -1326,7 +1326,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   // flagged under the box instead of silently mis-directing the model.
   const [mentionBox, setMentionBox] = React.useState(null);   // {start, query, hi}
   const mentionables = tagged.filter(a=>a.kind!=="text" && on(a))
-    .map(a=>({ t:stageAssetMention(a), label:String(a.label||""), kind:a.kind }));
+    .map(a=>({ t:stageAssetMention(a), label:String(a.label||""), kind:a.kind, url:String(a.url||"") }));
   const mentionItems = (q)=>{ q=String(q||"").toLowerCase();
     return mentionables.filter(m=>!q || m.t.toLowerCase().indexOf(q)>=0 || m.label.toLowerCase().indexOf(q)>=0).slice(0,8); };
   const promptCaretToken = (el)=>{ const upto = el.value.slice(0, el.selectionStart||0);
@@ -1950,7 +1950,15 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
           mentionItems(mentionBox.query).map((m,i)=>_stEl("button",{key:m.t,type:"button",
             className:"stage2-mention-item"+(i===mentionBox.hi?" hi":""),
             onMouseDown:e=>{ e.preventDefault(); insertMention(m.t); }},
-            _stEl("b",null,m.t), m.label && _stEl("span",null,m.label))))),
+            // thumbnail, Seedance-style: the asset's image, or a glyph tile for video/audio
+            m.kind==="image" && m.url
+              ? _stEl("img",{className:"stage2-mention-thumb",src:m.url,alt:""})
+              : _stEl("span",{className:"stage2-mention-thumb tile"},
+                  m.kind==="video" ? (Icon.film&&_stEl(Icon.film,{s:13})) : (Icon.mic&&_stEl(Icon.mic,{s:13}))),
+            _stEl("span",{className:"stage2-mention-main"},
+              _stEl("b",null,m.t), m.label && _stEl("span",{className:"stage2-mention-label"},m.label)),
+            _stEl("span",{className:"stage2-mention-kind"},
+              m.kind==="image"?"Image":m.kind==="video"?"Video":"Audio"))))),
       _stEl("div",{className:"stage2-gen-controls"},
         // References/Elements trays + tier/bitrate/audio moved to the Render settings
         // panel (labelled) — the composer keeps only the per-take creative levers.
