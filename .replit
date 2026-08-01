@@ -7,7 +7,7 @@
 
 # local preview inside the Replit workspace (optional)
 run = "python3 -m http.server 8099"
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "python-base-3.13"]
 
 [deployment]
 deploymentTarget = "static"

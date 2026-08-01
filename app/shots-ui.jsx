@@ -58,7 +58,7 @@ function FrameToggles({ label, items, selected, onToggle, emptyHint }){
       })));
 }
 
-function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, laterShots, isHead, isFirst, onToggleHead, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, onRegenDownstream, onStopChain, subLabel }){
+function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, laterShots, isHead, isFirst, onToggleHead, onUpdate, onDelete, onView, batchActiveId, onBatchDone, onGenerateShot, onRegenDownstream, onStopChain, subLabel, plan }){
   const loc = ctx.location;
   // who/what is in frame is DERIVED from the action text (single source of truth) — the
   // old manual tags are gone; this is what the prompt + references actually use.
@@ -66,6 +66,27 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
   const inCastIds = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, _allChars) : (sh.subjects||[]);
   const subjects = inCastIds.map(id=>ctx.charById[id]).filter(Boolean);
   const inPropIds = (typeof inFrameProps==="function") ? inFrameProps(sh, scene, ctx.charById, ctx.propById) : (sh.props||[]);
+  // DRIFT FLAG: characters/props named in the micro-beats this shot COVERS but missing
+  // from its action text. The render-time canon merge would try to rescue them — better
+  // to surface the seam on the card so the director can re-include them deliberately.
+  const dropped = (()=>{
+    const micro = (plan && Array.isArray(plan.micro)) ? plan.micro
+      : ((sh.beatPlan && Array.isArray(sh.beatPlan.micro)) ? sh.beatPlan.micro : null);
+    if(!micro || !Array.isArray(sh.covers) || !sh.covers.length) return null;
+    const covered = sh.covers.map(n=>micro[n-1]).filter(Boolean);
+    if(!covered.length) return null;
+    // scan the covered micro-beats as if they were an action, WITHOUT the scene-driver
+    // fallback (a bare inFrameCast would claim the driver even when unnamed)
+    const fakeScene = scene ? Object.assign({}, scene, { driver:null }) : scene;
+    const fake = { action: covered.join(" ") };
+    const wantChars = (typeof inFrameCast==="function") ? inFrameCast(fake, fakeScene, _allChars) : [];
+    const wantProps = (typeof inFrameProps==="function") ? inFrameProps(fake, fakeScene, ctx.charById, ctx.propById) : [];
+    const chars = wantChars.filter(id=> inCastIds.indexOf(id)<0)
+      .map(id=>ctx.charById[id]).filter(Boolean).map(c=>c.name);
+    const props = wantProps.filter(id=> inPropIds.indexOf(id)<0)
+      .map(id=>ctx.propById[id]).filter(Boolean).map(p=>p.name);
+    return (chars.length || props.length) ? chars.concat(props) : null;
+  })();
   // apply the SAME dressing filter the real attach path uses (collectShotRefs /
   // buildShotPrompt) — set-dressing sheets only ride on tight shots or when the
   // object leads the action; the plate delivers them in wides. Without this the
@@ -80,11 +101,14 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
   const chainPrompt = (typeof buildShotPrompt==="function") ? buildShotPrompt(sh, { ...promptCtx, prevFrameRole:true }) : finalPrompt;
   const previewPrompt = isHead ? finalPrompt : chainPrompt;
 
-  // THE ROLLING SEED: a non-head shot generates as an image-edit off the PREVIOUS shot's
-  // committed frame — it carries the colour grade AND the progressive physical state
-  // (wetness, dirt, damage, wardrobe wear) forward, while this shot stages its own action.
+  // THE COVERAGE SEED (user ruling 2026-08-01): a non-head shot generates as an
+  // image-edit off the REFERENCE frame — within a beat that's the beat's FIRST shot
+  // (its coverage anchor), so B/C/D all build on A instead of their immediate
+  // predecessor; a beat opener chains from the previous beat's tail frame. The seed
+  // carries the colour grade AND the progressive physical state (wetness, dirt,
+  // damage, wardrobe wear) forward, while this shot stages its own action.
   // A chain head renders from the sheets alone. ASYNC on purpose: in cloud mode
-  // the previous frame often isn't in the sync cache
+  // the reference frame often isn't in the sync cache
   // right after a reload — falling back to nbLoadImage keeps the chain intact.
   const deriveBase = async (gopts)=>{
     if(!prevShot || (gopts && (gopts.fresh || gopts.editInstruction))) return null;
@@ -304,8 +328,8 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
           // approve / lock — marks this frame as the APPROVED seed the next shot chains from
           gen.genUrl && _el("button",{className:"shot-lock-btn"+(sh.locked?" on":""),
             title: sh.locked
-              ? "Approved — this frame is the locked seed the next shot builds on. Click to unlock."
-              : "Approve this frame as the seed the next shot chains from.",
+              ? "Approved — this frame is the locked coverage reference this beat's shots build on. Click to unlock."
+              : "Approve this frame as the coverage reference this beat's shots build on.",
             onClick:()=>onUpdate(sh.id,{ locked: !sh.locked })},
             _el(Icon.check,{s:11}), _el("span",null, sh.locked?"Approved":"Approve")),
           window.QaCheckButton && _el(window.QaCheckButton,{ gen, name:beatLabel, noun:"shot frame", className:"shot-lock-btn",
@@ -338,6 +362,10 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
       // the action — what we see in this frame
       _el(SheetField,{label:"Action \u2014 what we see in this frame",value:sh.action,multiline:true,
         placeholder:"One vivid present-tense beat of on-screen action\u2026",onCommit:v=>onUpdate(sh.id,{action:v})}),
+      dropped && _el("div",{className:"shot-dropped",
+        title:"Named in the micro-beats this shot covers, but missing from its Action text. The render will try to merge them back in via the scripted canon, but the frame may still drop them — edit the Action to re-include them deliberately."},
+        "\u26a0 Dropped from action: ", _el("b",null, dropped.join(", ")),
+        " \u2014 named in covered micro-beats, missing from the action"),
 
       // composition (the depth-grid "vary" layer) + dialogue
       _el(SheetField,{label:"Composition \u2014 framing, blocking, depth, eyeline",value:sh.composition,multiline:true,
@@ -375,7 +403,7 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
               : _el("span",null,"No location resolved for this scene \u2014 set the scene's slugline / pull locations."))),
 
       _el(CardFold,{label:"Shot prompt",defaultOpen:false},
-        _el(CopyBox,{label: isHead ? "Final frame prompt \u2014 master + grade + references" : "Final frame prompt \u2014 master + grade + continuity anchor + references",text:previewPrompt}),
+        _el(CopyBox,{label: isHead ? "Final frame prompt \u2014 master + grade + references" : "Final frame prompt \u2014 master + grade + reference frame + sheets",text:previewPrompt}),
         _el(SheetField,{label:"Negative prompt \u2014 exclude",value:sh.negativePrompt||"",multiline:true,
           placeholder:shotNegativePrompt({}),onCommit:v=>onUpdate(sh.id,{negativePrompt:v})}))));
 }
@@ -462,6 +490,15 @@ function _circ(n){ return (n>=1&&n<=20) ? String.fromCharCode(0x245F+n) : ("#"+n
 const _MB_STOP = new Set(("the and a an of to in on at as is are was were be been being for with into from over under this that it its his her hers him she they them their then out off up down back again while when where who how not no one two has had have does did doing goes go get gets"
   ).split(" "));
 function _mbToks(s){ const set=new Set(); String(s||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ").split(/\s+/).forEach(w=>{ if(w.length>=3 && !_MB_STOP.has(w)) set.add(w); }); return set; }
+/* is a micro-beat VISUALLY described by a shot? Same token test microCoverage uses, but
+   restricted to the frame-facing fields (action + composition — not dialogue), so it
+   measures what the frame would SHOW rather than what the story covers. */
+function _mbShown(sh, microText){
+  const st = _mbToks((sh.action||"")+" "+(sh.composition||""));
+  const rt = _mbToks(microText);
+  let hit=0; st.forEach(w=>{ if(rt.has(w)) hit++; });
+  return hit>=2 && (hit/Math.sqrt((st.size||1)*(rt.size||1))) >= 0.34;
+}
 function microCoverage(shots, microTexts, opts){
   const rowToks = (microTexts||[]).map(_mbToks);
   const list = shots || [];
@@ -531,7 +568,8 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
   // only stands in until the scene is drafted
   const beatText = beatScriptText(scene.id, L.n)
     || (beatRow ? [ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" \u2014 ") : "");
-  const verbs = beatRow ? [ (beatRow.drive&&beatRow.drive.a||"").trim(), (beatRow.react&&beatRow.react.a||"").trim() ].filter(Boolean).join(" / ") : "";
+  const vDrive = beatRow ? String((beatRow.drive&&beatRow.drive.a)||"").trim() : "";
+  const vReact = beatRow ? String((beatRow.react&&beatRow.react.a)||"").trim() : "";
   const isTurn = String(bm.turnAt||"")===String(L.n);
   const chg = beatRow && beatRow.charge!=null && beatRow.charge!=="" ? Number(beatRow.charge) : null;
   const plan = L.shots.map(x=>x.beatPlan).find(Boolean);
@@ -555,7 +593,7 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
         ? _el("div",{className:"beat-card-img ph cta"},
             _el("div",{className:"bc-cta-t"},"This scene's frames haven't been rendered yet"),
             _el("button",{className:"char-draft-btn primary bc-cta-btn",disabled:!!renderBusy,
-              title:"Render every shot in this scene in chain order, each seeded by the previous frame, auto-approving each as it goes",
+              title:"Render every shot in this scene in chain order, each seeded by its beat's coverage reference, auto-approving each as it goes",
               onClick:()=>onRenderScene(scene)},
               _el(Icon.sparkles,{s:13}),"Render Scene "+String(scene.no).padStart(2,"0")+" in order"),
             _el("div",{className:"bc-cta-d"},"Renders every frame in chain order \u2014 or open the \u25b8 next shot below and generate just its frame."))
@@ -564,7 +602,11 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
     _el("div",{className:"beat-card-body"},
       _el("div",{className:"beat-card-head"},
         _el("span",{className:"beat-lane-no"},"Beat "+L.n+(lanesLen>1?(" of "+lanesLen):"")),
-        verbs && _el("span",{className:"beat-lane-verbs"},verbs),
+        (vDrive||vReact) && _el("span",{className:"beat-lane-verbs",
+          title:"Driver / reactor verbs for this beat \u2014 the BOLD verb is the side that carries the beat's charge (positive = the drive lands, negative = the reaction dominates)"},
+          vDrive && _el("span",{className:"bv"+(chg!=null&&chg>0?" lead":"")},vDrive),
+          (vDrive&&vReact) && " / ",
+          vReact && _el("span",{className:"bv"+(chg!=null&&chg<0?" lead":"")},vReact)),
         isTurn && _el("span",{className:"beat-lane-turn"},_el(Icon.bolt,{s:10}),"Turning point"),
         (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
         _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")),
@@ -597,16 +639,23 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
         plan.micro.map((m,i)=>{ const n=i+1;
           const covering = L.shots.map((sh,idx)=>({sh,idx})).filter(x=> microCov[x.sh.id] && microCov[x.sh.id].has(n));
           const flag = microMapped && !covering.length;   // genuinely unfilmed
+          // SHOWN vs IMPLIED: coverage marks STORY coverage — a micro-beat is only SHOWN
+          // when some covering shot's action/composition actually describes it (same
+          // token test microCoverage uses); otherwise the frame will likely just imply it.
+          const mTxt = String(m).replace(/^\s*\d+[\.\)]\s*/,"");
+          const implied = covering.length>0 && !covering.some(x=>_mbShown(x.sh, mTxt));
           return _el("div",{key:n,className:"bc-micro-row"+(flag?" uncovered":"")},
-            _el("span",{className:"bc-micro-t"},_circ(n)+" "+microHealText(String(m).replace(/^\s*\d+[\.\)]\s*/,""), beatText)),
+            _el("span",{className:"bc-micro-t"},_circ(n)+" "+microHealText(mTxt, beatText)),
             covering.length
               ? _el("span",{className:"bc-micro-shots"},covering.map(x=>_el("button",{key:x.sh.id,className:"bc-micro-shotlink",
                   title:"Filmed in Shot "+letterOf(x.idx)+" \u2014 click to open it",
-                  onClick:()=>setOpenShotId(x.sh.id)},letterOf(x.idx))))
+                  onClick:()=>setOpenShotId(x.sh.id)},letterOf(x.idx))),
+                  implied && _el("span",{className:"bc-micro-implied",
+                    title:"Story-covered, but no covering shot's Action describes it \u2014 the frame will likely only imply it. Put it in a shot's Action text to SHOW it."},"implied"))
               : flag
                 ? _el("button",{className:"bc-micro-none",
                     title:"No shot films this action yet \u2014 click to ADD A SHOT pre-filled with this action (it joins the chain after the beat's last shot; the frame renders separately)",
-                    onClick:()=> onAddShot && onAddShot(scene.id, L.n, { action:String(m).replace(/^\s*\d+[\.\)]\s*/,""), covers:[n] })},
+                    onClick:()=> onAddShot && onAddShot(scene.id, L.n, { action:mTxt, covers:[n] })},
                     "uncovered \u2014 add shot")
                 : _el("span",{className:"bc-micro-unknown",title:"Unknown \u2014 these shots don't record which micro-beats they film"},"\u2014"));
         })),
@@ -616,9 +665,10 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
           _el(BeatShotRow,{sh,letter:letterOf(i),open:openShotId===sh.id,isNext:(sh.id===nextShotId),
             onToggle:()=>setOpenShotId(openShotId===sh.id?null:sh.id)}),
           openShotId===sh.id && _el("div",{className:"bc-shot-expand"},
-            (()=>{ const prevShot=(typeof prevShotOf==="function")?prevShotOf(sh,ordered):null;
+            (()=>{ const prevShot=(typeof seedShotOf==="function")?seedShotOf(sh,ordered)
+                :((typeof prevShotOf==="function")?prevShotOf(sh,ordered):null);
               const _si=ordered.findIndex(x=>x.id===sh.id);
-              return _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,prevShot,
+              return _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,prevShot,plan,
                 laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
                 onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
                 subLabel:(L.shots.length>1?letterOf(i):null)}); })()))))));
@@ -644,13 +694,32 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
   const lanes = (()=>{
     const rows = Array.isArray(bm.rows) ? bm.rows : [];
     const byBeat = {};
-    ordered.forEach(sh=>{ const n = Number(sh.beatN)||0; (byBeat[n]=byBeat[n]||[]).push(sh); });
+    // dedupe by shot id: a duplicated shots array (stale local doc / merge hiccup) must
+    // not double-render rows or collide React keys — the first occurrence wins
+    const seenShotIds = new Set();
+    let dupShots = 0;
+    ordered.forEach(sh=>{
+      if(!sh || seenShotIds.has(sh.id)){ if(sh) dupShots++; return; }
+      seenShotIds.add(sh.id);
+      const n = Number(sh.beatN)||0; (byBeat[n]=byBeat[n]||[]).push(sh); });
     const seen = new Set();
-    const Ls = rows.map((r,i)=>{
-      const n = Number(r.n)||i+1;
+    const Ls = [];
+    let dupRows = 0;
+    rows.forEach((r,i)=>{
+      const n = Number(r && r.n)||i+1;
+      // dedupe beat rows by number: a stale/merged beat map with the same beat listed
+      // twice must not render the beat's card twice (duplicate React keys + flicker)
+      if(seen.has(n)){ dupRows++; return; }
       seen.add(n);
-      return { n, shots:byBeat[n]||[], canonical:true };
+      Ls.push({ n, shots:byBeat[n]||[], canonical:true });
     });
+    // diagnostic trail: if the dedupe ever actually drops something, say so — this
+    // confirms WHERE upstream state churn is duplicating (stale local doc, sync merge)
+    if((dupRows||dupShots) && typeof console!=="undefined" && console.warn){
+      console.warn("[shots] dropped duplicate lane content for scene "+(scene && scene.id)
+        +": "+dupRows+" duplicate beat row(s), "+dupShots+" duplicate shot(s). "
+        +"The beat map / shot list arrived duplicated (stale local doc or sync merge) — the dedupe kept the grid single.");
+    }
     Object.keys(byBeat).map(Number).sort((a,b)=>a-b).forEach(n=>{
       if(!seen.has(n)) Ls.push({ n, shots:byBeat[n]||[], canonical:false });
     });
@@ -727,10 +796,17 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
         _el("div",{className:"shot-scene-title"},scene.title||"Untitled scene"),
         _el("div",{className:"shot-scene-style-row"},_el(SceneStyleChip,{project:ctx.project,sceneId:scene.id})),
         _el("div",{className:"shot-scene-sub"},
-          (loc?("Location: "+loc.name+"   \u00b7   "):"")+shots.length+" shot"+(shots.length!==1?"s":""))),
+          (loc?("Location: "+loc.name+"   \u00b7   "):"")+shots.length+" shot"+(shots.length!==1?"s":"")),
+        // shots-per-beat strip: coverage distribution at a glance (widths ∝ shot counts)
+        (lanes.length>1) && _el("div",{className:"ssx-beat-strip",
+          title:"Shots per beat \u2014 how this scene's coverage is distributed"},
+          lanes.map(L=>_el("span",{key:"bb"+L.n,className:"ssx-beat-seg",
+            style:{flexGrow:Math.max(1,L.shots.length)},
+            title:"Beat "+L.n+" \u2014 "+L.shots.length+" shot"+(L.shots.length!==1?"s":"")},
+            L.shots.length)))),
       _el("div",{className:"shot-scene-acts"},
         onRenderScene && _el("button",{className:"char-draft-btn primary",disabled:!!renderBusy,onClick:()=>onRenderScene(scene),
-          title:"Render this scene in order, each shot seeded by the previous frame, auto-approving each. Approved frames are retained as seeds."},
+          title:"Render this scene in order, each shot seeded by its beat's coverage reference (a beat's opener chains from the previous beat), auto-approving each. Approved frames are retained as seeds."},
           _el(Icon.sparkles,{s:12}), renderBusy?"Rendering\u2026":("Render Scene "+String(scene.no).padStart(2,"0")+" in order")),
         _el("button",{className:"char-draft-btn ghost"+(draftingScene?" busy":""),disabled:!!draftingScene,onClick:()=>onDraftScene(scene),
           title:"Re-derive this scene's shot list from its beats (replaces the current shots)"},
@@ -762,10 +838,12 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
               _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")+" \u00b7 rendering\u2026")),
             _el("div",{className:"beat-lane-strip"},
               L.shots.map((sh,li)=>{
-                const prevShot=(typeof prevShotOf==="function")?prevShotOf(sh,ordered):null;
+                const prevShot=(typeof seedShotOf==="function")?seedShotOf(sh,ordered)
+                  :((typeof prevShotOf==="function")?prevShotOf(sh,ordered):null);
                 const _si=ordered.findIndex(x=>x.id===sh.id);
+                const _plan = L.shots.map(x=>x.beatPlan).find(Boolean);
                 return _el("div",{key:sh.id,className:"beat-shot-cell"},
-                  _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,prevShot,
+                  _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,prevShot,plan:_plan,
                     laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
                     onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
                     subLabel:(L.shots.length>1?String.fromCharCode(65+li):null)})); })));
@@ -783,7 +861,7 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
               _el("div",{className:"brn-t"},"MUSE is re-designing Scene "+String(scene.no).padStart(2,"0")+"'s shots"),
               _el("div",{className:"brn-d"},"Beat-by-beat coverage from the beats + script \u2014 about a minute. The current shots stay until the new list lands (a failed draft changes nothing)."))),
           _el("div",{className:"beat-card-grid"},
-            lanes.map((L,Li)=> _el(BeatCard,{key:"bc"+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
+            lanes.map((L,Li)=> _el(BeatCard,{key:"bc"+(L.canonical?"c":"o")+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
               ordered, firstId, toggleHead, onAddShot, onUpdate, onDelete, onView,
               onGenerateShot, onRegenDownstream, onStopChain, onBatchDone, batchActiveId, openShotId, setOpenShotId,
               sceneStart:(!_sceneRendered && Li===0), onRenderScene, renderBusy, nextShotId:_nextShotId }))));
@@ -994,10 +1072,12 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     ids.slice(at+1).forEach(id=> onUpdateShot(id,{ locked:false }));
     setCollapsed(c=>({ ...c, [sh.sceneId]:false }));
     stepChain(ids, at+1, true); };
-  // Manual card generation. A shot seeds off the PREVIOUS shot's frame (its anchor), so
-  // every earlier shot in this sub-chain must already be rendered. If one is missing we
-  // DON'T silently render it \u2014 we ask the user to generate the earlier shot first, so
-  // they stay in control of the chain order. Only the clicked shot renders here.
+  // Manual card generation. A shot seeds off its COVERAGE REFERENCE frame (user ruling
+  // 2026-08-01: within a beat, the beat's FIRST shot; a beat opener chains from the
+  // previous beat's tail), so that reference — and any seed the reference itself builds
+  // on — must already be rendered. If one is missing we DON'T silently render it \u2014 we
+  // ask the user to generate the earlier shot first, so they stay in control of the
+  // chain order. Only the clicked shot renders here.
   const startShot = async (id)=>{
     if(!id) return;
     // never swallow the click silently — say WHY nothing is starting
@@ -1013,25 +1093,29 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
       const orderedShots=(typeof sceneShotsOrdered==="function")?sceneShotsOrdered(shotsByScene[target.sceneId]):(shotsByScene[target.sceneId]||[]);
       const at=orderedShots.findIndex(s=>s.id===id);
       if(at<0){ setNotice("That shot isn't in its scene's running order \u2014 refresh and try again."); return; }
-      // A deliberately marked Fresh shot is a hard-cut head. It starts a new
-      // sub-chain; otherwise find the nearest earlier Fresh boundary.
-      let startAt=0;
-      for(let i=at;i>0;i--){ if(orderedShots[i].anchor){ startAt=i; break; } }
-      // which earlier shots in this sub-chain aren't rendered yet?
-      const missing=[];
-      for(let i=startAt;i<at;i++){
-        const s=orderedShots[i];
-        let u=(typeof nbGetImage==="function")?nbGetImage(s.id):"";
-        if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(s.id); }catch(e){} }
-        if(!u) missing.push(s);
+      // walk the SEED ANCESTRY: this shot's coverage reference, that reference's own
+      // seed, and so on up to a head. Nearest-first; a rendered seed's own ancestry is
+      // already baked into its frame, so the walk stops there.
+      const missing=[]; const seen={};
+      let cur=target;
+      while(cur){
+        const seed=(typeof seedShotOf==="function")?seedShotOf(cur,orderedShots)
+          :((typeof prevShotOf==="function")?prevShotOf(cur,orderedShots):null);
+        if(!seed || seen[seed.id]) break;
+        seen[seed.id]=true;
+        let u=(typeof nbGetImage==="function")?nbGetImage(seed.id):"";
+        if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(seed.id); }catch(e){} }
+        if(!u){ missing.push(seed); cur=seed; continue; }
+        break;
       }
       if(missing.length){
         const shotNo = (s)=> Math.max(1, orderedShots.findIndex(x=>x.id===s.id)+1);
         const shotLab = (s)=> "Shot "+shotNo(s)+(s.beatN ? " (Beat "+s.beatN+")" : "");
-        const near=missing[missing.length-1];   // the immediate anchor this shot builds on
+        const near=missing[0];                    // the reference this shot builds on
+        const first=missing[missing.length-1];    // the earliest missing link
         setNotice(missing.length===1
-          ? shotLab(target)+" depends on "+shotLab(near)+". Generate "+shotLab(near)+" first so it can become the continuity anchor."
-          : shotLab(target)+" depends on the previous frame, but earlier anchors are missing. Generate the chain in order starting with "+shotLab(missing[0])+".");
+          ? shotLab(target)+" depends on "+shotLab(near)+". Generate "+shotLab(near)+" first so it can become the coverage reference."
+          : shotLab(target)+" depends on "+shotLab(near)+", but its own seed chain is incomplete. Generate the chain in order starting with "+shotLab(first)+".");
         return;
       }
       setCollapsed(c=>({ ...c, [target.sceneId]:false }));
@@ -1077,14 +1161,14 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
         _el("div",{style:{flex:1}},
           _el("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Cinematographer (Shot Designer)",
             _el(window.InfoTip,{label:"About the Shot List",
-              text:"A BEAT owns 1\u2013N shots (coverage): every scene starts at one shot per beat, and any beat can be SPLIT INTO COVERAGE from its lane header \u2014 one shot per distinct visual event, labelled 3A/3B/3C in cut order. Shots are grouped by beat lane inside each scene. Every frame generation follows a rolling chain in scene order: the first shot renders from the locked sheets, and every later shot is seeded by the immediately previous generated frame. Generate the shots in order — if you click Generate on a later shot before an earlier one is rendered, TURN asks you to generate the earlier shot first (it's the anchor this frame builds on). 'Generate all shots' and 'Render Scene X in order' render the whole chain straight through, auto-approving each frame as the next shot's seed. Stage video clips are packed automatically from these shots \u2014 there is no manual clip grouping here; clips live on the Stage."}))),
+              text:"A BEAT owns 1\u2013N shots (coverage): every scene starts at one shot per beat, and any beat can be SPLIT INTO COVERAGE from its lane header \u2014 one shot per distinct visual event, labelled 3A/3B/3C in cut order. Shots are grouped by beat lane inside each scene. Every frame generation follows a chain in scene order: the scene's first shot renders from the locked sheets; within a beat every later shot is seeded by the beat's FIRST frame (its coverage reference), and each beat's first shot chains from the previous beat's tail frame. Generate the shots in order — if you click Generate on a later shot before an earlier one is rendered, TURN asks you to generate the earlier shot first (it's the anchor this frame builds on). 'Generate all shots' and 'Render Scene X in order' render the whole chain straight through, auto-approving each frame as the next shot's seed. Stage video clips are packed automatically from these shots \u2014 there is no manual clip grouping here; clips live on the Stage."}))),
         _el("div",{className:"art-intro-actions"},
           // "Export shot list" lives in the top bar's ⋮ menu now (window.turnExportShotList)
           _el("button",{className:"art-draftall ghost",disabled:draftingAllShots||!ordered.length,onClick:handleDesignAll,
             title:"Break any scene that has no shots yet into full coverage \u2014 size, angle, move and lens per beat"},
             _el(Icon.sparkles,{s:14}), draftingAllShots?"Designing\u2026":"Design all shots"),
           _el("button",{className:"art-draftall",disabled:!!batchActiveId||!!chain||!shots.length,onClick:startAll,
-            title:"Render every shot in chain order, each seeded by the previous frame. Locked (approved) frames are kept and used as seeds; the rest render."},
+            title:"Render every shot in chain order, each seeded by its beat's coverage reference. Locked (approved) frames are kept and used as seeds; the rest render."},
             _el(Icon.sparkles,{s:14}), (batchActiveId||chain)?"Rendering\u2026":"Generate all shots", typeof window.nbCostChip==="function" && window.nbCostChip(1))))),
     // A chain already has its own progress + Stop bar below. Hiding the generic
     // batch bar here avoids duplicate Cancel/Stop controls for the same request.

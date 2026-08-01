@@ -174,7 +174,7 @@ function stageShotScriptText(scene, drafts, sh, max){
   // which the cast-sheet scan relies on). sh.action is appended as staging detail when it
   // adds information beyond the micro-beat. Beat prose is the last-resort fallback for
   // shots with neither — reading it FIRST stamped the whole beat's prose onto every shot.
-  const M = max||160;
+  const M = (max==null) ? 160 : max;   // 0 = NO cap — editor views show the FULL line
   const own = String((sh&&sh.action)||"").replace(/\s+/g," ").trim();
   const microT = stageShotMicroTexts(sh).join(" ").replace(/\s+/g," ").trim();
   let base = "";
@@ -184,10 +184,10 @@ function stageShotScriptText(scene, drafts, sh, max){
     else base = (own.length >= microT.length) ? own : microT; // one contains the other: keep the fuller
   } else base = microT || own;
   if(base){
-    return base.length<=M ? base : base.slice(0, Math.max(0, M-1)).replace(/\s+\S*$/,"")+"\u2026";
+    return (M>0 && base.length>M) ? base.slice(0, Math.max(0, M-1)).replace(/\s+\S*$/,"")+"\u2026" : base;
   }
   if(typeof screenplayBeatTitle==="function"){
-    const t = screenplayBeatTitle(scene, drafts||{}, sh&&sh.beatN, M);
+    const t = screenplayBeatTitle(scene, drafts||{}, sh&&sh.beatN, M>0?M:undefined);
     if(t) return t;
   }
   return "";
@@ -262,8 +262,9 @@ function stageShotSheetText(scene, beatsMap, sh, max){
   return t;
 }
 function stageShotCanonLine(scene, drafts, beatsMap, sh, max){
-  const script = stageShotScriptText(scene, drafts, sh, max||180);
-  const sheet = stageShotSheetText(scene, beatsMap, sh, max||180);
+  const cap = (max==null) ? 180 : max;   // 0 = NO cap — full canon (the Multi-shot editor)
+  const script = stageShotScriptText(scene, drafts, sh, cap);
+  const sheet = stageShotSheetText(scene, beatsMap, sh, cap);
   if(script && sheet){
     const a=_normStageText(script), b=_normStageText(sheet);
     if(a && b && a!==b && a.indexOf(b)<0 && b.indexOf(a)<0) return script+" Storyboard panel action: "+sheet;
@@ -553,14 +554,28 @@ const SEEDANCE_MODELS = [
   // (Sora 2 was removed from the picker 2026-07-05 by user decision — its proxy
   // routing and videogen isSora branch remain dormant, so re-adding it later is
   // just restoring a registry entry here.)
-  // Announced by ByteDance June 2026 at Volcano Engine; public rollout targeted for
-  // July 2026. Not yet on fal.ai / wired to the proxy — kept here, disabled, so turning
-  // it on later is a status flip + a model id, not a UI rebuild. 30s single pass +
-  // 50 references => whole-scene clips (maxShotsPerClip:0 lifts the packing cap).
-  { id:"seedance-2.5", label:"Seedance 2.5", status:"soon", maxShotsPerClip:0, tiers:[],
+  // Seedance 2.5 — released 2026-07-31; NOT yet listed on fal.ai (checked 2026-08-01),
+  // so it stays "soon" — but the whole app is already 30s-wired: maxClipSec:30 feeds the
+  // caphead / tick guard / duration options / measured-seconds floor; the Stage raises
+  // the packing budget to 30 and these caps lift (maxShotsPerClip:0, maxDialoguePerClip:0);
+  // videogen clamps at 30s, accepts up to 50 image refs (maxAssets) and polls ~20 min;
+  // the proxy already allowlists the endpoints below. When fal lists it: verify the tier
+  // falModel ids + creditRates against the live listing, then flip status to "active".
+  { id:"seedance-2.5", label:"Seedance 2.5", status:"soon", maxShotsPerClip:0, maxDialoguePerClip:0,
+    maxClipSec:30, maxAssets:50,
     metaRes:"4K", metaDur:"4–30s",
     capabilities:["Native single-pass 30s clips","4K output · 10-bit colour","Up to 50 multimodal references","Local in-clip edits","Whole-scene generation","Native audio"],
-    note:"ByteDance's next model: native single-pass 30s clips in 4K (10-bit colour), up to 50 multimodal references, and local in-clip edits. Public rollout targeted for July 2026." },
+    tiers:[
+      // PROVISIONAL endpoint ids (mirroring 2.0's naming) + rates (+25% over 2.0) —
+      // confirm both against fal's listing before flipping status to "active".
+      { id:"standard", label:"Standard", fast:false, maxRes:"4K", falModel:"bytedance/seedance-2.5/reference-to-video",
+        note:"Best quality · single-pass 30s · resolution up to 4K",
+        creditRate:(window.turnVideoCreditRates&&window.turnVideoCreditRates("seedance-2.5","standard")) || { "480p":0.65, "720p":1.25, "1080p":2.5, "4K":6.5 } },
+      { id:"fast",     label:"Fast",     fast:true,  maxRes:"720p", falModel:"bytedance/seedance-2.5/fast/reference-to-video",
+        note:"Lower latency and cost for iteration · capped at 720p",
+        creditRate:(window.turnVideoCreditRates&&window.turnVideoCreditRates("seedance-2.5","fast")) || { "480p":0.5, "720p":1 } },
+    ],
+    note:"Released 2026-07-31: native single-pass 30s clips in 4K (10-bit colour), up to 50 multimodal references, and local in-clip edits. Waiting on fal.ai to list it — the app is already wired for its 30s ceiling, so activation is a status flip once the endpoint ids are confirmed." },
 ];
 function seedanceModelOf(id){ return SEEDANCE_MODELS.find(m=>m.id===id) || SEEDANCE_MODELS[0]; }
 function seedanceTierOf(model, tierId){ return (model&&model.tiers||[]).find(t=>t.id===tierId) || (model&&model.tiers||[])[0] || null; }
@@ -592,8 +607,10 @@ window.addEventListener("turn-pricing-changed", ()=>{
     if(r) t.creditRate = r;
   }));
 });
-/* per-shot seconds interval grid for the Multi-shot composer (bounded per model) */
-window.STAGE_MS_STEPS = [4, 8, 12, 15];
+/* per-shot seconds interval grid for the Multi-shot composer (bounded per model —
+   the stepper filters anything past the model's cap, so the 20s/30s rungs only ever
+   surface on Seedance 2.5-class models) */
+window.STAGE_MS_STEPS = [4, 8, 12, 15, 20, 30];
 
 /* ---- camera vocabulary Seedance 2.0 is tuned to recognise (fal.ai prompting guide:
    "Subject + Action + Camera + Scene/Lighting + Style", named cinematographer terms). ---- */
@@ -1052,7 +1069,8 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   // number their lip-sync tags from this, so a deselected line drops out consistently
   const audioIncluded = onAudios.map(a=>a.shotId).filter(Boolean);
   const onAssets = tagged.filter(on);
-  const assetLimit = 12;
+  // NB: `model` is only declared further below — resolve from modelId here instead
+  const assetLimit = seedanceModelOf(modelId).maxAssets || 12;   // Seedance 2.5 raises the input budget to 50
   const assetOver = onAssets.length > assetLimit;
   const budgetUsed = onAssets.length;
   const budgetOverBy = Math.max(0, budgetUsed-assetLimit);
@@ -1096,7 +1114,8 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   const [recipe, setRecipe] = React.useState(defaultRecipe);
   const [recipeTouched, setRecipeTouched] = React.useState(false);
   const pickRecipe = (id)=>{ setRecipeTouched(true); setRecipe(id); };
-  React.useEffect(()=>{ setRecipeTouched(false); setRecipe(defaultRecipe()); }, [clip.id]);
+  // NOTE: the "new clip → reset recipe" effect lives BELOW with the Multi-shot row
+  // state — clip.id alone can't key it (see the repack note there).
   React.useEffect(()=>{ if(!recipeTouched) setRecipe(defaultRecipe()); }, [sourceMode, modelId]);
   // leaving whole-scene mode retires the "scene" tab — fall back to the smart pick
   React.useEffect(()=>{
@@ -1180,23 +1199,34 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   const [msFolded, setMsFolded] = React.useState(()=>new Set());
   const msTouchedRef = React.useRef(false);         // user drove the rows — auto-fit stands down
   const msAutoFitRef = React.useRef(null);          // last clip auto-fitted (once per visit)
-  React.useEffect(()=>{ setMsOff(new Set()); setMsFolded(new Set()); msTouchedRef.current=false; }, [clip.id]);
-  // MULTI-SHOT is a WHOLE-SCENE composer: it lists EVERY beat of the scene (not just
-  // this clip's packed subset — Seedance caps clips at 3 shots, so beats 4+ live in
-  // later clips). Sourced from all the scene's clips, with panelLines / cast gathered
-  // scene-wide so each beat keeps its derived text + speaker. The checkboxes pick
-  // which beats ride the render (≤ the model's per-render ceiling).
-  const msAllShots = (recipe==="multishot")
-    ? clipsInScene.flatMap(c=>((c.data&&c.data.shots)||[]))
-    : shownShots;
-  const msPanelLines = (recipe==="multishot")
-    ? clipsInScene.flatMap(c=>((c.data&&c.data.panelLines)||[]))
-    : (d.panelLines||[]);
-  const msCast = (()=>{ if(recipe!=="multishot") return d.cast||[];
-    const seen=new Set(), out=[]; clipsInScene.forEach(c=>((c.data&&c.data.cast)||[]).forEach(ch=>{ if(ch&&ch.id&&!seen.has(ch.id)){ seen.add(ch.id); out.push(ch); } })); return out; })();
+  // A REPACK IS NOT A NEW CLIP. clip.id hashes the member shots, and the scene's
+  // clips re-pack whenever a shot's seconds change — so editing a Multi-shot row
+  // used to mint a "new" clip id, which reset the recipe tab to the smart default
+  // (snapping the user to Timeline/Narrative mid-edit) and re-armed auto-fit,
+  // which rewrote the durations and repacked AGAIN. Only a clip sharing NO member
+  // shots with the previous one counts as the user actually moving clips.
+  const msMembersRef = React.useRef(null);
+  React.useEffect(()=>{
+    const cur = ((d.shots)||[]).map(s=>s&&s.id).filter(Boolean);
+    const prev = msMembersRef.current;
+    msMembersRef.current = cur;
+    if(prev && cur.some(id=>prev.indexOf(id)>=0)){
+      msAutoFitRef.current = clip.id;   // repack — keep the tab, rows and hand-set seconds
+      return;
+    }
+    setRecipeTouched(false); setRecipe(defaultRecipe());
+    setMsOff(new Set()); setMsFolded(new Set()); msTouchedRef.current=false;
+  }, [clip.id]);
+  // MULTI-SHOT is a PER-BEAT composer: one beat at a time — the rows are exactly the
+  // active clip's packed shots (the beat's equivalent), never the whole scene's 20+.
+  // Pick a different beat with the scene rail's clip chips or the ◀ ▶ arrows; each
+  // beat gets its own rows, its own ticked total and its own render.
+  const msAllShots = shownShots;
+  const msPanelLines = d.panelLines || [];
+  const msCast = d.cast || [];
   const msClip = (recipe==="multishot")
     ? { ...clip, data:{ ...d, shots: msAllShots, panelLines: msPanelLines, allPanelLines: msPanelLines, cast: msCast,
-        lineShots: clipsInScene.flatMap(c=>((c.data&&c.data.lineShots)||[])) } }
+        lineShots: d.lineShots || [] } }
     : clip;
   const msShots = msAllShots.filter(sh=>!msOff.has(sh.id));
   const msTotal = msShots.reduce((a,sh)=> a + (Number(sh.dur) || (typeof shotDur==="function" ? shotDur(sh) : 3)), 0);
@@ -1227,6 +1257,19 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     msAllShots.forEach(sh=>{ const want = durs[sh.id]; if(want!=null && Math.abs((Number(sh.dur)||0)-want)>0.001) onUpdateShot(sh.id,{ dur:want }); });
     setMsOff(off);
   }, [clip.id, recipe, modelId]);
+  // LIMIT REACHED → collapse every UNTICKED row: once the ticked shots fill the
+  // model's clip ceiling, rows that can't join fold away. This only ever FOLDS —
+  // a hand-expanded row is never re-folded until the totals change again.
+  React.useEffect(()=>{
+    if(recipe!=="multishot") return;
+    const cap = model.maxClipSec || 15;
+    if(msTotal < cap-0.001) return;
+    setMsFolded(f=>{
+      let changed = false; const n = new Set(f);
+      msAllShots.forEach(sh=>{ if(msOff.has(sh.id) && !n.has(sh.id)){ n.add(sh.id); changed=true; } });
+      return changed ? n : f;
+    });
+  }, [recipe, msTotal, msOff, modelId]);
   const duration = (voiceLocked && measuredSec)
     ? Math.max(measuredSec, durationOverride||0)
     : (durationOverride
@@ -1278,6 +1321,37 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   const msSig = msAllShots.map(s=>s.id+":"+(s.vidText||"")+":"+(s.dur||"")+":"+(msOff.has(s.id)?0:1)).join("|");
   const beatPrompt = recipeText(recipe);
   const [prompt, setPrompt] = React.useState(beatPrompt);
+  // @-mention autocomplete — hand-written @Tokens map to INCLUDED assets only; the
+  // dropdown resolves which @name is which asset, and tokens that don't resolve get
+  // flagged under the box instead of silently mis-directing the model.
+  const [mentionBox, setMentionBox] = React.useState(null);   // {start, query, hi}
+  const mentionables = tagged.filter(a=>a.kind!=="text" && on(a))
+    .map(a=>({ t:stageAssetMention(a), label:String(a.label||""), kind:a.kind }));
+  const mentionItems = (q)=>{ q=String(q||"").toLowerCase();
+    return mentionables.filter(m=>!q || m.t.toLowerCase().indexOf(q)>=0 || m.label.toLowerCase().indexOf(q)>=0).slice(0,8); };
+  const promptCaretToken = (el)=>{ const upto = el.value.slice(0, el.selectionStart||0);
+    const m = /(?:^|[\s\n])@([A-Za-z0-9]*)$/.exec(upto);
+    return m ? { start:(el.selectionStart||0)-m[1].length-1, query:m[1] } : null; };
+  const onPromptChange = (e)=>{ setPrompt(e.target.value.slice(0,PANEL_PROMPT_MAX));
+    const tk = promptCaretToken(e.target); setMentionBox(tk ? { ...tk, hi:0 } : null); };
+  const insertMention = (tok)=>{ const el=promptRef.current; if(!el||!mentionBox) return;
+    const caret = el.selectionStart||0;
+    const next = (prompt.slice(0,mentionBox.start)+tok+" "+prompt.slice(caret)).slice(0,PANEL_PROMPT_MAX);
+    const pos = mentionBox.start+tok.length+1;
+    setPrompt(next); setMentionBox(null);
+    requestAnimationFrame(()=>{ try{ el.focus(); el.setSelectionRange(pos,pos); }catch(_e){} }); };
+  const onPromptKeyDown = (e)=>{ if(!mentionBox) return;
+    const items = mentionItems(mentionBox.query);
+    if(e.key==="ArrowDown"||e.key==="ArrowUp"){ e.preventDefault();
+      setMentionBox(b=>({ ...b, hi:(b.hi+(e.key==="ArrowDown"?1:-1)+Math.max(1,items.length))%Math.max(1,items.length) })); }
+    else if((e.key==="Enter"||e.key==="Tab") && items.length){ e.preventDefault();
+      insertMention(items[Math.min(mentionBox.hi, items.length-1)].t); }
+    else if(e.key==="Escape"){ setMentionBox(null); } };
+  // tokens that don't resolve to an included asset (typo, or the asset was excluded)
+  const badMentions = (()=>{ const known = new Set(mentionables.map(m=>m.t.toLowerCase()));
+    const out = [], re = /@(image|video|audio)\d+/gi; let mm;
+    while((mm = re.exec(prompt))){ if(!known.has(mm[0].toLowerCase()) && out.indexOf(mm[0])<0) out.push(mm[0]); }
+    return out; })();
   const [modeOverride, setModeOverride] = React.useState(null);
   const [voicingClip, setVoicingClip] = React.useState(false);
   const [maxImg, setMaxImg] = React.useState(null);   // {url,label,kind} — maximised reference viewer
@@ -1385,14 +1459,46 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     const imageUrls = [];
     for(const a of onImages){ if(a===frameAsset) continue; const u=await stageServerAssetUrl(a); if(u) imageUrls.push(u); }
     const videoUrls = onVideos.map(a=>a.url).filter(Boolean);
-    const audioUrls = voiceLocked ? onAudios.map(a=>a.url).filter(Boolean) : [];
+    let audioUrls = voiceLocked ? onAudios.map(a=>a.url).filter(Boolean) : [];
+    // voice overflow → BLACK-MP4 carriers in the video slots (fal caps audio refs at
+    // 3): the mp4's audio track is the voice, its black picture carries nothing, so
+    // the prompt flags it voice-only. In-browser conversion (WebCodecs); a browser
+    // that can't encode keeps the first 3 voices and gets told what was left out.
+    const voiceRefLines = [];
+    if(audioUrls.length>3){
+      const overflow = onAudios.slice(3).filter(a=>a.url);
+      audioUrls = audioUrls.slice(0,3);
+      const baseVideos = videoUrls.length;
+      const carried = overflow.slice(0, Math.max(0, 3-baseVideos));
+      let dropped = overflow.slice(carried.length);
+      if(carried.length){
+        if(typeof blackMp4FromAudio!=="function"){ dropped = dropped.concat(carried); }
+        else{
+          try{
+            for(const a of carried){
+              videoUrls.push(await blackMp4FromAudio(a.url));
+              voiceRefLines.push("@Video"+(baseVideos+voiceRefLines.length+1)+" is "
+                +(String(a.label||"the speaker").replace(/\s+line$/i,""))+"'s voice riding a black screen — use ONLY its audio track for that character's voice; ignore the picture entirely.");
+            }
+          }catch(e){
+            videoUrls.splice(baseVideos);   // roll back any partial muxes
+            dropped = dropped.concat(carried.slice(voiceRefLines.length));
+            voiceRefLines.length = 0;
+            if(typeof window.appToast==="function") window.appToast(String((e&&e.message)||e),"error");
+          }
+        }
+      }
+      if(dropped.length && typeof window.appToast==="function")
+        window.appToast((3+voiceRefLines.length)+" of "+onAudios.length+" voices attach to this render — left out: "+dropped.map(a=>a.label||"a line").join(", ")+".","error");
+    }
     const controls = "Camera movement: "+camera+". Lighting: "+lighting+". Performance: "+perf+".";
     if(assetOver){ if(typeof window.appToast==="function") window.appToast((model.label||"This model")+" accepts up to "+assetLimit+" inputs — exclude a few assets first.","error"); return; }
     if(!sourceReady){ if(typeof window.appToast==="function") window.appToast((usePanels?"Save this clip's storyboard "+(sourceMode==="sheet"?"sheet":"halves")+" in Storyboards first.":"Generate this clip's first shot frame first."),"error"); return; }
     if(needsVoice){ if(typeof window.appToast==="function") window.appToast("Voice this clip's dialogue first — duration and lip-sync are locked to line audio.","error"); return; }
     if(creditInfo.empty){ if(typeof window.appToast==="function") window.appToast("No generation credits remaining.","error"); return; }
     const seedVal = seedInput.trim() ? Number(seedInput.trim()) : undefined;
-    const promptPayload = refBlock ? (prompt.trim()+"\n\n"+refBlock) : prompt;
+    const promptPayload = (refBlock ? (prompt.trim()+"\n\n"+refBlock) : prompt)
+      + (voiceRefLines.length ? (refBlock?"":"\n\nReferences:")+"\n"+voiceRefLines.join("\n") : "");
     // Multi-shot rows ride the payload as structured segments — models with native
     // multi-shot (Kling 3.0's multi_prompt) render them per-shot; others ignore
     // them and use the compiled time-coded prompt text.
@@ -1622,6 +1728,11 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   if(!sourceReady) blockers.push({ key:"source",
     text: usePanels ? "No storyboard source is ready yet — save this clip's "+(sourceMode==="sheet"?"sheet":"halves")+" in Storyboards."
       : "This clip has no shot frame yet — generate it in Art Room → Shots." });
+  // OVER THE MODEL'S CLIP CEILING — the render would clamp silently and compress
+  // the pacing; force the choice instead (the fit / untick / parts fixes sit
+  // with the rows). Only reachable via the seconds steppers — ticking is capped.
+  if(recipe==="multishot" && msTotal > (model.maxClipSec||15)+0.001) blockers.push({ key:"overcap",
+    text:"The ticked shots total "+_fmtSecs(Math.round(msTotal*10)/10)+" — over "+(model.label||"this model")+"'s "+_fmtSecs(model.maxClipSec||15)+" maximum per clip. Fit the seconds, untick rows, or render in parts (the fixes sit under the rows)." });
   if(assetOver) blockers.push({ key:"budget",
     text:"Too many inputs selected — exclude "+budgetOverBy+" optional asset"+(budgetOverBy!==1?"s":"")+" before rendering." });
   if(creditInfo.empty) blockers.push({ key:"credits",
@@ -1675,15 +1786,28 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         title:label+" — "+desc,
         onClick:()=>{ pickRecipe(id); setPrompt(recipeText(id)); }},
         label))),
-    // MULTI-SHOT editor — Kling-style structured rows over the WHOLE SCENE's shots
-    // (every beat, not just this clip's packed subset): a duration stepper + a
-    // video-only description per shot + an include checkbox. Edits persist on the
-    // shot (vidText/dur), feed EVERY recipe, and recompile the prompt live. The
-    // canon Action (image side) is never touched; shots are added on the Shots tab.
+    // MULTI-SHOT editor — Kling-style structured rows over the ACTIVE BEAT's shots
+    // (one beat at a time, matching the clip the console is pointed at): a duration
+    // stepper + a video-only description per shot + an include checkbox. Edits
+    // persist on the shot (vidText/dur), feed EVERY recipe, and recompile the prompt
+    // live. The canon Action (image side) is never touched; shots are added on the Shots tab.
     recipe==="multishot" && _stEl("div",{className:"stage2-ms"},
+      (()=>{ // the model's clip ceiling, always visible while picking rows: the live
+        // total of TICKED seconds vs the cap — amber at the limit, red over it
+        const cap = model.maxClipSec || 15;
+        const tot = Math.round(msTotal*10)/10;
+        const over = tot > cap+0.001, at = !over && tot >= cap-0.001;
+        return _stEl("div",{className:"stage2-ms-caphead"+(over?" over":(at?" at":""))},
+          _stEl("span",{className:"stage2-ms-caphead-model"}, Icon.clock&&_stEl(Icon.clock,{s:12}),
+            (model.label||"This model")+" renders up to "+_fmtSecs(cap)+" per clip"),
+          _stEl("span",{className:"stage2-ms-caphead-total"},
+            "("+_fmtSecs(tot)+" / "+_fmtSecs(cap)+" ticked)"));
+      })(),
       msAllShots.map((sh,i)=>{
         const p = msPanelLines.find(x=>x.shotId===sh.id) || {};
-        const canon = String(p.text||"").trim();
+        // the editor shows the FULL canon line — the 190-char panel-line cap (and its
+        // trailing "…") is a prompt budget, not what the user reads or edits here
+        const canon = String(sh.vidText||"").trim() || stageShotCanonLine(scene, drafts, beatsMap, sh, 0) || String(p.text||"").trim();
         const voicedMin = (sh.lineAudio && sh.lineAudio.durationMs) ? Math.max(1, Math.round(((sh.lineAudio.durationMs/1000)+0.4)*10)/10) : 1;
         const curDur = Math.max(1, Math.round((Number(sh.dur) || (typeof shotDur==="function" ? shotDur(sh) : 3))*10)/10);
         const setDur = (nv)=>{ if(!onUpdateShot) return;
@@ -1695,11 +1819,21 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         const edited = sh.vidText!=null && String(sh.vidText).trim()!=="";
         const included = !msOff.has(sh.id);
         const folded = msFolded.has(sh.id);
+        // would including this row burst the model's clip ceiling? The tick is then
+        // refused (with a toast) and the checkbox shows the dashed "blocked" state
+        const blockedIn = !included && (msTotal + curDur > (model.maxClipSec||15)+0.001);
         const toggleInclude = ()=>{
           msTouchedRef.current = true;   // hand-picked rows — auto-fit stands down
           setMsOff(s=>{
             const n = new Set(s);
-            if(n.has(sh.id)) n.delete(sh.id);
+            if(n.has(sh.id)){
+              const cap = model.maxClipSec || 15;
+              if(msTotal + curDur > cap+0.001){
+                if(window.appToast) window.appToast("Shot "+(i+1)+" ("+_fmtSecs(curDur)+") would push the render to "+_fmtSecs(Math.round((msTotal+curDur)*10)/10)+" — over "+(model.label||"the model")+"'s "+_fmtSecs(cap)+" maximum. Shorten a row's seconds or untick another shot first.","error");
+                return s;
+              }
+              n.delete(sh.id);
+            }
             else {
               if(msShots.length<=1){ if(window.appToast) window.appToast("At least one shot must stay in the render."); return s; }
               n.add(sh.id);
@@ -1716,10 +1850,12 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
               "aria-expanded":folded?"false":"true",
               title: folded ? "Expand this shot" : "Collapse this shot (it stays in the list)",
               onClick:toggleFold}, folded ? "▸" : "▾"),
-            _stEl("button",{type:"button",className:"stage2-ms-check"+(included?" on":""),
+            _stEl("button",{type:"button",className:"stage2-ms-check"+(included?" on":"")+(blockedIn?" blocked":""),
               "aria-pressed":included?"true":"false",
               title: included
                 ? "Included in this render — click to leave this shot out (prompt, native multi-shot and duration all skip it; the shot itself is untouched)"
+                : blockedIn
+                ? "Over "+(model.label||"the model")+"'s "+_fmtSecs(model.maxClipSec||15)+" maximum — including this "+_fmtSecs(curDur)+" shot would push the total over. Shorten a row's seconds or untick another shot first."
                 : "Excluded from this render — click to include this shot again",
               onClick:toggleInclude}, included?"✓":""),
             _stEl("span",{className:"stage2-ms-tag"},"Shot "+(i+1)),
@@ -1803,9 +1939,18 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     _stEl("div",{className:"stage2-gen-box"+(recipe==="multishot"?" ms-mode":"")},
       // in Multi-shot mode the ROWS are the prompt editor — the compiled text is
       // hidden (it still compiles and renders; switch to Timeline to read it)
-      recipe!=="multishot" && _stEl("textarea",{ref:promptRef,className:"stage2-gen-prompt",value:prompt,
-        placeholder:"Describe the video you want to create…",
-        maxLength:PANEL_PROMPT_MAX,spellCheck:false,onChange:e=>setPrompt(e.target.value.slice(0,PANEL_PROMPT_MAX))}),
+      recipe!=="multishot" && _stEl("div",{className:"stage2-gen-promptwrap"},
+        _stEl("textarea",{ref:promptRef,className:"stage2-gen-prompt",value:prompt,
+          placeholder:"Describe the video you want to create…",
+          maxLength:PANEL_PROMPT_MAX,spellCheck:false,onChange:onPromptChange,onKeyDown:onPromptKeyDown,
+          onBlur:()=>setTimeout(()=>setMentionBox(null),120)}),
+        badMentions.length>0 && _stEl("div",{className:"stage2-mention-warn"},
+          "⚠ "+badMentions.join(", ")+" — not among this render's included assets; the model will guess. Fix the token or include the asset."),
+        mentionBox && mentionItems(mentionBox.query).length>0 && _stEl("div",{className:"stage2-mention-box"},
+          mentionItems(mentionBox.query).map((m,i)=>_stEl("button",{key:m.t,type:"button",
+            className:"stage2-mention-item"+(i===mentionBox.hi?" hi":""),
+            onMouseDown:e=>{ e.preventDefault(); insertMention(m.t); }},
+            _stEl("b",null,m.t), m.label && _stEl("span",null,m.label))))),
       _stEl("div",{className:"stage2-gen-controls"},
         // References/Elements trays + tier/bitrate/audio moved to the Render settings
         // panel (labelled) — the composer keeps only the per-take creative levers.
@@ -1887,8 +2032,16 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
                   _stageAgo(m.createdAt)||null].filter(Boolean).join(" · ");
                 return _stEl("option",{key:t.id,value:t.url}, bits+(i===0?" (latest)":"")); })
             : _stEl("option",{value:""},"No renders yet")),
-        // (the Takes/fullscreen/bookmark/more icon buttons were removed — Takes has
-        // its own room tab, and full screen is a double-click on the video itself)
+        // take MANAGEMENT (approve / restore / reuse) lives one click from the
+        // dropdown — the dedicated room tab is gone, this button opens the same view
+        onOpenVersions && _stEl("button",{type:"button",className:"stage2-version-manage",
+          disabled: !visibleTakes.length,
+          title: visibleTakes.length
+            ? "Manage this clip's takes — approve, restore, reuse"
+            : "No takes rendered yet",
+          onClick:()=>onOpenVersions()},
+          Icon.copy&&_stEl(Icon.copy,{s:13}), _stEl("span",null,"Takes")),
+        // (full screen is a double-click on the video itself)
         )),
     // player
     _stEl("div",{className:"stage2-player",style:_stageAspectCss(aspect)},
@@ -1915,22 +2068,26 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         _stEl("div",{className:"stage2-time-ruler"},
           [0,2,4,6,8].map(n=>_stEl("span",{key:n,className:n===2?"on":""},"00:"+_pad2(n)))),
         _stEl("div",{className:"stage2-time-cards"},
-          clipsInScene.map(c=>{
-            const active = c.id===clip.id;
-            const thumb = clipPrimaryFrame(c, imgs, visualSource);
-            const name = clipBeatName(c, beatsMap, drafts);
-            const vid = (typeof vidGetVideo==="function") ? vidGetVideo(c.id) : "";
-            const shotCount = (c.data.shots||[]).length;
-            return _stEl("button",{key:c.id,type:"button",className:"stage2-time-card"+(active?" on":"")+(vid?" rendered":""),
-              onClick:()=>onSelectClip&&onSelectClip(c.id),title:c.label+" · "+name+(shotCount>1?" · "+shotCount+" shots merged":"")},
-              _stEl("div",{className:"stage2-time-thumb"},
-                thumb ? _stEl("img",{src:thumb,alt:"",loading:"lazy"}) : _stEl("span",{className:"stage2-time-blank"},Icon.image&&_stEl(Icon.image,{s:16})),
-                shotCount>1 && _stEl("span",{className:"stage2-time-merge",title:shotCount+" shots merged into this clip"}, "×"+shotCount),
-                vid && _stEl("span",{className:"stage2-time-play"},Icon.play&&_stEl(Icon.play,{s:12}))),
-              _stEl("div",{className:"stage2-time-meta"},
-                _stEl("b",null,c.label+" "+name),
-                _stEl("span",null,_fmtSecs(c.data.dur)))); }),
-          _stEl("button",{type:"button",className:"stage2-time-add",title:"Add another clip later"},Icon.plus&&_stEl(Icon.plus,{s:18})))),
+          // the strip is RESERVED FOR GENERATED VIDEOS — one single scrolling line,
+          // no placeholder tiles for unrendered clips, no add tile. Clips without a
+          // take are still reached with the ◀ ▶ clip arrows (they cycle every clip).
+          (()=>{ const rendered = clipsInScene.filter(c=> (typeof vidGetVideo==="function") && vidGetVideo(c.id));
+            if(!rendered.length) return _stEl("div",{className:"stage2-time-empty"},
+              "No generated videos yet — render this clip and the take lands here.");
+            return rendered.map(c=>{
+              const active = c.id===clip.id;
+              const name = clipBeatName(c, beatsMap, drafts);
+              const vid = vidGetVideo(c.id);
+              const shotCount = (c.data.shots||[]).length;
+              return _stEl("button",{key:c.id,type:"button",className:"stage2-time-card rendered"+(active?" on":""),
+                onClick:()=>onSelectClip&&onSelectClip(c.id),title:c.label+" · "+name+" · rendered"+(shotCount>1?" · "+shotCount+" shots merged":"")},
+                _stEl("div",{className:"stage2-time-thumb"},
+                  _stEl("video",{src:vid,muted:true,playsInline:true,preload:"metadata"}),
+                  shotCount>1 && _stEl("span",{className:"stage2-time-merge",title:shotCount+" shots merged into this clip"}, "×"+shotCount),
+                  _stEl("span",{className:"stage2-time-play"},Icon.play&&_stEl(Icon.play,{s:12}))),
+                _stEl("div",{className:"stage2-time-meta"},
+                  _stEl("b",null,c.label+" "+name),
+                  _stEl("span",null,_fmtSecs(c.data.dur)))); }); })())),
       _stEl("button",{type:"button",className:"stage2-time-arrow",title:"Next clip",
         disabled:(()=>{ const i=clipsInScene.findIndex(c=>c.id===clip.id); return i<0 || i>=clipsInScene.length-1; })(),
         onClick:()=>{ const i=clipsInScene.findIndex(c=>c.id===clip.id); if(i>=0 && i<clipsInScene.length-1) onSelectClip&&onSelectClip(clipsInScene[i+1].id); }},
@@ -2785,10 +2942,14 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
   const [stageView, setStageView] = React.useState("stage");
   const [pendingReuse, setPendingReuse] = React.useState(null);
   const clipsByScene = React.useMemo(()=>{ const m={};
+    // the packing budget follows the MODEL's ceiling upward — a 30s model (Seedance
+    // 2.5) packs whole beats into 30s clips even when the format's budget is 15s
+    const packMax = Math.max(clipMax, stageModel.maxClipSec||15);
     const packOpts = packMode==="scene"
       ? { wholeScene:true }
-      : { maxShots: stageModel.maxShotsPerClip!=null ? stageModel.maxShotsPerClip : (window.CLIP_MAX_SHOTS||3), maxDialogue: window.CLIP_MAX_DIALOGUE||3 };
-    scenesWithShots.forEach(s=>{ m[s.id]=(typeof sceneSequences==="function")?sceneSequences(shotsByScene[s.id]||[], clipMax, packOpts):[]; });
+      : { maxShots: stageModel.maxShotsPerClip!=null ? stageModel.maxShotsPerClip : (window.CLIP_MAX_SHOTS||3),
+          maxDialogue: stageModel.maxDialoguePerClip!=null ? stageModel.maxDialoguePerClip : (window.CLIP_MAX_DIALOGUE||3) };
+    scenesWithShots.forEach(s=>{ m[s.id]=(typeof sceneSequences==="function")?sceneSequences(shotsByScene[s.id]||[], packMax, packOpts):[]; });
     return m; }, [scenesWithShots, shotsByScene, clipMax, modelId, packMode]);
 
   // ctx.scenes = the story-ORDERED list — shotPropSheetId/custodyOwnerAt resolve by story
@@ -2899,8 +3060,21 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
   // which of the clip's own shots is previewed in its filmstrip-of-one context.
   const [selId, setSelId] = React.useState(allClips[0] ? allClips[0].id : null);
   const [selShotId, setSelShotId] = React.useState((shots||[])[0] ? (shots||[])[0].id : null);
-  React.useEffect(()=>{ if(!allClips.some(c=>c.id===selId)) setSelId(allClips[0] ? allClips[0].id : null); },
-    [allClips.map(c=>c.id).join(","), selId]);
+  // REPACK-AWARE selection: clip ids hash their member shots, so editing a shot's
+  // seconds re-packs the scene and the selected id can simply vanish. Falling back
+  // to allClips[0] yanked the director to the first clip mid-edit — instead follow
+  // the shots: re-select the clip that inherited the most of the old clip's members.
+  const selMembersRef = React.useRef(null);
+  React.useEffect(()=>{
+    const cur = allClips.find(c=>c.id===selId);
+    if(cur){ selMembersRef.current = (cur.g.shots||[]).map(s=>s.id); return; }
+    const prev = selMembersRef.current || [];
+    let best=null, bestN=0;
+    allClips.forEach(c=>{ const n=(c.g.shots||[]).filter(s=>prev.indexOf(s.id)>=0).length; if(n>bestN){ best=c; bestN=n; } });
+    const next = best || allClips[0] || null;
+    selMembersRef.current = next ? (next.g.shots||[]).map(s=>s.id) : null;
+    setSelId(next ? next.id : null);
+  }, [allClips.map(c=>c.id).join(","), selId]);
 
   if(!scenesWithShots.length){
     return _stEl("div",{className:"stage2-root"},
@@ -2935,20 +3109,23 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
         _stEl("span",{className:"tree-scene-dot",style:{background:done===sceneClips.length&&sceneClips.length?"var(--pos)":chargeColor(scene)}}),
         _stEl("span",{className:"stage2-scene-ttl"}, scene.title||scene.loc),
         _stEl("span",{className:"stage2-scene-meta"}, _fmtSecs(sceneDur))),
-      // one chip per CLIP: label + visual-source glyph (▢ frame · ▢▢ per-shot frames ·
-      // ▤ 2-panel half · ▦ 4-panel sheet) + readiness/render state — a glanceable
-      // production checklist, not the old per-beat list.
+      // one chip per CLIP — and the Multi-shot composer edits ONE beat at a time, so
+      // each chip also names its beat: label + beat name + visual-source glyph
+      // (▢ frame · ▢▢ per-shot frames · ▤ 2-panel half · ▦ 4-panel sheet) +
+      // readiness/render state. Clicking a chip points the console at that beat.
       _stEl("div",{className:"stage2-clip-chips"},
         sceneClips.map(c=>{
           const p = stageClipSourcePlan(c, imgs);
           const rendered = clipVideoReady(c, vids);
           const shotCount = (c.data.shots||[]).length;
+          const beatNm = clipBeatName(c, beatsMap, drafts);
           return _stEl("button",{key:c.id,type:"button",
             className:"stage2-clip-chip"+(c.id===clip.id?" on":"")+(rendered?" done":"")+(p.ready?"":" missing"),
-            title:c.label+" · "+shotCount+" shot"+(shotCount!==1?"s":"")+" · renders from "+p.label
+            title:c.label+(beatNm?" · "+beatNm:"")+" · "+shotCount+" shot"+(shotCount!==1?"s":"")+" · renders from "+p.label
               +(p.ready?"":" — source missing, generate it first")+(rendered?" · rendered ✓":""),
             onClick:()=>onSelectClip(c.id)},
             _stEl("b",null,c.label),
+            beatNm && _stEl("span",{className:"stage2-clip-chip-name"},beatNm),
             _stEl("span",{className:"stage2-clip-chip-glyph"},p.glyph),
             _stEl("span",{className:"stage2-clip-chip-st"}, rendered?"✓":(p.ready?"":"!")));
         })));
@@ -2966,13 +3143,13 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
     ? _stEl(CollapsedStrip,{ side:"left", label:"Scenes", icon:Icon.panelLeft||Icon.layers, onExpand:()=>setRailOpen(true) })
     : _stEl("button",{className:"strip left",onClick:()=>setRailOpen(true),title:"Expand scenes"},
         _stEl("div",{className:"strip-label"},"Scenes"));
-    // the Stage's four IN-ROOM views, named for what HAPPENS inside and ordered as the
-    // production workflow: SHOOT the clips → pick the TAKES → assemble the TIMELINE →
-    // MIX the sound. ("Stage" as a tab name clashed with the room itself.) Internal
-    // view ids stay stable — only the labels are film-language.
+    // the Stage's IN-ROOM views, named for what HAPPENS inside and ordered as the
+    // production workflow: SHOOT the clips → assemble the TIMELINE → MIX the sound.
+    // Takes switched inline in the Shoot console (version dropdown) — no separate tab.
+    // ("Stage" as a tab name clashed with the room itself.) Internal view ids stay
+    // stable — only the labels are film-language.
     const stageTabs = [
       ["Shoot","stage",Icon.clapper||Icon.sparkles,"Render the clips — the director console"],
-      ["Takes","versions",Icon.copy,"Every rendered take — approve, restore, reuse"],
       ["Timeline","timeline",Icon.grid,"The film assembled from each clip's current take"],
       ["Mix","audio",Icon.mic,"Post-mix preview — pristine voices over picture, beds under"],
     ];
@@ -3002,7 +3179,11 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
                 onOpenStage:(id)=>{ onSelectClip(id); setStageView("stage"); } })
             : stageView==="audio"
             ? _stEl(StageAudioView,{ key:"au", allClips, vids, auds, selId, onSelectClip })
-            : _stEl(ClipConsole,{ key:clip.id, clip, selectedShot, sceneClips:selectedSceneClips, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId:prevBeatVideoId, aspect, visualSource, setVisualSource, creditBalance, onVoiceLine, onUpdateShot, modelId, setModelId, packMode, setPackMode,
+            // keyed by SCENE, not clip.id — clip ids change on every repack (they
+            // hash the member shots), and remounting the console wiped the recipe
+            // tab + Multi-shot row state mid-edit; the console's own member-overlap
+            // effect handles real clip moves within the scene.
+            : _stEl(ClipConsole,{ key:"console-"+selectedScene.id, clip, selectedShot, sceneClips:selectedSceneClips, ctx, imgs, auds, beatsMap, drafts, prevClipVideoId:prevBeatVideoId, aspect, visualSource, setVisualSource, creditBalance, onVoiceLine, onUpdateShot, modelId, setModelId, packMode, setPackMode,
                 onSelectClip, onOpenVersions:()=>setStageView("versions"),
                 pendingReuse, onReuseConsumed:()=>setPendingReuse(null) }))));
   }

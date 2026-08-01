@@ -737,6 +737,12 @@ Deno.serve(async (req) => {
       "bytedance/seedance-2.0/reference-to-video", "bytedance/seedance-2.0/fast/reference-to-video",
       "bytedance/seedance-2.0/image-to-video",     "bytedance/seedance-2.0/fast/image-to-video",
       "bytedance/seedance-2.0/text-to-video",      "bytedance/seedance-2.0/fast/text-to-video",
+      // Seedance 2.5 (released 2026-07-31) — provisional ids mirroring 2.0; allowlisted
+      // ahead of fal's listing so activating the model is client-side only. 30s clips
+      // pass through: this branch forwards duration unclamped.
+      "bytedance/seedance-2.5/reference-to-video", "bytedance/seedance-2.5/fast/reference-to-video",
+      "bytedance/seedance-2.5/image-to-video",     "bytedance/seedance-2.5/fast/image-to-video",
+      "bytedance/seedance-2.5/text-to-video",      "bytedance/seedance-2.5/fast/text-to-video",
       "fal-ai/sora-2/image-to-video",              "fal-ai/sora-2/image-to-video/pro",
       "fal-ai/kling-video/v3/standard/image-to-video", "fal-ai/kling-video/v3/pro/image-to-video",
     ]);

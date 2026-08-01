@@ -59,6 +59,12 @@
           standard: { "480p":0.1512, "720p":0.3034, "1080p":0.6820, "4K":1.5500 },
           fast:     { "480p":0.1210, "720p":0.2427 },
         },
+        // PROVISIONAL (2026-08-01): 2.5 isn't listed on fal yet — scaled +25% over 2.0
+        // until real per-second pricing lands; the pricing watch flags corrections.
+        "seedance-2.5": {
+          standard: { "480p":0.1890, "720p":0.3793, "1080p":0.8525, "4K":1.9375 },
+          fast:     { "480p":0.1513, "720p":0.3034 },
+        },
         "kling-3.0": {
           standard: { "480p":0.1260, "720p":0.1260, "1080p":0.1260 },
           pro:      { "480p":0.1680, "720p":0.1680, "1080p":0.1680 },

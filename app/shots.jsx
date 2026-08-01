@@ -169,6 +169,26 @@ function prevShotOf(sh, sceneShots){
   return i>0 ? ord[i-1] : null;                    // i<=0 → first shot = head
 }
 window.prevShotOf = prevShotOf;
+/* WHICH frame seeds a shot's generation (user ruling 2026-08-01): within a beat, the
+   beat's FIRST shot is the coverage reference — B/C/D all seed from A's frame rather
+   than from their immediate predecessor, so one beat's coverage shares a single visual
+   anchor. A beat's first shot keeps chaining from the previous shot (cross-beat
+   continuity), and an explicit fresh start (.anchor) / scene opener still renders
+   head-only from the sheets. Returns null when the shot renders without a seed. */
+function seedShotOf(sh, sceneShots){
+  if(!sh || sh.anchor) return null;
+  const ord = sceneShotsOrdered(sceneShots);
+  const i = ord.findIndex(s=>s.id===sh.id);
+  if(i<=0) return null;
+  // only group by beat when the shot actually HAS a beat number — an absent/blank
+  // beatN would clump unrelated shots under one false "first" reference
+  if(sh.beatN!=null && sh.beatN!==""){
+    const beatFirst = ord.find(s=>String(s.beatN)===String(sh.beatN));
+    if(beatFirst && beatFirst.id!==sh.id) return beatFirst;
+  }
+  return ord[i-1];
+}
+window.seedShotOf = seedShotOf;
 /* convenience: is this shot a chain head (no predecessor to seed from)? */
 function isShotHead(sh, sceneShots){ return !prevShotOf(sh, sceneShots); }
 window.isShotHead = isShotHead;
@@ -790,7 +810,7 @@ function shotScreenDirection(prevShot, subjects, composition){
   const sideText=(subjects||[]).filter(c=>sides[c.id]).map(c=>(c.name||"Subject")+" remains on the "+sides[c.id]+" side of frame").join("; ");
   return {
     composition:cleanComp,
-    clause:"SCREEN DIRECTION CONTINUITY: match the previous approved frame's axis and eyelines; "+sideText+". Do not flip or mirror their established positions.",
+    clause:"SCREEN DIRECTION CONTINUITY: match the reference frame's axis and eyelines; "+sideText+". Do not flip or mirror their established positions.",
   };
 }
 window.shotScreenDirection = shotScreenDirection;
@@ -1004,7 +1024,7 @@ function buildShotPrompt(sh, ctx){
   // approved frame) leads as Image 1 when present, then the sheets by location weight
   // (wide → set first; tight → cast first), then props, then carried-forward. ----
   const imgs = [];
-  if(ctx.prevFrameRole) imgs.push("the PREVIOUS approved frame — carry its colour grade, lighting and every established physical state (wardrobe wear, wetness, dirt, damage) forward exactly, but do NOT copy its framing");
+  if(ctx.prevFrameRole) imgs.push("the REFERENCE frame — carry its colour grade, lighting and every established physical state (wardrobe wear, wetness, dirt, damage) forward exactly, but do NOT copy its framing");
   // user-unticked reference sheets (sh.refOff) drop out of the image map ONLY — the
   // entity stays in the staging text; just its sheet isn't attached (labels must
   // mirror the real attachment list or the numbered map mislabels the files)
@@ -1143,11 +1163,14 @@ window.deriveShotPrompt = deriveShotPrompt;
 async function generateShotFrame(sh, sceneShots, ctx, opts){
   const _ep = (typeof nbEpoch==="function") ? nbEpoch() : null;   // asset scope at generation start
   opts = opts || {};
-  const prevSh = (typeof prevShotOf==="function") ? prevShotOf(sh, sceneShots) : null;
+  const prevSh = (typeof seedShotOf==="function") ? seedShotOf(sh, sceneShots)
+    : ((typeof prevShotOf==="function") ? prevShotOf(sh, sceneShots) : null);
   const isHead = !prevSh;
   const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
     if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; };
-  // the SEED: the previous shot's committed frame — the rolling reference (carries grade + state)
+  // the SEED: the reference frame — within a beat, the beat's FIRST shot's committed
+  // frame (the coverage anchor); for a beat opener, the previous shot's frame
+  // (cross-beat continuity). Carries grade + physical state forward.
   const seed = (prevSh && !opts.fresh) ? await grab(prevSh.id) : "";
   const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
   // the locked-reference sheets for what's actually in THIS frame (derived from the action text)
@@ -1518,7 +1541,9 @@ function normalizeShot(raw, scene, idx, locations, props, characters, beats){
     purpose: specText(raw.purpose,160),
     priority: !!raw.priority,
     beatPlan: (raw.beatPlan && Array.isArray(raw.beatPlan.micro) && raw.beatPlan.micro.length)
-      ? { micro: raw.beatPlan.micro.map(t=> specText(t,180)).filter(Boolean).slice(0,10),
+      // micro-beats are story canon — stored in FULL, never length-capped with a
+      // baked-in "…" (legacy 180-char clips heal at render via microHealText)
+      ? { micro: raw.beatPlan.micro.map(t=> (typeof scrubBrand==="function" ? scrubBrand(String(t||"")) : String(t||"")).replace(/\s+/g," ").trim()).filter(Boolean).slice(0,10),
           protect: specText(raw.beatPlan.protect,220) }
       : undefined,
     // no dur: a drafted shot stays on AUTO — its length can't be predicted, only

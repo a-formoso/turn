@@ -23,6 +23,11 @@ const VID_MODEL_FAST = "bytedance/seedance-2.0/fast/reference-to-video";
 // to this pair instead of guessing at an undocumented field on the multimodal endpoint.
 const VID_MODEL_I2V      = "bytedance/seedance-2.0/image-to-video";
 const VID_MODEL_I2V_FAST = "bytedance/seedance-2.0/fast/image-to-video";
+// Seedance 2.5 transition endpoints (PROVISIONAL ids mirroring 2.0's naming — confirm
+// against fal's listing when it lands; its reference-to-video endpoints ride the
+// tier's falModel, so only the start→end transition pair needs constants here)
+const VID25_MODEL_I2V      = "bytedance/seedance-2.5/image-to-video";
+const VID25_MODEL_I2V_FAST = "bytedance/seedance-2.5/fast/image-to-video";
 window.VID_MODEL = VID_MODEL; window.VID_MODEL_FAST = VID_MODEL_FAST;
 window.VID_MODEL_I2V = VID_MODEL_I2V; window.VID_MODEL_I2V_FAST = VID_MODEL_I2V_FAST;
 
@@ -315,6 +320,68 @@ async function vidPadShortAudio(url){
 }
 window.vidPadShortAudio = vidPadShortAudio;
 
+/* ---- BLACK-MP4 voice carrier: fal caps audio references at 3 clips, so extra
+   locked-voice lines ride as VIDEO references — a 1fps black 64x64 H.264 stream
+   with the voice encoded as AAC on top, muxed in-browser (WebCodecs + mp4-muxer
+   via esm.sh, no server round-trip). The black picture carries no visual identity
+   (the Stage's prompt flags it voice-only). Returns a blob: URL — vidProxyReadyUrl
+   serverizes it like any other staged asset. Throws a clear error when the browser
+   lacks WebCodecs H.264/AAC encoding (older Safari/Firefox). */
+let _mp4MuxerMod = null;
+async function _mp4Muxer(){
+  if(!_mp4MuxerMod) _mp4MuxerMod = await import("https://esm.sh/mp4-muxer@5.2.0");
+  return _mp4MuxerMod;
+}
+async function blackMp4FromAudio(audioUrl){
+  if(typeof VideoEncoder==="undefined" || typeof AudioEncoder==="undefined" || typeof VideoFrame==="undefined" || typeof AudioData==="undefined")
+    throw new Error("This browser can't package voice references (WebCodecs missing) — try Chrome or Edge.");
+  const res = await fetch(audioUrl);
+  if(!res.ok) throw new Error("Could not read the voice audio for packaging.");
+  _vidAC = _vidAC || new (window.AudioContext||window.webkitAudioContext)();
+  const dec = await _vidAC.decodeAudioData(await res.arrayBuffer());
+  if(!dec || !dec.duration) throw new Error("The voice audio couldn't be decoded for packaging.");
+  const rate = dec.sampleRate;
+  // mono mixdown, padded past fal's 2.0s audio floor (same rule as audio refs)
+  const frames = Math.max(dec.length, Math.ceil(rate*VID_MIN_AUDIO_SEC));
+  const pcm = new Float32Array(frames);
+  for(let c=0;c<dec.numberOfChannels;c++){ const ch=dec.getChannelData(c);
+    for(let i=0;i<ch.length;i++) pcm[i]+=ch[i]/dec.numberOfChannels; }
+  const aCfg = { codec:"mp4a.40.2", sampleRate:rate, numberOfChannels:1, bitrate:96000 };
+  const vCfg = { codec:"avc1.42001f", width:64, height:64, framerate:1, bitrate:50000 };
+  const aOk = await AudioEncoder.isConfigSupported(aCfg).catch(()=>({supported:false}));
+  const vOk = await VideoEncoder.isConfigSupported(vCfg).catch(()=>({supported:false}));
+  if(!aOk.supported || !vOk.supported)
+    throw new Error("This browser can't encode the voice mp4 (AAC/H.264 encode missing) — try Chrome or Edge.");
+  const Mp4 = await _mp4Muxer();
+  const target = new Mp4.ArrayBufferTarget();
+  const muxer = new Mp4.Muxer({ target,
+    video:{ codec:"avc", width:64, height:64 },
+    audio:{ codec:"aac", sampleRate:rate, numberOfChannels:1 },
+    fastStart:"in-memory" });
+  let encErr = null;
+  const vEnc = new VideoEncoder({ output:(c,m)=>muxer.addVideoChunk(c,m), error:e=>{ encErr = encErr||e; } });
+  vEnc.configure(vCfg);
+  const aEnc = new AudioEncoder({ output:(c,m)=>muxer.addAudioChunk(c,m), error:e=>{ encErr = encErr||e; } });
+  aEnc.configure(aCfg);
+  // 1fps black frames spanning the voice
+  const secs = Math.max(1, Math.ceil(frames/rate));
+  const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+  const cx = cv.getContext("2d"); cx.fillStyle = "#000"; cx.fillRect(0,0,64,64);
+  for(let i=0;i<secs;i++){ const f = new VideoFrame(cv, { timestamp:i*1000000, duration:1000000 });
+    vEnc.encode(f, { keyFrame:i%5===0 }); f.close(); }
+  // PCM → AAC in ~1s f32-planar chunks
+  for(let off=0; off<frames; off+=rate){ const n = Math.min(rate, frames-off);
+    const ad = new AudioData({ format:"f32-planar", sampleRate:rate, numberOfFrames:n, numberOfChannels:1,
+      timestamp:Math.round(off/rate*1000000), data:pcm.subarray(off, off+n) });
+    aEnc.encode(ad); ad.close(); }
+  await Promise.all([vEnc.flush(), aEnc.flush()]);
+  vEnc.close(); aEnc.close();
+  if(encErr) throw encErr;
+  muxer.finalize();
+  return URL.createObjectURL(new Blob([target.buffer], { type:"video/mp4" }));
+}
+window.blackMp4FromAudio = blackMp4FromAudio;
+
 /* ---- RELOAD/CRASH RECOVERY: a render is a server-side fal job — if the page reloads
    mid-poll the job still finishes, but nobody collects it (credits spent, take lost).
    Every submitted job persists in localStorage until it definitively completes; the
@@ -348,8 +415,12 @@ setTimeout(()=>{ try{ if(videoProxyReady()) vidRecoverPending(); }catch(e){} }, 
 
 async function seedanceGenerate(id, opts){
   opts = opts||{};
+  /* SEEDANCE 2.5 rides the same multimodal reference-to-video shape as 2.0, named by
+     the tier's falModel: 30s duration ceiling, up to 50 image references, and longer
+     renders (the poll ceiling stretches below). Provisional until fal lists it. */
+  const isSeedance25 = /seedance-2\.5/.test(String(opts.falModel||""));
   // assemble the multimodal asset lists (single frameUrl/audioUrl kept for back-compat)
-  const images = _dedupCap([opts.frameUrl, ...(opts.imageUrls||[])], 9);
+  const images = _dedupCap([opts.frameUrl, ...(opts.imageUrls||[])], isSeedance25 ? 50 : 9);
   const videos = _dedupCap(opts.videoUrls||[], 3);
   const audios = _dedupCap([opts.audioUrl, ...(opts.audioUrls||[])], 3);
   if(!images.length && !videos.length) throw new Error("This clip has no start frame yet — generate the shot's frame in the Shot List first.");
@@ -369,11 +440,13 @@ async function seedanceGenerate(id, opts){
   const endFrame = isSora ? "" : (opts.endImageUrl||"").trim();
   const useTransition = !isKling && !!(endFrame && images.length && !videos.length && !audios.length);
   const model = (isSora || isKling) ? opts.falModel
+    : isSeedance25
+    ? (useTransition ? (opts.fast ? VID25_MODEL_I2V_FAST : VID25_MODEL_I2V) : opts.falModel)
     : useTransition
     ? (opts.fast ? VID_MODEL_I2V_FAST : VID_MODEL_I2V)
     : (opts.fast ? VID_MODEL_FAST : VID_MODEL);
-  // audio-as-clock: the measured line duration sets the clip length (Seedance/Kling 3–15s; Sora up to 20s)
-  const duration = opts.durationMs ? Math.max(isKling?3:4, Math.min(isSora?20:15, Math.round(opts.durationMs/1000))) : (opts.duration||"auto");
+  // audio-as-clock: the measured line duration sets the clip length (Seedance/Kling 3–15s; Sora up to 20s; Seedance 2.5 up to 30s)
+  const duration = opts.durationMs ? Math.max(isKling?3:4, Math.min(isSora?20:(isSeedance25?30:15), Math.round(opts.durationMs/1000))) : (opts.duration||"auto");
   const klingShots = (isKling && Array.isArray(opts.multiShot))
     ? opts.multiShot.map(s=>({ prompt:String(s&&s.prompt||"").trim(), duration:Math.max(1,Math.round(Number(s&&s.duration)||3)) })).filter(s=>s.prompt)
     : [];
@@ -427,7 +500,7 @@ async function seedanceGenerate(id, opts){
   if(opts.onStatus) opts.onStatus(sub.status||"IN_QUEUE");
   // poll until COMPLETED — each call is short; the wait is here on the client
   const pollMs = opts.pollMs || 4000;
-  const maxPolls = opts.maxPolls || 150;       // ~10 min ceiling at 4s
+  const maxPolls = opts.maxPolls || (isSeedance25 ? 300 : 150);   // ~10 min at 4s — 30s renders get ~20
   for(let i=0; i<maxPolls; i++){
     if(opts.shouldCancel && opts.shouldCancel()) throw new Error("Render cancelled.");
     await new Promise(r=>setTimeout(r, pollMs));

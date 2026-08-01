@@ -30,6 +30,7 @@
     "gemini-3-pro-image": "Nano Banana Pro",
     "gpt-image-2": "GPT Image 2",
     "seedance-2.0": "Seedance 2.0",
+    "seedance-2.5": "Seedance 2.5",
     "kling-3.0": "Kling 3.0",
   };
 
