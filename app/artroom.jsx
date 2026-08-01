@@ -1331,7 +1331,10 @@ function useImageGen(opts){
     // softening edited frames
     if(isEditMode) genOpts.baseMaxDim = 1536;
     // Lite has no documented search-grounding support — never attach the tool to it
-    if(groundEnabled && usedModel!=="gemini-3.1-flash-lite-image"){ genOpts.groundSearch = true; if(isFlash) genOpts.groundImageSearch = true; }
+    // web grounding is a GEMINI-only feature — GPT Image has no such mode, so never
+    // request it there (the proxy used to echo grounded:true off the bare request
+    // flag, mis-badging GPT Image renders "Grounded" when nothing had grounded)
+    if(groundEnabled && !(typeof isGptImageModel==="function" && isGptImageModel(usedModel)) && usedModel!=="gemini-3.1-flash-lite-image"){ genOpts.groundSearch = true; if(isFlash) genOpts.groundImageSearch = true; }
 
     /* attachments: extra reference images (e.g. generated prop sheets the character
        carries) so the model SEES the object, not just its name. Resolved async. */
@@ -1453,7 +1456,10 @@ function useImageGen(opts){
         date: now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
         time: now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
         iso: now.toISOString(),
-        grounded: !!(groundEnabled && genOpts.metaOut && genOpts.metaOut.grounded),
+        // model-aware provenance: only a Gemini model can have grounded. Gated on
+        // actualModel so the GPT-Image→Nano-Banana policy fallback still records
+        // correctly (actualModel flips to the Gemini model in that path).
+        grounded: !!(groundEnabled && !(typeof isGptImageModel==="function" && isGptImageModel(actualModel)) && genOpts.metaOut && genOpts.metaOut.grounded),
         groundImages: !!(groundEnabled && isFlash && genOpts.metaOut && genOpts.metaOut.grounded),
         cameo: !!cameoUsed,
         propRefs: attachCount,
@@ -1897,7 +1903,9 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
             React.createElement("div",{className:"dt-flab"},m.k),
             React.createElement("div",{className:"dt-fval"},m.v)))),
           field("Version", meta.version ? ("v"+meta.version) : null),
-          field("Grounding", meta.grounded ? (meta.groundImages?"Google Search (web + images)":"Google Search") : null),
+          // same model-aware gate as the card chip — GPT Image never grounds,
+          // even on legacy meta stored before the fix
+          field("Grounding", (meta.grounded && !(typeof isGptImageModel==="function" && isGptImageModel(meta.modelId))) ? (meta.groundImages?"Google Search (web + images)":"Google Search") : null),
           field("Prop references", meta.propRefs ? (meta.propRefs+" prop sheet"+(meta.propRefs>1?"s":"")) : null),
           field("Image ID", data && data.id)),
         /* prompt */
@@ -2481,7 +2489,10 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
         className:"sheet-tier-warn",
         title:"Image is too large to save permanently — download it before closing or refreshing this tab"},
         React.createElement(Icon.warn,{s:10,sw:2}),"Session only \u00b7 download to keep"),
-      genUrl && genMeta && genMeta.grounded && React.createElement("span",{
+      // model-aware badge: older GPT Image renders were mis-badged "Grounded" from
+      // a bare request flag — the chip only makes sense on models that CAN ground,
+      // so it also hides on already-stored (legacy) meta
+      genUrl && genMeta && genMeta.grounded && !(typeof isGptImageModel==="function" && isGptImageModel(genMeta.modelId)) && React.createElement("span",{
         className:"sheet-ground-chip",
         title:genMeta.groundImages ? "Generated with web grounding and image references" : "Generated with web grounding"},
         React.createElement(Icon.globe,{s:9,sw:2}),"Grounded"),

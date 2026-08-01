@@ -1303,15 +1303,6 @@ function buildLocationRefPrompt(l, project, opts){
     },
     fixtures: fixtures.length ? fixtures : undefined,
     environment_props: envProps.length ? envProps : undefined,
-    // SHELL LINK (text-only, no reference image — the plate generates clean): this
-    // space is the hollow inside of a designed object; its materials are binding
-    interior_of: (()=>{ const sp = (typeof locShellProp==="function") ? locShellProp(l) : null;
-      if(!sp) return undefined;
-      return { object: sp.name,
-        shell: [clean(sp.form), clean(sp.material)].filter(Boolean).join("; ") || undefined,
-        physical_size: clean(sp.size) || undefined,
-        rule: "this location IS the hollow interior of that object — every wall, the bore, the openings and their edges must read as the inside of that exact shell (same material palette and construction), and any opening frames the outside world beyond" };
-    })(),
     ambient_species_canon: speciesCanon.length ? speciesCanon : undefined,
     views: {
       ...(panelPlan || {
@@ -1593,24 +1584,6 @@ function locDressingEditText(p){
     +" Match the plate's EXISTING lighting, palette and render style exactly; change nothing else in the space.";
 }
 window.locDressingEditText = locDressingEditText;
-/* the SHELL edge — this location IS the hollow interior of that prop (hollow log,
-   hive, seed pod: the building/apartment relationship — the object can't be set
-   dressing of its own inside). Set on the location card ("Interior of"); drives a
-   text-only `interior_of` block in the plate prompt, the Match-shell edit chip,
-   and blocks the shell's exterior sheet from attaching to shots inside itself. */
-function locShellProp(l){
-  if(!l || !l.interiorOfPropId) return null;
-  return (((window.turnContinuity||{}).props)||[]).find(p=>p && p.id===l.interiorOfPropId) || null;
-}
-window.locShellProp = locShellProp;
-function locShellMatchEditText(p){
-  const spec = [p.form, p.material].map(x=>String(x||"").trim().replace(/\.$/,"")).filter(Boolean).join("; ");
-  return "This location IS the hollow INTERIOR of \""+(p.name||"the object")+"\""
-    +(spec?(" ("+spec+")"):"")
-    +". Correct the plate so the walls, bore and openings read as the inside of that exact object — same material palette, same shell construction, same mouth and knot openings"
-    +" — while keeping the plate's EXISTING lighting, palette, render style and camera views. Change nothing else.";
-}
-window.locShellMatchEditText = locShellMatchEditText;
 async function generateLocationPlate(l, project){
   const _ep = (typeof nbEpoch==="function") ? nbEpoch() : null;   // asset scope at generation start
   if(typeof nbGenerate!=="function" || typeof nbCommit!=="function") return false;

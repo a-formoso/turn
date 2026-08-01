@@ -142,17 +142,11 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
   });
 
   // this location's set-dressing props — offered as one-click edit instructions in
-  // the plate's Edit panel. The SHELL prop (the object this location is the interior
-  // of) is excluded from the add-fixture chips — you can't place a thing inside its
-  // own inside — and gets its own "Match shell" chip instead.
-  const shellProp = (typeof locShellProp==="function") ? locShellProp(l) : null;
-  const dressProps = ((typeof locDressingProps==="function") ? locDressingProps(l) : [])
-    .filter(p=> !shellProp || p.id!==shellProp.id);
+  // the plate's Edit panel.
+  const dressProps = (typeof locDressingProps==="function") ? locDressingProps(l) : [];
   const sheetRefOf = (p)=> async ()=>{ let u = (typeof nbGetImage==="function") ? nbGetImage(p.id) : "";
     if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(p.id); }catch(e){} }
     return u||""; };
-  // every set-dressing object — candidates for the "Interior of" shell link
-  const dressAll = (((window.turnContinuity||{}).props)||[]).filter(p=>p && p.kind==="dressing");
 
   // batch generation: parent activates this card by id; generate then report done.
   // REMOUNT-SAFE (see CharacterSheet): seed batchStarted from the in-flight registry so
@@ -217,12 +211,7 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
       // one-click edit instructions: place each set-dressing fixture INTO the plate.
       // Chip label = prompt-only (built from the prop's spec); the clip button ALSO
       // attaches the fixture's generated sheet (if any) as an edit reference image.
-      // The shell prop leads with a "Match shell" correction chip instead.
       editSuggestions: [
-        ...(shellProp ? [{ raw:true, label:"Match shell · "+(shellProp.name||"object"),
-          text:(typeof locShellMatchEditText==="function") ? locShellMatchEditText(shellProp) : "",
-          title:"This location is the hollow INTERIOR of "+(shellProp.name||"the object")+" — insert a correction instruction so the plate reads as the inside of that exact shell (materials, bore, openings). Use the clip beside it to also attach the shell's exterior sheet as a reference.",
-          getRef: sheetRefOf(shellProp) }] : []),
         ...dressProps.map(p=>({ label:p.name||"fixture",
           text:(typeof locDressingEditText==="function") ? locDressingEditText(p) : ("Add "+(p.name||"the fixture")+" into the space."),
           title:"Insert the ready edit instruction for this fixture — built from its prop card's spec (form, material, size). Apply edit paints it into the plate, matching the plate's look. Use the clip button beside it to also attach the fixture's sheet as a reference.",
@@ -280,16 +269,7 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
             React.createElement(SceneChipPager,{ none:"No scenes reference this place",
               items: locScenes.map(s=>({ key:s.id, label:String(s.no).padStart(2,"0"), className:"prop-scene-chip",
                 title:s.title||("Scene "+s.no), onClick:()=>onChipClick&&onChipClick(s.id) })) })),
-          // SHELL LINK — this location is the hollow INSIDE of a designed object
-          // (hollow log, hive, seed pod: the building/apartment relationship)
-          dressAll.length>0 && React.createElement("div",{className:"loc-shell-row"},
-            React.createElement("span",{className:"prop-scenes-lab",
-              title:"Is this location the hollow INSIDE of one of your set-dressing objects? Linking it makes the shell's materials binding in the plate prompt, adds a 'Match shell' chip to the plate's Edit panel, and keeps the shell's exterior sheet out of shots filmed inside it."},
-              "Interior of"),
-            React.createElement("select",{className:"prop-select loc-shell-select",value:l.interiorOfPropId||"",
-              onChange:e=>onUpdate(l.id,{ interiorOfPropId: e.target.value||undefined })},
-              React.createElement("option",{value:""},"— not inside an object"),
-              dressAll.map(p=>React.createElement("option",{key:p.id,value:p.id},p.name||"Prop"))))),
+          null),
         // one flex row (like Props' head actions) \u2014 otherwise .sheet-head's column
         // layout stacks each button on its own full-width line
         React.createElement("div",{className:"sheet-head-actions"},

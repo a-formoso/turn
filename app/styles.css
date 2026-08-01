@@ -2643,12 +2643,12 @@ html[data-theme="dark"] .dt-viewing svg{color:oklch(0.82 0.09 296)}
 /* the chip's attach half: text + the fixture's sheet as an edit reference image */
 .sheet-edit-suggest-group{display:inline-flex;align-items:center}
 /* "Interior of" shell link on the location card head */
-.loc-shell-row{display:flex;align-items:center;gap:7px;margin-top:5px}
-.loc-shell-select{max-width:240px}
 
 /* MULTI-SHOT editor (Stage composer) — Kling-style per-shot rows */
 .stage2-ms{display:flex;flex-direction:column;gap:8px;margin:2px 0 8px}
 .stage2-ms-row{background:#fff;border:1px solid #e2dbd0;border-radius:9px;padding:8px 10px}
+/* the selected shot's row — picking a micro-beat in the Scenes rail scrolls here */
+.stage2-ms-row.on{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand)}
 /* a COLLAPSED row keeps its header; only the text box is hidden */
 .stage2-ms-row.folded .stage2-ms-head{margin-bottom:0}
 /* an EXCLUDED shot is dimmed but stays fully in the list */
@@ -4793,6 +4793,24 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .stage2-clip-chip.on .stage2-clip-chip-name{color:var(--brand)}
 .stage2-clip-chip-glyph{font-size:8.5px;letter-spacing:-1px;opacity:.85}
 .stage2-clip-chip-st{min-width:7px;text-align:center}
+/* beats with micro-beats nested inside (replaces the flat clip chips) */
+.stage2-beat-list{display:flex;flex-direction:column;gap:3px;padding:2px 8px 6px 26px}
+.stage2-beat-row{display:flex;align-items:center;gap:6px;width:100%;padding:4px 7px;border:1px solid var(--line-2);border-radius:6px;background:var(--bg-1);color:var(--txt-1);font:600 10px var(--f-ui);cursor:pointer;text-align:left}
+.stage2-beat-row b{font:700 9.5px var(--f-mono);color:var(--txt-2)}
+.stage2-beat-row:hover{border-color:var(--brand);color:var(--txt-0)}
+.stage2-beat-row.missing{border-style:dashed}
+.stage2-beat-row.done b{color:var(--pos)}
+.stage2-beat.on .stage2-beat-row{border-color:var(--brand);color:var(--brand)}
+.stage2-beat.on .stage2-beat-row b{color:var(--brand)}
+.stage2-beat-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage2-micro-list{display:flex;flex-direction:column;gap:1px;margin:1px 0 3px 12px;padding-left:8px;border-left:1px solid var(--line-2)}
+.stage2-micro-row{display:flex;align-items:baseline;gap:6px;padding:2px 6px;border:0;border-radius:4px;background:transparent;color:var(--txt-2);font:500 9.5px var(--f-ui);cursor:pointer;text-align:left}
+.stage2-micro-row:hover{background:var(--bg-2);color:var(--txt-0)}
+.stage2-micro-row.on{color:var(--brand)}
+.stage2-micro-n{flex:0 0 auto;font:700 8.5px var(--f-mono);color:var(--txt-3)}
+.stage2-micro-row.on .stage2-micro-n{color:var(--brand)}
+.stage2-micro-line{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage2-gen-promptwrap.fill{width:100%}
 .stage2-clip-chip.done .stage2-clip-chip-st{color:var(--pos)}
 .stage2-clip-chip.missing .stage2-clip-chip-st{color:var(--brand)}
 /* scene group within an act — slug header + its clips */
@@ -5158,7 +5176,9 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .stage2-take-card{grid-template-columns:1fr;padding:0;gap:0;border-radius:7px;background:#fff;overflow:hidden}
 .stage2-take-thumb{border-radius:0}
 .stage2-take-meta{padding:6px 7px}
-.stage2-director-prompt{margin:18px 0 16px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:0 12px 36px rgba(39,35,29,.06);overflow:hidden}
+/* overflow:visible (not hidden) so the @-mention dropdown can escape the box;
+   the chips row carries the bottom rounding instead */
+.stage2-director-prompt{margin:18px 0 16px;border:1px solid var(--line);border-radius:10px;background:#fff;box-shadow:0 12px 36px rgba(39,35,29,.06);overflow:visible}
 .stage2-director-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px 4px}
 .stage2-director-title{display:flex;align-items:center;gap:8px;min-width:0}
 .stage2-director-title b{font-size:14px;color:var(--txt-0)}
@@ -5167,7 +5187,7 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .stage2-prompt-library:hover{text-decoration:underline}
 .stage2-director-text{width:100%;min-height:94px;border:0;resize:vertical;background:transparent;color:var(--txt-0);font:500 13px/1.55 var(--f-ui);outline:0;padding:8px 14px 12px}
 .stage2-director-text::placeholder{color:var(--txt-3)}
-.stage2-director-chips{display:flex;flex-wrap:nowrap;gap:7px;padding:10px 14px 13px;border-top:1px solid var(--line);background:#faf9f6;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+.stage2-director-chips{display:flex;flex-wrap:nowrap;gap:7px;padding:10px 14px 13px;border-top:1px solid var(--line);border-radius:0 0 9px 9px;background:#faf9f6;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
 .stage2-director-chips::-webkit-scrollbar{height:5px}
 .stage2-director-chips::-webkit-scrollbar-thumb{background:#d9d2c6;border-radius:999px}
 .stage2-director-chips button{flex:0 0 auto}
@@ -5587,6 +5607,11 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .stage2-pill-opt:disabled{opacity:.45;cursor:default}
 .stage2-pill-opt small{font:700 8.5px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--txt-3);border:1px solid var(--line-2);border-radius:4px;padding:1px 4px}
 .stage2-pill-menu-h{font:700 9px var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--txt-3);padding:4px 9px 6px}
+/* keyboard-highlighted option mirrors the hover style (after .on so it wins) */
+.stage2-pill-opt.hi:not(:disabled){background:var(--bg-3,#f6f2eb);color:var(--txt-0)}
+/* model menu footer — the selected model's prompt formula */
+.stage2-pill-menu-foot{margin-top:4px;padding:7px 9px 6px;border-top:1px solid var(--line-2);font:500 9.5px var(--f-ui);line-height:1.45;color:var(--txt-2)}
+.stage2-pill-menu-foot b{color:var(--txt-1)}
 /* option internals: main label row + metadata badge chips + one-line description */
 .stage2-pill-opt{flex-direction:column;align-items:stretch}
 .stage2-pill-opt-main{display:flex;align-items:center;justify-content:space-between;gap:10px}

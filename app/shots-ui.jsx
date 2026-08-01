@@ -729,10 +729,10 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
     }
     return Ls;
   })();
-  // ONE CARD PER BEAT (user ruling 2026-07-21): all beats list vertically as cards.
-  // EXCEPTION: while a BATCH renders, the legacy full-card lanes mount for every
-  // beat — the scene runner advances by watching MOUNTED ShotCards, and the compact
-  // rows don't mount them. openShotId = the one shot expanded into its full editor.
+  // ONE CARD PER BEAT (user ruling 2026-07-21): all beats list vertically as cards —
+  // and STAY as cards through queue renders (user ruling 2026-08-01): the queue's
+  // active ShotCard mounts off-screen as the runner's driver (see the grid render
+  // below). openShotId = the one shot expanded into its full editor.
   const [openShotId, setOpenShotId] = React.useState(null);
   const batchMode = !!queueMode;
   // merged scene navigator: the click-to-jump scene list in this card's header
@@ -826,46 +826,51 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
             confLab && _el("span",{className:"ssx-conf-lab"},confLab),
             _el("div",{className:"ssx-pips"},
               [1,2,3].map(i=>_el("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")})))))))),
-    // BEAT CARDS — one card per beat (all beats listed); during a batch render the
-    // legacy full-card lanes mount instead so the queue can watch its cards.
-    open && (batchMode
-      ? _el(React.Fragment,null, lanes.map(L=>{
-          const beatRow=(bm.rows||[]).find(r=>String(r.n)===String(L.n));
-          const beatText=beatScriptText(scene.id, L.n) || (beatRow?[ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" \u2014 "):"");
-          return _el("div",{key:"lane-"+L.n,className:"beat-lane"},
-            _el("div",{className:"beat-lane-head"},
-              _el("span",{className:"beat-lane-no"},"Beat "+L.n),
-              _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")+" \u00b7 rendering\u2026")),
-            _el("div",{className:"beat-lane-strip"},
-              L.shots.map((sh,li)=>{
-                const prevShot=(typeof seedShotOf==="function")?seedShotOf(sh,ordered)
-                  :((typeof prevShotOf==="function")?prevShotOf(sh,ordered):null);
-                const _si=ordered.findIndex(x=>x.id===sh.id);
-                const _plan = L.shots.map(x=>x.beatPlan).find(Boolean);
-                return _el("div",{key:sh.id,className:"beat-shot-cell"},
-                  _el(ShotCard,{sh,scene,ctx,characters,propsAvail,beatText,prevShot,plan:_plan,
-                    laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(sh.id===firstId), onToggleHead:toggleHead,
-                    onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
-                    subLabel:(L.shots.length>1?String.fromCharCode(65+li):null)})); })));
-        }))
-      : (()=>{
-        const _kf=(id)=> (typeof nbGetImage==="function") ? !!nbGetImage(id) : false;
-        const _sceneRendered = ordered.some(sh=>_kf(sh.id));
-        const _nextShotId = (ordered.find(sh=>!_kf(sh.id))||{}).id || null;
-        return _el("div",{className:"beat-grid-wrap"+(draftingScene?" drafting":"")},
+    // BEAT CARDS — one card per beat (all beats listed), kept through queue renders
+    // too (user ruling 2026-08-01: "Render Scene in order" must NOT swap the grid back
+    // to the legacy full-card lanes). The chain runner still needs the ACTIVE shot's
+    // ShotCard MOUNTED — it fires and confirms each generation — so during a queue
+    // that one card mounts off-screen (display:none) alongside the grid.
+    open && (()=>{
+      const _kf=(id)=> (typeof nbGetImage==="function") ? !!nbGetImage(id) : false;
+      const _sceneRendered = ordered.some(sh=>_kf(sh.id));
+      const _nextShotId = (ordered.find(sh=>!_kf(sh.id))||{}).id || null;
+      // the queue's off-screen driver: the active shot's full card — UNLESS the user
+      // already has THAT shot expanded (an expanded card drives its own run; two
+      // mounted cards for one shot would fire the same generation twice)
+      const _drv = (batchMode && batchActiveId && openShotId!==batchActiveId)
+        ? ordered.find(x=>x.id===batchActiveId) : null;
+      let driverCard = null;
+      if(_drv){
+        const _dLane = lanes.find(L=>L.shots.some(x=>x.id===_drv.id)) || { n:Number(_drv.beatN)||0, shots:[_drv] };
+        const beatRow=(bm.rows||[]).find(r=>String(r.n)===String(_dLane.n));
+        const beatText=beatScriptText(scene.id, _dLane.n) || (beatRow?[ (beatRow.drive&&beatRow.drive.d||"").trim(), (beatRow.react&&beatRow.react.d||"").trim() ].filter(Boolean).join(" — "):"");
+        const prevShot=(typeof seedShotOf==="function")?seedShotOf(_drv,ordered)
+          :((typeof prevShotOf==="function")?prevShotOf(_drv,ordered):null);
+        const _si=ordered.findIndex(x=>x.id===_drv.id);
+        const _plan=_dLane.shots.map(x=>x.beatPlan).find(Boolean);
+        driverCard = _el("div",{key:"drv-"+_drv.id,style:{display:"none"},"aria-hidden":"true"},
+          _el(ShotCard,{sh:_drv,scene,ctx,characters,propsAvail,beatText,prevShot,plan:_plan,
+            laterShots:(_si>=0?ordered.slice(_si+1):[]), isHead:!prevShot, isFirst:(_drv.id===firstId), onToggleHead:toggleHead,
+            onUpdate,onDelete,onView,batchActiveId,onBatchDone,onGenerateShot,onRegenDownstream,onStopChain,
+            subLabel:(_dLane.shots.length>1?String.fromCharCode(65+Math.max(0,_dLane.shots.findIndex(x=>x.id===_drv.id))):null)}));
+      }
+      return _el(React.Fragment,null,
+        driverCard,
+        _el("div",{key:"beat-grid",className:"beat-grid-wrap"+(draftingScene?" drafting":"")},
           // REDRAFT IN PROGRESS — visible on the canvas, not just the button: the
           // current cards dim (they stay until the new list lands) under a status card
           draftingScene && _el("div",{className:"beat-redraft-note"},
             _el("span",{className:"ns-spin"}),
             _el("div",{className:"brn-txt"},
               _el("div",{className:"brn-t"},"MUSE is re-designing Scene "+String(scene.no).padStart(2,"0")+"'s shots"),
-              _el("div",{className:"brn-d"},"Beat-by-beat coverage from the beats + script \u2014 about a minute. The current shots stay until the new list lands (a failed draft changes nothing)."))),
+              _el("div",{className:"brn-d"},"Beat-by-beat coverage from the beats + script — about a minute. The current shots stay until the new list lands (a failed draft changes nothing)."))),
           _el("div",{className:"beat-card-grid"},
             lanes.map((L,Li)=> _el(BeatCard,{key:"bc"+(L.canonical?"c":"o")+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
               ordered, firstId, toggleHead, onAddShot, onUpdate, onDelete, onView,
               onGenerateShot, onRegenDownstream, onStopChain, onBatchDone, batchActiveId, openShotId, setOpenShotId,
-              sceneStart:(!_sceneRendered && Li===0), onRenderScene, renderBusy, nextShotId:_nextShotId }))));
-      })()));
+              sceneStart:(!_sceneRendered && Li===0), onRenderScene, renderBusy, nextShotId:_nextShotId })))));
+    })());
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,
@@ -975,8 +980,8 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   const visibleScenes = [curScene].filter(Boolean);
   const renderBusy = !!batchActiveId || !!chain;
   // a SOLO run (chain of exactly one — a card's Regenerate / QA apply-and-regenerate)
-  // keeps the beat-card UI: the expanded card drives it. Only QUEUE runs (Render
-  // Scene in order / Generate all shots) mount the legacy full-card lanes.
+  // is driven by its expanded card. QUEUE runs (Render Scene in order / Generate all
+  // shots) mount only the ACTIVE shot's card — off-screen — as the runner's driver.
   const queueMode = (chain && chain.total===1) ? false : (!!batchActiveId || !!chain);
   const runnerScene = activeSceneIdx>=0 && activeSceneIdx!==visibleIdx ? scenesWithShots[activeSceneIdx] : null;
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s ? s.no : sid; };

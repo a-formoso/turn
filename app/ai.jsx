@@ -155,6 +155,7 @@ if(!window.claude || typeof window.claude.complete !== "function"){
       const fnName = (window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxyFn) || "image-proxy";
       let data, error;
       try{ ({ data, error } = await sb.functions.invoke(fnName, { body:{ task:"text", usageKind:"writing", provider:m.provider, model:m.id, messages,
+        maxTokens: opts.maxTokens || undefined,
         userApiKeys: window.turnApiKeysForProxy ? window.turnApiKeysForProxy([m.provider]) : undefined } })); }
       catch(e){ error = e; }
       if(error){
@@ -172,6 +173,7 @@ if(!window.claude || typeof window.claude.complete !== "function"){
       if(data && data.usage && typeof window.dispatchEvent==="function")
         window.dispatchEvent(new CustomEvent("turn-credits-changed",{ detail:data.usage }));
       try{ window.__lastWritingModel = { id:m.id, label:m.label }; }catch(e){}
+      try{ window.__lastWritingTruncated = !!(data && data.truncated); }catch(e){}
       return (data && typeof data.text==="string") ? data.text : "";
     }
   };
@@ -3154,7 +3156,12 @@ async function aiDraftShots(scene, beats, drafts, locations, props, characters, 
     _lookbookBlock(P)+
     'Return ONLY compact JSON: {"beats":[{"beat":1,"micro":["...","..."],"protect":"..."}],"shots":[{"beat":1,"size":"WS","angle":"eye","move":"static","lens":"35","locationSide":"AUTO","subjects":["..."],"props":[],"action":"...","composition":"...","dialogue":"...","covers":[1,2],"purpose":"...","priority":false}]}';
   try{
-    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
+    // full-scene drafts emit a beats plan + every shot's fields — far past the
+    // proxy's 4096-token default, which truncated the JSON and left later beats
+    // to one-shot backfill ("1 shot per beat regardless of model")
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }], maxTokens: _onlyBeat ? undefined : 16384 });
+    if(!_onlyBeat && window.__lastWritingTruncated && typeof window.appToast==="function")
+      window.appToast("The coverage draft hit the reply length limit — later beats got simple one-shot coverage. Design busy beats individually with the beat's split tool instead.","error");
     const j = extractJSON(res);
     const arr = (j && Array.isArray(j.shots)) ? j.shots : (Array.isArray(j)?j:null);
     if(!arr || !arr.length) return null;

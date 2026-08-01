@@ -2565,7 +2565,10 @@ function App(){
       }
     }
     if(!made && typeof deriveShotsHeuristic==="function"){
+      // the AI draft failed or returned nothing parseable — the one-shot-per-beat
+      // layout below is a STOPGAP, never a silent substitute for real coverage
       made = deriveShotsHeuristic(scene, beatsMap, locations, props, characters);
+      if(typeof window.appToast==="function") window.appToast("The coverage AI returned nothing usable — laid out simple one-shot-per-beat coverage as a stopgap. Re-draft to try again.","error");
     }
     if(!made || !made.length) return;
     setShots(ss=>{ const kept = replace ? ss.filter(s=>s.sceneId!==scene.id) : ss; return [...kept, ...made]; });

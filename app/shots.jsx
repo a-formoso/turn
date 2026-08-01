@@ -532,15 +532,6 @@ function shotPropAttachable(p, sh){
     try{ return !!(typeof nbGetImage==="function" && nbGetImage(p.id)); }catch(e){ return false; }
   }
   if(p.kind!=="dressing") return true;
-  // SHELL GUARD (before the tight-shot rule): never attach an object's EXTERIOR sheet
-  // to a shot filmed INSIDE it — when the scene's location is marked "Interior of"
-  // this prop, the plate is canon (an exterior reference would invite the generator
-  // to put the whole object in frame).
-  try{
-    const C = window.turnContinuity || {};
-    const loc = locationForScene(C.locations||[], sh && sh.sceneId);
-    if(loc && loc.interiorOfPropId === p.id) return false;
-  }catch(e){}
   // TIGHT SHOTS keep the dressing sheet: at CU/MCU magnification a background object
   // reads LARGE, and the plate's small distant depiction can't hold its design — the
   // sheet's detail is needed. Wides rely on the plate (it renders dressing in place).

@@ -343,8 +343,19 @@ Deno.serve(async (req) => {
         providerCostUsd: estimate.providerCostUsd,
         metadata: { usageKind, vision, totalTokens: tokens.inputTokens + tokens.outputTokens },
       });
-      return json({ text, vision, usage: { ...usage, ...estimate, ...tokens, totalTokens: tokens.inputTokens + tokens.outputTokens } });
+      // relay output-cap truncation so the client can warn instead of silently
+      // degrading (a truncated shot-list draft salvages early beats and one-shot
+      // backfills the rest — invisible without this flag)
+      const truncated = (providerName === "anthropic" && providerData?.stop_reason === "max_tokens")
+        || ((providerName === "openai" || providerName === "moonshot") && ((((providerData?.choices || [])[0] || {}).finish_reason) === "length"))
+        || (providerName === "google" && ((((providerData?.candidates || [])[0] || {}).finishReason) === "MAX_TOKENS"));
+      return json({ text, vision, truncated: truncated || undefined, usage: { ...usage, ...estimate, ...tokens, totalTokens: tokens.inputTokens + tokens.outputTokens } });
     };
+    // per-request output budget — full-scene shot-list drafts need far more than the
+    // 4096 default (a capped reply truncates the JSON; the client salvages the early
+    // beats and one-shot backfills the rest, which read as "1 shot per beat")
+    const _reqMax = Math.round(Number(body.maxTokens) || 0);
+    const reqMaxTokens = _reqMax > 0 ? Math.max(1024, Math.min(32768, _reqMax)) : 0;
     if (provider === "google") {
       const gkey = providerKey("google", "GOOGLE_API_KEY");
       if (!gkey) return json({ error: missingKey("Google", "GOOGLE_API_KEY") }, 500);
@@ -363,7 +374,7 @@ Deno.serve(async (req) => {
       try {
         const r = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(gkey)}`,
-          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents }) },
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents, ...(reqMaxTokens ? { generationConfig: { maxOutputTokens: reqMaxTokens } } : {}) }) },
         );
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `Google error (${r.status}).`, status: r.status }, 200); }
         const data = await r.json();
@@ -378,7 +389,7 @@ Deno.serve(async (req) => {
         const r = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model, messages: messages.map((m: any, i: number) => {
+          body: JSON.stringify({ model, ...(reqMaxTokens ? { max_tokens: reqMaxTokens } : {}), messages: messages.map((m: any, i: number) => {
             const text = String(m.content || "");
             if (images.length && i === messages.length - 1)
               return { role: m.role || "user", content: [{ type: "text", text }, ...images.map((u: string) => ({ type: "image_url", image_url: { url: u } }))] };
@@ -405,7 +416,7 @@ Deno.serve(async (req) => {
           method: "POST",
           signal: AbortSignal.timeout(380000),
           headers: { Authorization: `Bearer ${mKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model, max_tokens: 4096,
+          body: JSON.stringify({ model, max_tokens: reqMaxTokens || 4096,
             messages: messages.map((m: any) => ({ role: m.role || "user", content: String(m.content || "") })) }),
         });
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `Moonshot error (${r.status}).`, status: r.status }, 200); }
@@ -438,7 +449,7 @@ Deno.serve(async (req) => {
         const r = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-          body: JSON.stringify({ model, max_tokens: 4096, ...(sys ? { system: sys } : {}), messages: turns.length ? turns : [{ role: "user", content: "" }] }),
+          body: JSON.stringify({ model, max_tokens: reqMaxTokens || 4096, ...(sys ? { system: sys } : {}), messages: turns.length ? turns : [{ role: "user", content: "" }] }),
         });
         if (!r.ok) { let d = ""; try { d = (await r.json())?.error?.message || ""; } catch (_e) { /* noop */ } return json({ error: d || `Anthropic error (${r.status}).`, status: r.status }, 200); }
         const data = await r.json();
@@ -986,19 +997,19 @@ Deno.serve(async (req) => {
         : [];
       const img = imageList[0] || result?.image || result?.data?.image || result?.output?.image || null;
       const b64 = (img && (img.b64_json || img.base64 || img.b64)) || result?.b64_json || result?.base64 || "";
-      if (b64) return await finishImage({ b64, mime: (img && (img.content_type || img.mime_type)) || "image/png", falModel: endpoint, grounded: !!groundSearch }, "fal", model);
+      if (b64) return await finishImage({ b64, mime: (img && (img.content_type || img.mime_type)) || "image/png", falModel: endpoint, grounded: cfg.family !== "openai" && !!groundSearch }, "fal", model);
 
       const url = typeof img === "string" ? img : (img && (img.url || img.image_url)) || result?.url || "";
       if (!url) return json({ error: "fal returned no image." }, 200);
       const m = /^data:(.*?);base64,(.*)$/.exec(url);
-      if (m) return await finishImage({ b64: m[2], mime: m[1] || "image/png", falModel: endpoint, grounded: !!groundSearch }, "fal", model);
+      if (m) return await finishImage({ b64: m[2], mime: m[1] || "image/png", falModel: endpoint, grounded: cfg.family !== "openai" && !!groundSearch }, "fal", model);
 
       const u = new URL(url);
       const imageHeaders = u.host.endsWith("fal.run") ? { "Authorization": "Key " + falKey } : undefined;
       const ir = await fetch(url, { headers: imageHeaders });
       if (!ir.ok) return json({ error: `Could not download fal image (${ir.status}).` }, 200);
       const mime = ir.headers.get("content-type") || (img && (img.content_type || img.mime_type)) || "image/png";
-      return await finishImage({ b64: arrayBufferToBase64(await ir.arrayBuffer()), mime, falModel: endpoint, grounded: !!groundSearch }, "fal", model);
+      return await finishImage({ b64: arrayBufferToBase64(await ir.arrayBuffer()), mime, falModel: endpoint, grounded: cfg.family !== "openai" && !!groundSearch }, "fal", model);
     } catch (e) {
       if ((e as any)?.name === "TimeoutError")
         return json({ error: "fal.ai's queue didn't accept the submission within 30s — the request was cancelled server-side. Try again, or choose a faster quality/resolution." }, 200);
