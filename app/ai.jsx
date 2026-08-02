@@ -1187,46 +1187,6 @@ async function aiPlantLine(targetScene, factLabel, mode){
 }
 window.aiPlantLine = aiPlantLine;
 
-/* Storyboard Director: ask the writing model (Claude Opus 5) to think through a scene's
-   panels and return an OPTIMIZED single-sheet image prompt — faithful to the baseline
-   structure (one continuous take, locked characters + location, per-panel CAM/MOVE/MOOD
-   strips), just tighter — plus an updated running continuity memo. Returns {prompt, notes,
-   memo} or null (the agent then falls back to the deterministic buildStoryboardPagePrompt). */
-async function aiDirectorNotes(scene, shots, beatsMap, ctxFor, priorMemo){
-  if(typeof buildStoryboardPagePrompt!=="function") return null;
-  const sctx = (typeof ctxFor==="function") ? ctxFor(scene) : ctxFor;
-  let baseline = "";
-  try{ baseline = buildStoryboardPagePrompt(scene, shots, sctx, beatsMap); }catch(e){ return null; }
-  if(!baseline) return null;
-  const sys = "You are a STORYBOARD DIRECTOR boarding a film scene by scene as a continuous visual narrative. "+
-    "You are given a baseline prompt that renders ONE scene as a SINGLE composite storyboard sheet (a grid of "+
-    "panels read as one continuous take, with locked characters and location, and a short annotation strip "+
-    "under each panel), plus a CONTINUITY MEMO of what earlier scenes already established. "+
-    "Do TWO things: (1) tighten the baseline into a stronger single-sheet prompt — sharpen panel selection, "+
-    "camera grammar, blocking and continuity, KEEPING the same structure (one continuous take; locked "+
-    "characters + location; per-panel CAM / MOVE / MOOD or VOICE slug lines; 16:9), and make it consistent with "+
-    "the memo so this sheet matches the earlier scenes' cast looks, world and colour grade; "+
-    "(2) update the running memo. PRESERVE the baseline's LOCATION LOCK: every panel of THIS sheet must be the SAME single "+
-    "physical place (identical architecture, walls, surfaces, signage, fixtures and lighting) — only framing and action change "+
-    "from beat to beat; never relocate or redesign the space between panels. "+
-    "Do NOT invent new characters or locations, and keep every reference the baseline locks. "+
-    'Return ONLY JSON: {"notes":"one short directing note, max 120 chars","prompt":"the full optimized single-sheet prompt","memo":"the UPDATED running continuity memo of established cast looks, world and grade, max 240 chars"}.';
-  const memoIn = (priorMemo||"").toString().trim();
-  const user = (memoIn ? ("CONTINUITY MEMO (established by earlier scenes):\n"+memoIn+"\n\n") : "CONTINUITY MEMO: none yet — this is the first boarded scene.\n\n")
-    + "BASELINE PROMPT:\n"+baseline;
-  let text;
-  try{ text = await museComplete([{ role:"user", content: sys+"\n\n"+user }]); }
-  catch(e){ return null; }
-  const j = extractJSON(text) || salvageJSON(text);
-  if(!j || !j.prompt) return null;
-  return {
-    prompt: scrubBrand(String(j.prompt)),
-    notes:  j.notes ? clipWords(scrubBrand(String(j.notes)).replace(/\s+/g," ").trim(),140) : null,
-    memo:   j.memo  ? clipWords(scrubBrand(String(j.memo)).replace(/\s+/g," ").trim(),240) : (memoIn||null),
-  };
-}
-window.aiDirectorNotes = aiDirectorNotes;
-
 /* Table-read: whole-script pacing / tone / voice critique. */
 async function aiTableRead(scenes, drafts){
   if(!aiAvailable()) return null;

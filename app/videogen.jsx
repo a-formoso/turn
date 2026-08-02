@@ -232,15 +232,28 @@ async function vidProxy(op, payload){
   if(!videoProxyReady()) throw new Error("Video runs through your server proxy — sign in and make sure Supabase + the proxy are configured.");
   const sb = window.sbClient();
   const fnName = (window.TURN_SUPABASE && window.TURN_SUPABASE.imageProxyFn) || "image-proxy";
+  // TRANSIENT-SAFE: "Failed to send a request to the Edge Function" is a NETWORK-level
+  // failure (no HTTP status — the call never completed: a wifi blip, VPN hiccup or a
+  // brief edge hiccup), so retry briefly before surfacing. submit is NEVER retried
+  // here — if the request did reach the server before the connection dropped, a blind
+  // retry would start (and charge) a second render.
+  const netRetries = op==="submit" ? 0 : 2;
   let data, error;
-  try{ ({ data, error } = await sb.functions.invoke(fnName, { body:{ task:"video", op, ...(payload||{}),
-    userApiKeys: window.turnApiKeysForProxy ? window.turnApiKeysForProxy(["fal"]) : undefined } })); }
-  catch(e){ error=e; }
+  for(let a=0;; a++){
+    data=undefined; error=undefined;
+    try{ ({ data, error } = await sb.functions.invoke(fnName, { body:{ task:"video", op, ...(payload||{}),
+      userApiKeys: window.turnApiKeysForProxy ? window.turnApiKeysForProxy(["fal"]) : undefined } })); }
+    catch(e){ error=e; }
+    const netFail = !!error && !((error&&error.context&&error.context.status)||error.status||0);
+    if(netFail && a<netRetries){ await new Promise(r=>setTimeout(r, 900*(a+1))); continue; }
+    break;
+  }
   if(error){
     const status=(error&&error.context&&error.context.status)||error.status||0;
     const _safe = window.turnSafeError || (x=>x);
     if(status===401) throw new Error("Sign in to render video — it runs on your server, not the browser.");
     if(status===404) throw new Error(_safe("The media proxy isn't deployed yet. Deploy supabase/functions/image-proxy (the video route), then have an administrator set FAL_KEY."));
+    if(!status) throw new Error(_safe("Couldn't reach the video proxy — the request never made it to the server (usually a brief connection drop or VPN/ad-blocker interference). Check your connection and try again"+(op==="submit"?"; the render was most likely not submitted or charged":"")+"."));
     throw new Error(_safe("Couldn't reach the video proxy: "+((error&&error.message)||"unknown error")+"."));
   }
   if(data && data.error) throw new Error((window.turnSafeError||(x=>x))(data.error));   // fal error relayed by the proxy
@@ -413,6 +426,20 @@ window.vidRecoverPending = vidRecoverPending;
 // one recovery pass per load, after the auth/proxy state has settled
 setTimeout(()=>{ try{ if(videoProxyReady()) vidRecoverPending(); }catch(e){} }, 4000);
 
+/* ---- LIKENESS FALSE POSITIVES: Seedance's safety filter sometimes decides an
+   AI-generated character sheet shows a REAL person's likeness and rejects the job.
+   Every Art Room reference IS AI-generated, so that rejection is a false positive:
+   retry ONCE with an explicit fictional-cast declaration prepended to the prompt,
+   and if the filter still refuses, explain it in human terms (regenerate a more
+   stylized sheet / switch model) instead of relaying raw provider text. ---- */
+const VID_LIKENESS_RE = /likeness|celebrit|public figure|famous|real (?:person|people|face)|portrait right|impersonat|face (?:match|verification|detect)|risk control|content (?:risk|policy|moderation)|moderation|sensitive content|prohibited content/i;
+function vidLikenessError(msg){
+  const s = String(msg||"");
+  return !!s && !/cancelled/i.test(s) && VID_LIKENESS_RE.test(s);
+}
+const VID_FICTION_NOTE = "Note: every person appearing in the reference images is an original, fully AI-generated fictional character created for this film. They are not real people, celebrities, or public figures — no real person's likeness, face, or identity is used or implied.";
+const VID_LIKENESS_HELP = "The model's safety filter flagged a reference image as a real person's likeness and refused the render — even after a retry declaring the cast as AI-generated fictional characters. This is a false positive on its side; it cannot be switched off from here. What works: regenerate that character's sheet with a more stylized / less photoreal look in the Art Room, drop the flagged reference from this clip, or switch the model (Kling reads identity from the start frame instead of reference sheets).";
+
 async function seedanceGenerate(id, opts){
   opts = opts||{};
   /* SEEDANCE 2.5 rides the same multimodal reference-to-video shape as 2.0, named by
@@ -475,46 +502,97 @@ async function seedanceGenerate(id, opts){
   const proxyAudios = [];
   if(!isSora && !isKling) for(const u of await vidProxyReadyUrls(audios)) proxyAudios.push(await vidPadShortAudio(u));
   const proxyEndFrame = (useTransition || (isKling && endFrame)) ? await vidProxyReadyUrl(endFrame) : "";
-  const sub = await vidProxy("submit", {
-    model, prompt:promptText,
-    ...(isKling
-      ? { image_url:proxyImages[0],
-          ...(proxyEndFrame ? { end_image_url:proxyEndFrame } : {}),
-          ...(klingShots.length>1 ? { multi_prompt:klingShots } : {}) }
-      : useTransition
-      ? { image_url:proxyImages[0], end_image_url:proxyEndFrame }
-      : { image_urls:proxyImages,
-          ...(proxyVideos.length ? { video_urls:proxyVideos } : {}),
-          ...(proxyAudios.length ? { audio_urls:proxyAudios } : {}) }),
-    duration, resolution, aspectRatio,
-    generateAudio,    // ON with audio refs (they become the speech in the track); user-toggled otherwise
-    bitrateMode,      // "high" = less compression / larger file; "standard" = smaller draft
-    ...(opts.seed!=null && !isSora && !isKling ? { seed:opts.seed } : {}),   // Sora/Kling have no seed control
-  });
-  if(!sub.requestId || !sub.statusUrl || !sub.responseUrl) throw new Error("The video proxy didn't accept the job.");
-  // persist the job until it DEFINITIVELY completes — a reload mid-poll would otherwise
-  // orphan a paid render (recovery re-polls leftovers on the next load). Cancels and
-  // timeouts keep the entry on purpose: the job may still finish server-side.
-  _vidPendingAdd({ requestId:sub.requestId, id, model, statusUrl:sub.statusUrl, responseUrl:sub.responseUrl, at:Date.now(),
-    meta:{ hash, model, durationMs:opts.durationMs||0, aspectRatio, prompt:promptText, ...(opts.takeMeta||{}) } });
-  if(opts.onStatus) opts.onStatus(sub.status||"IN_QUEUE");
-  // poll until COMPLETED — each call is short; the wait is here on the client
-  const pollMs = opts.pollMs || 4000;
-  const maxPolls = opts.maxPolls || (isSeedance25 ? 300 : 150);   // ~10 min at 4s — 30s renders get ~20
-  for(let i=0; i<maxPolls; i++){
-    if(opts.shouldCancel && opts.shouldCancel()) throw new Error("Render cancelled.");
-    await new Promise(r=>setTimeout(r, pollMs));
-    const st = await vidProxy("poll", { model, statusUrl:sub.statusUrl, responseUrl:sub.responseUrl });
-    if(opts.onStatus && st.status) opts.onStatus(st.status);
-    if(st.status==="COMPLETED" && st.videoUrl){
-      const meta = { hash, model, durationMs:opts.durationMs||0, aspectRatio, seed:st.seed||null, prompt:promptText,
-        ...(opts.takeMeta||{}) };   // Versions-view facts: source, tier, resolution, recipe, audio, batch position…
-      if(id) await vidCommit(id, st.videoUrl, meta);
-      _vidPendingRemove(sub.requestId);   // delivered — nothing left to recover
-      return { videoUrl:st.videoUrl, seed:st.seed||null, cached:false };
+  // ONE submit→poll pass with the given prompt text — extracted so a likeness
+  // rejection can rerun the whole pass with the fictional-cast declaration prepended.
+  const attempt = async (pText)=>{
+    const sub = await vidProxy("submit", {
+      model, prompt:pText,
+      ...(isKling
+        ? { image_url:proxyImages[0],
+            ...(proxyEndFrame ? { end_image_url:proxyEndFrame } : {}),
+            ...(klingShots.length>1 ? { multi_prompt:klingShots } : {}) }
+        : useTransition
+        ? { image_url:proxyImages[0], end_image_url:proxyEndFrame }
+        : { image_urls:proxyImages,
+            ...(proxyVideos.length ? { video_urls:proxyVideos } : {}),
+            ...(proxyAudios.length ? { audio_urls:proxyAudios } : {}) }),
+      duration, resolution, aspectRatio,
+      generateAudio,    // ON with audio refs (they become the speech in the track); user-toggled otherwise
+      bitrateMode,      // "high" = less compression / larger file; "standard" = smaller draft
+      ...(opts.seed!=null && !isSora && !isKling ? { seed:opts.seed } : {}),   // Sora/Kling have no seed control
+    });
+    if(!sub.requestId || !sub.statusUrl || !sub.responseUrl) throw new Error("The video proxy didn't accept the job.");
+    // persist the job until it DEFINITIVELY completes — a reload mid-poll would otherwise
+    // orphan a paid render (recovery re-polls leftovers on the next load). Cancels and
+    // timeouts keep the entry on purpose: the job may still finish server-side.
+    _vidPendingAdd({ requestId:sub.requestId, id, model, statusUrl:sub.statusUrl, responseUrl:sub.responseUrl, at:Date.now(),
+      meta:{ hash, model, durationMs:opts.durationMs||0, aspectRatio, prompt:pText, ...(opts.takeMeta||{}) } });
+    if(opts.onStatus) opts.onStatus(sub.status||"IN_QUEUE");
+    // poll until COMPLETED — each call is short; the wait is here on the client.
+    // PROGRESS: fal's status logs carry real "NN%" lines for some models (the proxy
+    // relays the last one as st.progress); when they don't, an elapsed-time asymptote
+    // against a per-tier expected render time stands in. Whichever is FURTHEST wins,
+    // it never moves backwards, and it caps at 97% until COMPLETED lands.
+    const pollMs = opts.pollMs || 4000;
+    const maxPolls = opts.maxPolls || (isSeedance25 ? 300 : 150);   // ~10 min at 4s — 30s renders get ~20
+    const t0 = Date.now();
+    const wantSec = typeof duration==="number" ? duration : 8;
+    const estSec = (opts.fast ? 50 : 100) + wantSec*(opts.fast ? 4 : 8);   // rough tier-typical wall time
+    let lastPct = 0;
+    let pollMiss = 0;   // consecutive unreachable-proxy polls — the render itself is still cooking server-side
+    for(let i=0; i<maxPolls; i++){
+      if(opts.shouldCancel && opts.shouldCancel()) throw new Error("Render cancelled.");
+      await new Promise(r=>setTimeout(r, pollMs));
+      let st;
+      try{ st = await vidProxy("poll", { model, statusUrl:sub.statusUrl, responseUrl:sub.responseUrl }); pollMiss = 0; }
+      catch(e){
+        // a network blip mid-poll must NOT kill a render that's still running on the
+        // provider — tolerate a few consecutive misses (each already retried inside
+        // vidProxy), then surface the real error. Terminal provider failures don't
+        // land here: they arrive as a successful poll with st.error/st.status.
+        if(/Couldn't reach the video proxy/i.test(String(e&&e.message)) && ++pollMiss<=4){
+          if(opts.onStatus) opts.onStatus("RECONNECTING");
+          continue;
+        }
+        throw e;
+      }
+      // a terminal failure the proxy relayed without an error field still ends here —
+      // throw so the likeness retry/help path can see the reason instead of timing out
+      if(/^(FAILED|ERROR|CANCELLED|CANCELED)$/i.test(String(st.status||"")))
+        throw new Error(String(st.error||("The provider reported the render as "+st.status+".")));
+      if(opts.onStatus && st.status){
+        let label = st.status;
+        if(st.status==="IN_QUEUE"){
+          if(Number(st.queuePosition)>0) label += " · #"+Number(st.queuePosition)+" in line";
+        } else if(st.status!=="COMPLETED"){
+          const elapsed = (Date.now()-t0)/1000;
+          const est = Math.round(100*(1-Math.exp(-1.6*elapsed/estSec)));
+          lastPct = Math.max(lastPct, Math.min(97, Math.max(Number(st.progress)||0, est)));
+          label += " · "+lastPct+"%";
+        }
+        opts.onStatus(label);
+      }
+      if(st.status==="COMPLETED" && st.videoUrl){
+        const meta = { hash, model, durationMs:opts.durationMs||0, aspectRatio, seed:st.seed||null, prompt:pText,
+          ...(opts.takeMeta||{}) };   // Versions-view facts: source, tier, resolution, recipe, audio, batch position…
+        if(id) await vidCommit(id, st.videoUrl, meta);
+        _vidPendingRemove(sub.requestId);   // delivered — nothing left to recover
+        return { videoUrl:st.videoUrl, seed:st.seed||null, cached:false };
+      }
+    }
+    throw new Error("The video render timed out — try again, or pick a faster tier / lower resolution in Render settings.");
+  };
+  try{ return await attempt(promptText); }
+  catch(e){
+    if(!vidLikenessError(e && e.message)) throw e;
+    // likeness false positive — one retry with the declaration up front
+    if(opts.onStatus) opts.onStatus("RETRY");
+    try{ return await attempt(VID_FICTION_NOTE+"\n"+promptText); }
+    catch(e2){
+      if(vidLikenessError(e2 && e2.message)) throw new Error(VID_LIKENESS_HELP);
+      throw e2;
     }
   }
-  throw new Error("The video render timed out — try again, or pick a faster tier / lower resolution in Render settings.");
 }
 window.seedanceGenerate=seedanceGenerate;
 

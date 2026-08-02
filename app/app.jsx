@@ -401,7 +401,6 @@ function App(){
   const [history, setHistory] = React.useState(()=> (saved && saved.history) || {});   // {sceneId:{back:[ver...], fwd:[ver...]}}
   const [continuityMap, setContinuityMap] = React.useState(()=> (saved && saved.continuityMap) || {});
   const [agentsOpen, setAgentsOpen] = React.useState(false);
-  const [directorOpen, setDirectorOpen] = React.useState(false);   // Storyboard Director (Art Room)
   const [sceneDirLaunch, setSceneDirLaunch] = React.useState(null); // Scene Director: {sceneId}|{} (whole film)|null
   const [coloristOpen, setColoristOpen] = React.useState(false);   // Cinematographer / Colorist (Art Room)
   const [shotDesignerOpen, setShotDesignerOpen] = React.useState(false);   // Shot Designer (Art Room)
@@ -2967,11 +2966,6 @@ function App(){
       } };
   };
 
-  // ---- Storyboard Director (Art Room) — a SEPARATE ctx surface: storyboard pages +
-  // two tools (writing-model director notes, GPT Image 2 sheet render). It never touches
-  // ctx.model / sync(): image commits live in the asset store, not the scene/beats undo
-  // snapshot (reversal is per-sheet via the Storyboard card menu). Mirrors StoryboardView's
-  // page derivation so the slot ids ("sbsheet-"+pageId) match the live tab. ----
   // Scene Director — the visual ctx (docs/Scene Director Agent Plan.md §8): the
   // scene groups with their shots + resolution ctx, frame reads, the headless
   // generation primitive, and the vision QC. Scoped to one scene when launched
@@ -3009,35 +3003,6 @@ function App(){
     const ctxFor = (scene)=>({ scene,
       location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null,
       charById, propById, project });
-
-    // Storyboards are fixed to 2×2 sheets, so the Director lands in the same slots
-    // as the visible Storyboards tab.
-    const SB = 4;
-    const sbGrid = "2x2";
-    const chunk = (arr,n)=>{ const o=[]; for(let i=0;i<(arr||[]).length;i+=n) o.push(arr.slice(i,i+n)); return o; };
-    const pages = [];
-    ordered.filter(s=>(shotsByScene[s.id]||[]).length).forEach(scene=>{
-      const groups = chunk(shotsByScene[scene.id]||[], SB);
-      groups.forEach((chunkShots,index)=> pages.push({
-        scene, index, pageCount:groups.length, grid:sbGrid,
-        pageId:"sbpage-"+scene.id+(sbGrid==="2x2"?"-2x2":"")+"-"+index, shots:chunkShots, ctxFor:ctxFor(scene) }));
-    });
-
-    const GPT2 = (window.NB_MODELS||[]).find(m=>/gpt-image/i.test(m.id));
-
-    // own-scene reference set (location plate + N character sheets). When the previous
-    // scene's sheet is chained in (cap=1) it already carries the cast, so we keep this
-    // leaner; on the first scene (cap=3) it does all the identity-locking.
-    const gatherSheetRefs = async (page, cap)=>{
-      const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
-        if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; };
-      const out=[], seen=new Set(); let nch=0; const c=page.ctxFor;
-      if(c.location){ const u=await grab(c.location.id); if(u) out.push({url:u, note:(c.location.name||"location")+" plate"}); }
-      for(const sh of (page.shots||[])){ if(nch>=cap) break;
-        for(const id of (sh.subjects||[])){ if(nch>=cap||seen.has(id)) continue; seen.add(id);
-          const ch=charById[id]; if(!ch) continue; const u=await grab(id); if(u){ out.push({url:u, note:ch.name+" sheet"}); nch++; } } }
-      return out;
-    };
 
     // ---- Shot Designer (Shot List agent) — coverage audit/design on a per-run WORKING
     // copy of shots (like Story Doctor's ctx.model); each approval also pushes to real state.
@@ -3413,8 +3378,6 @@ function App(){
       draftOnly,
       ai:{ available: (typeof aiAvailable==="function" && aiAvailable()) },
       art:{
-        pages,
-        gpt2Available: !!GPT2,
         coverage,
         cast,
         propmaster,
@@ -3432,41 +3395,6 @@ function App(){
           const seed=(sb.presets&&sb.presets.length)?sb.presets:(window.STYLE_PRESETS_DEFAULT||[]);
           return window.aiAssignSceneStyles(scenes, seed, drafts, project); },
         applyStyles: (res)=> applyStyleResult(res),
-        // ---- Storyboard Director tools ----
-        buildPrompt:(p)=> (typeof buildStoryboardPagePrompt==="function") ? buildStoryboardPagePrompt(p.scene, p.shots, {...(p.ctxFor||{}), _lookbookBrief:(typeof lookbookBriefFor==="function"?lookbookBriefFor("storyboard", lookbook, lookbookNote):"")}, beatsMap, { grid:p.grid }) : "",
-        directorNotes:(p, priorMemo)=>{ const cf={...(p.ctxFor||{}), _lookbookBrief:(typeof lookbookBriefFor==="function"?lookbookBriefFor("storyboard", lookbook, lookbookNote):"")}; return window.aiDirectorNotes(p.scene, p.shots, beatsMap, ()=>cf, priorMemo); },
-        // append the cross-scene continuity block to whatever prompt (LLM-optimized or deterministic)
-        withContinuity:(prompt, memo, hasPrev)=>{
-          let c = "";
-          if(hasPrev) c += " CONTINUITY: the FIRST reference image is the PREVIOUS scene's storyboard sheet from this same film — keep the SAME characters (faces, hair, wardrobe), the same world and the same colour grade / rendering style so the whole storyboard reads as ONE continuous film.";
-          if(memo) c += " ESTABLISHED SO FAR (keep consistent across scenes): "+memo;
-          return prompt + c;
-        },
-        // render one sheet; prevSheetUrl (if any) leads the reference set as the continuity anchor
-        renderSheet: async (p, prompt, prevSheetUrl)=>{
-          const slotId = "sbsheet-"+p.pageId;
-          // Keep the reference set MINIMAL — GPT Image 2 uses /images/edits when refs are
-          // present, and each ref + "high" quality is what blows the ~150s proxy timeout.
-          // When chained, the previous sheet already carries the cast, so 1 extra char
-          // sheet is plenty. quality:"low" is the real timeout fix (size is fixed by aspect;
-          // imageSize is ignored by the proxy for OpenAI). A board is a rough plan, not final art.
-          const own = await gatherSheetRefs(p, prevSheetUrl ? 1 : 3);
-          const refs = prevSheetUrl
-            ? [{url:prevSheetUrl, note:"previous scene sheet"}, ...own]
-            : own;
-          const url = await window.nbGenerate(prompt, {
-            model: GPT2?GPT2.id:undefined, aspectRatio:"16:9", quality:"low",
-            extraImages: refs.map(r=>r.url) });
-          const meta = { modelId: GPT2?GPT2.id:undefined, modelLabel: GPT2?GPT2.label:"", aspect:"16:9", quality:"low",
-            iso:new Date().toISOString(), refCount:refs.length, prompt, agent:"Storyboard Director", chained:!!prevSheetUrl };
-          const refsUsed = refs.map(r=>({ kind:"storyboard-ref", label:r.note, url:r.url }));
-          const kind = (typeof slotAssetKind==="function") ? slotAssetKind(slotId) : "asset";
-          await window.nbCommit(slotId, url, meta, refsUsed, kind);
-          // nbCommit doesn't emit nb-gen-done (only useImageGen does) — fire it so the
-          // open Storyboard tab updates its progress + thumbnail live.
-          try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:slotId, url } })); }catch(e){}
-          return url;
-        },
       } };
   };
 
@@ -3751,7 +3679,6 @@ function App(){
           : React.createElement(ArtRoom,{key:(cloudMode?currentProjectId:"local"),artView,setArtView,project,characters,scenes,props,drafts,trash,
             onRestoreChar:restoreCharacter,onPurgeChar:purgeCharacter,onRestoreProp:restoreProp,onPurgeProp:purgeProp,
             onRestoreLoc:restoreLocation,onPurgeLoc:purgeLocation,onEnsureOwner:ensureOwnerSheet,
-            onDirectStoryboard:()=>setDirectorOpen(true),
             onDirectScene:(sceneId)=>setSceneDirLaunch({ sceneId: sceneId||null }),
             onColorist:()=>setColoristOpen(true),
             onShoot:()=>setShotDesignerOpen(true),
@@ -3900,17 +3827,6 @@ function App(){
       undoLabel:agentUndo.length?agentUndo[agentUndo.length-1].label:null,
       onUndo:undoLastAgent,
       issues:agentIssues,
-      aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
-
-    // Storyboard Director — same modal/runner, scoped straight to the autonomous
-    // "director" agent with the Art-Room ctx factory (kind:"build" keeps it out of the
-    // Writers' picker, so opening here goes straight into its runner).
-    directorOpen && React.createElement(AgentsPanel,{
-      initialAgentId:"director", autoStart:true, single:true, viewLabel:"View Storyboards",
-      ctxFactory:artAgentCtxFactory,
-      onClose:()=>setDirectorOpen(false),
-      onView:()=>{ setArtView("storyboard"); setDirectorOpen(false); },
-      issues:{}, undoCount:0,
       aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
 
     // Scene Director — gated per scene (plan card before each scene's spend); takes a

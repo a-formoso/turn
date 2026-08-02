@@ -844,10 +844,36 @@ Deno.serve(async (req) => {
         const responseUrl = (body.responseUrl || "").toString();
         const okHost = (u: string) => { try { return new URL(u).host.endsWith("fal.run"); } catch (_e) { return false; } };
         if (!okHost(statusUrl) || !okHost(responseUrl)) return json({ error: "Bad poll URLs." }, 400);
-        const sr = await fetch(statusUrl, { headers: { "Authorization": "Key " + falKey } });
+        // logs=1 → fal streams the model's progress lines ("… 42%") in the status body;
+        // queue_position rides along while IN_QUEUE. Both feed the client's progress UI.
+        let logsUrl = statusUrl;
+        try { const u = new URL(statusUrl); u.searchParams.set("logs", "1"); logsUrl = u.toString(); } catch (_e) { /* keep raw */ }
+        const sr = await fetch(logsUrl, { headers: { "Authorization": "Key " + falKey } });
         if (!sr.ok) return json({ error: await falErr(sr), status: sr.status }, 200);
         const sd = await sr.json();
-        if (sd.status !== "COMPLETED") return json({ status: sd.status || "IN_PROGRESS" });
+        // terminal FAILURE statuses must surface as errors — returning them as
+        // in-progress data would make the client poll until its timeout instead of
+        // relaying the provider's reason (likeness/moderation rejections live here).
+        const stStr = String(sd.status || "");
+        if (/^(FAILED|ERROR|CANCELLED|CANCELED)$/i.test(stStr)) {
+          let detail = (typeof sd.error === "string" && sd.error) || (typeof sd.detail === "string" && sd.detail) || "";
+          if (!detail) {
+            try { const fr = await fetch(responseUrl, { headers: { "Authorization": "Key " + falKey } }); detail = fr.ok ? "" : await falErr(fr); } catch (_e) { /* noop */ }
+          }
+          return json({ error: detail || `fal reported the job as ${stStr}.`, status: stStr }, 200);
+        }
+        if (sd.status !== "COMPLETED") {
+          let progress = -1;
+          const logs = Array.isArray(sd.logs) ? sd.logs : [];
+          for (const l of logs) {
+            const m = String(l?.message ?? l ?? "").match(/(\d{1,3})(?:\.\d+)?\s*%/g);
+            if (m && m.length) { const n = parseInt(m[m.length - 1], 10); if (n >= 0 && n <= 100) progress = Math.max(progress, n); }
+          }
+          const qp = Number(sd.queue_position);
+          return json({ status: sd.status || "IN_PROGRESS",
+            ...(progress >= 0 ? { progress } : {}),
+            ...(Number.isFinite(qp) && qp >= 0 ? { queuePosition: qp } : {}) });
+        }
         const rr = await fetch(responseUrl, { headers: { "Authorization": "Key " + falKey } });
         if (!rr.ok) return json({ error: await falErr(rr), status: rr.status }, 200);
         const rd = await rr.json();

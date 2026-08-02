@@ -541,9 +541,10 @@ function useShotKeyframe(shotId){
 }
 
 /* one compact row per shot inside a BEAT CARD — click to expand the full editor */
-function BeatShotRow({ sh, letter, open, onToggle, isNext }){
+function BeatShotRow({ sh, letter, open, onToggle, isNext, live }){
   const url = useShotKeyframe(sh.id);
-  return _el("div",{className:"bc-shot-row"+(open?" on":"")+(isNext?" next":""),role:"button",tabIndex:0,onClick:onToggle,
+  return _el("div",{className:"bc-shot-row"+(open?" on":"")+(isNext?" next":"")+(live?" live":""),role:"button",tabIndex:0,onClick:onToggle,
+    "data-shot-row":sh.id,
     title:open?"Collapse this shot":"Open this shot (frame, references, grammar, action)"},
     url ? _el("img",{className:"bc-shot-thumb",src:url,alt:""}) : _el("span",{className:"bc-shot-thumb ph"}),
     _el("span",{className:"bc-shot-letter"},letter),
@@ -663,6 +664,7 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
         _el("div",{className:"bc-sec-lab"},"Shots \u00b7 "+L.shots.length),
         L.shots.map((sh,i)=> _el(React.Fragment,{key:sh.id},
           _el(BeatShotRow,{sh,letter:letterOf(i),open:openShotId===sh.id,isNext:(sh.id===nextShotId),
+            live:(sh.id===batchActiveId),
             onToggle:()=>setOpenShotId(openShotId===sh.id?null:sh.id)}),
           openShotId===sh.id && _el("div",{className:"bc-shot-expand"},
             (()=>{ const prevShot=(typeof seedShotOf==="function")?seedShotOf(sh,ordered)
@@ -983,6 +985,17 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   // is driven by its expanded card. QUEUE runs (Render Scene in order / Generate all
   // shots) mount only the ACTIVE shot's card — off-screen — as the runner's driver.
   const queueMode = (chain && chain.total===1) ? false : (!!batchActiveId || !!chain);
+  // keep the chain's active shot IN VIEW: as each shot starts rendering, scroll its
+  // beat-card row to the middle of the page (user ruling 2026-08-01; queue runs only —
+  // a solo run is driven from the card the user already opened). Rows inside the
+  // hidden off-screen runner group have no layout boxes, so a shot in a non-visible
+  // scene simply doesn't scroll.
+  React.useEffect(()=>{
+    if(!queueMode || !activeShotId) return;
+    const el = document.querySelector('[data-shot-row="'+activeShotId+'"]');
+    if(el && el.getClientRects().length && el.scrollIntoView)
+      el.scrollIntoView({ block:"center", behavior:"smooth" });
+  },[activeShotId, queueMode]);
   const runnerScene = activeSceneIdx>=0 && activeSceneIdx!==visibleIdx ? scenesWithShots[activeSceneIdx] : null;
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s ? s.no : sid; };
 

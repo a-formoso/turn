@@ -4247,7 +4247,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropIds, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
   locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocIds, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onSetWorldScale, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId, sluglineUnits, onUpdateUnit, onRemoveUnit,
-  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectStoryboard, onDirectScene, onColorist, onShoot, onCast, onPropsMaster,
+  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectScene, onColorist, onShoot, onCast, onPropsMaster,
   lookbook, lookbookNote, onUpdateLookbook, onAddLookbook, onDeleteLookbook, onSetLookbookNote, onResearch, onClearLookbook,
   staleTabs, onApplyLookbook }){
   const _stale = staleTabs || {};
@@ -4313,7 +4313,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
       ? React.createElement(window.ShotList,{project,scenes,characters,props,locations,shots,beatsMap,
           onUpdateShot,onAddShot,onDeleteShot,onSplitBeat,splittingBeat,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots,onShoot,onDirectScene})
       : artView==="storyboard" && window.StoryboardView
-      ? React.createElement(window.StoryboardView,{project,scenes,shots,characters,props,locations,beatsMap,setArtView,onDirect:onDirectStoryboard})
+      ? React.createElement(window.StoryboardView,{project,scenes,shots,characters,props,locations,beatsMap,setArtView})
       : React.createElement(ArtComingSoon,{tab:artView}));
 }
 window.ArtRoom = ArtRoom;

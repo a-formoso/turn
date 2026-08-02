@@ -1,35 +1,28 @@
-/* storyboard.jsx — The Art Room ▸ Storyboard.
-   Each SCENE becomes one 2×2 storyboard PAGE: a single composite image of up to 4
-   numbered panels, generated in one pass with GPT Image 2 (the shots' grammar +
-   action + dialogue become the per-panel prompt, and the scene's character sheets,
-   prop sheets + location plate ride along as references so people/place/objects stay consistent across
-   panels). Until generated, the page shows a 2×2 grid of LABELLED panel guides so you
-   know what each panel should depict; click a guide to edit that shot in the Shot
-   List. A scene with >4 shots paginates into extra pages. */
+/* storyboard.jsx — The Art Room ▸ Storyboards: the PRESENTATION LAYER of the shot chain
+   (user ruling 2026-08-01 — storyboards are a VIEW over work already paid for, not a
+   second generation pipeline; the sheet-painting path and the Storyboard Director agent
+   were removed). Each sheet is COMPOSED on a canvas from the shots' existing frames —
+   instant, free, with REAL annotation text (always legible, always correct — the thing
+   image models can't do) — and re-derives itself: a scene whose frames exist composes
+   on first view, and a composed sheet re-composes whenever one of its shot frames
+   re-renders in the Shot List. Sheets paginate on BEAT BOUNDARIES (a beat never splits
+   across sheets unless it overflows a page on its own) and honor the project's format
+   aspect. Presentation furniture: one-scene pager, per-panel beat & shot briefs with
+   jump-to-Shot-List links, saved top/bottom halves (the Stage's video-gen hand-off),
+   per-panel repair (edits the shot frame, then recomposes), upload of a board made
+   elsewhere, and a durable print/PDF export. */
 
 const _sbEl = React.createElement;
-/* Sheet GRID format. GPT Image 2's 16:9 request actually returns a 1536×1024 (3:2) canvas,
-   so the only grids whose panels come out EXACTLY 16:9 (after the annotation strip) are:
-     "2x2" — 4 cells of 768×512: panel image 768×432 (exact 16:9) + 80px strip. Default —
-             best per-panel resolution; halves of the sheet are its two panel rows
-             (made for video generators that condition on frames, e.g. Seedance).
-   Storyboards are fixed to 2×2 so each panel keeps the strongest 16:9 consistency.
-   window.SB_PAGE_SIZE tracks the live value for the Storyboard Director (app.jsx). */
-const SB_GRIDS = { "2x2":4 };
-function sbGridSaved(){ return "2x2"; }
-window.SB_PAGE_SIZE = 4;
 
-/* the grid shape a page paints to: the chosen grid when known, else derived from the
-   panel count (≤4 panels read best as 2 columns; 1 panel needs no grid at all) */
+/* the grid shape a page paints to. Sheets are fixed 2×2 (page.grid is always "2x2"):
+   four cells keep every panel in the strongest frame geometry, and the saved top/bottom
+   HALVES the Stage consumes are the sheet's two panel rows — a 2-column layout is what
+   makes that mapping well-defined. */
 function sbGridShape(N, grid){
   if(grid==="2x2") return { cols:2, rows:2 };
   const cols = N<=1 ? 1 : (N<=4 ? 2 : 3);
   return { cols, rows:Math.ceil(Math.max(1,N)/cols) };
 }
-
-/* Storyboard pages are always 16:9, rendered at 2K. */
-function sbAspectRatio(){ return "16 / 9"; }
-function sbChunk(arr, n){ const out=[]; for(let i=0;i<(arr||[]).length;i+=n) out.push(arr.slice(i,i+n)); return out; }
 
 /* the scene's beat/subtext map (driver/reactor/desire/antagonism + per-beat rows) */
 function sbBeatMeta(beatsMap, sceneId){ return (beatsMap||{})[sceneId] || {}; }
@@ -57,17 +50,6 @@ function sbPropIdsForPage(scene, shots, ctx){
   return out;
 }
 
-/* a brief beat title for the panel label: prefer the beat's dramatic intention
-   (drive.a from the beat map), else the first clause of the action, else "Beat n". */
-function sbBeatTitle(sh, i, row){
-  if(row && row.drive && row.drive.a){
-    const title = String(row.drive.a).replace(/\s+/g," ").trim();
-    return (typeof clipWords==="function") ? clipWords(title,46) : title.slice(0,46);
-  }
-  const a = (sh && sh.action||"").replace(/\s+/g," ").trim();
-  const first = (a.split(/[,;.]/)[0]||"").trim();
-  return first ? first.split(" ").slice(0,6).join(" ") : ("Beat "+((sh&&sh.beatN)||(i+1)));
-}
 /* a mood phrase from the scene's closing value charge */
 function sbMood(scene){
   const c = (scene&&scene.closeCharge)||0;
@@ -75,38 +57,10 @@ function sbMood(scene){
     : c>=2 ? "hopeful, warm, uplifting" : c>0 ? "lifting, warmer" : "even, observational";
 }
 
-/* one tight CHARACTER-LOCK sentence (Template 2): only the tokens that lock the look
-   across panels — age/build, hair, key wardrobe colour, key prop — NOT the full sheet
-   (the Character Sheet holds the canonical spec; this just anchors continuity). */
-function sbCharLock(c){
-  if(!c) return "";
-  const p = c.physique||{};
-  const idc  = [p.age, p.ethnicity, p.build].filter(Boolean).join(", ");
-  const ward = (c.wardrobeMask || c.wardrobe || "").replace(/\.$/,"");
-  const extra = (c.accessories && !/^none$/i.test(c.accessories)) ? c.accessories
-              : ((c.props && !/^none$/i.test(c.props)) ? c.props : "");
-  let s = [idc, (p.hair||""), ward, extra].map(x=>(x||"").replace(/\s+/g," ").trim()).filter(Boolean).join("; ");
-  if(s.length>180) s = (typeof clipWords==="function") ? clipWords(s,180) : s.slice(0,178).replace(/[;,]\s*\S*$/,"");
-  return (c.name||"Character").toUpperCase()+": "+(s||"as in the attached reference sheet")+".";
-}
-
-/* a panel's grid position label (top-left … bottom-right) for an R×C grid. */
-function sbGridPos(i, cols, rows){
-  const r=Math.floor(i/cols), c=i%cols;
-  const colSet = cols<=1?[""] : cols===2?["left","right"] : ["left","center","right"];
-  const rowSet = rows<=1?[""] : rows===2?["top","bottom"] : rows===3?["top","middle","bottom"]
-               : ["top","upper-middle","lower-middle","bottom"];
-  const cN=colSet[Math.min(c,colSet.length-1)], rN=rowSet[Math.min(r,rowSet.length-1)];
-  return [rN,cN].filter(Boolean).join("-") || ("panel "+(i+1));
-}
-
 /* the FOUR production-note slug lines under a panel — CAMERA / MOTION / ACTION /
-   PERFORMANCE — each short (2–9 words). PERFORMANCE carries the spoken line on a
-   dialogue panel, else the beat's behavioural note (how it's played), else the mood. */
-/* `full` = the canvas-composed sheet, which draws REAL text and can word-wrap —
-   so it gets the whole first sentence / line. Without it (the GPT-painted sheet)
-   values stay capped at 9 words: baked-in text must be short to render legibly. */
-function sbStrip(sh, scene, row, full){
+   PERFORMANCE. The canvas-composed sheet draws REAL text and word-wraps, so ACTION /
+   PERFORMANCE carry the whole first sentence / line. */
+function sbStrip(sh, scene, row){
   const camera = [
     (typeof shotSizeOf==="function")  ? shotSizeOf(sh.size).label   : sh.size,
     (typeof shotAngleOf==="function") ? shotAngleOf(sh.angle).label : sh.angle,
@@ -116,140 +70,60 @@ function sbStrip(sh, scene, row, full){
   let action = (sh.action||"").replace(/\s+/g," ").trim();
   const m = action.match(/^[^.!?]*[.!?]/); if(m) action=m[0];
   action = action.replace(/[.!?]+$/,"");
-  if(!full) action = action.split(" ").slice(0,9).join(" ");
   const dlg = (sh.dialogue||"").trim().replace(/^["“]|["”]$/g,"").replace(/[.!?]+$/,"");
   const beh = ((row && ((row.drive&&row.drive.d)||(row.react&&row.react.d)))||"").replace(/\s+/g," ").trim();
-  const performance = dlg ? ('"'+((typeof clipWords==="function") ? clipWords(dlg, full?160:60) : dlg.slice(0, full?160:60))+'"')
-    : (beh ? (full ? beh : beh.split(" ").slice(0,9).join(" ")) : sbMood(scene));
+  const performance = dlg ? ('"'+((typeof clipWords==="function") ? clipWords(dlg,160) : dlg.slice(0,160))+'"')
+    : (beh || sbMood(scene));
   return { camera, motion, action, performance };
 }
 
-/* The GPT Image 2 prompt for the SINGLE-SHEET composite (Template 2 — Cinematic
-   Storyboard Grid): ONE image, an R×C grid of N sequential panels read as one
-   continuous take, with locked characters + geography, and a baked off-white
-   annotation strip (CAM / MOVE / MOOD|VOICE) under each panel. Character sheets +
-   the location plate ride along as identity anchors. */
-function buildStoryboardPagePrompt(scene, shots, ctx, beatsMap, opts){
-  opts = opts || {};
-  // the format's native frame (16:9, or 9:16 for vertical micro-drama)
-  const asp = (typeof aspectFor==="function") ? aspectFor(ctx && ctx.project) : "16:9";
-  const vertical = asp==="9:16";
-  const loc = ctx && ctx.location;
-  const bm = sbBeatMeta(beatsMap, scene.id);
-  const N = (shots||[]).length;
-  const { cols, rows } = sbGridShape(N, opts.grid);
-  const genre = (ctx && ctx.project && ctx.project.genre) || "";
-  const mood = sbMood(scene);
-  const todM = String(scene.loc||"").match(/\b(NIGHT|DAY|DAWN|DUSK|MORNING|EVENING|AFTERNOON|NOON|MIDNIGHT|CONTINUOUS|LATER|SUNSET|SUNRISE)\b/i);
-  const tod = ((typeof parseSlug==="function" && scene.loc) ? (parseSlug(scene.loc).time||"") : "") || (todM ? todM[1] : "");
-  // shared SETTING — one place across the whole sheet
-  const setBits=[];
-  if(loc){ setBits.push(loc.name||"the location"); if(loc.intExt) setBits.push(loc.intExt); }
-  if(tod) setBits.push(tod.toLowerCase());
-  if(loc && loc.materials) setBits.push(loc.materials.replace(/\.$/,""));
-  const setting = setBits.join(", ");
-  const light = (loc && loc.lighting) ? loc.lighting.replace(/\.$/,"") : "motivated naturalistic light";
-  // scene GRADE + film stock — so the composite matches the per-panel frames
-  let grade="";
-  if(typeof scenePreset==="function" && typeof buildStyleClause==="function"){ const pr=scenePreset(ctx.project,scene.id); if(pr) grade += buildStyleClause(pr); }
-  if(typeof filmStockClause==="function") grade += filmStockClause(ctx.project);
-
-  // characters present across the page (deduped, in first-appearance order)
-  const seen=new Set(), cast=[];
-  const _chars = Object.values(ctx.charById||{});
-  (shots||[]).forEach(sh=>{ const ids=(typeof inFrameCast==="function")?inFrameCast(sh, scene, _chars):(sh.subjects||[]);
-    ids.forEach(id=>{ if(seen.has(id)) return; seen.add(id); const c=ctx.charById[id]; if(c) cast.push(c); }); });
-
-  // continuity ledger across the page's panels — a prop established in an earlier panel
-  // (the doll) that a later panel's text doesn't re-name is carried forward, so it stays
-  // in the cut across the sheet and across pages instead of popping out.
-  let _ledger = {};
-  try{ _ledger = (typeof sceneContinuityLedger==="function")
-    ? sceneContinuityLedger(scene, shots, ctx.charById, ctx.propById) : {}; }catch(e){}
-  const panels = (shots||[]).map((sh,i)=>{
-    const row  = sbBeatRow(beatsMap, sh);
-    const pos  = sbGridPos(i, cols, rows);
-    const beat = sbBeatTitle(sh, i, row);
-    const who  = sbInFrame(sh, ctx).join(" & ");
-    const st   = sbStrip(sh, scene, row);
-    // FULL first-sentence action — the complete "what's happening", so a prop named past the
-    // short 9-word annotation caption (e.g. the doll) is still DEPICTED. The short st.action
-    // stays the legible baked-in caption; `staging` carries the full content for the drawing.
-    let fullAction = (sh.action||"").replace(/\s+/g," ").trim();
-    const _am = fullAction.match(/^[^.!?]*[.!?]/); if(_am) fullAction = _am[0]; fullAction = fullAction.replace(/[.!?]+$/,"");
-    // props this panel must SHOW — named in the FULL action, plus any carried forward (ledger)
-    const ownProps = ((typeof inFrameProps==="function") ? inFrameProps(sh, scene, ctx.charById, ctx.propById) : (sh.props||[]))
-      .map(id=>(ctx.propById||{})[id]).filter(Boolean).map(p=> p.name + (p.ownerName?(" ("+p.ownerName+"'s)"):""));
-    const carried = (_ledger[sh.id]||[]).map(pid=>(ctx.propById||{})[pid]).filter(Boolean)
-      .map(p=> p.name + (p.ownerName?(" ("+p.ownerName+"'s)"):""));
-    const propsInFrame = Array.from(new Set([...ownProps, ...carried]));
-    return { panel:i+1, position:pos, beat:beat, in_frame:who||undefined,
-      camera:st.camera, motion:st.motion, action:st.action,
-      staging: (fullAction && fullAction!==st.action) ? fullAction : undefined,
-      performance:st.performance,
-      props_in_frame: propsInFrame.length ? propsInFrame : undefined };
+/* ============================================================================
+   PAGINATION — pages break on BEAT BOUNDARIES. A page packs whole beats up to 4
+   shots; a beat never splits across pages unless it overflows a page on its own,
+   and a beat that WOULD fit on one page but not in the space left starts a fresh
+   page — so every page reads as whole beats. Page ids stay
+   "sbpage-<sceneId>-2x2-<index>": the Stage's clip→sheet/halves bridge and the
+   Art Room's progress count construct those ids directly, so the scheme is frozen.
+   ============================================================================ */
+const SB_PAGE_SIZE = 4;
+function sbPaginateBeats(shots, pageSize){
+  pageSize = pageSize || SB_PAGE_SIZE;
+  const beats=[]; let cur=null;
+  (shots||[]).forEach(sh=>{ const n=Number(sh.beatN)||0;
+    if(!cur || cur.n!==n){ cur={ n, shots:[] }; beats.push(cur); }
+    cur.shots.push(sh); });
+  const pages=[]; let page=[];
+  const flush=()=>{ if(page.length){ pages.push(page); page=[]; } };
+  beats.forEach(b=>{
+    let i=0;
+    while(i < b.shots.length){
+      const space = pageSize - page.length;
+      const left = b.shots.length - i;
+      if(!space){ flush(); continue; }
+      if(left > space && b.shots.length <= pageSize && page.length){ flush(); continue; }
+      const take = Math.min(space, left);
+      page.push.apply(page, b.shots.slice(i, i+take)); i += take;
+    }
   });
-
-  const _lb = (ctx && (ctx._lookbookBrief||"")).trim();
-  const locName = (loc && loc.name) ? loc.name : (setting || "the location");
-  const _clean = (x)=>String(x||"").replace(/\.$/,"").trim();
-  const spec = {
-    task: "a cinematic STORYBOARD SHEET as ONE single image \u2014 a "+rows+"\u00d7"+cols+" grid of "+N+" sequential panels (read left-to-right, top-to-bottom) depicting ONE CONTINUOUS scene",
-    setting: setting || undefined,
-    continuous_take: "the panels are one continuous take broken into "+N+" sequential frames \u2014 the camera moves naturally around the action, same place, one unbroken flow of time \u2014 NOT "+N+" unrelated images",
-    video_clip: opts.clip ? ("THIS SHEET BOARDS ONE SINGLE VIDEO CLIP of about "+(opts.clip.dur||window.CLIP_MAX_SECONDS||15)+" seconds \u2014 stage the action and camera so motion flows seamlessly from panel to panel, one unbroken take, no time jumps") : undefined,
-    style: {
-      base: "cinematic"+(genre?(", "+genre+" tone"):"")+", live-action, photorealistic, lifelike, subtle 35mm film grain",
-      grade: _clean(grade) || undefined,
-      page_layout: vertical
-        ? "a 2:3 PORTRAIT sheet (1024×1536 canvas) that is a GRID of separate 9:16 panels — the SHEET is 2:3; each PANEL is 9:16; do NOT make the whole sheet a single 9:16 image"
-        : "a 3:2 LANDSCAPE sheet (1536×1024 canvas) that is a GRID of separate 16:9 panels — the SHEET is 3:2; each PANEL is 16:9; do NOT squeeze the whole sheet into 16:9 (that distorts the panels)",
-    },
-    atmosphere_light: light+"; "+mood,
-    visual_references: _lb ? ("translate their look (framing, composition, atmosphere), NOT their content: "+_lb.replace(/\s+/g," ")) : undefined,
-    grid: {
-      layout: "strict "+rows+"\u00d7"+cols+" grid; all panels exactly the same size, aligned to the grid; thin clean separators between panels; NO text or panel numbers INSIDE the panels",
-      panel_frame: vertical
-        ? "every panel's IMAGE is a VERTICAL 9:16 phone frame \u2014 clearly TALLER than it is wide \u2014 NEVER square, landscape or 4:3"
-        : "every panel's IMAGE is a WIDESCREEN 16:9 cinematic frame \u2014 clearly WIDER than it is tall, like a film still \u2014 NEVER square, portrait or 4:3",
-      canvas_geometry: (!vertical && cols===2 && rows===2)
-        ? "the canvas is 1536\u00d71024 \u2014 divide it into four equal 768\u00d7512 cells; each cell holds a 768\u00d7432 panel image (exactly 16:9) with its 80px annotation strip directly below"
-        : (!vertical && cols===3 && rows===3)
-        ? "the canvas is 1536\u00d71024 \u2014 divide it into nine equal 512\u00d7341 cells; each cell holds a 512\u00d7288 panel image (exactly 16:9) with its 53px annotation strip directly below"
-        : undefined,
-      empty_cells: rows*cols>N
-        ? ("the grid has "+(rows*cols)+" cells but only "+N+" panels: fill the FIRST "+N+" cells in reading order; the remaining "+(rows*cols-N)+" stay completely EMPTY \u2014 solid matte black, no image, no annotation strip; NEVER stretch, enlarge or re-arrange panels to fill the empty space")
-        : undefined,
-    },
-    annotation_strip: "UNDER EACH panel a thin off-white annotation strip carrying FOUR short lines of production notes in a clean, high-contrast sans-serif font (legible at the rendered grid size), formatted as screenplay slug lines: CAMERA (framing, angle & lens), MOTION (the camera movement), ACTION (what the subject does), PERFORMANCE (how the moment is played \u2014 or the spoken line on dialogue panels); 2\u20139 words per line, NEVER full sentences",
-    panels_rule: "DRAW each panel from its `staging` (the full description of what happens) — the `camera`/`motion`/`action`/`performance` lines are ONLY the short text for the baked annotation strip, not the limit of what to depict. Every object listed in a panel's `props_in_frame` MUST be clearly visible, held and used EXACTLY as the staging says (e.g. a doll clutched to the chest). Once a prop is established with an in-frame character, keep it present in later panels with that character unless that panel explicitly says it is dropped, destroyed, handed off, taken away, hidden, stowed, or leaves frame.",
-    panels: panels,
-    character_lock: cast.length ? {
-      rule: "every character appears IDENTICAL across all "+N+" panels (same face, build, hair, wardrobe, key props); the attached reference sheets are additional identity anchors \u2014 match them precisely",
-      characters: cast.map(sbCharLock),
-    } : undefined,
-    drama: (bm.desire||bm.obstacle) ? {
-      driver_wants: bm.desire ? ((bm.driverLabel?("("+bm.driverLabel+") "):"")+bm.desire) : undefined,
-      antagonism: bm.obstacle || undefined,
-    } : undefined,
-    location_lock: "EVERY panel is the SAME single physical place \u2014 "+locName+": identical architecture, walls, surfaces"+(loc&&loc.materials?(" ("+_clean(loc.materials)+")"):"")+", signage, fixtures, props, layout and lighting in every panel; only the camera framing/angle and the subject's action change from beat to beat \u2014 never relocate, redesign, re-decorate or re-light the space between panels; treat the ATTACHED LOCATION PLATE as ONE real set seen from different angles: reproduce its EXACT tiling pattern, wall colour, floor, edge markings, fixtures and any SIGNAGE TEXT in the SAME spelling and SAME positions in every panel; when the camera angle changes, show THAT SAME set from the new viewpoint",
-    narrative: scene.title||("Scene "+scene.no),
-    exclude: ["comic-book line art","speech bubbles","captions inside the frames","watermark","duplicate or inconsistent characters","blank panels"],
-    finish: "photoreal frames, sharp focus, legible annotation strips, "+asp,
-  };
-  return "Create ONE single storyboard-sheet image EXACTLY as specified by this JSON spec (continuity fields are binding):\n"+JSON.stringify(spec, null, 1);
-  return s;
+  flush();
+  let start=0;
+  return pages.map(p=>{ const o={ shots:p, start }; start += p.length; return o; });
 }
-window.buildStoryboardPagePrompt = buildStoryboardPagePrompt;
+/* page geometry for a scene's ordered shots — the SINGLE source of truth the Stage's
+   clip→sheet mapping (stage.jsx storyboardClipIds) shares, so a clip always finds the
+   sheet/halves its shots actually landed on. */
+function sbPageRanges(shots, pageSize){
+  return sbPaginateBeats(shots, pageSize).map(p=>({ start:p.start, count:p.shots.length }));
+}
+window.sbPageRanges = sbPageRanges;
 
 /* ============================================================================
-   COMPOSE FROM SHOT FRAMES — the zero-cost path. The Shot List already renders
-   per-shot frames with the anchor-consistency machinery; the sheet is then just
-   a VIEW over work already paid for: the frames laid into a 2×2 grid on a
-   canvas, with the CAMERA / MOTION / ACTION / PERFORMANCE strips drawn as REAL
-   text (always legible, always correct — the thing image models can't do).
-   Per-panel repair comes free: regenerate one shot in the Shot List, recompose.
-   The single-pass GPT Image 2 composite remains as the painterly fallback. */
+   COMPOSE FROM SHOT FRAMES — the sheet is just a VIEW over work already paid for:
+   the frames laid into a 2×2 grid on a canvas, in the format's native frame (16:9,
+   or vertical 9:16 for micro-drama), with the CAMERA / MOTION / ACTION /
+   PERFORMANCE strips drawn as REAL text. Per-panel repair comes free: regenerate
+   one shot in the Shot List, the sheet recomposes around it.
+   ============================================================================ */
 async function sbLoadBitmap(url){
   if(!url) return null;
   let revoke = null;
@@ -286,7 +160,7 @@ function sbWrapText(g, text, maxW, maxLines){
 async function composeStoryboardSheet(scene, page, ctx, beatsMap){
   const shots = page.shots || [];
   const N = shots.length; if(!N) return null;
-  const off = page.start || 0;   // scene-relative shot numbering (page 2+ / clip boards)
+  const off = page.start || 0;   // scene-relative shot numbering (page 2+)
   // gather the shots' generated frames (cache-first; cloud byte-cache makes this instant)
   const urls = [];
   for(const sh of shots){
@@ -295,7 +169,7 @@ async function composeStoryboardSheet(scene, page, ctx, beatsMap){
     urls.push(u || "");
   }
   if(!urls.some(Boolean)) return null;
-  // layout — same 2×2 grid shape as the painted sheet in the FORMAT's native frame (16:9, or vertical 9:16 for
+  // layout — a 2×2 grid in the FORMAT's native frame (16:9, or vertical 9:16 for
   // micro-drama), an annotation strip under each: CAMERA + MOTION one line each,
   // ACTION + PERFORMANCE up to TWO wrapped lines (fixed slots — 6 rows — so every
   // panel's strip is the same height)
@@ -315,7 +189,7 @@ async function composeStoryboardSheet(scene, page, ctx, beatsMap){
   for(let i=0;i<N;i++){
     const sh = shots[i], row = sbBeatRow(beatsMap, sh);
     const x = PAD + (i%cols)*(CELL_W+GAP), y = PAD + Math.floor(i/cols)*(CELL_H+GAP);
-    // frame (cover-fit; shot frames are 16:9 so this is exact in practice)
+    // frame (cover-fit; shot frames match the format aspect so this is exact in practice)
     const bm = bitmaps[i];
     if(bm && bm.img){
       const im=bm.img, s=Math.max(CELL_W/im.naturalWidth, IMG_H/im.naturalHeight);
@@ -328,14 +202,14 @@ async function composeStoryboardSheet(scene, page, ctx, beatsMap){
       g.fillStyle="#6f6a60"; g.font="500 15px 'Hanken Grotesk', sans-serif"; g.textAlign="center";
       g.fillText("Frame not generated — Shot "+scene.no+"."+(off+i+1), x+CELL_W/2, y+IMG_H/2-8);
       g.font="500 12px 'Space Mono', monospace";
-      g.fillText("generate it in the Shot List, then recompose", x+CELL_W/2, y+IMG_H/2+14);
+      g.fillText("generate it in the Shot List — the sheet recomposes itself", x+CELL_W/2, y+IMG_H/2+14);
       g.textAlign="left";
     }
     // annotation strip — real text, exact content
     const sy = y + IMG_H;
     g.fillStyle = "#f2eee4"; g.fillRect(x, sy, CELL_W, STRIP_H);
     g.strokeStyle = "#d8d2c2"; g.beginPath(); g.moveTo(x, sy+.5); g.lineTo(x+CELL_W, sy+.5); g.stroke();
-    const st = sbStrip(sh, scene, row, true);   // full text — the canvas wraps it
+    const st = sbStrip(sh, scene, row);
     const LABEL_X = x+12, VALUE_X = x+128, MAX_W = CELL_W-(VALUE_X-x)-12;
     let rowI = 0;
     SLOTS.forEach(([lab,key,maxL])=>{
@@ -356,77 +230,20 @@ async function composeStoryboardSheet(scene, page, ctx, beatsMap){
 }
 window.composeStoryboardSheet = composeStoryboardSheet;
 
-/* the whole SHEET as ONE composite image — GPT Image 2 draws every numbered panel
-   (frames + captions) in a single 16:9 pass (buildStoryboardPagePrompt), with the
-   scene's character sheets + location plate riding along as references. Same card
-   menu as a panel (View / Details / Edit / Regenerate / Clear). */
-function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId, onBatchDone, prevSheetId }){
+/* one SHEET card — the composed grid image + its furniture: options menu (view /
+   details / edit a panel / recompose / upload / save halves / clear), the saved-halves
+   manager (the Stage's hand-off), the per-panel repair flow, and the details modal.
+   The card also SELF-DERIVES: it composes on first view when frames exist, and a
+   composed sheet recomposes (debounced) when one of its frames re-renders. */
+function StoryboardComposite({ scene, page, ctx, beatsMap, onView }){
   const sid = "sbsheet-"+page.id;
-  const gen = useImageGen({
-    id: sid, slotId: sid,
-    buildFinal: ()=> (typeof buildStoryboardPagePrompt==="function")
-      ? buildStoryboardPagePrompt(scene, page.shots, ctx, beatsMap, { grid:page.grid, ...(page.clip?{clip:{dur:page.dur}}:{}) }) : "",
-    // A composite is one heavy image (a whole panel grid) — keep the reference set LEAN
-    // so the proxy doesn't time out. GPT Image 2 should paint the sheet as one cohesive
-    // pass, so Shot List frames are intentionally NOT used as GPT reference images.
-    attachments: async (gopts)=>{
-      const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
-        if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; };
-      const out=[], seen=new Set(); let chars=0, props=0;
-      // PREV-SHEET CHAINING (Part 3): the previous page's rendered sheet leads the reference
-      // set as the continuity anchor, so a manually-generated sheet continues the same cast
-      // looks, world and grade across pages/scenes — matching the Storyboard Director agent.
-      // Only for fresh generation (an edit flow rides its own refs); skipped if it's missing.
-      if(prevSheetId && !(gopts && Array.isArray(gopts.refIds) && gopts.refIds.length)){
-        const pu = await grab(prevSheetId); if(pu){ out.push({ url:pu, note:"the PREVIOUS sheet — continue its cast looks, world and colour grade; do NOT copy its panels or layout" }); seen.add(prevSheetId); }
-      }
-      // user-requested edit references ride FIRST (the edit panels' Reference chips)
-      const requested = (gopts && Array.isArray(gopts.refIds)) ? gopts.refIds : [];
-      for(const rid of requested){
-        const u = await grab(rid); if(!u) continue;
-        const opt = editRefOptions.find(o=>o.id===rid);
-        out.push({ url:u, note:(opt && opt.note) || "requested reference" }); seen.add(rid);
-      }
-      if(ctx.location && !seen.has(ctx.location.id)){ const u=await grab(ctx.location.id); if(u) out.push({url:u, note:(ctx.location.name||"the location")+" plate"}); }
-      // everyone in frame across the page's shots — derived from each shot's action
-      // text (inFrameCast), capped to keep the reference set lean.
-      // SCENE-WIDE: derive cast/props from ALL the scene's shots (not just this page's),
-      // so paginated pages 2,3… of the same scene attach the SAME referent input.
-      const shots = (ctx.sceneShots && ctx.sceneShots.length) ? ctx.sceneShots : (page.shots||[]);
-      const ids = [];
-      const _chars = Object.values(ctx.charById||{});
-      shots.forEach(sh=>{ const inc=(typeof inFrameCast==="function")?inFrameCast(sh, scene, _chars):(sh.subjects||[]);
-        inc.forEach(id=>{ if(ids.indexOf(id)<0) ids.push(id); }); });
-      for(const id of ids){ if(chars>=4) break; if(seen.has(id)) continue; seen.add(id);
-        const c=ctx.charById[id]; if(!c) continue;
-        const u=await grab(id); if(u){ out.push({url:u, note:c.name+"'s character sheet"}); chars++; } }
-      for(const id of sbPropIdsForPage(scene, shots, ctx)){ if(props>=4) break; if(seen.has(id)) continue; seen.add(id);
-        const p=ctx.propById[id]; if(!p) continue;
-        const u=await grab(id); if(u){ out.push({url:u, note:(p.name||"Prop")+" prop sheet"}); props++; } }
-      return out;
-    },
-    // the model receives the images as an ORDERED list with no captions — identify each
-    // reference by purpose so the prompt can keep location and character identity stable
-    attachmentsText: (attach)=> "REFERENCE IMAGES, IN ORDER: "
-      +(attach||[]).map((a,i)=>"image "+(i+1)+" = "+(a.note||"reference")).join("; ")+". "
-      +"Use these only as identity and location anchors. Paint the storyboard sheet as ONE cohesive single-pass image; "
-      +"the location plate, character sheets and prop sheets keep the place, recurring characters and carried objects IDENTICAL across all panels.",
-  });
-  const GPT2 = (window.NB_MODELS||[]).find(m=>/gpt-image/i.test(m.id));
-  // quality:"medium" is the timeout fix — a whole-grid composite at the default "high"
-  // routinely exceeds the ~150s proxy timeout. (imageSize is ignored by the proxy for
-  // OpenAI; size is fixed by aspect, so quality is the real lever.) A board isn't final art.
-  // the sheet's aspect follows the format's panel frame (a near-square grid of
-  // 9:16 panels reads as a 9:16 sheet; of 16:9 panels as a 16:9 sheet)
-  const sheetAsp = (typeof aspectFor==="function") ? aspectFor(ctx && ctx.project) : "16:9";
-  const doGen  = ()=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:sheetAsp, quality:"medium" });
-  const doEdit = (t)=> gen.generate({ model: GPT2?GPT2.id:undefined, aspectRatio:sheetAsp, quality:"medium", editInstruction:t, refIds:editRefSel.slice() });
-
-  // ---- compose-from-frames: how many of this page's shots already have frames ----
+  // store/display ONLY — this tab never paints sheets; compose-from-frames is the path
+  const gen = useImageGen({ id: sid, slotId: sid });
   const shotIds = (page.shots||[]).map(s=>s.id);
   const [ready, setReady] = React.useState({ n:0, total:shotIds.length });
   const [composing, setComposing] = React.useState(false);
   const [composeErr, setComposeErr] = React.useState("");
+  const sheetAsp = (typeof aspectFor==="function") ? aspectFor(ctx && ctx.project) : "16:9";
 
   // split the sheet into halves and save both to the project's image store (cloud) —
   // the Stage's video-generation hand-off; no local files to manage. Saved halves are
@@ -449,35 +266,18 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
   };
   React.useEffect(()=>{ let alive=true; (async()=>{ if(alive) await loadHalves(); })(); return ()=>{ alive=false; }; },[sid]);
 
-  // WHAT WENT INTO THIS SHEET — the reference images recorded when the displayed
-  // image was generated (location plate, character sheets, prop sheets), shown
-  // as chips so the prompt's ingredients are visible at a glance.
-  const [usedRefs, setUsedRefs] = React.useState(null);
-  React.useEffect(()=>{
-    let alive = true;
-    (async()=>{
-      if(!gen.genUrl){ if(alive) setUsedRefs(null); return; }
-      try{ const d = await gen.loadDetails(); if(alive) setUsedRefs((d && d.refs) || []); }
-      catch(e){ if(alive) setUsedRefs([]); }
-    })();
-    return ()=>{ alive=false; };
-  },[gen.genUrl]);
-
-  // BUILT FROM — the reference images this sheet locks to, as small thumbnails (click to
-  // enlarge): the location plate, in-frame character sheets and prop sheets, plus any user-ADDED
-  // references. Recomputed live so they're always displayable.
-  const [refImgs, setRefImgs] = React.useState([]);   // auto influences, DERIVED from Characters/Props/Locations
+  // BUILT FROM — the reference images this sheet's frames lock to, as small thumbnails
+  // (click to enlarge): the location plate, in-frame character sheets and prop sheets.
+  // Recomputed live so they're always displayable.
+  const [refImgs, setRefImgs] = React.useState([]);
   const _sbRefKey = [page.id, gen.genUrl||"", (page.shots||[]).map(s=>s.id).join(","),
-    (ctx.location&&ctx.location.id)||"", prevSheetId||""].join("|");
+    (ctx.location&&ctx.location.id)||""].join("|");
   React.useEffect(()=>{
     let alive = true;
     (async()=>{
       const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
         if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u||""; };
       const out=[], seen=new Set();
-      // PREVIOUS sheet (e.g. page 1 → page 2 of the same scene) leads as the continuity
-      // anchor — the same sheet the generation chains in (see attachments prevSheetId).
-      if(prevSheetId){ const pu=await grab(prevSheetId); if(pu){ out.push({ url:pu, label:"Previous sheet — continuity anchor", kind:"anchor" }); seen.add(prevSheetId); } }
       const shots = (ctx.sceneShots && ctx.sceneShots.length) ? ctx.sceneShots : (page.shots||[]);   // scene-wide refs (same across pages)
       if(ctx.location){ const u=await grab(ctx.location.id); if(u){ out.push({ url:u, label:(ctx.location.name||"Location")+" plate", kind:"location" }); seen.add(ctx.location.id); } }
       const ids=[]; const _chars=Object.values(ctx.charById||{});
@@ -489,9 +289,8 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
     return ()=>{ alive=false; };
   },[_sbRefKey]);
 
-  // optional EXTRA REFERENCES for sheet/panel edits — the scene's characters, props
-  // and location plate, opt-in chips on the edit panels so an edit can be pinned to
-  // the canon designs.
+  // optional EXTRA REFERENCES for panel edits — the scene's characters, props and
+  // location plate, opt-in chips so a panel repair can be pinned to the canon designs.
   const [editRefSel, setEditRefSel] = React.useState([]);
   const editRefOptions = React.useMemo(()=>{
     const seen = new Set(), out = [];
@@ -514,6 +313,7 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
     editRefOptions.map(o=> _sbEl("button",{key:o.id, className:"sb-editref-chip"+(editRefSel.indexOf(o.id)>=0?" on":""),
       title:"Attach "+o.note+" to this edit so the model matches that design exactly",
       onClick:()=>toggleEditRef(o.id)}, o.label)));
+
   // the sheet version the halves must match to count as "already saved"
   const sheetVersion = ()=>{ const m = gen.genMeta || ((typeof nbGetMeta==="function") ? nbGetMeta(sid) : null) || {};
     return String(m.iso||m.ts||m.version||""); };
@@ -563,6 +363,36 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
     catch(e){ setHalvesErr("Couldn't delete the "+h+" half — "+((e&&e.message)||e)); return; }
     await loadHalves();
   };
+
+  // ---- self-derivation: the sheet is a VIEW over the shot frames ----------------
+  const isComposed = !!((gen.genMeta && gen.genMeta.composed) || ((typeof nbGetMeta==="function") && (nbGetMeta(sid)||{}).composed));
+  const [panelBusy, setPanelBusy] = React.useState(false);
+  // refs so the nb-gen-done listener (registered once per page) always sees fresh state
+  const isComposedRef = React.useRef(isComposed); isComposedRef.current = isComposed;
+  const panelBusyRef = React.useRef(panelBusy);   panelBusyRef.current = panelBusy;
+  const composingRef = React.useRef(composing);   composingRef.current = composing;
+  const readyRef     = React.useRef(ready);       readyRef.current = ready;
+  const autoTimer    = React.useRef(null);
+
+  // lay the existing shot frames into the sheet grid with REAL text strips —
+  // instant, zero generation cost, per-panel repair via the Shot List
+  const doCompose = async ()=>{
+    if(composingRef.current || !readyRef.current.n) return;
+    setComposing(true); setComposeErr("");
+    try{
+      const dataUrl = await composeStoryboardSheet(scene, page, ctx, beatsMap);
+      if(!dataUrl) throw new Error("The sheet couldn't be drawn from the shot frames — try regenerating the frames in the Shot List, then compose again.");
+      const meta = { model:"Composited from shot frames", composed:true, panels:page.shots.length,
+        missing: readyRef.current.total-readyRef.current.n, aspect:sheetAsp, ts:Date.now() };
+      const r = (typeof nbCommit==="function") ? await nbCommit(sid, dataUrl, meta, []) : null;
+      const url = (r && r.url) || dataUrl;
+      try{ sessionStorage.removeItem("turn_sb_hold_"+sid); }catch(e){}
+      window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:sid, url } }));
+    }catch(e){ setComposeErr("Compose failed — "+((e&&e.message)||e)); }
+    setComposing(false);
+  };
+  const doComposeRef = React.useRef(doCompose); doComposeRef.current = doCompose;
+
   React.useEffect(()=>{
     let alive = true;
     const count = async ()=>{
@@ -575,93 +405,77 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
       if(alive) setReady({ n, total:shotIds.length });
     };
     count();
-    // a shot frame generated elsewhere (Shot List) or warmed by prefetch updates the count
+    // a page shot's frame landed or RE-RENDERED (Shot List, chain render, panel edit):
+    // refresh the count, and if this sheet is a composed one, re-compose it around the
+    // new frame — the board always mirrors the latest frames. Debounced: a chain render
+    // delivers frames one by one. (Skipped while a panel edit owns the recompose, and
+    // never self-triggers: the compose commit dispatches with the SHEET's id, not a shot's.)
     const onChange = (e)=>{ const d=(e&&e.detail)||{};
-      if(d.id ? shotIds.indexOf(d.id)>=0 : true) count(); };
+      if(d.id ? shotIds.indexOf(d.id)<0 : false) return;
+      count();
+      if(d.id && isComposedRef.current && !panelBusyRef.current){
+        clearTimeout(autoTimer.current);
+        autoTimer.current = setTimeout(()=>{ doComposeRef.current(); }, 900);
+      }
+    };
     window.addEventListener("nb-gen-done", onChange);
     window.addEventListener("nb-prefetched", onChange);
-    return ()=>{ alive=false; window.removeEventListener("nb-gen-done", onChange); window.removeEventListener("nb-prefetched", onChange); };
+    return ()=>{ alive=false; clearTimeout(autoTimer.current);
+      window.removeEventListener("nb-gen-done", onChange); window.removeEventListener("nb-prefetched", onChange); };
   },[shotIds.join(",")]);
 
-  // ---- per-panel edit -------------------------------------------------------
-  // Composed sheet → edit the underlying SHOT FRAME (same language as the Shot
-  // List's edit), then recompose; the Shot List card adopts the new frame too.
-  // GPT-painted sheet → a panel-scoped edit instruction on the whole image.
+  // FIRST VIEW: a scene whose frames already exist gets its sheet composed
+  // automatically — the board builds itself from the shot chain. A Clear in this tab
+  // session holds the auto-compose off (sessionStorage) so it never fights the user.
+  const autoTried = React.useRef(false);
+  React.useEffect(()=>{ autoTried.current=false; },[sid]);
+  React.useEffect(()=>{
+    if(gen.genUrl || !ready.n || composing || autoTried.current) return;
+    try{ if(sessionStorage.getItem("turn_sb_hold_"+sid)==="1") return; }catch(e){}
+    autoTried.current = true;
+    doComposeRef.current();
+  },[gen.genUrl, ready.n, composing]);
+
+  // ---- per-panel repair --------------------------------------------------------
+  // Edit the underlying SHOT FRAME (same language as the Shot List's edit), then
+  // recompose; the Shot List card adopts the new frame too. Composed sheets only —
+  // an uploaded sheet has no per-shot frames to edit through.
   const [panelEdit, setPanelEdit] = React.useState(null);   // {idx:int|null, text:string} | null
-  const [panelBusy, setPanelBusy] = React.useState(false);
   const [panelErr, setPanelErr] = React.useState("");
-  const isComposed = !!((gen.genMeta && gen.genMeta.composed) || ((typeof nbGetMeta==="function") && (nbGetMeta(sid)||{}).composed));
   const applyPanelEdit = async ()=>{
-    if(!panelEdit || panelEdit.idx==null || !panelEdit.text.trim() || panelBusy || gen.gening || composing) return;
+    if(!panelEdit || panelEdit.idx==null || !panelEdit.text.trim() || panelBusy || composing || !isComposed) return;
     const text = panelEdit.text.trim();
     const i = panelEdit.idx, sh = page.shots[i];
     setPanelErr("");
-    if(isComposed){
-      // edit the shot's frame itself, then recompose the sheet around it
-      setPanelBusy(true);
-      try{
-        let frame = (typeof nbGetImage==="function") ? nbGetImage(sh.id) : "";
-        if(!frame && typeof nbLoadImage==="function"){ try{ frame = await nbLoadImage(sh.id); }catch(e){} }
-        if(!frame) throw new Error("This panel has no frame yet — generate it in the Shot List first.");
-        const prompt = "Edit this film frame. Apply ONLY this change: "+text+". "
-          +"Everything the instruction does NOT name stays IDENTICAL to the reference — the same characters "
-          +"(identical faces & wardrobe), the same location and set, the same lighting and colour grade, and "
-          +"(unless the instruction changes them) the same shot size, lens and staging. Do not re-imagine the frame.";
-        // quality:"medium" is the GPT Image 2 timeout lever (a frame edit at the default
-        // "high" routinely exceeds the ~150s proxy timeout); other models ignore it.
-        const extra = [];
-        for(const rid of editRefSel){ let u=(typeof nbGetImage==="function")?nbGetImage(rid):"";
-          if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(rid); }catch(e){} } if(u) extra.push(u); }
-        const url = await nbGenerate(prompt + (extra.length?" Additional reference images are attached (character sheets / location plate) — match those identities and that exact set faithfully.":""),
-          { referenceImage:frame, aspectRatio:sheetAsp, quality:"medium", ...(extra.length?{extraImages:extra}:{}) });
-        const prior = (typeof nbGetMeta==="function") ? (nbGetMeta(sh.id)||{}) : {};
-        const now = new Date();
-        const meta = { ...prior, mode:"edit", editInstruction:text, prompt,
-          date:now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
-          time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
-          iso:now.toISOString(), version:((prior.version||1)+1) };
-        const r = (typeof nbCommit==="function") ? await nbCommit(sh.id, url, meta, [{kind:"edit",label:"Previous frame (edited)",url:frame}], "shot") : null;
-        window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:sh.id, url:(r&&r.url)||url } }));
-        setPanelEdit(null);
-        await doCompose();   // rebuild the sheet with the repaired panel
-      }catch(e){ setPanelErr((e&&e.message)||"Edit failed."); }
-      setPanelBusy(false);
-    } else {
-      // painted sheet: scope the edit to the one panel by its grid position
-      const N = page.shots.length, { cols, rows } = sbGridShape(N, page.grid);
-      const pos = sbGridPos(i, cols, rows);
-      setPanelEdit(null);
-      doEdit("PANEL "+(i+1)+" ONLY (the "+pos+" panel of the grid): "+text
-        +". Change ONLY that panel — every other panel, the grid layout, separators and ALL annotation strips remain EXACTLY as in the reference image.");
-    }
-  };
-
-  // lay the existing shot frames into the sheet grid with REAL text strips —
-  // instant, zero generation cost, per-panel repair via the Shot List
-  const doCompose = async ()=>{
-    if(gen.gening || composing || !ready.n) return;
-    setComposing(true); setComposeErr("");
+    setPanelBusy(true);
     try{
-      const dataUrl = await composeStoryboardSheet(scene, page, ctx, beatsMap);
-      if(!dataUrl) throw new Error("The sheet couldn't be drawn from the shot frames — try regenerating the frames in the Shot List, then compose again.");
-      const meta = { model:"Composited from shot frames", composed:true, panels:page.shots.length,
-        missing: ready.total-ready.n, aspect:"3-col grid", ts:Date.now() };
-      const r = (typeof nbCommit==="function") ? await nbCommit(sid, dataUrl, meta, []) : null;
-      const url = (r && r.url) || dataUrl;
-      window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:sid, url } }));
-    }catch(e){ setComposeErr("Compose failed — "+((e&&e.message)||e)); }
-    setComposing(false);
+      let frame = (typeof nbGetImage==="function") ? nbGetImage(sh.id) : "";
+      if(!frame && typeof nbLoadImage==="function"){ try{ frame = await nbLoadImage(sh.id); }catch(e){} }
+      if(!frame) throw new Error("This panel has no frame yet — generate it in the Shot List first.");
+      const prompt = "Edit this film frame. Apply ONLY this change: "+text+". "
+        +"Everything the instruction does NOT name stays IDENTICAL to the reference — the same characters "
+        +"(identical faces & wardrobe), the same location and set, the same lighting and colour grade, and "
+        +"(unless the instruction changes them) the same shot size, lens and staging. Do not re-imagine the frame.";
+      // quality:"medium" is the GPT Image 2 timeout lever (a frame edit at the default
+      // "high" routinely exceeds the ~150s proxy timeout); other models ignore it.
+      const extra = [];
+      for(const rid of editRefSel){ let u=(typeof nbGetImage==="function")?nbGetImage(rid):"";
+        if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(rid); }catch(e){} } if(u) extra.push(u); }
+      const url = await nbGenerate(prompt + (extra.length?" Additional reference images are attached (character sheets / location plate) — match those identities and that exact set faithfully.":""),
+        { referenceImage:frame, aspectRatio:sheetAsp, quality:"medium", ...(extra.length?{extraImages:extra}:{}) });
+      const prior = (typeof nbGetMeta==="function") ? (nbGetMeta(sh.id)||{}) : {};
+      const now = new Date();
+      const meta = { ...prior, mode:"edit", editInstruction:text, prompt,
+        date:now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
+        time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}),
+        iso:now.toISOString(), version:((prior.version||1)+1) };
+      const r = (typeof nbCommit==="function") ? await nbCommit(sh.id, url, meta, [{kind:"edit",label:"Previous frame (edited)",url:frame}], "shot") : null;
+      window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:sh.id, url:(r&&r.url)||url } }));
+      setPanelEdit(null);
+      await doCompose();   // rebuild the sheet with the repaired panel
+    }catch(e){ setPanelErr((e&&e.message)||"Edit failed."); }
+    setPanelBusy(false);
   };
-
-  // batch ("Generate all sheets") — when this sheet is the active id, generate it,
-  // then advance the queue when it finishes (mirrors the Shot List batch).
-  const batchStarted=React.useRef(false), wasGening=React.useRef(false);
-  React.useEffect(()=>{ const mine=batchActiveId===sid;
-    if(!mine){ batchStarted.current=false; wasGening.current=gen.gening; return; }
-    if(!batchStarted.current && !gen.gening){ batchStarted.current=true; wasGening.current=false; doGen(); return; }
-    if(batchStarted.current && wasGening.current && !gen.gening){ batchStarted.current=false; onBatchDone && onBatchDone(sid); }
-    wasGening.current=gen.gening;
-  },[batchActiveId, gen.gening, sid]);
 
   const [menuOpen,setMenuOpen]=React.useState(false);
   const [detailsOpen,setDetailsOpen]=React.useState(false);
@@ -671,12 +485,16 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
     document.addEventListener("mousedown",h); return ()=>document.removeEventListener("mousedown",h); },[menuOpen]);
 
   const name = (scene.title||("Scene "+scene.no))+" — storyboard sheet";
-  // upload a finished storyboard sheet from the machine (made elsewhere, e.g. GPT Image 2)
-  // — reuses the shared importSheet so it commits to this sheet's slot at full resolution.
+  // upload a finished storyboard sheet from the machine (made elsewhere) — reuses the
+  // shared importSheet so it commits to this sheet's slot at full resolution.
   const sbUploadRef = React.useRef(null);
   const pickUpload = ()=>{ if(sbUploadRef.current) sbUploadRef.current.click(); };
   const onUploadPicked = (e)=>{ const f=e.target.files&&e.target.files[0]; if(f && gen.importSheet) gen.importSheet(f); e.target.value=""; };
-  return _sbEl("div",{className:"sb-comp"+(batchActiveId===sid?" batch-on":""),"data-sbsheet":page.id},
+  const clearSheet = ()=>{ setMenuOpen(false);
+    // hold off the auto-compose for the rest of this tab session, so Clear sticks
+    try{ sessionStorage.setItem("turn_sb_hold_"+sid,"1"); }catch(e){}
+    gen.clearGen(); };
+  return _sbEl("div",{className:"sb-comp","data-sbsheet":page.id},
     _sbEl("input",{type:"file",accept:"image/png,image/jpeg,image/webp,image/avif",ref:sbUploadRef,style:{display:"none"},onChange:onUploadPicked}),
     _sbEl("div",{className:"sb-comp-frame"},
       gen.genUrl && _sbEl("div",{className:"sheet-tools-menu sb-tpanel-menu",ref:menuRef},
@@ -684,21 +502,19 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
         menuOpen && _sbEl("div",{className:"sheet-tools-dropdown"},
           _sbEl("button",{className:"sheet-tools-item",onClick:()=>{ onView({url:gen.genUrl,character:{name}}); setMenuOpen(false); }}, _sbEl(Icon.eye,{s:13}),"View full"),
           _sbEl("button",{className:"sheet-tools-item",onClick:()=>{ setDetailsOpen(true); setMenuOpen(false); }}, _sbEl(Icon.info,{s:13}),"Details"),
-          _sbEl("button",{className:"sheet-tools-item "+(gen.editMode?"on":""),onClick:()=>{ gen.setEditMode(m=>!m); gen.setEditText(""); setMenuOpen(false); }}, _sbEl(Icon.wand,{s:13}), gen.editMode?"Close edit":"Edit sheet"),
-          _sbEl("button",{className:"sheet-tools-item "+(panelEdit?"on":""),
+          _sbEl("button",{className:"sheet-tools-item "+(panelEdit?"on":""), disabled:!isComposed,
             title: isComposed ? "Edit one panel — the change is applied to that shot's frame, then the sheet recomposes"
-                              : "Edit one panel of the painted sheet by its grid position",
-            onClick:()=>{ setPanelEdit(panelEdit?null:{idx:null,text:""}); setPanelErr(""); setMenuOpen(false); }},
+                              : "Panel repair needs a composed sheet (it edits the shot's frame) — this sheet was uploaded or painted elsewhere",
+            onClick:()=>{ if(!isComposed) return; setPanelEdit(panelEdit?null:{idx:null,text:""}); setPanelErr(""); setMenuOpen(false); }},
             _sbEl(Icon.grid,{s:13}), panelEdit?"Close panel edit":"Edit a panel…"),
-          _sbEl("button",{className:"sheet-tools-item",disabled:gen.gening||composing||!ready.n,
+          _sbEl("button",{className:"sheet-tools-item",disabled:composing||!ready.n,
             title: ready.n ? "Recompose the sheet from the shots' current frames" : "No shot frames to compose from",
             onClick:()=>{ doCompose(); setMenuOpen(false); }}, _sbEl(Icon.board,{s:13}),"Recompose from frames"),
-          _sbEl("button",{className:"sheet-tools-item",disabled:gen.gening||composing,onClick:()=>{ doGen(); setMenuOpen(false); }}, _sbEl(Icon.sparkles,{s:13}),"Regenerate (GPT Image 2)", typeof window.nbCostChip==="function" && window.nbCostChip(1,{model:GPT2&&GPT2.id,quality:"medium"})),
-          _sbEl("button",{className:"sheet-tools-item",disabled:gen.gening||composing,onClick:()=>{ setMenuOpen(false); pickUpload(); }}, _sbEl(Icon.image,{s:13}),"Replace with upload"),
+          _sbEl("button",{className:"sheet-tools-item",disabled:composing,onClick:()=>{ setMenuOpen(false); pickUpload(); }}, _sbEl(Icon.image,{s:13}),"Replace with upload"),
           _sbEl("button",{className:"sheet-tools-item"+((halvesDone||halvesCurrent)?" on":""),disabled:!gen.genUrl||halvesBusy||halvesCurrent,
             title: halvesCurrent
-              ? "Both halves of this sheet version are already saved — regenerate or edit the sheet to re-save"
-              : "Split the sheet horizontally and save BOTH halves to your project (cloud) — on a 2×2 sheet each half is one panel row (two 16:9 frames side by side), ready for the Stage's video generation (e.g. Seedance)",
+              ? "Both halves of this sheet version are already saved — recompose or edit the sheet to re-save"
+              : "Split the sheet horizontally and save BOTH halves to your project (cloud) — on a 2×2 sheet each half is one panel row (two frames side by side), ready for the Stage's video generation (e.g. Seedance)",
             onClick:saveHalves},
             _sbEl(Icon.download,{s:13}),
             halvesBusy?"Saving halves…"
@@ -707,48 +523,38 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
               :(halves.top||halves.bottom)?"Re-save halves (sheet changed)"
               :"Save halves (for the Stage)"),
           _sbEl("div",{className:"sheet-tools-divider"}),
-          _sbEl("button",{className:"sheet-tools-item danger",onClick:()=>{ setMenuOpen(false); gen.clearGen(); }}, _sbEl(Icon.x,{s:13}),"Clear"))),
+          _sbEl("button",{className:"sheet-tools-item danger",onClick:clearSheet}, _sbEl(Icon.x,{s:13}),"Clear"))),
       gen.genUrl
         ? _sbEl("img",{className:"sb-comp-img",src:gen.genUrl,alt:"",loading:"lazy",onClick:()=>onView({url:gen.genUrl,character:{name}})})
-        : (gen.gening || composing)
+        : composing
           ? _sbEl("div",{className:"sb-comp-empty",style:{cursor:"default"}},
-              _sbEl("span",{className:"ns-spin"}),_sbEl("span",null, composing?"Composing sheet…":"Generating sheet…"))
+              _sbEl("span",{className:"ns-spin"}),_sbEl("span",null,"Composing sheet…"))
           : _sbEl("div",{className:"sb-comp-choices"},
               _sbEl("button",{className:"sb-comp-choice primary",onClick:doCompose,disabled:!ready.n,
                 title: ready.n ? "Lay the shots' generated frames into the sheet — instant, free, real text strips"
-                               : "No shot frames yet — generate frames in the Shot List first"},
+                               : "No shot frames yet — generate frames in the Shot List; the sheet composes itself"},
                 _sbEl(Icon.board,{s:16}),_sbEl("span",null,"Compose from shot frames"),
                 _sbEl("span",{className:"sb-comp-empty-sub"}, ready.n+" of "+ready.total+" frames ready · instant · free")),
-              _sbEl("button",{className:"sb-comp-choice",onClick:doGen,
-                title:"Paint the whole sheet as one image with GPT Image 2 (single pass)"},
-                _sbEl(Icon.sparkles,{s:16}),_sbEl("span",null,"Generate single sheet"), typeof window.nbCostChip==="function" && window.nbCostChip(1,{model:GPT2&&GPT2.id,quality:"medium"}),
-                _sbEl("span",{className:"sb-comp-empty-sub"}, page.shots.length+" panels · GPT Image 2 · 16:9")),
               _sbEl("button",{className:"sb-comp-choice",onClick:pickUpload,
-                title:"Import a finished storyboard sheet you made elsewhere (e.g. ChatGPT / GPT Image 2) at full resolution"},
+                title:"Import a finished storyboard sheet you made elsewhere at full resolution"},
                 _sbEl(Icon.image,{s:16}),_sbEl("span",null,"Upload a sheet"),
                 _sbEl("span",{className:"sb-comp-empty-sub"}, "from your computer · full resolution"))),
-      (gen.gening||composing||panelBusy) && gen.genUrl && _sbEl("div",{className:"sb-tpanel-spin"},
+      (composing||panelBusy) && gen.genUrl && _sbEl("div",{className:"sb-tpanel-spin"},
         _sbEl("span",{className:"ns-spin"}),
         _sbEl("span",{className:"sb-spin-lab"},
           panelBusy ? "Editing panel — regenerating that shot's frame…"
-          : composing ? "Composing sheet from shot frames…"
-          : "Repainting sheet with GPT Image 2 — this can take a minute or two…")),
-      /* generation/compose/halves failed: show the REAL error on the sheet (not a
-         hover-only icon) plus the way out — retry the failed action, or fall back to
-         the free compose when frames exist */
-      (gen.genErr || composeErr || (halvesErr && !(halves.top||halves.bottom))) && !gen.gening && !composing && !halvesBusy && _sbEl("div",{className:"sb-sheet-err"},
+          : "Composing sheet from shot frames…")),
+      /* compose/halves failed: show the REAL error on the sheet (not a hover-only
+         icon) plus the way out — retry the failed action */
+      (composeErr || (halvesErr && !(halves.top||halves.bottom))) && !composing && !halvesBusy && _sbEl("div",{className:"sb-sheet-err"},
         _sbEl(Icon.alert,{s:14}),
-        _sbEl("span",{className:"sb-sheet-err-msg"}, (!(halves.top||halves.bottom) && halvesErr) || composeErr || gen.genErr),
+        _sbEl("span",{className:"sb-sheet-err-msg"}, (!(halves.top||halves.bottom) && halvesErr) || composeErr),
         _sbEl("div",{className:"sb-sheet-err-acts"},
           _sbEl("button",{className:"sb-sheet-err-btn primary",
-            onClick:()=>{ if(halvesErr){ saveHalves(); } else if(composeErr){ doCompose(); } else { doGen(); } }},
-            "Try again"),
-          !composeErr && !halvesErr && ready.n>0 && _sbEl("button",{className:"sb-sheet-err-btn",
-            onClick:()=>doCompose(),
-            title:"Lay the shots' already-generated frames into the sheet — instant, no image model involved"},
-            "Compose from frames instead")))),
-    /* BUILT FROM — reference images this sheet locks to, as small thumbnails (click to
-       enlarge); DERIVED from the in-frame Characters, Props and Locations, without Shot-frame keyframes */
+            onClick:()=>{ if(halvesErr){ saveHalves(); } else { doCompose(); } }},
+            "Try again")))),
+    /* BUILT FROM — reference images the sheet's frames lock to, as small thumbnails
+       (click to enlarge); DERIVED from the in-frame Characters, Props and Locations */
     refImgs.length>0 && _sbEl("div",{className:"shot-refs sb-refs"},
       _sbEl("div",{className:"shot-refs-lab"}, _sbEl(Icon.layers,{s:11}),"Built from — derived from Characters, Props & Locations"),
       _sbEl("div",{className:"shot-refs-row"},
@@ -759,8 +565,6 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
     /* saved halves — the Stage's video-gen hand-off, managed in place: view, restore
        the previous saved version, or delete. Stale halves (cut from an older sheet
        version) say so and point at the ⋮ menu's re-save. */
-    gen.genUrl && window.QaCheckButton && _sbEl("div",{className:"card-qa-row sb-qa-row"},
-      _sbEl(window.QaCheckButton,{ gen, name:name, noun:"storyboard sheet" })),
     (halves.top||halves.bottom) && _sbEl("div",{className:"sb-halves"},
       _sbEl("button",{className:"sb-halves-head",onClick:()=>setHalvesOpen(o=>!o),
         "aria-expanded":halvesOpen?"true":"false",
@@ -782,16 +586,7 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
               title:"Delete this saved half from the project — the sheet itself is untouched"},"Delete"))))),
       halvesOpen && halvesErr && _sbEl("div",{className:"sb-halves-err"}, _sbEl(Icon.alert,{s:12}), halvesErr)),
 
-    gen.editMode && gen.genUrl && _sbEl("div",{className:"sheet-edit-panel"},
-      _sbEl("input",{className:"sheet-edit-input",type:"text",autoFocus:true,placeholder:"Describe a change to the whole sheet…  e.g. tighter panels, warmer grade",
-        value:gen.editText,onChange:e=>gen.setEditText(e.target.value),
-        onKeyDown:e=>{ if(e.key==="Enter"&&gen.editText.trim()) doEdit(gen.editText.trim()); if(e.key==="Escape"){ gen.setEditMode(false); gen.setEditText(""); } }}),
-      editRefChips("sheet-edit-refs"),
-      _sbEl("div",{className:"sheet-edit-acts"},
-        _sbEl("button",{className:"sheet-edit-apply",disabled:!gen.editText.trim()||gen.gening,onClick:()=>doEdit(gen.editText.trim())}, _sbEl(Icon.wand,{s:12}),"Apply edit"),
-        _sbEl("button",{className:"sheet-edit-cancel",onClick:()=>{ gen.setEditMode(false); gen.setEditText(""); }},"Cancel"))),
-
-    // per-panel edit: pick the panel, describe the change
+    // per-panel repair: pick the panel, describe the change
     panelEdit && gen.genUrl && _sbEl("div",{className:"sheet-edit-panel sb-panel-edit"},
       _sbEl("div",{className:"sb-panel-chips"},
         page.shots.map((sh,i)=> _sbEl("button",{key:sh.id,
@@ -801,15 +596,13 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
           scene.no+"."+((page.start||0)+i+1),
           _sbEl("span",{className:"sb-panel-chip-sub"},(typeof shotSizeOf==="function")?shotSizeOf(sh.size).label:(sh.size||""))))),
       panelEdit.idx!=null && _sbEl("input",{className:"sheet-edit-input",type:"text",autoFocus:true,
-        placeholder: isComposed
-          ? "Change panel "+scene.no+"."+((page.start||0)+panelEdit.idx+1)+" — edits that shot's frame, then recomposes…"
-          : "Change panel "+scene.no+"."+((page.start||0)+panelEdit.idx+1)+" only — the rest of the sheet stays…",
+        placeholder:"Change panel "+scene.no+"."+((page.start||0)+panelEdit.idx+1)+" — edits that shot's frame, then recomposes…",
         value:panelEdit.text,onChange:e=>setPanelEdit(p=>({ ...p, text:e.target.value })),
         onKeyDown:e=>{ if(e.key==="Enter") applyPanelEdit(); if(e.key==="Escape") setPanelEdit(null); }}),
       panelErr && _sbEl("div",{className:"sb-panel-err"}, _sbEl(Icon.alert,{s:12}), panelErr),
       editRefChips("panel-edit-refs"),
       _sbEl("div",{className:"sheet-edit-acts"},
-        _sbEl("button",{className:"sheet-edit-apply",disabled:panelEdit.idx==null||!panelEdit.text.trim()||panelBusy||gen.gening||composing,
+        _sbEl("button",{className:"sheet-edit-apply",disabled:panelEdit.idx==null||!panelEdit.text.trim()||panelBusy||composing,
           onClick:applyPanelEdit},
           _sbEl(Icon.wand,{s:12}), panelBusy?"Editing panel…":"Apply to panel"),
         _sbEl("button",{className:"sheet-edit-cancel",onClick:()=>setPanelEdit(null)},"Cancel"))),
@@ -817,29 +610,16 @@ function StoryboardComposite({ scene, page, ctx, beatsMap, onView, batchActiveId
       onClose:()=>setDetailsOpen(false), onView:(url)=>onView({url,character:{name}}) }), document.body));
 }
 
-/* one scene PAGE = a storyboard SHEET: a header bar + the composite single-sheet image
-   (the whole page drawn in one pass), plus a beat-briefs expander. */
-function StoryboardPage({ project, scene, page, pageCount, ctx, beatsMap, onView, jumpToShot, batchActiveId, onBatchDone, prevSheetId }){
-  const clipMax = (typeof clipMaxFor==="function") ? clipMaxFor(project) : 15;
+/* one scene PAGE = a storyboard SHEET: a header bar + the composed sheet image,
+   plus a beat-briefs expander. */
+function StoryboardPage({ project, scene, page, pageCount, ctx, beatsMap, onView, jumpToShot }){
   return _sbEl("div",{className:"sb-sheet","data-sbpage":page.id},
     _sbEl("div",{className:"sb-sheet-head"},
       _sbEl("span",{className:"sb-sheet-hi"}, _sbEl("b",null,"PROJECT: "), (project&&project.title)||"Untitled film"),
       _sbEl("span",{className:"sb-sheet-hi"}, _sbEl("b",null,"SCENE: "), String(scene.no).padStart(2,"0")),
       _sbEl("span",{className:"sb-sheet-hi"}, _sbEl("b",null,"TITLE: "), scene.title||"Untitled scene"),
-      page.clip
-        ? _sbEl("span",{className:"sb-sheet-hi page"+((page.dur||0)>clipMax?" clip-over":""),
-            title:(page.dur||0)>clipMax
-              ? "≈"+page.dur+"s — over the "+clipMax+"s clip budget; split it in the Shot List's Clips strip"
-              : "One generated video clip — ≈"+page.dur+"s of the "+clipMax+"s budget"},
-            _sbEl("b",null,"CLIP: "), (page.index+1)+" of "+pageCount+" · ≈"+(page.dur||0)+"s")
-        : _sbEl("span",{className:"sb-sheet-hi page"}, _sbEl("b",null,"PAGE: "), (page.index+1)+" of "+pageCount)),
-    _sbEl(StoryboardComposite,{ scene, page, ctx, beatsMap, onView, batchActiveId, onBatchDone, prevSheetId }),
-
-    // the exact prompt GPT Image 2 paints the WHOLE sheet from in one pass (the
-    // 'Generate single sheet' / 'Regenerate (GPT Image 2)' path), read-only + copyable
-    (typeof buildStoryboardPagePrompt==="function") && _sbEl(CardFold,{label:"Sheet prompt — GPT Image 2 single pass",defaultOpen:false},
-      _sbEl(CopyBox,{label:"The prompt sent to GPT Image 2 to paint this whole sheet in one pass",
-        text: buildStoryboardPagePrompt(scene, page.shots, ctx, beatsMap, { grid:page.grid, ...(page.clip?{clip:{dur:page.dur}}:{}) }) })),
+      _sbEl("span",{className:"sb-sheet-hi page"}, _sbEl("b",null,"PAGE: "), (page.index+1)+" of "+pageCount)),
+    _sbEl(StoryboardComposite,{ scene, page, ctx, beatsMap, onView }),
 
     // full per-panel detail — Shot List fields + Writers' Room beat subtext + the final frame prompt
     _sbEl(CardFold,{label:"Beat & shot briefs",defaultOpen:false},
@@ -873,11 +653,9 @@ function StoryboardPage({ project, scene, page, pageCount, ctx, beatsMap, onView
       })));
 }
 
-function StoryboardView({ project, scenes, shots, characters, props, locations, beatsMap, setArtView, onDirect }){
+function StoryboardView({ project, scenes, shots, characters, props, locations, beatsMap, setArtView }){
   const [view, setView]   = React.useState(null);   // lightbox {url, character}
-  const [frames, setFrames] = React.useState({});    // pageId -> url (for the progress count)
-  const batch = (typeof useBatchGen==="function") ? useBatchGen() : { activeId:null, begin:()=>{}, advance:()=>{}, setMsg:()=>{} };
-  const batchActiveId = batch.activeId;
+  const [frames, setFrames] = React.useState({});    // sheetId -> url (for the progress count)
 
   const ordered = React.useMemo(()=> scenesInStoryOrder(scenes), [scenes]);
   const shotsByScene = React.useMemo(()=>{
@@ -889,29 +667,21 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
   const propById = React.useMemo(()=>{ const m={}; (props||[]).forEach(p=>m[p.id]=p); return m; },[props]);
   const ctxFor = (scene)=>({ scene, location:(typeof locationForScene==="function")?locationForScene(locations,scene.id):null, charById, propById, project, locations:locations||[], sceneShots:(shotsByScene[scene.id]||[]) });
 
-  // Storyboards are fixed to scene sheets in a 2×2 grid. This keeps every panel in
-  // the strongest 16:9 geometry.
-  const sbGrid = "2x2";
-  const pageSize = 4;
-  React.useEffect(()=>{ window.SB_PAGE_SIZE = 4; },[]);
-
-  // scene -> its pages (scene mode: chunks of the grid's page size; clip mode: one page per sequence)
+  // scene -> its sheets: 2×2 pages packed on BEAT boundaries (sbPaginateBeats); the id
+  // scheme is frozen — the Stage's clip→sheet bridge + the Art Room progress build them.
   const pagesByScene = React.useMemo(()=> ordered
     .filter(s=>(shotsByScene[s.id]||[]).length)
     .map(scene=>({
       scene,
-      pages: sbChunk(shotsByScene[scene.id]||[], pageSize).map((shots,index)=>({
-        id:"sbpage-"+scene.id+"-2x2-"+index, index, shots, start:index*pageSize, grid:sbGrid }))
-    })), [ordered, shotsByScene, pageSize, sbGrid]);
+      pages: sbPaginateBeats(shotsByScene[scene.id]||[]).map((pg,index)=>({
+        id:"sbpage-"+scene.id+"-2x2-"+index, index, shots:pg.shots, start:pg.start, grid:"2x2" }))
+    })), [ordered, shotsByScene]);
   const allSheetIds = React.useMemo(()=> pagesByScene.flatMap(g=>g.pages.map(p=>"sbsheet-"+p.id)), [pagesByScene]);
-  // prev-sheet chaining (Part 3): each sheet's continuity anchor is the one before it in
-  // story order (across pages AND scenes), so manual per-card generation continues the look.
-  const prevSheetOf = React.useMemo(()=>{ const m={}; allSheetIds.forEach((id,i)=>{ m[id]= i>0 ? allSheetIds[i-1] : null; }); return m; }, [allSheetIds]);
 
   // one scene at a time — ← / → pager instead of one long scroll
   const [pIdx, setPIdx] = useScenePager(pagesByScene.length);
 
-  // load sheet image urls (for the X-of-Y progress) + adopt freshly generated ones
+  // load sheet image urls (for the X-of-Y progress) + adopt freshly composed ones
   React.useEffect(()=>{
     let alive = true;
     (async ()=>{
@@ -940,16 +710,12 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
   React.useEffect(()=>{ try{ localStorage.setItem("turn_sb_collapsed", JSON.stringify(collapsed)); }catch(e){} },[collapsed]);
   const toggleScene = (id)=> setCollapsed(c=>({ ...c, [id]: !c[id] }));
 
-  // "Generate all sheets" advances by watching MOUNTED sheet cards — expand all first
-  const startAll = ()=>{ if(batchActiveId || !allSheetIds.length) return; setCollapsed({}); batch.begin(allSheetIds, 0); };
-
   // compose every sheet whose shots have frames — instant per sheet, no generation cost
   const [composingAll, setComposingAll] = React.useState(null);   // {i,total} | null
   const composeAll = async ()=>{
-    if(composingAll || batchActiveId) return;
+    if(composingAll) return;
     const jobs = pagesByScene.flatMap(g=>g.pages.map(p=>({ scene:g.scene, page:p })));
     setComposingAll({ i:0, total:jobs.length });
-    let made = 0;
     for(let i=0;i<jobs.length;i++){
       setComposingAll({ i:i+1, total:jobs.length });
       const { scene, page } = jobs[i];
@@ -958,8 +724,8 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
         if(!dataUrl) continue;   // no frames for this scene yet — skip, don't blank it
         const meta = { model:"Composited from shot frames", composed:true, panels:page.shots.length, ts:Date.now() };
         const r = (typeof nbCommit==="function") ? await nbCommit("sbsheet-"+page.id, dataUrl, meta, []) : null;
+        try{ sessionStorage.removeItem("turn_sb_hold_"+"sbsheet-"+page.id); }catch(e){}
         window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:"sbsheet-"+page.id, url:(r&&r.url)||dataUrl } }));
-        made++;
       }catch(e){}
     }
     setComposingAll(null);
@@ -987,14 +753,14 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
       _sbEl("div",{className:"art-intro"},
         _sbEl("div",{className:"art-intro-row"},
           _sbEl("div",{style:{flex:1}},
-            _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboard Director",
-              _sbEl(window.InfoTip,{label:"About the Storyboard",
-                text:"Each scene becomes one storyboard sheet — a single composite image of the scene's panels, drawn by GPT Image 2 in one pass."}))))),
+            _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboards",
+              _sbEl(window.InfoTip,{label:"About Storyboards",
+                text:"Storyboards are the presentation layer of your shot chain: each scene's generated shot frames lay into printable 2×2 sheets — paginated on beat boundaries, with real CAMERA / MOTION / ACTION / PERFORMANCE annotations — and re-compose automatically whenever a frame re-renders."}))))),
       _sbEl("div",{className:"prop-empty"},
         _sbEl("div",{className:"art-soon-ic"},_sbEl(Icon.board,{s:30})),
         _sbEl("div",{className:"art-soon-t"},"No shots to board yet"),
         _sbEl("div",{className:"art-soon-d"},
-          "Break your scenes into shots in the Shot List — each scene then becomes a storyboard sheet you can generate here."),
+          "Break your scenes into shots in the Shot List and generate their frames — each scene's storyboard sheet then composes itself here."),
         _sbEl("button",{className:"art-draftall",style:{marginTop:16},onClick:()=> setArtView && setArtView("shots")},
           _sbEl(Icon.film,{s:14}),"Go to Shot List")));
   }
@@ -1005,26 +771,19 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
     _sbEl("div",{className:"art-intro"},
       _sbEl("div",{className:"art-intro-row"},
         _sbEl("div",{style:{flex:1}},
-          _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboard Director",
-            _sbEl(window.InfoTip,{label:"About the Storyboard",
-              text:"Each scene becomes storyboard SHEETS — 2×2 pages of four exact 16:9 panels drawn by GPT Image 2 in one cohesive pass. The sheet uses the location plate, in-frame character sheets and prop sheets for identity, geography and object continuity, while the shot text supplies action, camera and performance notes. Scenes paginate every four shots: a 5-beat scene becomes one full 2×2 page plus a second chained 2×2 page with beat 5 in the first cell and the remaining cells matte-empty, preserving every panel's 16:9 frame. Each 2×2 sheet can be split into top/bottom halves for the Stage."})),
+          _sbEl("div",{className:"art-intro-t",style:{display:"flex",alignItems:"center",gap:9}},"Storyboards",
+            _sbEl(window.InfoTip,{label:"About Storyboards",
+              text:"Storyboards are the presentation layer of your shot chain: each scene's generated shot frames lay into printable 2×2 sheets — paginated on beat boundaries, with real CAMERA / MOTION / ACTION / PERFORMANCE annotations — and re-compose automatically whenever a frame re-renders in the Shot List. Save top/bottom halves to hand panel rows to the Stage, repair a single panel (it edits that shot's frame), upload a board made elsewhere, or export the whole board as a print-ready PDF."})),
           _sbEl("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",marginTop:4}},
-            readySheets+" of "+totalSheets+" sheet"+(totalSheets!==1?"s":"")+" generated")),
+            readySheets+" of "+totalSheets+" sheet"+(totalSheets!==1?"s":"")+" ready")),
         _sbEl("div",{className:"art-intro-actions"},
-          onDirect && _sbEl("button",{className:"art-draftall ghost",disabled:!!batchActiveId||!totalSheets,onClick:onDirect,
-            title:"Storyboard Director — an agent thinks through each scene's panels with the writing model, then renders every sheet with GPT Image 2"},
-            _sbEl(Icon.robot,{s:14}),"Direct storyboard"),
-          _sbEl("button",{className:"art-draftall ghost",disabled:!!batchActiveId||!!composingAll||!totalSheets,onClick:composeAll,
-            title:"Lay each scene's generated shot frames into its sheet — instant and free; scenes with no frames yet are skipped"},
+          _sbEl("button",{className:"art-draftall",disabled:!!composingAll||!totalSheets,onClick:composeAll,
+            title:"Lay every scene's generated shot frames into its sheets — instant and free; scenes with no frames yet are skipped"},
             _sbEl(Icon.board,{s:14}), composingAll?("Composing "+composingAll.i+"/"+composingAll.total+"…"):"Compose all from frames"),
-          _sbEl("button",{className:"art-draftall",disabled:!!batchActiveId||!!composingAll||!totalSheets,onClick:startAll,
-            title:"Generate (or regenerate) every scene's storyboard sheet, one at a time"},
-            _sbEl(Icon.sparkles,{s:14}), batchActiveId?"Generating…":"Generate all sheets", typeof window.nbCostChip==="function" && window.nbCostChip(1,{model:(window.NB_MODELS||[]).filter(function(m){return /gpt-image/i.test(m.id)}).map(function(m){return m.id})[0],quality:"medium"})),
           _sbEl("button",{className:"art-draftall ghost",disabled:!readySheets,
             onClick:()=> exportStoryboard(pagesByScene, frames, project),
             title:"Preview the storyboard as a printable document (sheet images inlined for keeps), then print / save as PDF or download the HTML"},
             _sbEl(Icon.download,{s:14}),"Export storyboard"))) ),
-    (typeof BatchBar!=="undefined") && BatchBar && _sbEl(BatchBar,{batch,noun:"sheet"}),
 
     (typeof ScenePager!=="undefined") && pagesByScene.length>0 && (()=>{ const cs=pagesByScene[Math.min(pIdx,pagesByScene.length-1)]; const cl=cs&&ctxFor(cs.scene).location;
       return _sbEl(ScenePager,{ idx:Math.min(pIdx,pagesByScene.length-1), total:pagesByScene.length,
@@ -1046,7 +805,7 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
           _sbEl("span",{className:"sb-scene-count"},
             pages.length>1 ? (pages.length+" pages") : (shotsByScene[scene.id].length+" shots"))),
         open && pages.map(page=> _sbEl(StoryboardPage,{key:page.id,project,scene,page,pageCount:pages.length,ctx,beatsMap,
-          onView:setView,jumpToShot,batchActiveId,onBatchDone:batch.advance,prevSheetId:prevSheetOf["sbsheet-"+page.id]})));
+          onView:setView,jumpToShot})));
     }));
 }
 window.StoryboardView = StoryboardView;
@@ -1055,10 +814,10 @@ window.StoryboardView = StoryboardView;
    store (Supabase in cloud mode, local otherwise) — no file downloads to manage.
    Each half becomes its own asset, `<sheetId>:half-top` / `<sheetId>:half-bottom`,
    ready for the Stage's video generation (frame-conditioning, e.g. Seedance). On a
-   2×2 sheet each half is one panel ROW — two exact 16:9 frames side by side. The
-   image is inlined first (sbToDataUrl) so cropping a cloud sheet's signed URL
-   doesn't taint the canvas. Re-saving after a sheet regenerates overwrites the
-   halves (the previous pair stays in each asset's version history). */
+   2×2 sheet each half is one panel ROW — two frames side by side. The image is
+   inlined first (sbToDataUrl) so cropping a cloud sheet's signed URL doesn't taint
+   the canvas. Re-saving after a sheet recomposes overwrites the halves (the previous
+   pair stays in each asset's version history). */
 async function sbSaveHalves(url, sid, page, sourceVersion){
   const data = await sbToDataUrl(url);
   const img = new Image();
@@ -1080,10 +839,11 @@ async function sbSaveHalves(url, sid, page, sourceVersion){
   }
 }
 
-/* ---- export: printable storyboard SHEETS (header + the composite sheet image), Save as PDF ----
+/* ---- export: printable storyboard SHEETS (header + the composed sheet image), Save as PDF ----
    DURABLE: every sheet image is inlined as a data URL before the document is written —
    cloud sheets are served on SIGNED URLs that expire within the hour, so an export that
-   merely links them goes blank as soon as it's saved or printed later. */
+   merely links them goes blank as soon as it's saved or printed later. The sheet cell
+   honors the project's format aspect (a vertical board prints vertical). */
 async function sbToDataUrl(url){
   if(!url || /^data:/.test(url)) return url || "";
   try{
@@ -1096,6 +856,7 @@ async function sbToDataUrl(url){
 async function exportStoryboard(pagesByScene, frames, project){
   const esc = (s)=> String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   const title = (project && project.title) || "Storyboard";
+  const _ar = String((typeof aspectFor==="function") ? aspectFor(project) : "16:9").replace(":", " / ");
   const placeholder = '<!doctype html><html><head><meta charset="utf-8"><title>'+esc(title)
     +' — Storyboard</title></head><body style="background:#000;color:#9a958b;font:13px -apple-system,Segoe UI,sans-serif;'
     +'display:flex;align-items:center;justify-content:center;height:100vh;margin:0">Preparing a durable export — inlining sheet images…</body></html>';
@@ -1126,8 +887,7 @@ async function exportStoryboard(pagesByScene, frames, project){
         + '<span><b>PROJECT:</b> '+esc(title)+'</span>'
         + '<span><b>SCENE:</b> '+esc(String(scene.no).padStart(2,"0"))+'</span>'
         + '<span><b>TITLE:</b> '+esc(scene.title||"")+'</span>'
-        + '<span><b>'+(page.clip?'CLIP':'PAGE')+':</b> '+(page.index+1)+' of '+pages.length
-        + (page.clip?(' &middot; &asymp;'+(page.dur||0)+'s'):'')+'</span>'
+        + '<span><b>PAGE:</b> '+(page.index+1)+' of '+pages.length+'</span>'
         + '</div><div class="sheet-img">'+img+'</div></section>';
     });
   });
@@ -1137,12 +897,12 @@ async function exportStoryboard(pagesByScene, frames, project){
     + '.sheet{break-inside:avoid;margin:0 0 32px;}'
     + '.sheet-h{display:flex;gap:26px;flex-wrap:wrap;font-size:12px;letter-spacing:.04em;border-bottom:1px solid #444;padding-bottom:8px;margin-bottom:14px;}'
     + '.sheet-h b{color:#999;font-weight:600;}'
-    + '.sheet-img{aspect-ratio:16/9;background:#111;border:1px solid #333;border-radius:6px;overflow:hidden;}'
+    + '.sheet-img{aspect-ratio:'+_ar+';background:#111;border:1px solid #333;border-radius:6px;overflow:hidden;}'
     + '.sheet-img img{width:100%;height:100%;object-fit:contain;display:block;background:#000;}'
     + '.sheet-img .ph{width:100%;height:100%;background:repeating-linear-gradient(135deg,#111,#111 6px,#181818 6px,#181818 12px);}'
     + '@media print{body{margin:10mm;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}'
     + '</style></head><body>'
-    + (body||'<p>No sheets generated yet.</p>')
+    + (body||'<p>No sheets composed yet.</p>')
     + '</body></html>';
   if(prev){ prev.setHtml(html); return; }
   if(w){ w.document.open();
