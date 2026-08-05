@@ -16,33 +16,90 @@ function GrammarSelect({ label, value, options, onChange }){
       options.map(o=>_el("option",{key:o.id,value:o.id,title:o.desc||""},o.label))));
 }
 
-function CameraSettingSelect({ label, value, options, onChange }){
+function CameraSettingSelect({ label, value, options, onChange, effective }){
+  const isAuto = !value || value==="auto";
+  const displayOptions = (options||[]).map(o=>{
+    if(o.id==="auto" && isAuto && effective) return { ...o, label:"Recommended: "+effective };
+    return o;
+  });
   return _el("label",{className:"shot-gsel"},
     _el("span",{className:"shot-gsel-lab"},label),
     _el("select",{className:"prop-select",value:value||"auto",onChange:e=>onChange(e.target.value)},
-      options.map(o=>_el("option",{key:o.id,value:o.id,title:o.desc||""},o.label))));
+      displayOptions.map(o=>_el("option",{key:o.id,value:o.id,title:o.desc||""},o.label))));
+}
+
+function CameraProfilePicker({ value, options, onChange, recommendedLabel }){
+  const [open, setOpen] = React.useState(false);
+  const [expanded, setExpanded] = React.useState({});
+  const [pos, setPos] = React.useState(null);
+  const triggerRef = React.useRef(null), menuRef = React.useRef(null);
+  const list = options || [];
+  const cur = list.find(o=>o.id===(value||"auto")) || list[0] || { id:"auto", label:"Project default / None", family:"Camera" };
+  const isAuto = !value || value==="auto";
+  const triggerLabel = isAuto ? ("Recommended: "+(recommendedLabel || cur.label || "Project default / None")) : cur.label;
+  const place = ()=>{ const t=triggerRef.current; if(!t) return; const r=t.getBoundingClientRect(); setPos({ top:r.bottom+4, left:r.left, width:r.width }); };
+  React.useEffect(()=>{
+    if(!open) return;
+    const onDoc=(e)=>{ if((menuRef.current&&menuRef.current.contains(e.target))||(triggerRef.current&&triggerRef.current.contains(e.target))) return; setOpen(false); };
+    const onKey=(e)=>{ if(e.key==="Escape") setOpen(false); };
+    const reflow=(e)=>{ if(menuRef.current && e && e.target && menuRef.current.contains(e.target)) return; place(); };
+    document.addEventListener("mousedown",onDoc); document.addEventListener("keydown",onKey);
+    window.addEventListener("scroll",reflow,true); window.addEventListener("resize",reflow);
+    return ()=>{ document.removeEventListener("mousedown",onDoc); document.removeEventListener("keydown",onKey); window.removeEventListener("scroll",reflow,true); window.removeEventListener("resize",reflow); };
+  },[open]);
+  React.useEffect(()=>{ if(open) setExpanded(prev=>Object.keys(prev).length?{...prev,[cur.family||"Other cameras"]:true}:{[cur.family||"Other cameras"]:true}); },[open, cur.family]);
+  const groups = [], byGroup = {};
+  list.forEach(o=>{ const g=o.family||"Other cameras"; if(!byGroup[g]){ byGroup[g]=[]; groups.push(g); } byGroup[g].push(o); });
+  const pick = (id)=>{ setOpen(false); onChange && onChange(id); };
+  const toggleGroup = (e,g)=>{ e.stopPropagation(); setExpanded(prev=>prev[g]?{}:{[g]:true}); };
+  const menu = (open && pos && window.ReactDOM && window.ReactDOM.createPortal) ? window.ReactDOM.createPortal(
+    _el("div",{className:"rs-menu camera-profile-menu",ref:menuRef,style:{position:"fixed",top:pos.top+"px",left:pos.left+"px",minWidth:pos.width+"px"}},
+      groups.map(g=>{
+        const rows = byGroup[g] || [];
+        const isOpen = !!expanded[g];
+        const selectedInGroup = rows.some(o=>o.id===(value||"auto"));
+        return _el("div",{key:g,className:"rs-group"+(isOpen?" open":"")+(selectedInGroup?" has-sel":"")},
+          _el("button",{type:"button",className:"rs-group-head",onClick:(e)=>toggleGroup(e,g),title:(isOpen?"Collapse ":"Expand ")+g},
+            _el("span",{className:"rs-group-caret"},isOpen?"▾":"▸"),
+          _el("span",{className:"rs-group-lab"},g),
+          _el("span",{className:"rs-group-count"},rows.length)),
+          isOpen && _el("div",{className:"rs-group-body"},
+            rows.map(o=>_el("div",{key:o.id,className:"rs-opt"+(o.id===(value||"auto")?" sel":""),title:o.desc||o.label,onClick:()=>pick(o.id)},
+              _el("span",{className:"rs-opt-lab"},o.label)))));
+      })), document.body) : null;
+  return _el("div",{className:"rs-picker camera-profile-picker"+(open?" open":"")},
+    _el("button",{type:"button",className:"rs-trigger",ref:triggerRef,onClick:()=>{ if(open) setOpen(false); else { place(); setOpen(true); } }},
+      _el("span",{className:"rs-trigger-lab"},triggerLabel),
+      _el("span",{className:"rs-caret"},"▾")),
+    menu);
 }
 
 function AdvancedCameraSettings({ sh, onUpdate }){
   const c = { camera:"auto", lensType:"auto", focalLength:"auto", aperture:"auto", shutter:"auto", iso:"auto", ...(sh.cameraSettings||{}) };
   const patch = (key,val)=> onUpdate(sh.id,{ cameraSettings:{ ...c, [key]:val } });
   const active = typeof shotHasCameraSettings==="function" && shotHasCameraSettings(sh);
+  const resolved = (typeof shotEffectiveCameraSettings==="function") ? shotEffectiveCameraSettings(sh) : null;
+  const resolvedLine = (typeof shotCameraResolvedLine==="function") ? shotCameraResolvedLine(sh) : "";
   const reset = ()=> onUpdate(sh.id,{ cameraSettings:{ camera:"auto", lensType:"auto", focalLength:"auto", aperture:"auto", shutter:"auto", iso:"auto" } });
   return _el(CardFold,{label:"Advanced cinematography"+(active?" · custom camera":" · Auto"),defaultOpen:false},
     _el("div",{className:"shot-camera-panel"},
       _el("div",{className:"shot-camera-head"},
         _el("div",{className:"shot-camera-note"},
           _el(Icon.info,{s:12}),"Leave controls on Auto unless you want this shot to carry explicit camera language into the frame prompt."),
-        active && _el("button",{className:"shot-camera-reset",onClick:reset,title:"Reset all advanced camera settings to Auto"},"Reset to Auto")),
+        active && _el("button",{className:"shot-camera-reset",onClick:reset,title:"Use TURN's recommended camera settings for this shot"},"Recommended")),
       _el("div",{className:"shot-camera-grid"},
-        _el(CameraSettingSelect,{label:"Camera",value:c.camera,options:SHOT_CAMERA_BODIES,onChange:v=>patch("camera",v)}),
-        _el(CameraSettingSelect,{label:"Lens type",value:c.lensType,options:SHOT_LENS_TYPES,onChange:v=>patch("lensType",v)}),
-        _el(CameraSettingSelect,{label:"Focal length",value:c.focalLength,options:SHOT_FOCAL_LENGTHS,onChange:v=>patch("focalLength",v)}),
-        _el(CameraSettingSelect,{label:"Aperture",value:c.aperture,options:SHOT_APERTURES,onChange:v=>patch("aperture",v)}),
-        _el(CameraSettingSelect,{label:"Shutter",value:c.shutter,options:SHOT_SHUTTERS,onChange:v=>patch("shutter",v)}),
-        _el(CameraSettingSelect,{label:"ISO / grain",value:c.iso,options:SHOT_ISO_GRAIN,onChange:v=>patch("iso",v)})),
-      active && _el("div",{className:"shot-camera-preview"},
-        (typeof shotCameraSettingsClause==="function") ? shotCameraSettingsClause(sh) : "")));
+        _el("label",{className:"shot-gsel"},
+          _el("span",{className:"shot-gsel-lab"},"Camera profile"),
+          _el(CameraProfilePicker,{value:c.camera,options:(window.SHOT_CAMERA_PROFILES||SHOT_CAMERA_BODIES),onChange:v=>patch("camera",v),recommendedLabel:resolved&&resolved.camera&&resolved.camera.effectiveLabel})),
+        _el(CameraSettingSelect,{label:"Lens type",value:c.lensType,options:SHOT_LENS_TYPES,onChange:v=>patch("lensType",v),effective:resolved&&resolved.lensType&&resolved.lensType.effectiveLabel}),
+        _el(CameraSettingSelect,{label:"Focal length",value:c.focalLength,options:SHOT_FOCAL_LENGTHS,onChange:v=>patch("focalLength",v),effective:resolved&&resolved.focalLength&&resolved.focalLength.effectiveLabel}),
+        _el(CameraSettingSelect,{label:"Aperture",value:c.aperture,options:SHOT_APERTURES,onChange:v=>patch("aperture",v),effective:resolved&&resolved.aperture&&resolved.aperture.effectiveLabel}),
+        _el(CameraSettingSelect,{label:"Shutter",value:c.shutter,options:SHOT_SHUTTERS,onChange:v=>patch("shutter",v),effective:resolved&&resolved.shutter&&resolved.shutter.effectiveLabel}),
+        _el(CameraSettingSelect,{label:"ISO / grain",value:c.iso,options:SHOT_ISO_GRAIN,onChange:v=>patch("iso",v),effective:resolved&&resolved.iso&&resolved.iso.effectiveLabel})),
+      _el("div",{className:"shot-camera-preview"},
+        active && ((typeof shotCameraSettingsClause==="function") ? shotCameraSettingsClause(sh) : ""),
+        active && resolvedLine ? _el("br") : null,
+        resolvedLine)));
 }
 
 /* a toggle chip row for choosing which cast / props are in frame */
@@ -121,8 +178,7 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
   // Ordered by location weight: a wide leads with the set plate (geography reads); a tight
   // leads with the cast and demotes the plate to a background/grade anchor.
   const collectShotRefs = async (gopts)=>{
-    const grab = async (id)=>{ let u = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
-      if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(id); }catch(e){} } return u; };
+    const grab = async (id)=> (typeof shotGrabImage==="function") ? await shotGrabImage(id) : "";
     const _locPanel = (loc && typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
     const locSpec = loc
       ? ((typeof shotLocationCoverageSpecs==="function")
@@ -150,13 +206,33 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
       return { id:so.id, baseId:p.id, note:p.name+" prop sheet"+(so.state?(" \u2014 "+so.state.label):"")+(co.handover&&co.name?(" \u2014 "+co.name+" holds it now"):"") }; }).filter(Boolean);
     // same untick filter as generateShotFrame/buildShotPrompt — labels match files
     const _refOff = Array.isArray(sh.refOff) ? sh.refOff : [];
-    const ordered = ((locWeight==="ambient") ? [...castSpec, ...locSpec, ...propSpec] : [...locSpec, ...castSpec, ...propSpec])
+    const activeLocSpec = locSpec.filter(s=> _refOff.indexOf(s.baseId||s.id)<0);
+    const ordered = ((locWeight==="ambient") ? [...castSpec, ...activeLocSpec, ...propSpec] : [...activeLocSpec, ...castSpec, ...propSpec])
       .filter(s=> _refOff.indexOf(s.baseId||s.id)<0);
     const out = [];
-    for(const s of ordered){ let u = await grab(s.id);
-      if(u && s.locPanelQ!=null && typeof shotLocPanelCrop==="function"){ const cu=await shotLocPanelCrop(u, s.locPanelQ); if(cu) u=cu; }
-      if(u) out.push({ url:u, note:s.note, refId:s.id }); }
-    return out;
+    const locIds = new Set(activeLocSpec.map(s=>s&&s.id).filter(Boolean));
+    const locResolved = (typeof shotResolveLocationSpecImages==="function") ? await shotResolveLocationSpecImages(activeLocSpec, grab) : [];
+    let locResolvedPushed = false;
+    for(const s of ordered){
+      if(locIds.has(s.id)){
+        if(!locResolvedPushed && locResolved.length){
+          locResolved.forEach(r=>out.push({ url:r.url, note:r.note, refId:r.refId||s.id,
+            assetRole:r.assetRole, assetRoleLabel:r.assetRoleLabel, assetRolePriority:r.assetRolePriority,
+            assetSourceQuality:r.assetSourceQuality }));
+          locResolvedPushed = true;
+        }
+        continue;
+      }
+      const u = await grab(s.id);
+      if(u){
+        const role = s.assetRole || (s.kind==="seed" ? "shot_anchor" : "master_reference");
+        out.push({ url:u, note:s.note, refId:s.id, assetRole:role,
+          assetRoleLabel:(typeof nbAssetRoleLabel==="function") ? nbAssetRoleLabel(role) : role,
+          assetRolePriority:(typeof nbAssetRolePriority==="function") ? nbAssetRolePriority(role) : 0,
+          assetSourceQuality:s.assetSourceQuality || "full_frame" });
+      }
+    }
+    return (typeof nbPreferBestAssetRefs==="function") ? nbPreferBestAssetRefs(out) : out;
   };
 
   const gen = useImageGen({
@@ -177,6 +253,9 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
     // comfortably inside the proxy window. These are input references only:
     // generated quality and resolution always follow the user's selected controls.
     referenceMaxDim: 640,
+    metaExtra: ()=>({
+      advancedCamera:(typeof shotCameraMetadata==="function") ? shotCameraMetadata(sh) : null
+    }),
   });
 
   // Every manual Generate / Regenerate enters the scene's ordered runner. If an earlier
@@ -210,6 +289,26 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
   const toggleIn = (key, id)=>{ const cur = sh[key]||[]; const next = cur.indexOf(id)>=0 ? cur.filter(x=>x!==id) : [...cur, id];
     const patch = { [key]: next }; if(key==="subjects") patch.subjectsSet = true; onUpdate(sh.id, patch); };
 
+  const liveLocationSpecs = ()=>{
+    if(!loc) return [];
+    const p = (typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
+    return (typeof shotLocationCoverageSpecs==="function")
+      ? shotLocationCoverageSpecs(loc, sh, scene, (window.turnContinuity||{}).drafts||{})
+      : [{ id:loc.id, locPanelQ:(p?p.q:null), note:(loc.name||"Location")+" plate" }];
+  };
+  const liveLocationRefIds = ()=>{
+    const ids = [];
+    liveLocationSpecs().forEach(s=>{
+      if(!s) return;
+      if(s.id) ids.push(s.id);
+      if(s.fallbackId) ids.push(s.fallbackId);
+    });
+    return Array.from(new Set(ids.filter(Boolean)));
+  };
+  const _locSpecKey = liveLocationSpecs()
+    .map(s=>[s.id||"", s.fallbackId||"", s.locPanelQ==null?"":s.locPanelQ, s.source||"", s.role||""].join(":"))
+    .join("|");
+
   // REFERENCE IMAGES that influence this shot's frame — the scene KEY FRAME it derives
   // from, the LOCATION coverage plate, and the in-frame CHARACTER & PROP sheets. Shown as
   // small thumbnails (click to enlarge) so it's clear what canon art the generation locks
@@ -225,27 +324,37 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
     window.addEventListener("nb-gen-done", onDone);
     return ()=>window.removeEventListener("nb-gen-done", onDone);
   },[prevShot && prevShot.id]);
-  const _coverageKey = loc && Array.isArray(loc.coverageSheets) ? loc.coverageSheets.map(v=>v.id).join(",") : "";
-  const _refKey = [sh.id, prevShot&&prevShot.id, prevShot&&prevShot.locked?1:0, prevSeedBump, loc&&loc.id, _coverageKey, locWeight,
+  const [refAssetBump, setRefAssetBump] = React.useState(0);
+  const _liveRefIdsKey = [prevShot&&prevShot.id, ...liveLocationRefIds(), ...subjects.map(c=>c.id), ...inProps.map(p=>p.id)].filter(Boolean).join("|");
+  React.useEffect(()=>{
+    const matches = (detail)=>{
+      if(!detail) return false;
+      const ids = _liveRefIdsKey.split("|").filter(Boolean);
+      if(!ids.length) return false;
+      if(detail.id && ids.indexOf(detail.id)>=0) return true;
+      return Array.isArray(detail.ids) && detail.ids.some(id=>ids.indexOf(id)>=0);
+    };
+    const onChanged = (e)=>{ if(matches(e&&e.detail)) setRefAssetBump(b=>b+1); };
+    window.addEventListener("nb-gen-done", onChanged);
+    window.addEventListener("nb-prefetched", onChanged);
+    return ()=>{ window.removeEventListener("nb-gen-done", onChanged); window.removeEventListener("nb-prefetched", onChanged); };
+  },[_liveRefIdsKey]);
+  const _refKey = [sh.id, prevShot&&prevShot.id, prevShot&&prevShot.locked?1:0, prevSeedBump, refAssetBump, loc&&loc.id, _locSpecKey, locWeight,
     subjects.map(c=>c.id).join(","), inProps.map(p=>p.id).join(","), gen.genUrl||""].join("|");
   React.useEffect(()=>{
     let alive = true;
     (async ()=>{
-      const grab = async (id)=>{ let u = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
-        if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(id); }catch(e){} } return u||""; };
+      const grab = async (id)=> (typeof shotGrabImage==="function") ? await shotGrabImage(id) : "";
       // the rolling SEED leads (the previous shot's frame), then the canon sheets ordered by weight
       const seedU = prevShot ? await grab(prevShot.id) : "";
       const seed = (prevShot && seedU) ? [{ url:seedU, label:"Previous shot · Beat "+(prevShot.beatN||"—"), kind:"seed", approved:!!prevShot.locked }] : [];
       const locItems = []; if(loc){
-        const p = (typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
-        const locSpecs = (typeof shotLocationCoverageSpecs==="function")
-          ? shotLocationCoverageSpecs(loc, sh, scene, (window.turnContinuity||{}).drafts||{})
-          : [{ id:loc.id, locPanelQ:(p?p.q:null), note:(loc.name||"Location")+" plate" }];
-        for(const s of locSpecs){ let u=await grab(s.id);
-          if(u && s.locPanelQ!=null && typeof shotLocPanelCrop==="function"){
-            const cu=await shotLocPanelCrop(u, s.locPanelQ); if(cu) u=cu;
-          }
-          if(u) locItems.push({ url:u, label:String(s.note||"Location reference").replace(/\s+\([^)]*\)$/,""), kind:"location", refId:s.id });
+        const locSpecs = liveLocationSpecs();
+        const resolved = (typeof shotResolveLocationSpecImages==="function") ? await shotResolveLocationSpecImages(locSpecs, grab) : [];
+        for(const r of resolved){
+          locItems.push({ url:r.url, label:String(r.note||"Location reference").replace(/\s+\([^)]*\)$/,""), kind:"location", refId:r.refId,
+            assetRole:r.assetRole, assetRoleLabel:r.assetRoleLabel, assetRolePriority:r.assetRolePriority,
+            assetSourceQuality:r.assetSourceQuality });
         }
       }
       const castItems = []; for(const c of subjects){ const u=await grab(c.id); if(u) castItems.push({ url:u, label:c.name, kind:"character", refId:c.id }); }
@@ -260,7 +369,7 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
   const initials = (sizeOf(sh.size).label||"SH");
   const waitingForShot = !!(batchActiveId && batchActiveId!==sh.id);
 
-  return _el("div",{className:"sheet-card shot-card"+(batchActiveId===sh.id?" batch-on":""),"data-shot-card":sh.id},
+  return _el("div",{className:"sheet-card shot-card"+(batchActiveId===sh.id?" batch-on":"")+(gen.gening?" gening":""),"data-shot-card":sh.id},
     _el(SheetFrame,{ gen:genGuarded, slotId:"shot-"+sh.id, name:beatLabel, avatarColor:"linear-gradient(135deg,#7a6cae,#2a2440)",
       initials, drafted:true, drafting:false, onDraft:()=>{}, entity:sh, onView,
       slotPlaceholder:"Generate or drop a frame", noun:"frame", dropToImport:true, onStop:onStopChain,
@@ -860,13 +969,6 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
       return _el(React.Fragment,null,
         driverCard,
         _el("div",{key:"beat-grid",className:"beat-grid-wrap"+(draftingScene?" drafting":"")},
-          // REDRAFT IN PROGRESS — visible on the canvas, not just the button: the
-          // current cards dim (they stay until the new list lands) under a status card
-          draftingScene && _el("div",{className:"beat-redraft-note"},
-            _el("span",{className:"ns-spin"}),
-            _el("div",{className:"brn-txt"},
-              _el("div",{className:"brn-t"},"MUSE is re-designing Scene "+String(scene.no).padStart(2,"0")+"'s shots"),
-              _el("div",{className:"brn-d"},"Beat-by-beat coverage from the beats + script — about a minute. The current shots stay until the new list lands (a failed draft changes nothing)."))),
           _el("div",{className:"beat-card-grid"},
             lanes.map((L,Li)=> _el(BeatCard,{key:"bc"+(L.canonical?"c":"o")+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
               ordered, firstId, toggleHead, onAddShot, onUpdate, onDelete, onView,
@@ -876,7 +978,8 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,
-  onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onShoot }){
+  onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onShoot,
+  trashItems, onRestore, onPurge }){
   const [view, setView] = React.useState(null);
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
@@ -1191,6 +1294,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
     // A chain already has its own progress + Stop bar below. Hiding the generic
     // batch bar here avoids duplicate Cancel/Stop controls for the same request.
     !chain && BatchBar && _el(BatchBar,{batch,noun:"shot"}),
+    window.RecentlyDeleted && _el(window.RecentlyDeleted,{items:trashItems,kind:"shot",onRestore,onPurge}),
     // "Design all shots" progress — determinate, driven by how many scenes still lack shots
     (draftingAllShots && designTotal>0) && (()=>{
       const remaining = scenesNeedingShots().length;

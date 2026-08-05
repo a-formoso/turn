@@ -44,6 +44,7 @@ function buildPropRefPrompt(p, project){
   const material = clean(p.material);
   const detail = clean(p.detail);
   const relation = clean(p.relation);   // how the owner relates to it — drives wear & condition
+  const externalRefs = Array.isArray(p.referenceImages) ? p.referenceImages.filter(r=>r&&r.url) : [];
   const _size = clean(p.size);
   const scale = p.kind==="worn" ? ("wearable, true-to-body scale"+(_size?(", "+_size):""))
               : p.kind==="carried" ? ("handheld scale"+(_size?(", "+_size):""))
@@ -59,10 +60,10 @@ function buildPropRefPrompt(p, project){
        || (window.PROP_RENDER_TEXT||{}).photoreal || "hyper realistic photography, photorealistic 8k");
   // off-white / light-neutral background with a soft contact shadow (matches the cast sheets)
   const bg = "flat off-white / very light neutral panel background, even and clean, with a simple soft contact shadow beneath the object";
-  // 3-PANEL reference sheet \u2014 the SAME structure the cast sheets use (buildCharRefPrompt):
-  // a wider hero panel + two clean orthographic panels, thin dividers, 16:9, no baked text.
-  // The old "360 turnaround + 3-up detail column" is folded into binding CONTINUITY fields
-  // (material / signature feature) so every panel stays faithful without extra panels.
+  // 4-PANEL object reference sheet: hero, front, side and detail, thin dividers,
+  // 16:9, no baked text. The old "360 turnaround + 3-up detail column" is folded
+  // into binding CONTINUITY fields (material / signature feature) so every panel
+  // stays faithful without extra panels.
   const spec = {
     subject: name + (form ? (", "+form) : ""),
     object: {
@@ -92,6 +93,7 @@ function buildPropRefPrompt(p, project){
       material_rule: material ? ("rendered in "+material+", with accurate surface texture and finish in every panel") : "accurate, consistent material and finish in every panel",
       feature_rule: detail ? ("its signature feature \u2014 "+((typeof clipWords==="function")?clipWords(detail,90):detail.slice(0,90))+" \u2014 present and consistent in every view") : undefined,
       relationship_rule: relation ? ("the owner's relationship to it \u2014 "+((typeof clipWords==="function")?clipWords(relation,90):relation.slice(0,90))+" \u2014 is visible in its condition: wear, repairs, handling marks and how carefully it has been kept") : undefined,
+      harvested_reference_rule: externalRefs.length ? ("Use the attached selected-item/whole-sheet reference image"+(externalRefs.length>1?"s":"")+" as world-consistency guidance for this object's design language, material wear, likeness when the prop depicts a person, lighting feel and belonging in the same film world; do not copy unrelated surrounding scenery from the source image.") : undefined,
     },
     render: {
       style: styleText,
@@ -452,6 +454,11 @@ function propOwnerAttachments(p){
     let hu = (typeof nbGetImage==="function") ? nbGetImage(p.id+":inhand") : "";
     if(!hu && typeof nbLoadImage==="function"){ try{ hu = await nbLoadImage(p.id+":inhand"); }catch(e){} }
     if(hu) out.push({ url:hu, note:(p.name||"the object")+" in "+(p.ownerName||"the owner")+"\u2019s hand \u2014 derive the sheet from THIS exact design, scale and finish", refId:p.id+":inhand" });
+    (Array.isArray(p.referenceImages)?p.referenceImages:[]).filter(r=>r&&r.url).slice(0,6).forEach(r=>{
+      out.push({ url:r.url, kind:"prop-reference-image",
+        note:(r.note||"visual reference")+" \u2014 from "+(r.sourceName||"another Art Room sheet")+" as a consistency reference",
+        refId:r.sourceEntityId || r.id });
+    });
     return out;
   };
 }
@@ -480,9 +487,12 @@ function propAttachmentsText(p){
   return (attach)=>{
     const hasOwner  = (attach||[]).some(a=>a && a.refId===p.ownerId);
     const hasInhand = (attach||[]).some(a=>a && a.refId===p.id+":inhand");
+    const visualRefs = (attach||[]).filter(a=>a && (a.kind==="prop-reference-image" || a.kind==="prop-reference-crop"));
     let t = hasOwner ? ((typeof propOwnerNote==="function") ? propOwnerNote(p) : "") : "";
     if(hasInhand)
       t += (t?" ":"") + "A further reference shows "+(p.name||"the object")+" in "+(p.ownerName||"the owner")+"\u2019s hand \u2014 derive the object\u2019s design, scale, grip proportions and wear from it exactly.";
+    if(visualRefs.length)
+      t += (t?" ":"") + "Additional consistency reference image"+(visualRefs.length>1?"s":"")+" show how this prop should belong inside the film's existing character/location/prop world. Use selected crops for item-specific design, and whole sheets for likeness, owner taste, materials, patina, colour and texture continuity; ignore unrelated surrounding objects or background.";
     return t;
   };
 }
@@ -926,6 +936,7 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
     onUpdate(p.id,{ renderStyleKey:"photoreal", renderStyle:(typeof window.renderStyleText==="function"?window.renderStyleText("prop","photoreal"):"") });
   };
   const initials = (p.name||"?").replace(/^the\s+/i,"").split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+  const referenceImages = Array.isArray(p.referenceImages) ? p.referenceImages.filter(r=>r&&r.url) : [];
 
   const gen = useImageGen({
     id: p.id, slotId: "propref-"+p.id,
@@ -1141,6 +1152,17 @@ function PropSheet({ p, project, characters, scenes, onUpdate, onDelete, onDraft
 
       anchorStale && React.createElement("div",{className:"prompt-drift-note"},
         (p.ownerName||"The owner")+"'s character sheet has changed since this sheet was generated \u2014 Regenerate to re-anchor it to the current one."),
+
+      referenceImages.length>0 && React.createElement("div",{className:"prop-consistency-refs"},
+        React.createElement("div",{className:"prop-consistency-head"},
+          React.createElement(Icon.target,{s:12}),
+          React.createElement("span",null,"Consistency references"),
+          React.createElement("em",null,referenceImages.length)),
+        React.createElement("div",{className:"prop-consistency-row"},
+          referenceImages.map(r=>React.createElement("span",{key:r.id||r.url,className:"prop-consistency-thumb",
+            title:(r.note||"Selected item")+" \u2014 from "+(r.sourceName||"Art Room sheet")},
+            React.createElement("img",{src:r.url,alt:r.note||"Prop consistency reference",onClick:()=>onView&&onView(r.url,{name:r.note||"Consistency reference"})}),
+            React.createElement("button",{title:"Remove reference",onClick:()=>onUpdate(p.id,{referenceImages:referenceImages.filter(x=>(x.id||x.url)!==(r.id||r.url))})},"\u00d7"))))),
 
       React.createElement(PropInHandRow,{ p, project, onView }),
 

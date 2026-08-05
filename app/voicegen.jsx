@@ -123,9 +123,32 @@ async function vgProxy(op, payload){
     if(status===404) throw new Error(_safe("The media proxy isn't deployed yet. Deploy supabase/functions/image-proxy (the voice route), then have an administrator set ELEVENLABS_API_KEY."));
     throw new Error(_safe("Couldn't reach the voice proxy: "+((error&&error.message)||"unknown error")+"."));
   }
-  if(data && data.error) throw new Error((window.turnSafeError||(x=>x))(data.error));   // ElevenLabs error relayed by the proxy
+  if(data && data.error){
+    const raw = (window.turnSafeError||(x=>x))(data.error);
+    const msg = vgVoiceUserError(raw, data.code, op);
+    const e = new Error(msg);
+    e.code = data.code || "";
+    e.rawMessage = raw;
+    throw e;
+  }
   return data||{};
 }
+
+function vgVoiceUserError(message, code, op){
+  const raw = String(message||"").trim();
+  const blocked = code==="VOICE_PROVIDER_BILLING" || /\b(subscription|invoice|payment|billing)\b/i.test(raw);
+  if(!blocked) return raw || "Voice generation failed.";
+  const action = op==="design" ? "Voice design"
+    : op==="saveVoice" ? "Saving this voice"
+    : op==="listVoices" ? "The voice library"
+    : op==="clone" ? "Voice cloning"
+    : "Voice rendering";
+  const adminHint = window.turnIsAdmin
+    ? " Open the top-bar API Keys panel and save a working ElevenLabs key, or update the server ELEVENLABS_API_KEY secret."
+    : " The platform voice account needs attention; try again later or use an already locked voice.";
+  return action+" is paused because the voice-provider account has a billing issue."+adminHint;
+}
+window.vgVoiceUserError = vgVoiceUserError;
 
 // Measure a rendered line off the audio itself (fallback when the route reports no timing).
 function vgMeasureDuration(url){

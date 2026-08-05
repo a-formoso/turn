@@ -55,17 +55,127 @@ const SHOT_LENSES = [
   { id:"imax70", label:"70mm / IMAX", desc:"large-format capture; immense clarity and resolution, deep fine detail, sweeping epic grandeur" },
   { id:"vhs", label:"VHS / CCTV", desc:"lo-fi analog capture; soft low resolution, scanlines, chroma bleed, date-stamp surveillance aesthetic" },
 ];
-const SHOT_CAMERA_BODIES = [
-  { id:"auto", label:"Auto", desc:"let the shot designer infer the capture feel" },
-  { id:"cinema", label:"Cinema camera", desc:"high-end digital cinema capture with controlled dynamic range" },
-  { id:"film35", label:"35mm film camera", desc:"photochemical 35mm motion-picture capture with organic grain" },
-  { id:"largeformat", label:"Large-format camera", desc:"large-format clarity, scale and fine detail" },
-  { id:"macro", label:"Macro rig", desc:"specialized macro capture for tiny subjects and surface detail" },
-  { id:"handheld", label:"Handheld doc camera", desc:"reactive documentary camera feel" },
-  { id:"surveillance", label:"Surveillance / CCTV", desc:"fixed security-camera capture, compressed and observational" },
-  { id:"phone", label:"Phone camera", desc:"small-sensor mobile camera capture" },
-  { id:"drone", label:"Drone", desc:"aerial camera platform with floating spatial overview" },
+function shotCameraProfileDesc(label, family){
+  const low = String(label||"").toLowerCase();
+  if(family==="ARRI"){
+    if(low.includes("65") || low.includes("265")) return label+"-style large-format ARRI capture: expansive scale, premium colour depth, natural skin tone and gentle highlight roll-off";
+    if(low.includes("lf")) return label+"-style large-format ARRI capture: smooth skin tone, graceful dynamic range, elegant depth and restrained digital sharpness";
+    return label+"-style ARRI digital cinema capture: natural colour, generous dynamic range, clean shadow separation and gentle highlight roll-off";
+  }
+  if(family==="Canon"){
+    if(low.includes("c70") || low.includes("r5") || low.includes("c400") || low.includes("c80") || low.includes("c50")) return label+"-style compact Canon cinema capture: natural warm colour, practical mobility, clean detail and balanced highlight handling";
+    if(low.includes("ff") || low.includes("c500")) return label+"-style full-frame Canon cinema capture: warm natural skin tone, practical production polish and balanced highlight roll-off";
+    return label+"-style Canon cinema capture: warm colour science, gentle contrast, clean production detail and reliable skin tone";
+  }
+  if(family==="Panasonic"){
+    if(low.includes("varicam")) return label+"-style Panasonic VariCam capture: rich colour separation, practical low-light latitude and grounded digital cinema texture";
+    if(low.includes("s1h") || low.includes("bs1h") || low.includes("bgh1")) return label+"-style Panasonic compact cinema capture: grounded indie-cinema image, soft colour roll-off and practical natural-light feel";
+    return label+"-style Panasonic production capture: robust broadcast/cinema clarity, controlled colour and clean motion rendering";
+  }
+  if(family==="RED"){
+    if(low.includes("monstro") || low.includes("vv")) return label+"-style RED VistaVision capture: high-resolution digital clarity, expansive frame, crisp texture and bold colour separation";
+    if(low.includes("helium") || low.includes("dragon") || low.includes("gemini") || low.includes("s35") || low.includes("komodo")) return label+"-style RED Super 35 capture: crisp fine detail, punchy contrast, textured digital sharpness and compact production energy";
+    return label+"-style RED cinema capture: high-resolution digital detail, strong texture definition and bold modern contrast";
+  }
+  if(family==="Panavision") return label+"-style large-format Panavision capture: expansive field, premium colour depth, smooth tonal scale and epic studio-cinema polish";
+  if(family==="Sony"){
+    if(low.includes("venice") || low.includes("burano")) return label+"-style Sony high-end cinema capture: polished modern image, clean low-light response, rich colour separation and controlled contrast";
+    if(low.includes("fx") || low.includes("fr7") || low.includes("fs") || low.includes("f5") || low.includes("f55")) return label+"-style Sony compact cinema capture: flexible production mobility, clean low-light detail and modern neutral colour";
+    return label+"-style Sony production capture: clean digital image, stable colour, strong low-light response and controlled contrast";
+  }
+  if(family==="Blackmagic"){
+    if(low.includes("12k") || low.includes("17k")) return label+"-style Blackmagic high-resolution capture: textured digital cinema detail, strong latitude and tactile indie-production finish";
+    return label+"-style Blackmagic cinema capture: practical production texture, crisp detail and flexible colour latitude";
+  }
+  if(family==="DJI") return label+"-style DJI aerial cinema capture: stabilized spatial movement, wide environmental perspective and polished drone-camera clarity";
+  return label+"-style capture";
+}
+function shotCameraProfile(id, label, family, desc){
+  return { id, label, family, desc: desc || shotCameraProfileDesc(label, family) };
+}
+const SHOT_CAMERA_PROFILES = [
+  { id:"auto", label:"Project default / None", family:"Auto", desc:"do not add camera-body language; let the Style Preset and shot grammar lead" },
+  shotCameraProfile("arri_alexa_lf", "ARRI Alexa LF", "ARRI"),
+  shotCameraProfile("arri_minilf", "ARRI Alexa Mini LF", "ARRI"),
+  shotCameraProfile("arri_alexa65", "ARRI Alexa 65", "ARRI"),
+  shotCameraProfile("arri_alexa35", "ARRI Alexa 35", "ARRI"),
+  shotCameraProfile("arri_alexa265", "ARRI ALEXA 265", "ARRI"),
+  shotCameraProfile("arri_alexa35_xtreme", "ARRI ALEXA 35 Xtreme", "ARRI"),
+  shotCameraProfile("canon_c300ii", "Canon C300 Mk II", "Canon"),
+  shotCameraProfile("canon_c300iii", "Canon C300 Mk III", "Canon"),
+  shotCameraProfile("canon_c500ii", "Canon C500 Mk II", "Canon"),
+  shotCameraProfile("canon_c500", "Canon C500", "Canon"),
+  shotCameraProfile("canon_c700", "Canon C700", "Canon"),
+  shotCameraProfile("canon_c700ff", "Canon C700 FF", "Canon"),
+  shotCameraProfile("canon_eos_c70", "Canon EOS C70", "Canon"),
+  shotCameraProfile("canon_eos_r5c", "Canon EOS R5 C", "Canon"),
+  shotCameraProfile("canon_c400", "Canon EOS C400", "Canon"),
+  shotCameraProfile("canon_eos_c80", "Canon EOS C80", "Canon"),
+  shotCameraProfile("canon_eos_c50", "Canon EOS C50", "Canon"),
+  shotCameraProfile("panasonic_varicam35", "Panasonic VariCam 35", "Panasonic"),
+  shotCameraProfile("panasonic_varicam_lt", "Panasonic VariCam LT", "Panasonic"),
+  shotCameraProfile("panasonic_varicam_pure", "Panasonic VariCam Pure", "Panasonic"),
+  shotCameraProfile("panasonic_au_eva1", "Panasonic AU-EVA1", "Panasonic"),
+  shotCameraProfile("panasonic_s1h", "Panasonic S1H", "Panasonic"),
+  shotCameraProfile("panasonic_bgh1", "Panasonic BGH1", "Panasonic"),
+  shotCameraProfile("panasonic_bs1h", "Panasonic BS1H", "Panasonic"),
+  shotCameraProfile("panasonic_ak_uc4000", "Panasonic AK-UC4000", "Panasonic"),
+  shotCameraProfile("red_dsmc2_weapon_monstro", "RED DSMC2 / WEAPON MONSTRO 8K VV", "RED"),
+  shotCameraProfile("red_weapon_dragon_8k_vv", "RED WEAPON DRAGON 8K VV", "RED"),
+  shotCameraProfile("red_dsmc2_weapon_helium", "RED DSMC2 / WEAPON HELIUM 8K S35", "RED"),
+  shotCameraProfile("red_epicw_helium", "RED EPIC-W HELIUM 8K S35", "RED"),
+  shotCameraProfile("red_weapon_dragon_6k", "RED WEAPON DRAGON 6K S35", "RED"),
+  shotCameraProfile("red_epic_dragon_6k", "RED EPIC DRAGON 6K S35", "RED"),
+  shotCameraProfile("red_dsmc2_epicw_gemini", "RED DSMC2 / EPIC-W GEMINI 5K S35", "RED"),
+  shotCameraProfile("red_scarletw_dragon", "RED SCARLET-W DRAGON 5K S35", "RED"),
+  shotCameraProfile("red_raven", "RED RAVEN 4.5K", "RED"),
+  shotCameraProfile("red_ranger_monstro", "RED RANGER MONSTRO 8K VV", "RED"),
+  shotCameraProfile("red_ranger_helium", "RED RANGER HELIUM 8K S35", "RED"),
+  shotCameraProfile("red_ranger_gemini", "RED RANGER GEMINI 5K S35", "RED"),
+  shotCameraProfile("red_dsmc2_dragonx", "RED DSMC2 DRAGON-X 6K S35", "RED"),
+  shotCameraProfile("red_komodo", "RED KOMODO 6K", "RED"),
+  shotCameraProfile("red_vraptor", "RED V-RAPTOR 8K VV", "RED"),
+  shotCameraProfile("red_vraptor_xl", "RED V-RAPTOR XL 8K VV", "RED"),
+  shotCameraProfile("red_vraptor_s35", "RED V-RAPTOR 8K S35", "RED"),
+  shotCameraProfile("red_vraptor_xl_s35", "RED V-RAPTOR XL 8K S35", "RED"),
+  shotCameraProfile("red_komodox", "RED KOMODO-X 6K S35", "RED"),
+  shotCameraProfile("red_vraptor_x", "RED V-RAPTOR [X] 8K VV", "RED"),
+  shotCameraProfile("red_vraptor_xl_x", "RED V-RAPTOR XL [X] 8K VV", "RED"),
+  shotCameraProfile("red_vraptor_xe", "RED V-RAPTOR XE 8K VV", "RED"),
+  shotCameraProfile("panavision_dxl2", "Panavision DXL2", "Panavision"),
+  shotCameraProfile("sony_venice", "Sony Venice", "Sony"),
+  shotCameraProfile("sony_venice2_6k", "Sony Venice 2 6K", "Sony"),
+  shotCameraProfile("sony_venice2", "Sony Venice 2 8K", "Sony"),
+  shotCameraProfile("sony_burano", "Sony Burano", "Sony"),
+  shotCameraProfile("sony_fx9", "Sony FX9", "Sony"),
+  shotCameraProfile("sony_f55", "Sony F55", "Sony"),
+  shotCameraProfile("sony_f65", "Sony F65", "Sony"),
+  shotCameraProfile("sony_fs7", "Sony FS7 / FS7 II", "Sony"),
+  shotCameraProfile("sony_f5", "Sony F5", "Sony"),
+  shotCameraProfile("sony_fx6", "Sony FX6", "Sony"),
+  shotCameraProfile("sony_fr7", "Sony FR7", "Sony"),
+  shotCameraProfile("sony_pxw_z450", "Sony PXW-Z450", "Sony"),
+  shotCameraProfile("sony_pxw_z750", "Sony PXW-Z750", "Sony"),
+  shotCameraProfile("sony_fx3", "Sony FX3", "Sony"),
+  shotCameraProfile("sony_hdc_f5500", "Sony HDC-F5500", "Sony"),
+  shotCameraProfile("blackmagic_ursa_mini_46k", "Blackmagic Design URSA Mini 4.6K", "Blackmagic"),
+  shotCameraProfile("blackmagic_ursa_mini_pro_46k", "Blackmagic Design URSA Mini Pro 4.6K", "Blackmagic"),
+  shotCameraProfile("blackmagic_ursa_mini_pro_g2", "Blackmagic Design URSA Mini PRO 4.6K G2", "Blackmagic"),
+  shotCameraProfile("blackmagic_ursa_mini_pro_12k_olpf", "Blackmagic Design URSA Mini PRO 12K OLPF", "Blackmagic"),
+  shotCameraProfile("blackmagic_ursa_cine12k", "Blackmagic Design URSA Cine 12K LF", "Blackmagic"),
+  shotCameraProfile("blackmagic_ursa_cine17k", "Blackmagic Design URSA Cine 17K 65", "Blackmagic"),
+  shotCameraProfile("blackmagic_pyxis_12k", "Blackmagic Design PYXIS 12K", "Blackmagic"),
+  shotCameraProfile("dji_inspire3_x9", "DJI Inspire 3 Zenmuse X9-8K Air", "DJI"),
+  shotCameraProfile("cinema", "Generic cinema camera", "Generic", "high-end digital cinema capture with controlled dynamic range"),
+  shotCameraProfile("film35", "35mm film camera", "Generic", "photochemical 35mm motion-picture capture with organic grain"),
+  shotCameraProfile("largeformat", "Large-format camera", "Generic", "large-format clarity, scale and fine detail"),
+  shotCameraProfile("macro", "Macro rig", "Generic", "specialized macro capture for tiny subjects and surface detail"),
+  shotCameraProfile("handheld", "Handheld doc camera", "Generic", "reactive documentary camera feel"),
+  shotCameraProfile("surveillance", "Surveillance / CCTV", "Generic", "fixed security-camera capture, compressed and observational"),
+  shotCameraProfile("phone", "Phone camera", "Generic", "small-sensor mobile camera capture"),
+  shotCameraProfile("drone", "Drone", "Generic", "aerial camera platform with floating spatial overview"),
 ];
+const SHOT_CAMERA_BODIES = SHOT_CAMERA_PROFILES;
 const SHOT_LENS_TYPES = [
   { id:"auto", label:"Auto", desc:"use the selected basic lens naturally" },
   { id:"spherical", label:"Spherical", desc:"clean spherical cinema lens, natural geometry" },
@@ -126,11 +236,136 @@ window.shotSizeOf = sizeOf; window.shotAngleOf = angleOf; window.shotMoveOf = mo
 function shotCameraSettingLabel(list, id){
   return (list.find(x=>x.id===id) || list[0]).label;
 }
+function shotCameraProfileOf(id){ return SHOT_CAMERA_PROFILES.find(x=>x.id===id) || SHOT_CAMERA_PROFILES[0]; }
+function shotCameraProfilePrompt(id){
+  const p = shotCameraProfileOf(id);
+  if(!p || p.id==="auto") return "";
+  return "Camera profile: "+p.label+". Interpretation: "+p.desc+". This is a capture-style hint only; do not override the Art Room Style Preset, palette, medium, character design or location design.";
+}
+function shotCameraSettingOf(list, id){
+  return (list||[]).find(x=>x.id===id) || ((list||[])[0]);
+}
+function shotCameraEffectiveChoice(sh, key, list, fallbackId, fallbackLabel){
+  const c = (sh && sh.cameraSettings) || {};
+  const selectedId = c[key] || "auto";
+  const selected = shotCameraSettingOf(list, selectedId) || { id:"auto", label:"Auto" };
+  const explicit = selectedId && selectedId!=="auto";
+  const effectiveId = explicit ? selectedId : fallbackId;
+  const effective = shotCameraSettingOf(list, effectiveId) || { id:effectiveId, label:fallbackLabel || effectiveId || "Auto" };
+  return {
+    key,
+    selectedId,
+    selectedLabel:selected.label || selectedId,
+    effectiveId:effective.id || effectiveId || selectedId,
+    effectiveLabel:fallbackLabel || effective.label || effectiveId || selected.label || selectedId,
+    auto:!explicit,
+  };
+}
+function shotInferLensType(sh){
+  const lens = String((sh && sh.lens) || "");
+  const size = String((sh && sh.size) || "");
+  if(size==="INSERT" || size==="ECU" || lens==="100macro") return "macro";
+  if(lens==="14" || lens==="24") return "wide";
+  if(lens==="85" || lens==="135" || lens==="200") return "telephoto";
+  return "spherical";
+}
+function shotInferFocalLength(sh){
+  const lens = String((sh && sh.lens) || "50");
+  if(SHOT_FOCAL_LENGTHS.some(x=>x.id===lens)) return { id:lens, label:shotCameraSettingLabel(SHOT_FOCAL_LENGTHS,lens) };
+  const basic = lensOf(lens);
+  return { id:lens || "50", label:(basic && basic.label) || "50mm" };
+}
+function shotInferAperture(sh){
+  const size = String((sh && sh.size) || "MS");
+  if(size==="EWS" || size==="WS") return "f8";
+  if(size==="FS" || size==="MWS") return "f5_6";
+  if(size==="CU" || size==="ECU" || size==="INSERT") return "f2_8";
+  return "f4";
+}
+function shotInferShutter(sh){
+  const move = String((sh && sh.move) || "");
+  const text = ((sh && (sh.action+" "+sh.composition)) || "").toLowerCase();
+  if(/\b(run|rush|fight|slam|jerk|snap|hit|lunge|crash|explode|impact)\b/.test(text)) return "crisp";
+  if(move==="handheld" || move==="track" || move==="steadi") return "natural";
+  return "natural";
+}
+function shotInferIsoGrain(sh){
+  const text = ((sh && (sh.action+" "+sh.composition+" "+sh.locationName)) || "").toLowerCase();
+  if(/\b(night|dark|shadow|rain|storm|alley|tunnel|canal|neon|sodium|low[- ]light)\b/.test(text)) return "nightgrain";
+  if(/\b(cctv|surveillance|vhs|degraded|dirty|security)\b/.test(text)) return "noisy";
+  return "clean";
+}
+function shotInferCameraProfile(sh){
+  const lens = String((sh && sh.lens) || "");
+  const move = String((sh && sh.move) || "");
+  const size = String((sh && sh.size) || "");
+  const text = ((sh && (sh.action+" "+sh.composition+" "+sh.locationName)) || "").toLowerCase();
+  if(lens==="vhs" || /\b(cctv|surveillance|security camera|dashcam|bodycam|webcam)\b/.test(text)) return "surveillance";
+  if(/\b(phone|selfie|mobile footage|screen recording)\b/.test(text)) return "phone";
+  if(/\b(drone|aerial|bird'?s-eye|flyover|overhead aerial)\b/.test(text)) return "drone";
+  if(size==="INSERT" || size==="ECU" || lens==="100macro" || /\b(macro|insert|tiny detail|close detail)\b/.test(text)) return "macro";
+  if(lens==="imax70" || /\b(epic scale|large format|70mm|imax)\b/.test(text)) return "arri_alexa65";
+  if(/\b(night|dark|rain|storm|neon|sodium|low[- ]light)\b/.test(text)) return "sony_venice2_6k";
+  if(move==="handheld" && /\b(documentary|reactive|street|improvised|run-and-gun)\b/.test(text)) return "handheld";
+  if(/\b(gritty|crisp|high[- ]contrast|action|impact|kinetic)\b/.test(text)) return "red_komodo";
+  return "arri_alexa35";
+}
+function shotEffectiveCameraSettings(sh){
+  const c = (sh && sh.cameraSettings) || {};
+  const cameraAuto = !(c.camera && c.camera!=="auto");
+  const recommendedProfile = shotCameraProfileOf(shotInferCameraProfile(sh));
+  const profile = cameraAuto ? recommendedProfile : shotCameraProfileOf(c.camera || "auto");
+  const focal = shotInferFocalLength(sh);
+  return {
+    camera:{
+      key:"camera",
+      selectedId:c.camera || "auto",
+      selectedLabel:cameraAuto ? "Auto" : profile.label,
+      effectiveId:profile.id,
+      effectiveLabel:profile.label,
+      family:profile.family,
+      desc:profile.desc,
+      auto:cameraAuto,
+    },
+    lensType:shotCameraEffectiveChoice(sh, "lensType", SHOT_LENS_TYPES, shotInferLensType(sh)),
+    focalLength:shotCameraEffectiveChoice(sh, "focalLength", SHOT_FOCAL_LENGTHS, focal.id, focal.label),
+    aperture:shotCameraEffectiveChoice(sh, "aperture", SHOT_APERTURES, shotInferAperture(sh)),
+    shutter:shotCameraEffectiveChoice(sh, "shutter", SHOT_SHUTTERS, shotInferShutter(sh)),
+    iso:shotCameraEffectiveChoice(sh, "iso", SHOT_ISO_GRAIN, shotInferIsoGrain(sh)),
+  };
+}
+function shotCameraResolvedLine(sh){
+  const e = shotEffectiveCameraSettings(sh);
+  const parts = [
+    ["Camera profile", e.camera],
+    ["Lens type", e.lensType],
+    ["Focal length", e.focalLength],
+    ["Aperture", e.aperture],
+    ["Shutter", e.shutter],
+    ["ISO / grain", e.iso],
+  ];
+  return "Resolved camera settings — "+parts.map(([label,x])=>label+": "+(x.auto ? ("Auto → "+x.effectiveLabel) : x.effectiveLabel)).join("; ");
+}
+function shotCameraMetadata(sh){
+  const e = shotEffectiveCameraSettings(sh);
+  const pack = (x)=>({ selectedId:x.selectedId, selectedLabel:x.selectedLabel, effectiveId:x.effectiveId, effectiveLabel:x.effectiveLabel, auto:!!x.auto });
+  return {
+    camera:{ ...pack(e.camera), family:e.camera.family || "", desc:e.camera.desc || "" },
+    lensType:pack(e.lensType),
+    focalLength:pack(e.focalLength),
+    aperture:pack(e.aperture),
+    shutter:pack(e.shutter),
+    iso:pack(e.iso),
+    promptClause:shotCameraSettingsClause(sh),
+    resolvedLine:shotCameraResolvedLine(sh),
+  };
+}
 function shotCameraSettingsClause(sh){
   const c = (sh && sh.cameraSettings) || {};
   const bits = [];
+  const profile = shotCameraProfilePrompt(c.camera);
+  if(profile) bits.push(profile);
   const add = (label, list, id)=>{ if(id && id!=="auto") bits.push(label+": "+shotCameraSettingLabel(list,id)); };
-  add("camera", SHOT_CAMERA_BODIES, c.camera);
   add("lens type", SHOT_LENS_TYPES, c.lensType);
   add("focal length", SHOT_FOCAL_LENGTHS, c.focalLength);
   add("aperture", SHOT_APERTURES, c.aperture);
@@ -144,6 +379,12 @@ function shotHasCameraSettings(sh){
 }
 window.shotCameraSettingsClause = shotCameraSettingsClause;
 window.shotHasCameraSettings = shotHasCameraSettings;
+window.shotEffectiveCameraSettings = shotEffectiveCameraSettings;
+window.shotCameraResolvedLine = shotCameraResolvedLine;
+window.shotCameraMetadata = shotCameraMetadata;
+window.SHOT_CAMERA_PROFILES = SHOT_CAMERA_PROFILES;
+window.shotCameraProfileOf = shotCameraProfileOf;
+window.shotCameraProfilePrompt = shotCameraProfilePrompt;
 
 /* ---- the rolling keyframe CHAIN ----------------------------------------------- */
 /* The keyframe pass renders a scene's shots IN ORDER, each one seeded by the
@@ -202,10 +443,10 @@ function locWeightForSize(sizeId){
 }
 window.locWeightForSize = locWeightForSize;
 
-/* PANEL-SPLIT LOCATION REFERENCE (user idea 2026-07-23): a 2x2 grid confuses the
-   image model (it must parse four views at quarter resolution, and sometimes blends
-   their geometry). Shots attach ONE panel, cropped client-side from the plate,
-   chosen by the shot's grammar — full-frame, unambiguous conditioning. */
+/* PANEL-SPLIT LOCATION REFERENCE (user idea 2026-07-23): a 2x2 master plate can
+   confuse the image model, so when the master is the only usable source we attach
+   one cropped panel chosen by shot grammar. Full slugline-unit / coverage plates
+   supersede this crop path because they are already one full-resolution frame. */
 function shotLocPanel(sh){
   const size=String((sh&&sh.size)||"").toUpperCase();
   const angle=String((sh&&sh.angle)||"").toLowerCase();
@@ -227,6 +468,74 @@ async function shotLocPanelCrop(url, q){
   }catch(e){ return ""; }
 }
 window.shotLocPanelCrop = shotLocPanelCrop;
+
+async function shotGrabImage(id){
+  if(!id) return "";
+  let u = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
+  if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(id); }catch(e){} }
+  // A freshly opened cloud project may not have hydrated the local byte cache yet.
+  // For downstream references, a signed remote URL is still a better source than
+  // silently falling back to a cropped master-plate quadrant.
+  if(!u && typeof nbRemoteImageUrl==="function"){ try{ u = await nbRemoteImageUrl(id); }catch(e){} }
+  return u || "";
+}
+window.shotGrabImage = shotGrabImage;
+
+async function shotLoadLocationSpecImage(spec, grab, opts){
+  if(!spec || typeof grab!=="function") return null;
+  let u = await grab(spec.id);
+  let note = spec.note;
+  let refId = spec.id;
+  let q = spec.locPanelQ;
+  let assetRole = spec.assetRole || (q!=null ? "crop_fallback" : "master_reference");
+  let assetSourceQuality = spec.assetSourceQuality || (q!=null ? "cropped_master_panel" : "master_full_frame");
+  if(!u && spec.fallbackId && !(opts && opts.noFallback)){
+    u = await grab(spec.fallbackId);
+    note = spec.fallbackNote || note;
+    refId = spec.fallbackId;
+    q = spec.fallbackLocPanelQ;
+    assetRole = spec.fallbackAssetRole || (q!=null ? "crop_fallback" : "master_reference");
+    assetSourceQuality = spec.fallbackAssetSourceQuality || (q!=null ? "cropped_master_panel" : "master_full_frame");
+  }
+  if(u && q!=null && typeof shotLocPanelCrop==="function"){
+    const cu = await shotLocPanelCrop(u, q);
+    if(cu){
+      u = cu;
+      assetRole = "crop_fallback";
+      assetSourceQuality = "cropped_master_panel";
+    }
+  }
+  const label = (typeof nbAssetRoleLabel==="function") ? nbAssetRoleLabel(assetRole) : assetRole;
+  const priority = (typeof nbAssetRolePriority==="function") ? nbAssetRolePriority(assetRole) : 0;
+  return u ? { url:u, note, refId, assetRole, assetRoleLabel:label, assetRolePriority:priority, assetSourceQuality } : null;
+}
+window.shotLoadLocationSpecImage = shotLoadLocationSpecImage;
+
+async function shotResolveLocationSpecImages(specs, grab){
+  const list = Array.isArray(specs) ? specs.filter(Boolean) : [];
+  const seen = new Set();
+  const dedupe = (items)=>items.filter(r=>{
+    const k = [r.refId||"", r.assetSourceQuality||"", r.note||""].join("|");
+    if(seen.has(k)) return false; seen.add(k); return true;
+  });
+  const direct = [];
+  for(const s of list){
+    const r = await shotLoadLocationSpecImage(s, grab, { noFallback:true });
+    if(r) direct.push(r);
+  }
+  // If any full-frame unit/coverage source resolves, suppress crop fallbacks. A
+  // cropped master panel only exists to bridge missing derived plates.
+  const full = direct.filter(r=>r.assetSourceQuality!=="cropped_master_panel" && r.assetRole!=="crop_fallback");
+  if(full.length) return dedupe(full);
+  if(direct.length) return dedupe(direct);
+  const fallbacks = [];
+  for(const s of list){
+    const r = await shotLoadLocationSpecImage(s, grab);
+    if(r) fallbacks.push(r);
+  }
+  return dedupe(fallbacks);
+}
+window.shotResolveLocationSpecImages = shotResolveLocationSpecImages;
 
 /* a one-line human label for a shot's grammar, e.g. "MS · Low angle · Push in · 50mm" */
 function shotGrammarLabel(sh){
@@ -374,13 +683,46 @@ function shotLocationCoverageSpecs(loc, sh, scene, drafts){
   if(!loc) return [];
   const _locPanel = (typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
   const base = { id:loc.id, locPanelQ:(_locPanel?_locPanel.q:null), role:loc.intExt||"",
+    assetRole:(_locPanel?"crop_fallback":"master_reference"),
+    assetSourceQuality:(_locPanel?"cropped_master_panel":"master_full_frame"),
     note:(loc.name||"location")+" — master location plate seen as its "+(_locPanel?_locPanel.label:"coverage view")+" (one full-frame view)" };
+  const text = shotLocationText(sh).toLowerCase();
+  const side = shotLocationSide(sh, loc, scene, drafts);
+  const crossBoundary = side==="BOTH" || /\b(through|across|behind|beyond)\s+(?:the\s+)?(glass|window|door|threshold)\b/i.test(text);
+  const locKey = String(loc.key || ((typeof locSlug==="function") ? locSlug(loc.name).split("-").slice(0,4).join("-") : "") || "");
+  const unitIdFor = (u)=> (typeof sluglineUnitImageId==="function")
+    ? sluglineUnitImageId(u&&u.key)
+    : "locunit-"+String((u&&u.key)||"").replace(/[^a-z0-9-]+/gi,"-");
+  const units = (((window.turnContinuity||{}).sluglineUnits)||[]).filter(u=>{
+    if(!u || u.orphan) return false;
+    if(locKey && String(u.locationKey||"")!==locKey) return false;
+    if(scene && scene.id && Array.isArray(u.scenes) && u.scenes.length && u.scenes.indexOf(scene.id)<0) return false;
+    const role = String(u.intExt||"").toUpperCase();
+    if(side==="BOTH") return true;
+    return !side || !role || role===side;
+  });
+  const scoreUnit = (u)=>{
+    let n = 0;
+    const name = String((u&&u.name)||(u&&u.place)||"").toLowerCase();
+    if(name && text.indexOf(name)>=0) n += 8;
+    const script = String((u&&u.scriptText)||"").toLowerCase();
+    const words = Array.from(new Set(text.split(/[^a-z0-9']+/).filter(w=>w.length>4))).slice(0,18);
+    words.forEach(w=>{ if(script.indexOf(w)>=0) n += 1; });
+    return n;
+  };
+  const unitSpecs = units.slice().sort((a,b)=>scoreUnit(b)-scoreUnit(a)).map(u=>{
+    const role = String(u.intExt||"").toUpperCase();
+    const unitName = u.name || loc.name || "location";
+    return { id:unitIdFor(u), role, locPanelQ:null, source:"slugline-unit",
+      assetRole:"derived_reference", assetSourceQuality:"slugline_unit_full_frame",
+      fallbackId:base.id, fallbackLocPanelQ:base.locPanelQ, fallbackNote:base.note,
+      fallbackAssetRole:base.assetRole, fallbackAssetSourceQuality:base.assetSourceQuality,
+      note:unitName+" — slugline-unit "+(role||"location")+" coverage plate"
+        +(u.time?(" at "+u.time):"")+" (full-resolution unit anchor)" };
+  });
   const sheets = (Array.isArray(loc.coverageSheets) && loc.coverageSheets.length)
     ? loc.coverageSheets
     : ((typeof deriveLocationCoverageSheets==="function") ? deriveLocationCoverageSheets(loc, scene?[scene]:[], drafts||((window.turnContinuity||{}).drafts)||{}) : []);
-  if(!sheets.length) return [base];
-  const text = shotLocationText(sh).toLowerCase();
-  const side = shotLocationSide(sh, loc, scene, drafts);
   const matches = sheets.filter(v=>{
     const role = String(v.role||"").toUpperCase();
     if(side==="BOTH") return true;
@@ -388,8 +730,15 @@ function shotLocationCoverageSpecs(loc, sh, scene, drafts){
     const words = (v.triggerWords||[]).map(w=>String(w||"").toLowerCase()).filter(Boolean);
     return !words.length || words.some(w=>text.indexOf(w)>=0);
   }).map(v=>({ id:loc.id+"-"+v.id, role:v.role||"", locPanelQ:null,
+    assetRole:"derived_reference", assetSourceQuality:"screenplay_coverage_full_frame",
     note:(v.name||loc.name||"location")+" — screenplay-derived "+(v.role||"INT")+" coverage sheet (one full-frame view)" }));
-  const crossBoundary = side==="BOTH" || /\b(through|across|behind|beyond)\s+(?:the\s+)?(glass|window|door|threshold)\b/i.test(text);
+  if(unitSpecs.length){
+    if((side==="INT" || side==="EXT") && !crossBoundary) return unitSpecs;
+    const unitRoles = new Set(unitSpecs.map(s=>String(s.role||"").toUpperCase()).filter(Boolean));
+    return [...unitSpecs, ...matches.filter(m=>!unitRoles.has(String(m.role||"").toUpperCase()))]
+      .filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i);
+  }
+  if(!sheets.length) return [base];
   if(!matches.length) return [base];
   if(side==="INT" && !crossBoundary) return matches;
   if(side==="EXT" && !crossBoundary) return [base, ...matches.filter(m=>String(m.role).toUpperCase()==="EXT")].filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i);
@@ -1157,8 +1506,7 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   const prevSh = (typeof seedShotOf==="function") ? seedShotOf(sh, sceneShots)
     : ((typeof prevShotOf==="function") ? prevShotOf(sh, sceneShots) : null);
   const isHead = !prevSh;
-  const grab = async (id)=>{ let u=(typeof nbGetImage==="function")?nbGetImage(id):"";
-    if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(id); }catch(e){} } return u; };
+  const grab = async (id)=> (typeof shotGrabImage==="function") ? await shotGrabImage(id) : "";
   // the SEED: the reference frame — within a beat, the beat's FIRST shot's committed
   // frame (the coverage anchor); for a beat opener, the previous shot's frame
   // (cross-beat continuity). Carries grade + physical state forward.
@@ -1200,14 +1548,34 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   // user-unticked sheets (sh.refOff) drop out here AND in buildShotPrompt's image
   // map together — the numbered labels always match the attached files
   const _refOff = Array.isArray(sh.refOff) ? sh.refOff : [];
+  const activeLocSpec = locSpec.filter(s=> _refOff.indexOf(s.baseId||s.id)<0);
   const orderedSpecs = ((locWeight==="ambient")
-    ? [...castSpec, ...locSpec, ...propSpec, ...carrySpec]   // tight: the cast leads, the set recedes
-    : [...locSpec, ...castSpec, ...propSpec, ...carrySpec])  // wide: the set leads
+    ? [...castSpec, ...activeLocSpec, ...propSpec, ...carrySpec]   // tight: the cast leads, the set recedes
+    : [...activeLocSpec, ...castSpec, ...propSpec, ...carrySpec])  // wide: the set leads
     .filter(s=> _refOff.indexOf(s.baseId||s.id)<0);
   const refs = [];
-  for(const s of orderedSpecs){ let u=await grab(s.id);
-    if(u && s.locPanelQ!=null && typeof shotLocPanelCrop==="function"){ const cu=await shotLocPanelCrop(u, s.locPanelQ); if(cu) u=cu; }
-    if(u) refs.push({ url:u, note:s.note }); }
+  const locIds = new Set(activeLocSpec.map(s=>s&&s.id).filter(Boolean));
+  const locResolved = (typeof shotResolveLocationSpecImages==="function") ? await shotResolveLocationSpecImages(activeLocSpec, grab) : [];
+  let locResolvedPushed = false;
+  for(const s of orderedSpecs){
+    if(locIds.has(s.id)){
+      if(!locResolvedPushed && locResolved.length){
+        locResolved.forEach(r=>refs.push({ url:r.url, note:r.note, refId:r.refId||s.id,
+          assetRole:r.assetRole, assetRoleLabel:r.assetRoleLabel, assetRolePriority:r.assetRolePriority,
+          assetSourceQuality:r.assetSourceQuality }));
+        locResolvedPushed = true;
+      }
+      continue;
+    }
+    const u = await grab(s.id);
+    if(u){
+      const role = s.assetRole || "master_reference";
+      refs.push({ url:u, note:s.note, refId:s.id, assetRole:role,
+        assetRoleLabel:(typeof nbAssetRoleLabel==="function") ? nbAssetRoleLabel(role) : role,
+        assetRolePriority:(typeof nbAssetRolePriority==="function") ? nbAssetRolePriority(role) : 0,
+        assetSourceQuality:s.assetSourceQuality || "full_frame" });
+    }
+  }
   // buildShotPrompt now emits the STYLE SPINE + staging + the named reference stack itself
   // (it reads ctx.carriedForward + ctx.prevFrameRole), so we don't re-list references here.
   const _ordAll = (typeof sceneShotsOrdered==="function") ? sceneShotsOrdered(sceneShots) : (sceneShots||[]);
@@ -1223,11 +1591,16 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
     referenceMaxDim:768,
   };
   if(seed) gopts.referenceImage = seed;
-  if(refs.length) gopts.extraImages = refs.map(r=>r.url);
+  const rankedRefs = (typeof nbPreferBestAssetRefs==="function") ? nbPreferBestAssetRefs(refs) : refs;
+  if(rankedRefs.length) gopts.extraImages = rankedRefs.map(r=>r.url);
   const url = await nbGenerate(prompt, gopts);
   const now = new Date();
   const prior = (typeof nbGetMeta==="function") ? (nbGetMeta(sh.id)||{}) : {};
+  const advancedCamera = (typeof shotCameraMetadata==="function") ? shotCameraMetadata(sh) : null;
   const meta = { ...prior, mode: seed?"base":"final", prompt, director:true,
+    assetRole:"shot_anchor", assetRoleLabel:(typeof nbAssetRoleLabel==="function") ? nbAssetRoleLabel("shot_anchor") : "Shot anchor",
+    advancedCamera,
+    sourceReferences:rankedRefs.map(r=>({ refId:r.refId||"", note:r.note||"", assetRole:r.assetRole||"", assetSourceQuality:r.assetSourceQuality||"" })),
     date:now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}),
     time:now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}), iso:now.toISOString(),
     version:((prior.version||0)+1), ...(opts.correction?{editInstruction:opts.correction}:{}) };

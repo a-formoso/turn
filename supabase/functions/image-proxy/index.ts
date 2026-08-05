@@ -534,6 +534,12 @@ Deno.serve(async (req) => {
       let d = ""; try { const j = await r.json(); d = j?.detail?.message || (typeof j?.detail === "string" ? j.detail : "") || j?.message || ""; } catch (_e) { /* noop */ }
       return d || `ElevenLabs error (${r.status}).`;
     };
+    const voiceBillingIssue = (msg: string, status = 0): boolean =>
+      status === 402 || /\b(subscription|invoice|payment|billing)\b/i.test(String(msg || ""));
+    const voiceProviderError = (msg: string, status: number, opName: string): any =>
+      voiceBillingIssue(msg, status)
+        ? { error: msg || "Voice provider billing issue.", code: "VOICE_PROVIDER_BILLING", status, op: opName }
+        : { error: msg, status };
     try {
       // TTS WITH TIMESTAMPS — one call returns the audio AND per-character timing, so
       // we get the line's duration (the cut clock) and split points for free.
@@ -575,7 +581,7 @@ Deno.serve(async (req) => {
             return json({ audioB64: data.audio_base64, mime: "audio/mpeg", durationMs, alignment: data.alignment || null, via: "elevenlabs" });
           }
           elWhy = await elErr(r);
-          if (!falVoiceKey) return json({ error: elWhy, status: r.status }, 200);
+          if (!falVoiceKey) return json(voiceProviderError(elWhy, r.status, op), 200);
         }
         // Fallback: the same ElevenLabs models hosted on fal, billed to the fal wallet.
         // Custom voices are addressed by the same voice id; timestamps keep the cut clock.
@@ -625,7 +631,7 @@ Deno.serve(async (req) => {
             ...(body.seed != null ? { seed: Number(body.seed) } : {}),
           }),
         });
-        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
+        if (!r.ok) return json(voiceProviderError(await elErr(r), r.status, op), 200);
         const data = await r.json();
         const previews = (data.previews || []).map((p: any) => ({
           generatedVoiceId: p.generated_voice_id,
@@ -645,7 +651,7 @@ Deno.serve(async (req) => {
           headers: { "xi-api-key": elKey, "Content-Type": "application/json" },
           body: JSON.stringify({ voice_name: name, voice_description: (body.description || "").toString(), generated_voice_id: generatedVoiceId }),
         });
-        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
+        if (!r.ok) return json(voiceProviderError(await elErr(r), r.status, op), 200);
         const data = await r.json();
         return json({ voiceId: data.voice_id || (data.voice && data.voice.voice_id) || "", name });
       }
@@ -653,7 +659,7 @@ Deno.serve(async (req) => {
       // The account's voices (for the "picked from library" origin).
       if (op === "listVoices") {
         const r = await fetch(`${EL}/voices`, { headers: { "xi-api-key": elKey } });
-        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
+        if (!r.ok) return json(voiceProviderError(await elErr(r), r.status, op), 200);
         const data = await r.json();
         const voices = (data.voices || []).map((v: any) => ({
           voiceId: v.voice_id, name: v.name, category: v.category || "",
@@ -675,7 +681,7 @@ Deno.serve(async (req) => {
           if (blob) form.append("files", blob, `sample${i++}.mp3`);
         }
         const r = await fetch(`${EL}/voices/add`, { method: "POST", headers: { "xi-api-key": elKey }, body: form });
-        if (!r.ok) return json({ error: await elErr(r), status: r.status }, 200);
+        if (!r.ok) return json(voiceProviderError(await elErr(r), r.status, op), 200);
         const data = await r.json();
         return json({ voiceId: data.voice_id || "", name: (body.name || "Cloned voice").toString() });
       }
@@ -762,8 +768,24 @@ Deno.serve(async (req) => {
     const op = (body.op || "submit").toString();
     const falHead = { "Authorization": "Key " + falKey, "Content-Type": "application/json" };
     const falErr = async (r: Response) => {
-      let d = ""; try { const j = await r.json(); d = (typeof j?.detail === "string" ? j.detail : Array.isArray(j?.detail) ? j.detail.map((x: any) => x.msg || x).join("; ") : "") || j?.error || ""; } catch (_e) { /* noop */ }
+      let d = ""; try {
+        const j = await r.json();
+        d = (typeof j?.detail === "string" ? j.detail
+          : Array.isArray(j?.detail) ? j.detail.map((x: any) => x?.msg || x?.message || JSON.stringify(x)).join("; ")
+          : j?.detail?.message || j?.message || j?.error || "");
+      } catch (_e) { /* noop */ }
       return d || `fal error (${r.status}).`;
+    };
+    const videoResolutionForModel = (m: string, requested: unknown): string => {
+      const raw = String(requested || "720p").trim();
+      const norm = raw.toLowerCase() === "4k" ? "4K" : raw.toLowerCase();
+      const ladder = ["480p", "720p", "1080p", "4K"];
+      const maxRank = /seedance-2\.0\/fast/.test(m) ? 1
+        : /kling-video|sora-2\/image-to-video\/pro/.test(m) ? 2
+        : /sora-2/.test(m) ? 1
+        : 3;
+      const idx = ladder.indexOf(norm);
+      return ladder[Math.max(0, Math.min(idx >= 0 ? idx : 1, maxRank))].toLowerCase();
     };
     try {
       if (op === "submit") {
@@ -778,7 +800,7 @@ Deno.serve(async (req) => {
           if (!startImage) return json({ error: "Sora 2 needs a start image." }, 400);
           const want = Number(body.duration) || 4;
           const dur = [4, 8, 12, 16, 20].reduce((b, v) => Math.abs(v - want) < Math.abs(b - want) ? v : b, 4);
-          const res = (body.resolution || "").toString();
+          const res = videoResolutionForModel(model, body.resolution);
           const asp = (body.aspectRatio || "auto").toString();
           input = {
             prompt: (body.prompt || "").toString(),
@@ -819,7 +841,7 @@ Deno.serve(async (req) => {
           const audioUrls = await videoInputUrls(body.audio_urls, "audio");
           input = {
             prompt: (body.prompt || "").toString(),
-            resolution: (body.resolution || "720p").toString(),
+            resolution: videoResolutionForModel(model, body.resolution),
             duration: (body.duration != null ? String(body.duration) : "auto"),
             aspect_ratio: (body.aspectRatio || "auto").toString(),
             generate_audio: body.generateAudio !== false,

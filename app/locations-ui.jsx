@@ -219,7 +219,7 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
       ],
       specGate:{ ready:(drafted || !l.manual), hint:"Draft the design spec first \u2014 architecture, materials & light are what the plate is built from." },
       // edit ONE view of the plate (works on generated or uploaded plates)
-      menuExtra: gen.genUrl ? [{ label: panelEdit?"Close panel edit":"Edit a panel\u2026",
+      menuExtra: gen.genUrl ? [{ label: panelEdit?"Close panel edit":"Edit a panel\u2026", placement:"beforeEdit",
         title:"Change just ONE view of the multi-angle plate, leaving the others untouched",
         onClick:()=> setPanelEdit(pe=> pe ? null : { idx:null, text:"" }) }] : null,
       referenceControls: masterRefs.length>0 && React.createElement(CoverageReferenceStrip,{ refs:masterRefs, excludedIds:masterRefOff, onToggle:toggleMasterRef, onView }),
@@ -510,6 +510,11 @@ function LocationCoverageSheet({ l, v, project, scenes, drafts, previousSheets, 
       : "",
     buildEdit: (instr)=> "Edit this "+(v.role||"INT")+" coverage sheet for "+(v.name||l.name||"the location")+". Apply ONLY: "+instr+". Keep it consistent with the parent location's architecture, materials and light.",
   });
+  const viewerEntity = {
+    ...l,
+    id,
+    name:(v.name||l.name||"Location")+" · "+(v.role||"INT")
+  };
   return React.createElement("div",{className:"loc-variant loc-coverage-sheet"},
     React.createElement("div",{className:"loc-variant-head"},
       React.createElement("div",{className:"loc-coverage-title"},
@@ -519,7 +524,7 @@ function LocationCoverageSheet({ l, v, project, scenes, drafts, previousSheets, 
     v.summary && React.createElement("div",{className:"loc-variants-empty loc-coverage-summary"},v.summary),
     React.createElement(SheetFrame,{ gen, slotId:"loccov-"+id, name:(v.name||l.name||"Location")+" \u00b7 "+(v.role||"INT"),
       avatarColor:locSwatch(v.role), initials:(v.role||"?").slice(0,2).toUpperCase(), drafted:true, drafting:false,
-      entity:l, onView, slotPlaceholder:"Drop a finished side plate", noun:"coverage sheet", compact:true,
+      entity:viewerEntity, onView, slotPlaceholder:"Drop a finished side plate", noun:"coverage sheet", compact:true,
       // match the unit-plate card: the empty slot itself imports on drop/click, which also
       // drops the redundant "Upload a finished coverage sheet" button below the generate CTA
       dropToImport:true,
@@ -564,20 +569,26 @@ function CoverageReferenceStrip({ refs, excludedIds, onToggle, onView }){
 
 /* one time-of-day variant: its own image slot + a small establishing-frame generator */
 function LocationVariant({ l, v, project, onTime, onRemove, onView }){
+  const id = l.id+"-"+v.id;
   const gen = useImageGen({
-    id: l.id+"-"+v.id, slotId: "locvar-"+l.id+"-"+v.id,
+    id, slotId: "locvar-"+l.id+"-"+v.id,
     entity: l,
     buildFinal: ()=> buildLocationVariantPrompt(l, project, { time:v.time }),
     buildSimple: ()=> buildSimpleLocationPrompt(l),
     buildEdit: (instr)=> "Edit this establishing frame of "+(l.name||"the place")+" ("+v.time+"). Apply ONLY: "+instr+". Keep the same space and architecture.",
   });
+  const viewerEntity = {
+    ...l,
+    id,
+    name:(l.name||"Location")+" · "+(v.time||"Variant")
+  };
   return React.createElement("div",{className:"loc-variant"},
     React.createElement("div",{className:"loc-variant-head"},
       React.createElement(EditText,{value:v.time,placeholder:"Night / Day / Rain\u2026",onCommit:onTime}),
       React.createElement("button",{className:"loc-variant-x",title:"Remove variant",onClick:onRemove},React.createElement(Icon.x,{s:12}))),
     React.createElement(SheetFrame,{ gen, slotId:"locvar-"+l.id+"-"+v.id, name:(l.name||"")+" \u00b7 "+v.time,
       avatarColor:locSwatch(l.intExt), initials:(v.time||"?").slice(0,2).toUpperCase(), drafted:true, drafting:false,
-      entity:l, onView, slotPlaceholder:"Drop a photo", noun:"variant", compact:true }),
+      entity:viewerEntity, onView, slotPlaceholder:"Drop a photo", noun:"variant", compact:true }),
     gen.genUrl && window.QaCheckButton && React.createElement("div",{className:"card-qa-row"},
       React.createElement(window.QaCheckButton,{ gen, name:(l.name||"")+" \u00b7 "+v.time, noun:"time-of-day plate" })));
 }
@@ -656,6 +667,11 @@ function SluglineUnitCard({ l, u, project, scenes, drafts, parentGenUrl, onUpdat
       : "",
     buildEdit: (instr)=> "Edit this "+role+" coverage plate for "+(u.name||l.name||"the location")+(u.time?(" at "+u.time):"")+". Apply ONLY: "+instr+". Keep it consistent with the parent location's architecture, materials and light.",
   });
+  const viewerEntity = {
+    ...l,
+    id:imgId,
+    name:(u.name||l.name||"Location")+" · "+role+(u.time?(" · "+u.time):"")
+  };
   return React.createElement("div",{className:"loc-variant loc-coverage-sheet loc-unit-card"+(u.orphan?" orphan":"")},
     React.createElement("div",{className:"loc-variant-head"},
       React.createElement("div",{className:"loc-coverage-title"},
@@ -682,7 +698,7 @@ function SluglineUnitCard({ l, u, project, scenes, drafts, parentGenUrl, onUpdat
     React.createElement(UnitDressing,{ u, onUpdateUnit: u.orphan ? null : onUpdateUnit }),
     React.createElement(SheetFrame,{ gen, slotId, name:(u.name||l.name||"Location")+" \u00b7 "+role+(u.time?(" \u00b7 "+u.time):""),
       avatarColor:locSwatch(role), initials:role.slice(0,2), drafted:true, drafting:false,
-      entity:l, onView, slotPlaceholder:"Drop a finished unit plate", noun:"unit plate", compact:true,
+      entity:viewerEntity, onView, slotPlaceholder:"Drop a finished unit plate", noun:"unit plate", compact:true,
       dropToImport:true,
       referenceControls: React.createElement(CoverageReferenceStrip,{ refs:refPreview, excludedIds:refOff, onToggle:toggleRef, onView }),
       generateDisabled:!canGenerate,

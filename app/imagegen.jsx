@@ -115,6 +115,72 @@ function slotAssetKind(slotId){
 }
 window.slotAssetKind = slotAssetKind;
 
+const NB_ASSET_ROLES = {
+  MASTER_REFERENCE:"master_reference",
+  DERIVED_REFERENCE:"derived_reference",
+  CROP_FALLBACK:"crop_fallback",
+  SHOT_ANCHOR:"shot_anchor",
+  FINAL_TAKE:"final_take",
+};
+const NB_ASSET_ROLE_LABELS = {
+  master_reference:"Master reference",
+  derived_reference:"Derived reference",
+  crop_fallback:"Crop fallback",
+  shot_anchor:"Shot anchor",
+  final_take:"Final take",
+};
+const NB_ASSET_ROLE_PRIORITY = {
+  final_take:100,
+  shot_anchor:92,
+  derived_reference:86,
+  master_reference:70,
+  crop_fallback:20,
+};
+function nbNormalizeAssetRole(role){
+  const r = String(role||"").trim().toLowerCase().replace(/[\s-]+/g,"_");
+  return NB_ASSET_ROLE_LABELS[r] ? r : "";
+}
+function nbInferAssetRole(args){
+  args = args || {};
+  const meta = args.meta || {};
+  const explicit = nbNormalizeAssetRole(args.assetRole || meta.assetRole || meta.role);
+  if(explicit) return explicit;
+  const id = String(args.id||"");
+  const kind = String(args.kind||"").toLowerCase();
+  if(kind==="video" || kind==="take" || kind==="final_take") return NB_ASSET_ROLES.FINAL_TAKE;
+  if(kind==="shot" || id.indexOf("shot-")===0) return NB_ASSET_ROLES.SHOT_ANCHOR;
+  if(kind==="locunit" || id.indexOf("locunit-")===0 || id.indexOf(":half-")>=0 || id.indexOf("sbsheet-")===0) return NB_ASSET_ROLES.DERIVED_REFERENCE;
+  if(/-(?:coverage|unit|state|variant|plate)-/i.test(id) || /-(?:int|ext)(?:-|$)/i.test(id)) return NB_ASSET_ROLES.DERIVED_REFERENCE;
+  return NB_ASSET_ROLES.MASTER_REFERENCE;
+}
+function nbAssetRoleLabel(role){ return NB_ASSET_ROLE_LABELS[nbNormalizeAssetRole(role)] || "Reference"; }
+function nbAssetRolePriority(role){
+  const r = nbNormalizeAssetRole(role);
+  return r ? (NB_ASSET_ROLE_PRIORITY[r] || 0) : 0;
+}
+function nbWithAssetProvenance(id, meta, kind, extra){
+  const out = { ...(meta||{}) };
+  const role = nbInferAssetRole({ ...(extra||{}), id, kind, meta:out });
+  out.assetRole = role;
+  out.assetRoleLabel = nbAssetRoleLabel(role);
+  out.assetRolePriority = nbAssetRolePriority(role);
+  return out;
+}
+function nbPreferBestAssetRefs(refs){
+  const list = Array.isArray(refs) ? refs.filter(Boolean) : [];
+  return list.slice().sort((a,b)=>{
+    const ap = Number(a.assetRolePriority || nbAssetRolePriority(a.assetRole));
+    const bp = Number(b.assetRolePriority || nbAssetRolePriority(b.assetRole));
+    return bp - ap;
+  });
+}
+window.NB_ASSET_ROLES = NB_ASSET_ROLES;
+window.nbInferAssetRole = nbInferAssetRole;
+window.nbAssetRoleLabel = nbAssetRoleLabel;
+window.nbAssetRolePriority = nbAssetRolePriority;
+window.nbWithAssetProvenance = nbWithAssetProvenance;
+window.nbPreferBestAssetRefs = nbPreferBestAssetRefs;
+
 /* which provider a model id belongs to ("google" default for older saved stories) */
 function imageModelEntry(model){
   return (window.NB_MODELS||NB_MODELS).find(x=>x.id===model) || null;
@@ -647,6 +713,8 @@ async function nbCommit(id, dataUrl, meta, refs, kind, epoch){
   // the scope moved while this was generating — the result belongs to a film that is no
   // longer open, and this id means something different here. Drop it rather than clobber.
   if(epoch!=null && epoch!==_nbEpoch) return { tier:"stale", url:dataUrl };
+  meta = (typeof nbWithAssetProvenance==="function") ? nbWithAssetProvenance(id, meta, kind) : (meta||null);
+  refs = (typeof nbPreferBestAssetRefs==="function") ? nbPreferBestAssetRefs(refs||[]) : (refs||[]);
   if(_nbBackend==="cloud"){
     if(typeof window.cloudCommit!=="function") return { tier:"error", url:dataUrl };
     const r = await window.cloudCommit(_scopeFor(id), _nbUid, id, dataUrl, meta, refs, kind);

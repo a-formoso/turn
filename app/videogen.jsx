@@ -140,6 +140,8 @@ async function _vidCommitRaw(id, url, meta){
   if(old&&old.url&&old.url!==url) takes.push({ url:old.url, meta:oldMeta, savedAt:(oldMeta&&oldMeta.createdAt)||Date.now() });
   ((oldMeta&&oldMeta.takes)||[]).forEach(t=>{ if(t&&t.url&&t.url!==url&&!takes.some(x=>x.url===t.url)) takes.push(t); });
   meta = { ...(meta||{}) };
+  if(typeof window.nbWithAssetProvenance==="function") meta = window.nbWithAssetProvenance(id, meta, "video");
+  else if(!meta.assetRole){ meta.assetRole = "final_take"; meta.assetRoleLabel = "Final take"; meta.assetRolePriority = 100; }
   /* STABLE version number: assigned once on first commit, carried by the take forever
      (never renumbered when older takes roll over) — restoring an old take keeps its vno. */
   if(meta.vno==null){
@@ -265,6 +267,17 @@ async function vidProxy(op, payload){
 function _dedupCap(arr, cap){ const out=[], seen=new Set();
   (arr||[]).forEach(u=>{ if(u && !seen.has(u)){ seen.add(u); out.push(u); } });
   return cap ? out.slice(0,cap) : out; }
+function vidResolutionForModel(model, requested){
+  const raw = String(requested || "720p").trim();
+  const norm = raw.toLowerCase()==="4k" ? "4K" : raw.toLowerCase();
+  const maxRank = /seedance-2\.0\/fast/.test(String(model||"")) ? 1
+    : /kling-video|sora-2\/image-to-video\/pro/.test(String(model||"")) ? 2
+    : /sora-2/.test(String(model||"")) ? 1
+    : 3;
+  const ladder = ["480p","720p","1080p","4K"];
+  const idx = ladder.indexOf(norm);
+  return ladder[Math.max(0, Math.min(idx>=0 ? idx : 1, maxRank))].toLowerCase();
+}
 function _blobToDataUrl(blob){
   return new Promise((resolve,reject)=>{
     try{
@@ -437,8 +450,9 @@ function vidLikenessError(msg){
   const s = String(msg||"");
   return !!s && !/cancelled/i.test(s) && VID_LIKENESS_RE.test(s);
 }
+window.vidLikenessError = vidLikenessError;
 const VID_FICTION_NOTE = "Note: every person appearing in the reference images is an original, fully AI-generated fictional character created for this film. They are not real people, celebrities, or public figures — no real person's likeness, face, or identity is used or implied.";
-const VID_LIKENESS_HELP = "The model's safety filter flagged a reference image as a real person's likeness and refused the render — even after a retry declaring the cast as AI-generated fictional characters. This is a false positive on its side; it cannot be switched off from here. What works: regenerate that character's sheet with a more stylized / less photoreal look in the Art Room, drop the flagged reference from this clip, or switch the model (Kling reads identity from the start frame instead of reference sheets).";
+const VID_LIKENESS_HELP = "The model's safety filter flagged a reference image as a real person's likeness and refused the render — even after a retry declaring the cast as AI-generated fictional characters. This is a false positive on its side; it cannot be switched off from here. What works: regenerate that character's sheet with a more stylized / less photoreal look in the Art Room, or exclude character reference sheets from this clip and render from the shot frame plus location/prop references.";
 
 async function seedanceGenerate(id, opts){
   opts = opts||{};
@@ -477,7 +491,7 @@ async function seedanceGenerate(id, opts){
   const klingShots = (isKling && Array.isArray(opts.multiShot))
     ? opts.multiShot.map(s=>({ prompt:String(s&&s.prompt||"").trim(), duration:Math.max(1,Math.round(Number(s&&s.duration)||3)) })).filter(s=>s.prompt)
     : [];
-  const resolution = String(opts.resolution || "720p").toLowerCase();   // fal's enum is lowercase ("4k")
+  const resolution = vidResolutionForModel(model, opts.resolution);   // clamp stale/local choices to the model's current fal ceiling
   const aspectRatio = opts.aspectRatio || "auto";
   const controls = (opts.controls||"").trim();
   const basePrompt = (opts.prompt||"").trim() || (audios.length
@@ -596,33 +610,73 @@ async function seedanceGenerate(id, opts){
 }
 window.seedanceGenerate=seedanceGenerate;
 
+/* ---- In-flight render registry ------------------------------------------------
+   Stage tabs unmount the Shoot console when you visit Takes/Timeline/Mix. The fal
+   job must keep polling and the UI must be able to resubscribe when Shoot remounts,
+   so active render state lives at module scope instead of inside one React hook. */
+const _vidJobs = new Map();   // id -> { gening,status,err,promise,cancelRef }
+function _vidJobState(id){
+  return _vidJobs.get(id) || { gening:false, status:"", err:"", promise:null, cancelRef:null };
+}
+function _vidJobPatch(id, patch){
+  const prev = _vidJobState(id);
+  const next = { ...prev, ...(patch||{}) };
+  if(!next.gening && !next.status && !next.err && !next.promise) _vidJobs.delete(id);
+  else _vidJobs.set(id, next);
+  try{ window.dispatchEvent(new CustomEvent("vid-job",{ detail:{ id } })); }catch(e){}
+  return next;
+}
+function _vidJobCancel(id){
+  const j = _vidJobs.get(id);
+  if(j && j.cancelRef) j.cancelRef.current = true;
+  _vidJobPatch(id, { status:"CANCELLED" });
+}
+
 // ---- React hook (mirrors useVoiceGen) — one clip's video, by asset id --------
 function useSeedanceGen(id){
   const [videoUrl,setVideoUrl]=React.useState(()=>vidGetVideo(id));
-  const [status,setStatus]=React.useState("");
-  const [gening,setGening]=React.useState(false);
-  const [err,setErr]=React.useState("");
+  const [jobTick,setJobTick]=React.useState(0);
   const idRef=React.useRef(id); idRef.current=id;
-  const cancelRef=React.useRef(false);
+  const job = _vidJobState(id);
+  const status = job.status || "";
+  const gening = !!job.gening;
+  const err = job.err || "";
 
   React.useEffect(()=>{ let alive=true;
     if(!vidGetVideo(id)){ vidLoadVideo(id).then(u=>{ if(alive&&u) setVideoUrl(u); }); }
     const onDone=(e)=>{ if(!alive||!e.detail||!e.detail.ids||e.detail.ids.indexOf(idRef.current)<0) return; setVideoUrl(vidGetVideo(idRef.current)); };
+    const onJob=(e)=>{ if(!alive||!e.detail||e.detail.id!==idRef.current) return; setJobTick(t=>t+1); };
     window.addEventListener("vid-done", onDone);
-    return ()=>{ alive=false; window.removeEventListener("vid-done", onDone); };
+    window.addEventListener("vid-job", onJob);
+    return ()=>{ alive=false; window.removeEventListener("vid-done", onDone); window.removeEventListener("vid-job", onJob); };
   },[id]);
 
   const generate = React.useCallback(async (opts)=>{
-    cancelRef.current=false; setGening(true); setErr(""); setStatus("IN_QUEUE");
-    try{
-      const r = await seedanceGenerate(idRef.current, { ...(opts||{}),
-        onStatus:setStatus, shouldCancel:()=>cancelRef.current });
-      setVideoUrl(r.videoUrl); return r;
-    }catch(e){ setErr(String((e&&e.message)||"Video render failed.")); throw e; }
-    finally{ setGening(false); setStatus(""); }
+    const jid = idRef.current;
+    const existing = _vidJobs.get(jid);
+    if(existing && existing.gening && existing.promise) return existing.promise;
+    const cancelRef = { current:false };
+    _vidJobPatch(jid, { gening:true, err:"", status:"IN_QUEUE", cancelRef });
+    const promise = (async()=>{
+      try{
+        const r = await seedanceGenerate(jid, { ...(opts||{}),
+          onStatus:(s)=>_vidJobPatch(jid, { gening:true, status:s }),
+          shouldCancel:()=>cancelRef.current });
+        setVideoUrl(r.videoUrl);
+        return r;
+      }catch(e){
+        const m = String((e&&e.message)||"Video render failed.");
+        _vidJobPatch(jid, { err:m });
+        throw e;
+      }finally{
+        _vidJobPatch(jid, { gening:false, status:"", promise:null, cancelRef:null });
+      }
+    })();
+    _vidJobPatch(jid, { promise });
+    return promise;
   },[]);
-  const cancel = React.useCallback(()=>{ cancelRef.current=true; },[]);
-  const clear = React.useCallback(async ()=>{ await vidClear(idRef.current); setVideoUrl(""); },[]);
+  const cancel = React.useCallback(()=>{ _vidJobCancel(idRef.current); },[]);
+  const clear = React.useCallback(async ()=>{ _vidJobCancel(idRef.current); await vidClear(idRef.current); setVideoUrl(""); },[]);
 
   /* BATCH: N parallel Seedance jobs for the same clip. Each job gets a distinct random
      seed (a pinned seed is honoured on the first job only — identical seeds would just
@@ -632,29 +686,39 @@ function useSeedanceGen(id){
   const generateBatch = React.useCallback(async (base, count)=>{
     const n = Math.max(1, Math.min(4, Number(count)||1));
     if(n===1) return [await generate(base)];
-    cancelRef.current=false; setGening(true); setErr("");
+    const jid = idRef.current;
+    const existing = _vidJobs.get(jid);
+    if(existing && existing.gening && existing.promise) return existing.promise;
+    const cancelRef = { current:false };
     const states = new Array(n).fill("IN_QUEUE");
     const paint = ()=>{ const done=states.filter(s=>s==="COMPLETED").length;
-      setStatus(done+"/"+n+" takes · "+(states.find(s=>s!=="COMPLETED")||"COMPLETED")); };
+      _vidJobPatch(jid, { gening:true, err:"", status:done+"/"+n+" takes · "+(states.find(s=>s!=="COMPLETED")||"COMPLETED") }); };
     paint();
-    try{
-      const jobs = Array.from({length:n},(_,i)=> seedanceGenerate(idRef.current, { ...(base||{}),
-        seed: (base && base.seed!=null && i===0) ? base.seed : undefined,
-        takeMeta: { ...((base&&base.takeMeta)||{}), batchIndex:i+1, batchCount:n },
-        force:true,
-        onStatus:(s)=>{ states[i]=s; paint(); },
-        shouldCancel:()=>cancelRef.current }));
-      const settled = await Promise.allSettled(jobs);
-      const ok = settled.filter(s=>s.status==="fulfilled").map(s=>s.value);
-      const bad = settled.filter(s=>s.status==="rejected");
-      if(!ok.length){
-        const m = String((bad[0]&&bad[0].reason&&bad[0].reason.message)||"Video render failed.");
-        setErr(m); throw new Error(m);
+    const promise = (async()=>{
+      try{
+        const jobs = Array.from({length:n},(_,i)=> seedanceGenerate(jid, { ...(base||{}),
+          seed: (base && base.seed!=null && i===0) ? base.seed : undefined,
+          takeMeta: { ...((base&&base.takeMeta)||{}), batchIndex:i+1, batchCount:n },
+          force:true,
+          onStatus:(s)=>{ states[i]=s; paint(); },
+          shouldCancel:()=>cancelRef.current }));
+        const settled = await Promise.allSettled(jobs);
+        const ok = settled.filter(s=>s.status==="fulfilled").map(s=>s.value);
+        const bad = settled.filter(s=>s.status==="rejected");
+        if(!ok.length){
+          const m = String((bad[0]&&bad[0].reason&&bad[0].reason.message)||"Video render failed.");
+          _vidJobPatch(jid, { err:m });
+          throw new Error(m);
+        }
+        if(bad.length) _vidJobPatch(jid, { err:bad.length+" of "+n+" takes failed: "+String((bad[0].reason&&bad[0].reason.message)||"render error") });
+        setVideoUrl(vidGetVideo(jid));
+        return ok;
+      } finally {
+        _vidJobPatch(jid, { gening:false, status:"", promise:null, cancelRef:null });
       }
-      if(bad.length) setErr(bad.length+" of "+n+" takes failed: "+String((bad[0].reason&&bad[0].reason.message)||"render error"));
-      setVideoUrl(vidGetVideo(idRef.current));
-      return ok;
-    } finally { setGening(false); setStatus(""); }
+    })();
+    _vidJobPatch(jid, { promise, cancelRef });
+    return promise;
   },[generate]);
 
   return { videoUrl, status, gening, err, generate, generateBatch, cancel, clear };

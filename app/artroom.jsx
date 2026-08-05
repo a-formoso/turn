@@ -1074,16 +1074,17 @@ function buildCharRefPrompt(c, project, props){
         : "both hands empty and relaxed at sides",
     },
     layout: {
-      format: "a 3-panel casting reference sheet in 16:9 landscape: three tall vertical panels divided by thin clean vertical lines; the first panel is wider and contains a large hero portrait, the other two panels contain full-body views; the SAME character throughout",
+      format: "a 4-panel casting reference sheet in 16:9 landscape: four tall vertical panels divided by thin clean vertical lines; panel 1 is a large hero face portrait and panels 2-4 are full-body turnaround views; the SAME character throughout",
       panels_left_to_right: [
         "PANEL 1 — large close-up hero FACE PORTRAIT, front-facing, neutral controlled expression, shoulders/chest crop, face fills most of the panel, exact identity anchor",
-        "PANEL 2 — full-body FRONT view at EXACTLY the same figure height, scale and vertical alignment as the BACK view in panel 3 (same headroom, feet on the same line) — but the head is NOT rendered: above the collar there is only clean empty background; the figure begins at the neckline; body facing camera, "+(_heldItem?("one hand on the "+_heldItem+", the other relaxed at side"):"arms relaxed at sides")+", clean silhouette",
-        "PANEL 3 — full-body BACK view, head-to-toe, facing away (hair/back of head visible, no face), same wardrobe and proportions"
+        "PANEL 2 — full-body FRONT view, head-to-toe, facing camera, neutral expression matching the portrait identity, "+(_heldItem?("one hand on the "+_heldItem+", the other relaxed at side"):"arms relaxed at sides")+", clean silhouette, feet on the same baseline as panels 3 and 4",
+        "PANEL 3 — full-body THREE-QUARTER FRONT view, head-to-toe, body turned about 35-45 degrees, same face, same build, same wardrobe, same figure height and baseline as panels 2 and 4",
+        "PANEL 4 — full-body BACK view, head-to-toe, facing away (back of head visible, no face), same wardrobe, same proportions, same figure height and baseline as panels 2 and 3"
       ],
-      one_face_rule: "EXACTLY ONE face appears on this sheet — the hero portrait in panel 1. The front panel's head is omitted BY DESIGN (blank background above the collar, figure scale unchanged): a second rendered face causes downstream video generators to blend or hallucinate identity.",
-      scale_rule: "the front and back figures are the SAME height and scale, vertically aligned across panels 2 and 3 — the missing head must NOT enlarge the front figure",
-      no_extra_views: "do not add side/profile or three-quarter views, expression rows, inset detail shots, rulers, captions, labels, title text, measurement text, or ANY info box / character-data panel (no name, height, age or traits printed on the image — that metadata travels in the prompt, never baked into pixels)",
-      background: "solid warm off-white or light-grey studio sweep, even and clean across all three panels"
+      face_consistency_rule: "the face in panel 2 and panel 3 must match the hero portrait exactly; do not invent a second identity, age shift, hairstyle, facial hair change or different person",
+      scale_rule: "the full-body figures in panels 2, 3 and 4 are the SAME height and scale, vertically aligned across panels with the same headroom and feet on the same line",
+      no_extra_views: "do not add expression rows, inset detail shots, rulers, captions, labels, title text, measurement text, or ANY info box / character-data panel (no name, height, age or traits printed on the image — that metadata travels in the prompt, never baked into pixels)",
+      background: "solid warm off-white or light-grey studio sweep, even and clean across all four panels"
     },
     continuity: {
       identity_rule: "the SAME identical face, build and identity in every view",
@@ -1124,8 +1125,8 @@ function buildRefFromPhotoPrompt(c, project){
   if(tone) s += tone+" tone. ";
   s += "Character is "+v.height+" tall ("+v.scaleClass+"). ";
   s += "RENDER STYLE: "+style.replace(/\.$/,"")+". ";
-  s += "LAYOUT: a clean 3-panel casting reference sheet in 16:9 landscape with three tall vertical panels divided by thin clean vertical lines. Panel 1 is wider: a large close-up hero FACE PORTRAIT, front-facing, neutral controlled expression, shoulders/chest crop, face fills most of the panel. Panel 2: full-body FRONT view at exactly the same figure height and scale as Panel 3 (same headroom, feet aligned), but with NO head rendered — clean empty background above the collar, the figure beginning at the neckline; arms relaxed. Panel 3: full-body BACK view, head-to-toe, facing away (no face visible). EXACTLY ONE face on the sheet — the panel-1 portrait; the missing head must not enlarge the front figure. No text, captions or info boxes anywhere on the image. ";
-  s += "Do NOT add side/profile views, expression rows, inset detail shots, rulers, captions, labels, title text, measurement text, annotations or watermarks. Solid warm off-white or light-grey studio background, soft even studio lighting, the SAME identical face/build/wardrobe in every panel, sharp focus.";
+  s += "LAYOUT: a clean 4-panel casting reference sheet in 16:9 landscape with four tall vertical panels divided by thin clean vertical lines. Panel 1: large close-up hero FACE PORTRAIT, front-facing, neutral controlled expression, shoulders/chest crop, face fills most of the panel. Panel 2: full-body FRONT view, head-to-toe, facing camera, neutral expression matching the portrait. Panel 3: full-body THREE-QUARTER FRONT view, head-to-toe, body turned about 35-45 degrees, same face/build/wardrobe. Panel 4: full-body BACK view, head-to-toe, facing away. Full-body panels use the same figure height, headroom, foot baseline and scale. No text, captions or info boxes anywhere on the image. ";
+  s += "Do NOT add expression rows, inset detail shots, rulers, captions, labels, title text, measurement text, annotations or watermarks. Solid warm off-white or light-grey studio background, soft even studio lighting, the SAME identical face/build/wardrobe in every applicable panel, sharp focus.";
   return s;
 }
 window.buildRefFromPhotoPrompt = buildRefFromPhotoPrompt;
@@ -1478,6 +1479,7 @@ function useImageGen(opts){
       // re-check cancel after the async meta work — a cancelled generate must never commit
       if(window.__nbGenCancel && window.__nbGenCancel[id]) throw { __cancelled:true };
       const assetKind = (typeof slotAssetKind==="function") ? slotAssetKind(slotId) : "character";
+      if(typeof nbWithAssetProvenance==="function") Object.assign(meta, nbWithAssetProvenance(id, meta, assetKind));
       const saveResult = await nbCommit(id, url, meta, refsUsed, assetKind, _genEpoch);
       committedUrl = (saveResult && saveResult.url) || url;
       setGenUrl(committedUrl);
@@ -1534,6 +1536,7 @@ function useImageGen(opts){
         iso: now.toISOString(), version: 1,
       };
       const assetKind = (typeof slotAssetKind==="function") ? slotAssetKind(slotId) : "character";
+      if(typeof nbWithAssetProvenance==="function") Object.assign(meta, nbWithAssetProvenance(id, meta, assetKind));
       const saveResult = await nbCommit(id, dataUrl, meta, [], assetKind);
       const url = (saveResult && saveResult.url) || dataUrl;
       setGenUrl(url); setGenTier((saveResult && saveResult.tier) || "local"); setGenMeta(meta);
@@ -1863,6 +1866,11 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
   const field = (label,val)=> val ? React.createElement("div",{className:"dt-field"},
     React.createElement("div",{className:"dt-flab"},label),
     React.createElement("div",{className:"dt-fval"},val)) : null;
+  const cam = meta && meta.advancedCamera;
+  const camField = (label,x)=> x ? React.createElement("div",{className:"dt-camera-row",key:label},
+    React.createElement("span",{className:"dt-camera-k"},label),
+    React.createElement("span",{className:"dt-camera-v"},
+      x.auto ? ("Auto -> "+(x.effectiveLabel||"Auto")) : (x.effectiveLabel||x.selectedLabel||"Custom"))) : null;
 
   return React.createElement("div",{className:"lb-overlay dt-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
     React.createElement("div",{className:"dt-panel"},
@@ -1908,6 +1916,16 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
           field("Grounding", (meta.grounded && !(typeof isGptImageModel==="function" && isGptImageModel(meta.modelId))) ? (meta.groundImages?"Google Search (web + images)":"Google Search") : null),
           field("Prop references", meta.propRefs ? (meta.propRefs+" prop sheet"+(meta.propRefs>1?"s":"")) : null),
           field("Image ID", data && data.id)),
+        cam && React.createElement("div",{className:"dt-section dt-camera-section"},
+          React.createElement("div",{className:"dt-sec-lab"},"Advanced cinematography"),
+          React.createElement("div",{className:"dt-camera-box"},
+            camField("Camera profile", cam.camera),
+            camField("Lens type", cam.lensType),
+            camField("Focal length", cam.focalLength),
+            camField("Aperture", cam.aperture),
+            camField("Shutter", cam.shutter),
+            camField("ISO / grain", cam.iso),
+            cam.promptClause && React.createElement("div",{className:"dt-camera-note"},cam.promptClause))),
         /* prompt */
         meta.prompt && React.createElement("div",{className:"dt-section",ref:promptRef},
           React.createElement("div",{className:"dt-sec-head"},
@@ -2171,6 +2189,382 @@ function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec, sh
 }
 window.QaCheckButton = QaCheckButton;
 
+function RegionEditModal({ url, name, noun, editPropRefs, onClose, onApply }){
+  const [rect, setRect] = React.useState({ x:24, y:24, w:44, h:36 });
+  const [drag, setDrag] = React.useState(null);
+  const [text, setText] = React.useState("");
+  const [refs, setRefs] = React.useState([]);
+  const [propOptions, setPropOptions] = React.useState([]);
+  const imgRef = React.useRef(null);
+  const boxRef = React.useRef(null);
+  const fileRef = React.useRef(null);
+  const sideRef = React.useRef(null);
+  const sideDragRef = React.useRef(null);
+  const [sidePos, setSidePos] = React.useState(null);
+
+  React.useEffect(()=>{
+    let alive = true;
+    (async ()=>{
+      const C = window.turnContinuity || {};
+      const byId = {};
+      (editPropRefs||[]).forEach(p=>{ if(p&&p.id) byId[p.id]=p; });
+      (C.props||[]).forEach(p=>{ if(p&&p.id) byId[p.id]=p; });
+      const out = [];
+      for(const p of Object.values(byId)){
+        let u = "";
+        try{ u = (typeof nbGetImage==="function") ? nbGetImage(p.id) : ""; }catch(e){}
+        if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(p.id); }catch(e){} }
+        if(u) out.push({ id:p.id, name:p.name||"Prop", url:u, note:(p.name||"Prop")+" prop sheet" });
+      }
+      if(alive) setPropOptions(out);
+    })();
+    return ()=>{ alive=false; };
+  },[editPropRefs]);
+
+  const clamp = (n,min,max)=> Math.max(min, Math.min(max, n));
+  const beginSideDrag = (e)=>{
+    if(e.button != null && e.button !== 0) return;
+    const r = sideRef.current && sideRef.current.getBoundingClientRect();
+    if(!r) return;
+    e.preventDefault();
+    e.stopPropagation();
+    sideDragRef.current = { dx:e.clientX-r.left, dy:e.clientY-r.top };
+    setSidePos({ left:r.left, top:r.top });
+  };
+  React.useEffect(()=>{
+    const move = (e)=>{
+      const d = sideDragRef.current;
+      if(!d) return;
+      e.preventDefault();
+      const el = sideRef.current;
+      const w = el ? el.offsetWidth : 330;
+      const h = el ? Math.min(el.offsetHeight, window.innerHeight-16) : 360;
+      setSidePos({
+        left: clamp(e.clientX-d.dx, 8, Math.max(8, window.innerWidth-w-8)),
+        top: clamp(e.clientY-d.dy, 8, Math.max(8, window.innerHeight-h-8))
+      });
+    };
+    const end = ()=>{ sideDragRef.current = null; };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+    return ()=>{
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+  },[]);
+  const point = (e)=>{
+    const r = boxRef.current && boxRef.current.getBoundingClientRect();
+    if(!r) return null;
+    return {
+      x: clamp(((e.clientX-r.left)/r.width)*100, 0, 100),
+      y: clamp(((e.clientY-r.top)/r.height)*100, 0, 100)
+    };
+  };
+  const start = (e)=>{ e.preventDefault(); const p=point(e); if(!p) return; setDrag(p); setRect({ x:p.x, y:p.y, w:0, h:0 }); };
+  React.useEffect(()=>{
+    if(!drag) return;
+    const move = (e)=>{ e.preventDefault(); const p=point(e); if(!p) return;
+      const x=Math.min(drag.x,p.x), y=Math.min(drag.y,p.y);
+      setRect({ x, y, w:Math.abs(p.x-drag.x), h:Math.abs(p.y-drag.y) }); };
+    const end = ()=>{ setDrag(null); setRect(r=> r.w<3||r.h<3 ? { x:24, y:24, w:44, h:36 } : r); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    return ()=>{ window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); };
+  },[drag]);
+
+  const addRef = (r)=> setRefs(rs=> rs.some(x=>x.url===r.url) ? rs : rs.concat([r]));
+  const addFiles = (files)=>{ [...(files||[])].forEach(f=>{
+    if(!/^image\//.test(f.type||"")) return;
+    const rd = new FileReader();
+    rd.onload = ()=>{
+      const raw = String(rd.result||"");
+      const push = (u)=> addRef({ url:u||raw, note:f.name||"uploaded reference" });
+      if(typeof turnDownscaleDataUrl==="function") turnDownscaleDataUrl(raw, 1280).then(push).catch(()=>push(raw));
+      else push(raw);
+    };
+    rd.readAsDataURL(f);
+  }); };
+  const pct = (n)=> String(Math.round(n));
+  const apply = ()=>{
+    if(!text.trim()) return;
+    const r = { x:Math.round(rect.x), y:Math.round(rect.y), w:Math.round(rect.w), h:Math.round(rect.h),
+      x2:Math.round(rect.x+rect.w), y2:Math.round(rect.y+rect.h) };
+    const refLine = refs.length
+      ? " Match the attached reference image"+(refs.length>1?"s":"")+" for design, material, silhouette and colour where relevant."
+      : "";
+    onApply && onApply({
+      instruction: "LOCALIZED REGION EDIT. Apply the requested change ONLY inside the selected rectangle: "
+        +"left "+r.x+"%, top "+r.y+"%, width "+r.w+"%, height "+r.h+"% (right "+r.x2+"%, bottom "+r.y2+"%). "
+        +"Requested change: "+text.trim()+". "+refLine
+        +" Preserve everything outside that rectangle exactly: framing, identity, lighting, background, panel layout and all other objects must remain unchanged. Blend the edited area naturally into the existing image.",
+      refs
+    });
+    onClose && onClose();
+  };
+
+  const portalTarget = (typeof document!=="undefined" && (document.body || document.documentElement)) || null;
+  const sideStyle = sidePos ? { left:sidePos.left, top:sidePos.top, right:"auto", bottom:"auto" } : null;
+  const modal = React.createElement("div",{className:"region-edit-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
+    React.createElement("div",{className:"region-edit-panel"},
+      React.createElement("div",{className:"region-edit-head"},
+        React.createElement("div",null,
+          React.createElement("div",{className:"region-edit-title"},"Select area & edit"),
+          React.createElement("div",{className:"region-edit-sub"},name||noun||"Image")),
+        React.createElement("button",{className:"ag-x",onClick:onClose},React.createElement(Icon.x,{s:17}))),
+      React.createElement("div",{className:"region-edit-body"},
+        React.createElement("div",{className:"region-edit-canvas"},
+          React.createElement("div",{className:"region-edit-imagebox",ref:boxRef,onPointerDown:start},
+            React.createElement("img",{ref:imgRef,src:url,alt:name||"selected image",draggable:false}),
+            React.createElement("div",{className:"region-edit-rect",style:{
+              left:pct(rect.x)+"%", top:pct(rect.y)+"%", width:pct(rect.w)+"%", height:pct(rect.h)+"%" }})),
+          React.createElement("div",{className:"region-edit-hint"},"Drag on the image to choose the edit area")),
+        React.createElement("div",{className:"region-edit-side",ref:sideRef,style:sideStyle},
+          React.createElement("div",{className:"region-edit-dragbar",onPointerDown:beginSideDrag,title:"Move prompt card"},
+            React.createElement(Icon.grip,{s:13}),
+            React.createElement("span",null,"Prompt")),
+          React.createElement("label",{className:"region-edit-field region-edit-prompt-field"},
+            React.createElement("textarea",{value:text,onChange:e=>setText(e.target.value),
+              placeholder:"Describe exactly what changes inside the selected area..." })),
+          React.createElement("div",{className:"region-edit-coords"},
+            "Region: left "+pct(rect.x)+"%, top "+pct(rect.y)+"%, width "+pct(rect.w)+"%, height "+pct(rect.h)+"%"),
+          React.createElement("div",{className:"region-edit-refs-head"},"Reference image"),
+          React.createElement("div",{className:"region-edit-ref-actions"},
+            React.createElement("button",{className:"sheet-tools-item region-action",onClick:()=>fileRef.current&&fileRef.current.click()},
+              React.createElement(Icon.image,{s:13}),"Upload reference"),
+            React.createElement("input",{ref:fileRef,type:"file",accept:"image/*",multiple:true,style:{display:"none"},
+              onChange:e=>{ addFiles(e.target.files); e.target.value=""; }})),
+          propOptions.length>0 && React.createElement("div",{className:"region-props"},
+            propOptions.slice(0,10).map(p=>React.createElement("button",{key:p.id,className:"region-prop",
+              title:"Attach "+p.name+" as an edit reference",onClick:()=>addRef(p)},
+              React.createElement("img",{src:p.url,alt:p.name}),
+              React.createElement("span",null,p.name)))),
+          refs.length>0 && React.createElement("div",{className:"sheet-edit-refs region-ref-list"},
+            refs.map((r,i)=>React.createElement("span",{key:i,className:"sheet-edit-refthumb",title:r.note||"Reference image"},
+              React.createElement("img",{src:r.url,alt:r.note||"Reference"}),
+              React.createElement("button",{className:"sheet-edit-refx",title:"Remove",
+                onClick:()=>setRefs(rs=>rs.filter((_,j)=>j!==i))},"\u00d7")))),
+          React.createElement("div",{className:"region-edit-note"},
+            "Soft-mask edit: the selected coordinates and references are sent to the model; the current image stays as the anchor."),
+          React.createElement("div",{className:"region-edit-acts"},
+            React.createElement("button",{className:"sheet-edit-cancel",onClick:onClose},"Cancel"),
+            React.createElement("button",{className:"sheet-edit-apply",disabled:!text.trim(),onClick:apply},
+              React.createElement(Icon.wand,{s:12}),"Apply region edit"))))),
+    );
+  return portalTarget ? ReactDOM.createPortal(modal, portalTarget) : modal;
+}
+
+function cropRegionAsDataUrl(url, rect, maxDim){
+  maxDim = maxDim || 1024;
+  return new Promise(resolve=>{
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = ()=>{
+      try{
+        const nw = img.naturalWidth || img.width, nh = img.naturalHeight || img.height;
+        const sx = Math.max(0, Math.round((rect.x/100)*nw));
+        const sy = Math.max(0, Math.round((rect.y/100)*nh));
+        const sw = Math.max(1, Math.min(nw-sx, Math.round((rect.w/100)*nw)));
+        const sh = Math.max(1, Math.min(nh-sy, Math.round((rect.h/100)*nh)));
+        const sc = Math.min(1, maxDim/Math.max(sw, sh));
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(sw*sc));
+        c.height = Math.max(1, Math.round(sh*sc));
+        const ctx = c.getContext("2d");
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+        resolve(c.toDataURL("image/jpeg", .88));
+      }catch(e){ resolve(""); }
+    };
+    img.onerror = ()=>resolve("");
+    img.src = url;
+  });
+}
+
+function PropReferenceModal({ url, name, noun, entity, onClose }){
+  const propList = ((window.turnContinuity||{}).props||[]).filter(p=>p&&p.id);
+  const [rect, setRect] = React.useState({ x:24, y:24, w:28, h:32 });
+  const [drag, setDrag] = React.useState(null);
+  const [targetId, setTargetId] = React.useState(()=> (propList[0]&&propList[0].id)||"__new");
+  const [newName, setNewName] = React.useState("");
+  const [note, setNote] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const boxRef = React.useRef(null);
+  React.useEffect(()=>{
+    if(targetId || !propList.length) return;
+    setTargetId(propList[0].id);
+  },[propList.length, targetId]);
+  const clamp = (n,min,max)=> Math.max(min, Math.min(max, n));
+  const point = (e)=>{
+    const r = boxRef.current && boxRef.current.getBoundingClientRect();
+    if(!r) return null;
+    return {
+      x: clamp(((e.clientX-r.left)/r.width)*100, 0, 100),
+      y: clamp(((e.clientY-r.top)/r.height)*100, 0, 100)
+    };
+  };
+  const start = (e)=>{ e.preventDefault(); const p=point(e); if(!p) return; setDrag(p); setRect({ x:p.x, y:p.y, w:0, h:0 }); };
+  React.useEffect(()=>{
+    if(!drag) return;
+    const move = (e)=>{ e.preventDefault(); const p=point(e); if(!p) return;
+      setRect({ x:Math.min(drag.x,p.x), y:Math.min(drag.y,p.y), w:Math.abs(p.x-drag.x), h:Math.abs(p.y-drag.y) }); };
+    const end = ()=>{ setDrag(null); setRect(r=> r.w<3||r.h<3 ? { x:24, y:24, w:28, h:32 } : r); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    return ()=>{ window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end); };
+  },[drag]);
+  const pct = (n)=> String(Math.round(n));
+  const target = propList.find(p=>p.id===targetId);
+  const attach = async ()=>{
+    if((!targetId || (targetId==="__new" && !newName.trim())) || saving) return;
+    setSaving(true);
+    const cropped = await cropRegionAsDataUrl(url, rect, 1024);
+    const ref = {
+      id:"pref-"+Date.now().toString(36),
+      url:cropped || url,
+      sourceUrl:url,
+      sourceEntityId:entity&&entity.id,
+      sourceName:name||((entity&&entity.name)||noun)||"Art Room sheet",
+      sourceKind:noun||"sheet",
+      note:note.trim() || ("Selected item from "+(name||noun||"Art Room sheet")),
+      cropped:!!cropped,
+      region:{ x:Math.round(rect.x), y:Math.round(rect.y), w:Math.round(rect.w), h:Math.round(rect.h) }
+    };
+    let ok = false, label = (target&&target.name)||"prop";
+    if(targetId==="__new"){
+      const card = typeof window.turnCreatePropFromReference==="function"
+        ? window.turnCreatePropFromReference(ref, { name:newName.trim() }) : null;
+      ok = !!card; label = (card&&card.name)||newName.trim();
+    } else {
+      ok = typeof window.turnAttachPropReference==="function" && window.turnAttachPropReference(targetId, ref);
+    }
+    setSaving(false);
+    if(ok && typeof window.appToast==="function") window.appToast((targetId==="__new"?"Created ":"Attached selected item to ")+label+" as a consistency reference.","success");
+    if(ok) onClose && onClose();
+  };
+  const portalTarget = typeof document!=="undefined" && (document.body || document.documentElement);
+  const modal = React.createElement("div",{className:"region-edit-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
+    React.createElement("div",{className:"region-edit-panel"},
+      React.createElement("div",{className:"region-edit-head"},
+        React.createElement("div",null,
+          React.createElement("div",{className:"region-edit-title"},"Attach item to prop"),
+          React.createElement("div",{className:"region-edit-sub"},name||noun||"Image")),
+        React.createElement("button",{className:"ag-x",onClick:onClose},React.createElement(Icon.x,{s:17}))),
+      React.createElement("div",{className:"region-edit-body"},
+        React.createElement("div",{className:"region-edit-canvas"},
+          React.createElement("div",{className:"region-edit-imagebox",ref:boxRef,onPointerDown:start},
+            React.createElement("img",{src:url,alt:name||"selected image",draggable:false}),
+            React.createElement("div",{className:"region-edit-rect",style:{
+              left:pct(rect.x)+"%", top:pct(rect.y)+"%", width:pct(rect.w)+"%", height:pct(rect.h)+"%" }})),
+          React.createElement("div",{className:"region-edit-hint"},"Drag around the item you want the prop to inherit")),
+        React.createElement("div",{className:"region-edit-side"},
+          React.createElement("label",{className:"region-edit-field"},
+            React.createElement("span",null,"Target prop"),
+            React.createElement("select",{className:"prop-select region-prop-select",value:targetId,onChange:e=>setTargetId(e.target.value)},
+              React.createElement("option",{value:"__new"},"+ Create new prop from selection"),
+              propList.map(p=>React.createElement("option",{key:p.id,value:p.id},(p.name||"Unnamed prop")+(p.ownerName?(" \u00b7 "+p.ownerName):""))))),
+          targetId==="__new" && React.createElement("label",{className:"region-edit-field"},
+            React.createElement("span",null,"New prop name"),
+            React.createElement("input",{className:"prop-select region-text-input",value:newName,onChange:e=>setNewName(e.target.value),
+              placeholder:"e.g. phone on counter, worn locket, framed photograph..." })),
+          React.createElement("label",{className:"region-edit-field"},
+            React.createElement("span",null,"Reference note"),
+            React.createElement("textarea",{value:note,onChange:e=>setNote(e.target.value),
+              placeholder:"What should this prop borrow from the selected item? e.g. patina, material, scale, handmade construction..." })),
+          React.createElement("div",{className:"region-edit-coords"},
+            "Region: left "+pct(rect.x)+"%, top "+pct(rect.y)+"%, width "+pct(rect.w)+"%, height "+pct(rect.h)+"%"),
+          React.createElement("div",{className:"region-edit-note"},
+            "The selected crop is saved on the target prop and rides as a reference on future prop generations/edits, helping the prop belong to this character or location world."),
+          React.createElement("div",{className:"region-edit-acts"},
+            React.createElement("button",{className:"sheet-edit-cancel",onClick:onClose},"Cancel"),
+            React.createElement("button",{className:"sheet-edit-apply",disabled:!targetId||(targetId==="__new"&&!newName.trim())||saving,onClick:attach},
+              React.createElement(Icon.target,{s:12}), saving?"Attaching\u2026":(targetId==="__new"?"Create prop":"Attach to prop"))))),
+    ));
+  return portalTarget ? ReactDOM.createPortal(modal, portalTarget) : modal;
+}
+
+function PropSheetReferenceModal({ prop, onClose }){
+  const graph = window.turnContinuity || {};
+  const currentPropId = prop && prop.id;
+  const candidates = [
+    ...((graph.characters||[]).filter(Boolean).map(c=>({ id:c.id, name:c.name||"Unnamed character", kind:"character", note:(c.name||"Character")+" character sheet" }))),
+    ...((graph.props||[]).filter(p=>p&&p.id&&p.id!==currentPropId).map(p=>({ id:p.id, name:p.name||"Unnamed prop", kind:"prop", note:(p.name||"Prop")+" prop sheet" }))),
+    ...((graph.locations||[]).filter(Boolean).map(l=>({ id:l.id||l.key, name:l.name||"Unnamed location", kind:"location", note:(l.name||"Location")+" location plate" })))
+  ].filter(x=>x&&x.id);
+  const [rows, setRows] = React.useState([]);
+  const [selected, setSelected] = React.useState("");
+  const [note, setNote] = React.useState("");
+  React.useEffect(()=>{
+    let alive = true;
+    (async ()=>{
+      const out = [];
+      for(const c of candidates){
+        let url = "";
+        try{ url = (typeof nbGetImage==="function") ? nbGetImage(c.id) : ""; }catch(e){}
+        if(!url && typeof nbLoadImage==="function"){ try{ url = await nbLoadImage(c.id); }catch(e){} }
+        if(url) out.push({ ...c, url });
+      }
+      if(alive){
+        setRows(out);
+        setSelected(s=> s || (out[0] && out[0].id) || "");
+      }
+    })();
+    return ()=>{ alive = false; };
+  },[currentPropId, candidates.length]);
+  const picked = rows.find(r=>r.id===selected);
+  const attach = ()=>{
+    if(!picked || !prop || !prop.id) return;
+    const ref = {
+      id:"pref-"+Date.now().toString(36),
+      url:picked.url,
+      sourceUrl:picked.url,
+      sourceEntityId:picked.id,
+      sourceName:picked.name,
+      sourceKind:picked.kind,
+      note:note.trim() || picked.note,
+      cropped:false
+    };
+    const ok = typeof window.turnAttachPropReference==="function" && window.turnAttachPropReference(prop.id, ref);
+    if(ok && typeof window.appToast==="function") window.appToast("Attached "+picked.name+" to "+(prop.name||"this prop")+" as a consistency reference.","success");
+    if(ok) onClose && onClose();
+  };
+  return ReactDOM.createPortal(React.createElement("div",{className:"region-edit-overlay",onMouseDown:e=>{ if(e.target===e.currentTarget) onClose(); }},
+    React.createElement("div",{className:"region-edit-panel prop-sheet-ref-panel"},
+      React.createElement("div",{className:"region-edit-head"},
+        React.createElement("div",null,
+          React.createElement("div",{className:"region-edit-title"},"Attach reference to prop"),
+          React.createElement("div",{className:"region-edit-sub"},prop && prop.name ? prop.name : "Prop")),
+        React.createElement("button",{className:"ag-x",onClick:onClose},React.createElement(Icon.x,{s:17}))),
+      React.createElement("div",{className:"region-edit-body"},
+        React.createElement("div",{className:"region-edit-canvas prop-ref-list-canvas"},
+          rows.length
+            ? React.createElement("div",{className:"prop-ref-picker"},
+                rows.map(r=>React.createElement("button",{key:r.kind+":"+r.id,
+                  className:"prop-ref-pick"+(selected===r.id?" on":""),
+                  onClick:()=>{ setSelected(r.id); if(!note.trim()) setNote(r.note); }},
+                  React.createElement("img",{src:r.url,alt:r.name}),
+                  React.createElement("span",null,
+                    React.createElement("b",null,r.name),
+                    React.createElement("em",null,r.kind)))))
+            : React.createElement("div",{className:"region-edit-empty"},
+                React.createElement(Icon.image,{s:28}),
+                React.createElement("p",null,"No generated character, prop or location sheets found yet."))),
+        React.createElement("div",{className:"region-edit-side"},
+          React.createElement("label",{className:"region-edit-field"},
+            React.createElement("span",null,"Reference note"),
+            React.createElement("textarea",{value:note,onChange:e=>setNote(e.target.value),
+              placeholder:"What should this prop inherit? e.g. likeness, owner taste, material patina, set-dressing world..." })),
+          picked && React.createElement("div",{className:"region-edit-coords"},
+            "Source: "+picked.kind+" sheet · "+picked.name),
+          React.createElement("div",{className:"region-edit-note"},
+            "Use this for whole-sheet influence: a character likeness for a photo prop, an owner's taste and wear patterns, a location's materials, or another prop's construction language."),
+          React.createElement("div",{className:"region-edit-acts"},
+            React.createElement("button",{className:"sheet-edit-cancel",onClick:onClose},"Cancel"),
+            React.createElement("button",{className:"sheet-edit-apply",disabled:!picked,onClick:attach},
+              React.createElement(Icon.layers,{s:12}),"Attach reference"))))),
+    ), document.body);
+}
+
 function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, drafting, onDraft, entity, onView, slotPlaceholder, noun, onDelete, deleteLabel, specGate, extraMeta, menuExtra, dropToImport, hideUploadButton, onStop, generateDisabled, generateDisabledLabel, generateDisabledTitle, referenceControls, editPropRefs, editSuggestions }){
   const { genUrl, genMeta, genTier, gening, genErr, retrying, slotHasRef,
     editMode, setEditMode, editText, setEditText, generate, cancelGen, clearGen, importSheet, relatedClearCount, revertPrevious, layers, allModels } = gen;
@@ -2221,10 +2615,18 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
     generate(opts); setEditRefs([]); };
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const [regionEditOpen, setRegionEditOpen] = React.useState(false);
+  const [propRefOpen, setPropRefOpen] = React.useState(false);
+  const [sheetRefOpen, setSheetRefOpen] = React.useState(false);
   const menuRef = React.useRef(null);
   const uploadRef = React.useRef(null);
   const pickUpload = ()=>{ if(uploadRef.current) uploadRef.current.click(); };
   const onUploadPicked = (e)=>{ const f=e.target.files&&e.target.files[0]; if(f&&importSheet) importSheet(f); e.target.value=""; };
+  const editNounLabel = /delete character/i.test(deleteLabel||"") ? "character sheet" : (noun||"sheet");
+  const menuItemsBeforeEdit = (menuExtra||[]).filter(m=>m&&m.placement==="beforeEdit");
+  const menuItemsDefault = (menuExtra||[]).filter(m=>m&&m.placement!=="beforeEdit");
+  const isPropCardMenu = /delete prop/i.test(deleteLabel||"") || (noun==="prop sheet");
+  const forceRemaster = /delete (character|prop)/i.test(deleteLabel||"");
   // dropToImport: the empty slot itself imports a FINISHED frame at full resolution (drop or
   // click-to-browse) — same job as the old "Upload a finished" button, so it can replace it.
   const [dropOver, setDropOver] = React.useState(false);
@@ -2288,27 +2690,38 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
         React.createElement("button",{className:"sheet-gen-tool",onClick:()=>setMenuOpen(m=>!m),title:"Options"},
           React.createElement(Icon.moreV,{s:14})),
         menuOpen && React.createElement("div",{className:"sheet-tools-dropdown"},
-          genUrl && React.createElement("button",{className:"sheet-tools-item",onClick:()=>{ onView&&onView(genUrl,entity); setMenuOpen(false); }},
-            React.createElement(Icon.eye,{s:13}),"View full"),
           genUrl && React.createElement("button",{className:"sheet-tools-item",onClick:()=>{ setDetailsOpen(true); setMenuOpen(false); }},
             React.createElement(Icon.info,{s:13}),"Details"),
-          (genUrl && remasterEligible(genMeta)) && React.createElement("button",{className:"sheet-tools-item",disabled:gening,
+          (genUrl && (forceRemaster || remasterEligible(genMeta))) && React.createElement("button",{className:"sheet-tools-item",disabled:gening,
             title:"Re-render the CURRENT image as a fresh, clean, full-quality version \u2014 same design, artifacts and noise removed (stacked edits degrade like a photocopy of a photocopy). Lands as a new version; the old one stays in history.",
             onClick:()=>{ setMenuOpen(false); generate({ editInstruction: (typeof remasterInstruction==="function")?remasterInstruction(noun):"Reproduce this image exactly, clean and artifact-free." }); }},
             React.createElement(Icon.sparkles,{s:13}),"Remaster \u2014 clean re-render"),
+          ...(menuItemsBeforeEdit||[]).map((m,i)=>
+            React.createElement("button",{key:"mb"+i,className:"sheet-tools-item",disabled:gening||m.disabled,title:m.title,
+              onClick:()=>{ setMenuOpen(false); m.onClick&&m.onClick(); }},
+              React.createElement(m.icon||Icon.sparkles,{s:13}), m.label)),
           genUrl && React.createElement("button",{className:"sheet-tools-item "+(editMode?"on":""),
             onClick:()=>{ setEditMode(m=>!m); setEditText(""); setMenuOpen(false); }},
-            React.createElement(Icon.wand,{s:13}),editMode?"Close edit":"Edit "+noun),
+            React.createElement(Icon.wand,{s:13}),editMode?"Close edit":"Edit "+editNounLabel),
           genUrl && React.createElement("button",{className:"sheet-tools-item",disabled:gening,
-            onClick:()=>{ generate(); setMenuOpen(false); }},
-            React.createElement(Icon.sparkles,{s:13}),"Regenerate"),
+            title:"Draw a rectangle on the image, write a localized edit prompt, and optionally attach a prop sheet or uploaded reference image.",
+            onClick:()=>{ setRegionEditOpen(true); setMenuOpen(false); }},
+            React.createElement(Icon.target,{s:13}),"Select area & edit"),
+          genUrl && !isPropCardMenu && (((window.turnContinuity||{}).props||[]).length>0) && React.createElement("button",{className:"sheet-tools-item",disabled:gening,
+            title:"Select an item in this image and attach that crop to an existing prop as a consistency reference.",
+            onClick:()=>{ setPropRefOpen(true); setMenuOpen(false); }},
+            React.createElement(Icon.box,{s:13}),"Attach item to prop\u2026"),
+          genUrl && isPropCardMenu && React.createElement("button",{className:"sheet-tools-item",disabled:gening,
+            title:"Attach an existing character, prop or location sheet as a consistency reference for future prop generations and edits.",
+            onClick:()=>{ setSheetRefOpen(true); setMenuOpen(false); }},
+            React.createElement(Icon.layers,{s:13}),"Attach reference to prop\u2026"),
           // import a finished sheet generated outside the app (e.g. GPT Image 2 in ChatGPT)
           importSheet && React.createElement("button",{className:"sheet-tools-item",disabled:gening,
             title:"Import a finished image you generated elsewhere, at full resolution — it becomes this "+noun,
             onClick:()=>{ setMenuOpen(false); pickUpload(); }},
             React.createElement(Icon.image,{s:13}), genUrl?"Replace with upload":"Upload a sheet"),
           // caller-specific menu items (e.g. Shots: "Generate fresh sample")
-          ...(menuExtra||[]).filter(Boolean).map((m,i)=>
+          ...(menuItemsDefault||[]).map((m,i)=>
             React.createElement("button",{key:"mx"+i,className:"sheet-tools-item",disabled:gening||m.disabled,title:m.title,
               onClick:()=>{ setMenuOpen(false); m.onClick&&m.onClick(); }},
               React.createElement(m.icon||Icon.sparkles,{s:13}), m.label)),
@@ -2317,17 +2730,30 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
               setMenuOpen(false);
               const vN = relatedClearCount||0;
               const extra = vN>0 ? (", plus "+vN+" variant sheet"+(vN>1?"s":"")+",") : "";
-              const ok = await window.appConfirm({
+              const opts = {
                 title: "Clear "+(name||"this")+"’s "+(noun||"sheet")+"?",
                 body: "This permanently deletes the generated image and ALL earlier versions"+extra+" from cloud storage. The "+(noun||"sheet")+" can be regenerated — the written spec is kept.",
                 note: vN>0 ? "Your cameo and linked props are kept. This can’t be undone."
                            : "This can’t be undone.",
                 confirmLabel: "Clear", cancelLabel: "Cancel", danger: true,
-              });
+              };
+              const ok = window.appConfirm ? await window.appConfirm(opts)
+                : window.confirm ? window.confirm(opts.title+"\n\n"+opts.body) : false;
               if(ok) clearGen();
             }},
             React.createElement(Icon.x,{s:13}),"Clear"),
-          onDelete && React.createElement("button",{className:"sheet-tools-item danger",onClick:()=>{ setMenuOpen(false); onDelete(); }},
+          onDelete && React.createElement("button",{className:"sheet-tools-item danger",onClick:async ()=>{
+              setMenuOpen(false);
+              if(/location/i.test(deleteLabel||"")){
+                const ok = !window.appConfirm || await window.appConfirm({
+                  title:"Delete "+(name||"this location")+"?",
+                  body:"This removes the location card from the Art Room and moves it to Recently Deleted. Its generated plate can be restored from there until you delete it forever.",
+                  confirmLabel:"Delete location", cancelLabel:"Cancel", danger:true
+                });
+                if(!ok) return;
+              }
+              onDelete();
+            }},
             React.createElement(Icon.trash,{s:13}),deleteLabel||"Delete")))),
     editMode && React.createElement("div",{className:"sheet-edit-panel"},
       React.createElement("input",{className:"sheet-edit-input",type:"text",autoFocus:true,
@@ -2528,7 +2954,18 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
        the modal's position:fixed — trapping the overlay inside the card instead of
        covering the viewport (broken/clipped on small screens). */
     detailsOpen && ReactDOM.createPortal(React.createElement(SheetDetails,{ gen, name, noun, extraMeta,
-      onClose:()=>setDetailsOpen(false), onView:(url)=>onView&&onView(url, entity) }), document.body));
+      onClose:()=>setDetailsOpen(false), onView:(url)=>onView&&onView(url, entity) }), document.body),
+    regionEditOpen && genUrl && React.createElement(RegionEditModal,{url:genUrl,name,noun,editPropRefs,
+      onClose:()=>setRegionEditOpen(false),
+      onApply:({ instruction, refs })=> generate({
+        editInstruction:instruction,
+        editRefImages:(refs||[]).map(r=>r.url).filter(Boolean),
+        editRefMeta:(refs||[]).filter(r=>r.url).map(r=>({ url:r.url, note:r.note||r.name||"Region edit reference", refId:r.id }))
+      })}),
+    propRefOpen && genUrl && React.createElement(PropReferenceModal,{url:genUrl,name,noun,entity,
+      onClose:()=>setPropRefOpen(false)}),
+    sheetRefOpen && genUrl && entity && React.createElement(PropSheetReferenceModal,{prop:entity,
+      onClose:()=>setSheetRefOpen(false)}));
 }
 window.SheetFrame = SheetFrame;
 window.SheetDetails = SheetDetails;
@@ -2694,13 +3131,24 @@ function CardFold({ label, count, defaultOpen, children }){
 }
 
 /* RecentlyDeleted — the per-tab restore bin. Lists soft-deleted characters / props /
-   locations (each kept with its scenes, full spec and generated sheet) with Restore and
+   locations / shots (each kept with its scenes, full spec and generated sheet) with Restore and
    Delete-forever. Collapsed by default; renders nothing when the bin is empty. Shared by
-   all three Art Room tabs via window.RecentlyDeleted. */
+   Art Room tabs via window.RecentlyDeleted. */
 function RecentlyDeleted({ items, kind, onRestore, onPurge }){
   const [open, setOpen] = React.useState(false);
   if(!items || !items.length) return null;
-  const noun = kind==="character" ? "character" : kind==="location" ? "location" : "prop";
+  const noun = kind==="character" ? "character" : kind==="location" ? "location" : kind==="shot" ? "shot" : "prop";
+  const labelFor = (it)=>{
+    if(!it) return "Untitled "+noun;
+    if(it.name || it.title) return it.name || it.title;
+    if(kind==="shot"){
+      const letter = String.fromCharCode(64 + Math.max(1, Number(it.order)||1));
+      const beat = Number(it.beatN)||1;
+      const action = String(it.action || it.vidText || it.text || "").trim();
+      return "Beat "+beat+letter+(action ? " — "+action : "");
+    }
+    return "Untitled "+noun;
+  };
   const rel = (iso)=>{ if(!iso) return ""; const ms=Date.now()-new Date(iso).getTime();
     const m=Math.round(ms/60000); if(m<1) return "just now"; if(m<60) return m+"m ago";
     const h=Math.round(m/60); if(h<24) return h+"h ago"; return Math.round(h/24)+"d ago"; };
@@ -2712,13 +3160,13 @@ function RecentlyDeleted({ items, kind, onRestore, onPurge }){
       React.createElement("span",{className:"rd-chev"}, React.createElement(open?Icon.chevD:Icon.chevR,{s:12}))),
     open && React.createElement("div",{className:"rd-list"},
       items.map(it=>React.createElement("div",{key:it.id,className:"rd-row"},
-        React.createElement("span",{className:"rd-name",title:it.name||it.title||""}, it.name||it.title||("Untitled "+noun)),
+        React.createElement("span",{className:"rd-name",title:labelFor(it)}, labelFor(it)),
         it._deletedAt && React.createElement("span",{className:"rd-when"}, rel(it._deletedAt)),
         React.createElement("button",{className:"rd-restore",onClick:()=>onRestore&&onRestore(it.id),
           title:"Restore this "+noun+" with its scenes & spec"},
           React.createElement(Icon.undo,{s:12}),"Restore"),
         React.createElement("button",{className:"rd-purge",title:"Delete forever",
-          onClick:async ()=>{ const ok=await window.appConfirm({ title:"Delete “"+(it.name||it.title||"this "+noun)+"” forever?",
+          onClick:async ()=>{ const ok=await window.appConfirm({ title:"Delete “"+labelFor(it)+"” forever?",
             body:"This permanently removes it and its reference sheet from the project. This can't be undone.",
             confirmLabel:"Delete forever", danger:true });
             if(ok && onPurge) onPurge(it.id); }},
@@ -3128,7 +3576,7 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
       // "Update a prop" chips in the sheet-edit panel: THIS character's own props
       // (worn or carried) that already have a locked prop sheet
       editPropRefs: ownedProps.filter(p=>ownedSheetMap[p.id]).map(p=>({id:p.id, name:p.name, kind:p.kind})),
-      onDelete:(onDelete && c.manual)?(()=>onDelete(c.id)):null, deleteLabel:"Delete character" }),
+      onDelete:onDelete?(()=>onDelete(c.id)):null, deleteLabel:"Delete character" }),
     React.createElement("div",{className:"sheet-body"},
       (drafting && !drafted) && React.createElement("div",{className:"char-drafting-strip"},
         React.createElement("span",{className:"ns-spin"}),"Drafting from script\u2026"),
@@ -3450,7 +3898,7 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
           React.createElement(QaCheckButton,{ gen:scaleGenWrapped, name:(c.name||"")+" \u00b7 scale", noun:"scale sheet" }))),
 
       React.createElement(CardFold,{label:"Master reference prompt",defaultOpen:false},
-        React.createElement(CopyBox,{label:"3-panel casting sheet \u2014 feed to your image tool",text:promptText}),
+        React.createElement(CopyBox,{label:"4-panel casting sheet \u2014 feed to your image tool",text:promptText}),
         React.createElement(SheetField,{label:"Negative prompt \u2014 exclude",value:c.negativePrompt||v.negativePrompt,multiline:true,
           onCommit:val=>onUpdate(c.id,{negativePrompt:val})}),
         // the FINAL box always holds the prompt that generated the CURRENT sheet
@@ -3472,7 +3920,7 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
           refreshCameo();
           const ok = !window.appConfirm || await window.appConfirm({
             title:"Turn the likeness into "+(c.name||"this character")+"'s sheet?",
-            body:"Regenerates the 3-panel character sheet locked to the captured face — the portrait and full-body views will match the real person. You can also do this later with “Apply to sheet”.",
+            body:"Regenerates the 4-panel character sheet locked to the captured face — the portrait and full-body views will match the real person. You can also do this later with “Apply to sheet”.",
             confirmLabel:"Generate sheet" });
           if(ok && !gen.gening) gen.generate();
         } }),
@@ -3660,11 +4108,15 @@ function NbControls(){
       React.createElement("span",{className:"nb-ctl-lab"},"Aspect"),
       React.createElement("div",{className:"nb-seg-rows"},
         React.createElement("div",{className:"nb-seg"},
-          aspects.slice(0,3).map(a=>React.createElement("button",{key:a,className:"nb-seg-btn "+(aspect===a?"on":""),
-            onClick:()=>{ setAspect(a); nbSetAspect(a); }},a))),
+          aspects.slice(0,3).map(a=>React.createElement("button",{key:a,className:"nb-seg-btn nb-aspect-btn "+(aspect===a?"on":""),
+            onClick:()=>{ setAspect(a); nbSetAspect(a); }},
+            React.createElement("span",{className:"sdbar-ratio-ico ratio-"+String(a).replace(":","x")}),
+            React.createElement("span",null,a)))),
         aspects.length>3 && React.createElement("div",{className:"nb-seg"},
-          aspects.slice(3).map(a=>React.createElement("button",{key:a,className:"nb-seg-btn "+(aspect===a?"on":""),
-            onClick:()=>{ setAspect(a); nbSetAspect(a); }},a))))),
+          aspects.slice(3).map(a=>React.createElement("button",{key:a,className:"nb-seg-btn nb-aspect-btn "+(aspect===a?"on":""),
+            onClick:()=>{ setAspect(a); nbSetAspect(a); }},
+            React.createElement("span",{className:"sdbar-ratio-ico ratio-"+String(a).replace(":","x")}),
+            React.createElement("span",null,a)))))),
     React.createElement("div",{className:"nb-ctl"},
       React.createElement("span",{className:"nb-ctl-lab"},"Resolution"),
       React.createElement("div",{className:"nb-seg"},
@@ -4243,7 +4695,7 @@ function ArtComingSoon({ tab }){
     React.createElement("div",{className:"art-soon-tag"},"Next increment"));
 }
 
-function ArtRoom({ artView, setArtView, project, characters, scenes, props, drafts, trash, onRestoreChar, onPurgeChar, onRestoreProp, onPurgeProp, onRestoreLoc, onPurgeLoc, onEnsureOwner, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds, onCreateOwnedProp,
+function ArtRoom({ artView, setArtView, project, characters, scenes, props, drafts, trash, onRestoreChar, onPurgeChar, onRestoreProp, onPurgeProp, onRestoreLoc, onPurgeLoc, onRestoreShot, onPurgeShot, onEnsureOwner, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds, onCreateOwnedProp,
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropIds, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
   locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocIds, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onSetWorldScale, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId, sluglineUnits, onUpdateUnit, onRemoveUnit,
@@ -4309,9 +4761,10 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
       : artView==="stylebible" && window.StyleBibleView
       ? React.createElement(window.StyleBibleView,{project,scenes,onAssign:onAssignStyles,assigning:assigningStyles,onSetRefs:onSetStyleRefs,onSetScenePreset,onAddRefImages:onAddStyleRefImages,onRemoveRefImage:onRemoveStyleRefImage,onColorist,
           lookbookStale:!!_stale.stylebible,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("colorist")})
-      : artView==="shots" && window.ShotList
+    : artView==="shots" && window.ShotList
       ? React.createElement(window.ShotList,{project,scenes,characters,props,locations,shots,beatsMap,
-          onUpdateShot,onAddShot,onDeleteShot,onSplitBeat,splittingBeat,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots,onShoot,onDirectScene})
+          onUpdateShot,onAddShot,onDeleteShot,onSplitBeat,splittingBeat,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots,onShoot,onDirectScene,
+          trashItems:(trash&&trash.shots)||[],onRestore:onRestoreShot,onPurge:onPurgeShot})
       : artView==="storyboard" && window.StoryboardView
       ? React.createElement(window.StoryboardView,{project,scenes,shots,characters,props,locations,beatsMap,setArtView})
       : React.createElement(ArtComingSoon,{tab:artView}));

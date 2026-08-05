@@ -361,9 +361,9 @@ function App(){
   // opens (not re-drafted on every visit), plus the set of character ids currently
   // being drafted so each card can show its own inline "Drafting…" status.
   const [visualsSeeded, setVisualsSeeded] = React.useState(()=> !!(saved && saved.visualsSeeded));
-  // RECENTLY DELETED (restore bin): deleting a character/prop/location moves the full
+  // RECENTLY DELETED (restore bin): deleting a character/prop/location/shot moves the full
   // object here (with its scenes + spec + generated sheet kept) so it can be restored.
-  const _emptyTrash = ()=>({ characters:[], props:[], locations:[] });
+  const _emptyTrash = ()=>({ characters:[], props:[], locations:[], shots:[] });
   const [trash, setTrash] = React.useState(()=> (saved && saved.trash) || _emptyTrash());
   const [draftingVisualIds, setDraftingVisualIds] = React.useState([]);
   const draftingVisualIdsRef = React.useRef([]); draftingVisualIdsRef.current = draftingVisualIds;
@@ -720,6 +720,41 @@ function App(){
   // the CONTINUITY GRAPH, exposed for prompt builders that have no props/scenes/locations
   // params (e.g. the location plate folds in the environment props it owns — locations.jsx)
   React.useEffect(()=>{ window.turnContinuity = { props, scenes, locations, characters, drafts, sluglineUnits }; },[props, scenes, locations, characters, drafts, sluglineUnits]);
+  React.useEffect(()=>{
+    window.turnAttachPropReference = (propId, ref)=>{
+      if(!propId || !ref || !ref.url) return false;
+      setProps(ps=>ps.map(p=>{
+        if(!p || p.id!==propId) return p;
+        const refs = Array.isArray(p.referenceImages) ? p.referenceImages : [];
+        const next = [{ ...ref }, ...refs.filter(r=>r && r.id!==ref.id && r.url!==ref.url)].slice(0,8);
+        return { ...p, referenceImages: next };
+      }));
+      return true;
+    };
+    window.turnCreatePropFromReference = (ref, seed)=>{
+      if(!ref || !ref.url) return null;
+      seed = seed || {};
+      const name = String(seed.name||ref.note||"New prop").trim() || "New prop";
+      const slug = (typeof window.propSlug==="function") ? window.propSlug(name)
+        : name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,40);
+      const id = "prop-ref-"+(slug||"item")+"-"+Date.now().toString(36);
+      const card = { id, name, kind:seed.kind||"carried", ownerId:seed.ownerId||"", ownerName:seed.ownerName||"",
+        form: seed.form||("Derived from selected visual reference: "+(ref.sourceName||"Art Room sheet")),
+        detail: seed.detail||("Created from a selected item reference so its design belongs to the existing film world."),
+        referenceImages:[{ ...ref, id:ref.id||("pref-"+Date.now().toString(36)) }],
+        manual:true };
+      setProps(ps=>[card, ...ps]);
+      return card;
+    };
+    window.turnRemovePropReference = (propId, refId)=>{
+      if(!propId || !refId) return false;
+      setProps(ps=>ps.map(p=> p && p.id===propId
+        ? { ...p, referenceImages:(Array.isArray(p.referenceImages)?p.referenceImages:[]).filter(r=>r && r.id!==refId) }
+        : p));
+      return true;
+    };
+    return ()=>{ delete window.turnAttachPropReference; delete window.turnCreatePropFromReference; delete window.turnRemovePropReference; };
+  },[]);
   const hydratingRef = React.useRef(false);
   const lastSentRef = React.useRef({});   // per-section save baseline (seeded by applyDoc)
   // bumped when a hydration pass finishes — lets effects that are gated on
@@ -734,7 +769,7 @@ function App(){
     project:{ title:"Untitled film", genre:"", logline:"", controllingIdea:{} },
     drafts:{}, beatsMap:{}, history:{}, continuityMap:{},
     selId:null, room:"writers", view:"spine", artView:"lookbook", propsSeeded:false, locsSeeded:false, visualsSeeded:false,
-    trash:{ characters:[], props:[], locations:[] }, blank:true });
+    trash:{ characters:[], props:[], locations:[], shots:[] }, blank:true });
   /* The Matrix sample as a full project doc — used ONLY to seed the admin
      account's first project (the demo lives in the admin account by default). */
   const sampleDoc = ()=>({ scenes:SCENES, characters:CHARACTERS, props:(window.PROPS_SEED||[]), locations:[], sluglineUnits:[], lookbook:[], lookbookNote:"", lookbookApplied:{}, shots:[],
@@ -777,7 +812,7 @@ function App(){
     setLocsSeeded(!!d.locsSeeded);
     setVisualsSeeded(!!d.visualsSeeded);
     setTrash(d.trash && typeof d.trash==="object"
-      ? { characters:d.trash.characters||[], props:d.trash.props||[], locations:d.trash.locations||[] }
+      ? { characters:d.trash.characters||[], props:d.trash.props||[], locations:d.trash.locations||[], shots:d.trash.shots||[] }
       : _emptyTrash());
     /* seed the per-section baseline from the doc we just loaded. Without this the first
        save after opening a film would treat EVERY section as locally changed and write the
@@ -1569,6 +1604,7 @@ function App(){
     // auto-opening it would hijack the canvas on every browsing tap.
     if(!inspDrawer) setInspOpen(true);
   };
+  const selectSceneBrowse = (id)=>{ setSelId(id); setSelChar(null); setFocusBeat(null); };
   // canvas views (Spine / Audit / Board): tapping a scene MEANS "show me its
   // details", so on mobile this variant ALSO opens the inspector drawer
   // (user ruling 2026-07-19 — the Script view keeps the non-hijacking selectScene).
@@ -2310,7 +2346,24 @@ function App(){
   // A shot = one beat. "Draft all shots" derives the shot breakdown for every scene
   // that doesn't have one yet (non-destructive); per-scene re-draft replaces one scene.
   const updateShot = (id,patch)=> setShots(ss=>ss.map(s=>s.id===id?{...s,...patch}:s));
-  const deleteShot = (id)=>{ setShots(ss=>ss.filter(s=>s.id!==id)); try{ if(typeof nbClearAsset==="function") nbClearAsset(id); }catch(e){} };
+  const deleteShot = (id)=>{
+    const sh = (shots||[]).find(x=>x.id===id); if(!sh) return;
+    setShots(ss=>ss.filter(s=>s.id!==id));
+    setTrash(t=>({ ...t, shots:[ _trashStamp(sh), ...(t.shots||[]).filter(x=>x.id!==id) ] }));
+  };
+  const restoreShot = (id)=>{
+    const item = (trash.shots||[]).find(x=>x.id===id); if(!item) return;
+    const { _deletedAt, ...clean } = item;
+    setShots(ss=> ss.some(s=>s.id===id) ? ss : [...ss, clean].sort((a,b)=>
+      String(a.sceneId||"").localeCompare(String(b.sceneId||"")) ||
+      ((Number(a.beatN)||0)-(Number(b.beatN)||0)) ||
+      ((Number(a.order)||0)-(Number(b.order)||0))));
+    setTrash(t=>({ ...t, shots:(t.shots||[]).filter(x=>x.id!==id) }));
+  };
+  const purgeShot = (id)=>{
+    setTrash(t=>({ ...t, shots:(t.shots||[]).filter(x=>x.id!==id) }));
+    try{ if(typeof nbClearAsset==="function") nbClearAsset(id); }catch(e){}
+  };
 
   // ── Phase 2: line audio = the cut clock ──────────────────────────────────────
   // Render a shot's dialogue through its speaker's LOCKED voice; the MEASURED
@@ -3678,7 +3731,7 @@ function App(){
           ? React.createElement("div",{className:"canvas"}, emptyCanvas())
           : React.createElement(ArtRoom,{key:(cloudMode?currentProjectId:"local"),artView,setArtView,project,characters,scenes,props,drafts,trash,
             onRestoreChar:restoreCharacter,onPurgeChar:purgeCharacter,onRestoreProp:restoreProp,onPurgeProp:purgeProp,
-            onRestoreLoc:restoreLocation,onPurgeLoc:purgeLocation,onEnsureOwner:ensureOwnerSheet,
+            onRestoreLoc:restoreLocation,onPurgeLoc:purgeLocation,onRestoreShot:restoreShot,onPurgeShot:purgeShot,onEnsureOwner:ensureOwnerSheet,
             onDirectScene:(sceneId)=>setSceneDirLaunch({ sceneId: sceneId||null }),
             onColorist:()=>setColoristOpen(true),
             onShoot:()=>setShotDesignerOpen(true),
@@ -3766,7 +3819,7 @@ function App(){
         view==="beats" && scenes.length>0 && React.createElement(TurnAudit,{scenes,selId,onSelect:selectSceneDetail}),
         view==="board" && scenes.length>0 && React.createElement(Board,{scenes,selId,onSelect:selectSceneDetail}),
         view==="script" && scenes.length>0 && React.createElement(ScriptView,{scene:sel,beats,
-          drafts, scenes, onSelectScene:selectScene, onPolish:polishScene,
+          drafts, scenes, onSelectScene:selectSceneBrowse, onPolish:polishScene,
           onDraftOne:draftOne, onDraftAll:draftAll, drafting, total:scenes.length,
           history: sel ? (history[sel.id]||{back:[],fwd:[]}) : {back:[],fwd:[]},
           labelOf, onRevert:revertVersion, onRedo:redoVersion, onEditScene:commitVersion, continuityMap, project,

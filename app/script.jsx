@@ -355,7 +355,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
   const nextScene = scenes[idx+1] || null;
   const screenplay = drafts[scene.id];
   const draftedCount = scenes.filter(s=>drafts[s.id]).length;
-  const go = (d)=>{ const n = scenes[idx+d]; if(n) onSelectScene(n.id); };
+  const go = (d, e)=>{ if(e && e.stopPropagation) e.stopPropagation(); const n = scenes[idx+d]; if(n) onSelectScene(n.id); };
 
   const transIn = sceneTransition(prevScene, scene);
   const transOut = nextScene ? sceneTransition(scene, nextScene) : null;
@@ -576,10 +576,10 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       React.createElement("div",{className:"st-group a"}, contBtn, versionUI, editBtn),
       React.createElement("div",{className:"st-group b"}, polishUI, control,
         React.createElement("div",{className:"script-scenestep",title:"Step through the screenplay scene by scene"},
-          React.createElement("button",{className:"panel-collapse",onClick:()=>go(-1),disabled:idx<=0,
+          React.createElement("button",{className:"panel-collapse",onClick:(e)=>go(-1,e),disabled:idx<=0,
             title:"Previous scene",style:{opacity:idx<=0?.4:1}},React.createElement(Icon.chevL,{s:14})),
           `Scene ${idx+1} / ${scenes.length}`,
-          React.createElement("button",{className:"panel-collapse",onClick:()=>go(1),disabled:idx>=scenes.length-1,
+          React.createElement("button",{className:"panel-collapse",onClick:(e)=>go(1,e),disabled:idx>=scenes.length-1,
             title:"Next scene",style:{opacity:idx>=scenes.length-1?.4:1}},React.createElement(Icon.chevR,{s:14}))))));
 
   // inline per-scene continuity flag
