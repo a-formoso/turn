@@ -468,27 +468,32 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
 
       _el(AdvancedCameraSettings,{sh,onUpdate}),
 
-      // the action — what we see in this frame
-      _el(SheetField,{label:"Action \u2014 what we see in this frame",value:sh.action,multiline:true,
-        placeholder:"One vivid present-tense beat of on-screen action\u2026",onCommit:v=>onUpdate(sh.id,{action:v})}),
-      dropped && _el("div",{className:"shot-dropped",
-        title:"Named in the micro-beats this shot covers, but missing from its Action text. The render will try to merge them back in via the scripted canon, but the frame may still drop them — edit the Action to re-include them deliberately."},
-        "\u26a0 Dropped from action: ", _el("b",null, dropped.join(", ")),
-        " \u2014 named in covered micro-beats, missing from the action"),
+      // the shot's TEXT layer, folded shut by default so the card reads compact —
+      // SheetField commits on blur, so collapsing loses only uncommitted drafts.
+      // The dropped-subjects warning forces the fold open: a warning hidden behind
+      // a closed fold is a warning nobody sees.
+      _el(CardFold,{label:"Action \u00b7 composition \u00b7 dialogue \u00b7 notes",defaultOpen:!!dropped},
+        // the action — what we see in this frame
+        _el(SheetField,{label:"Action \u2014 what we see in this frame",value:sh.action,multiline:true,
+          placeholder:"One vivid present-tense beat of on-screen action\u2026",onCommit:v=>onUpdate(sh.id,{action:v})}),
+        dropped && _el("div",{className:"shot-dropped",
+          title:"Named in the micro-beats this shot covers, but missing from its Action text. The render will try to merge them back in via the scripted canon, but the frame may still drop them — edit the Action to re-include them deliberately."},
+          "\u26a0 Dropped from action: ", _el("b",null, dropped.join(", ")),
+          " \u2014 named in covered micro-beats, missing from the action"),
 
-      // composition (the depth-grid "vary" layer) + dialogue
-      _el(SheetField,{label:"Composition \u2014 framing, blocking, depth, eyeline",value:sh.composition,multiline:true,
-        placeholder:"Where subjects sit in frame, foreground/background, eyeline\u2026",onCommit:v=>onUpdate(sh.id,{composition:v})}),
-      // multiline: dialogue lines routinely outgrow a single-line input, which clipped
-      // them visually (the full text was stored, just unreadable/uneditable)
-      _el(SheetField,{label:"Dialogue (optional)",value:sh.dialogue,multiline:true,
-        placeholder:"A short line spoken in this beat\u2026",onCommit:v=>onUpdate(sh.id,{dialogue:v})}),
+        // composition (the depth-grid "vary" layer) + dialogue
+        _el(SheetField,{label:"Composition \u2014 framing, blocking, depth, eyeline",value:sh.composition,multiline:true,
+          placeholder:"Where subjects sit in frame, foreground/background, eyeline\u2026",onCommit:v=>onUpdate(sh.id,{composition:v})}),
+        // multiline: dialogue lines routinely outgrow a single-line input, which clipped
+        // them visually (the full text was stored, just unreadable/uneditable)
+        _el(SheetField,{label:"Dialogue (optional)",value:sh.dialogue,multiline:true,
+          placeholder:"A short line spoken in this beat\u2026",onCommit:v=>onUpdate(sh.id,{dialogue:v})}),
 
-      // the director's own prompt words — compiled into the spec as custom_directives
-      // on every rebuild, so they survive sheet/style changes and never fork the prompt
-      _el(SheetField,{label:"Director's notes \u2014 extra prompt directives (optional)",value:sh.directives,multiline:true,
-        placeholder:"Your own words for the generator \u2014 atmosphere, camera nuance, performance notes\u2026 These compose INTO the prompt; the derived spec (references, cast, style) stays intact.",
-        onCommit:v=>onUpdate(sh.id,{directives:v})}),
+        // the director's own prompt words — compiled into the spec as custom_directives
+        // on every rebuild, so they survive sheet/style changes and never fork the prompt
+        _el(SheetField,{label:"Director's notes \u2014 extra prompt directives (optional)",value:sh.directives,multiline:true,
+          placeholder:"Your own words for the generator \u2014 atmosphere, camera nuance, performance notes\u2026 These compose INTO the prompt; the derived spec (references, cast, style) stays intact.",
+          onCommit:v=>onUpdate(sh.id,{directives:v})})),
 
       _el(CardFold,{label:"In frame",defaultOpen:false},
         // read-only: derived from the action text, the single source the prompt uses —

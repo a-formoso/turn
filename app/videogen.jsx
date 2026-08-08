@@ -23,11 +23,12 @@ const VID_MODEL_FAST = "bytedance/seedance-2.0/fast/reference-to-video";
 // to this pair instead of guessing at an undocumented field on the multimodal endpoint.
 const VID_MODEL_I2V      = "bytedance/seedance-2.0/image-to-video";
 const VID_MODEL_I2V_FAST = "bytedance/seedance-2.0/fast/image-to-video";
-// Seedance 2.5 transition endpoints (PROVISIONAL ids mirroring 2.0's naming — confirm
-// against fal's listing when it lands; its reference-to-video endpoints ride the
-// tier's falModel, so only the start→end transition pair needs constants here)
+// Seedance 2.5 transition endpoint (verified live on fal 2026-08-07: supports
+// end_image_url, 480p/720p, 4–30s). fal lists NO fast variant for 2.5, so the
+// "fast" constant aliases the standard endpoint — the registry has no 2.5 fast
+// tier, so it's never selected; the alias just makes a stale opts.fast harmless.
 const VID25_MODEL_I2V      = "bytedance/seedance-2.5/image-to-video";
-const VID25_MODEL_I2V_FAST = "bytedance/seedance-2.5/fast/image-to-video";
+const VID25_MODEL_I2V_FAST = VID25_MODEL_I2V;
 window.VID_MODEL = VID_MODEL; window.VID_MODEL_FAST = VID_MODEL_FAST;
 window.VID_MODEL_I2V = VID_MODEL_I2V; window.VID_MODEL_I2V_FAST = VID_MODEL_I2V_FAST;
 
@@ -271,6 +272,7 @@ function vidResolutionForModel(model, requested){
   const raw = String(requested || "720p").trim();
   const norm = raw.toLowerCase()==="4k" ? "4K" : raw.toLowerCase();
   const maxRank = /seedance-2\.0\/fast/.test(String(model||"")) ? 1
+    : /seedance-2\.5/.test(String(model||"")) ? 1   // fal lists 480p/720p ONLY for 2.5 — no 1080p/4K
     : /kling-video|sora-2\/image-to-video\/pro/.test(String(model||"")) ? 2
     : /sora-2/.test(String(model||"")) ? 1
     : 3;
@@ -457,13 +459,15 @@ const VID_LIKENESS_HELP = "The model's safety filter flagged a reference image a
 async function seedanceGenerate(id, opts){
   opts = opts||{};
   /* SEEDANCE 2.5 rides the same multimodal reference-to-video shape as 2.0, named by
-     the tier's falModel: 30s duration ceiling, up to 50 image references, and longer
-     renders (the poll ceiling stretches below). Provisional until fal lists it. */
+     the tier's falModel: 30s duration ceiling and longer renders (the poll ceiling
+     stretches below). Per-modality caps verified against fal's live schema 2026-08-07:
+     2.5 takes ≤30 images, ≤10 videos, ≤10 audio (50 files total, budgeted upstream by
+     the tier's assetLimit); 2.0 takes ≤9 images, ≤3 videos, ≤3 audio (12 total). */
   const isSeedance25 = /seedance-2\.5/.test(String(opts.falModel||""));
   // assemble the multimodal asset lists (single frameUrl/audioUrl kept for back-compat)
-  const images = _dedupCap([opts.frameUrl, ...(opts.imageUrls||[])], isSeedance25 ? 50 : 9);
-  const videos = _dedupCap(opts.videoUrls||[], 3);
-  const audios = _dedupCap([opts.audioUrl, ...(opts.audioUrls||[])], 3);
+  const images = _dedupCap([opts.frameUrl, ...(opts.imageUrls||[])], isSeedance25 ? 30 : 9);
+  const videos = _dedupCap(opts.videoUrls||[], isSeedance25 ? 10 : 3);
+  const audios = _dedupCap([opts.audioUrl, ...(opts.audioUrls||[])], isSeedance25 ? 10 : 3);
   if(!images.length && !videos.length) throw new Error("This clip has no start frame yet — generate the shot's frame in the Shot List first.");
   /* SORA 2 rides the same queue but a different shape: the tier names its fal endpoint
      (opts.falModel), takes ONE start image, and has no video/audio refs, no end-frame

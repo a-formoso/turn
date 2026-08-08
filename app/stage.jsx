@@ -671,30 +671,28 @@ const SEEDANCE_MODELS = [
   // (Sora 2 was removed from the picker 2026-07-05 by user decision — its proxy
   // routing and videogen isSora branch remain dormant, so re-adding it later is
   // just restoring a registry entry here.)
-  // Seedance 2.5 — released 2026-07-31; NOT yet listed on fal.ai (checked 2026-08-01),
-  // so it stays "soon" — but the whole app is already 30s-wired: maxClipSec:30 feeds the
-  // caphead / tick guard / duration options / measured-seconds floor; the Stage raises
-  // the packing budget to 30 and these caps lift (maxShotsPerClip:0, maxDialoguePerClip:0);
-  // videogen clamps at 30s, accepts up to 50 image refs (maxAssets) and polls ~20 min;
-  // the proxy already allowlists the endpoints below. When fal lists it: verify the tier
-  // falModel ids + creditRates against the live listing, then flip status to "active".
-  { id:"seedance-2.5", label:"Seedance 2.5", status:"soon", maxShotsPerClip:0, maxDialoguePerClip:0,
+  // Seedance 2.5 — LIVE on fal (verified 2026-08-07): bytedance/seedance-2.5/reference-to-video.
+  // Real listing facts: up to 50 multimodal refs, 4–30s (or auto) duration, resolutions
+  // 480p/720p ONLY (no 1080p/4K output despite the launch material), generate_audio
+  // default on, @-mention reference grammar, and NO fast endpoint exists. The whole app
+  // was pre-wired for the 30s ceiling: maxClipSec:30 feeds the caphead / tick guard /
+  // duration options / measured-seconds floor; caps lift (maxShotsPerClip:0,
+  // maxDialoguePerClip:0); videogen clamps at 30s and polls ~20 min; the proxy
+  // allowlists the endpoint and caps its resolution ladder at 720p.
+  { id:"seedance-2.5", label:"Seedance 2.5", status:"active", maxShotsPerClip:0, maxDialoguePerClip:0,
     maxClipSec:30, maxAssets:50,
-    metaRes:"4K", metaDur:"4–30s",
-    bestFor:"Whole scenes in ONE pass — single-pass 30s clips in 4K with up to 50 multimodal references.",
+    metaRes:"720p", metaDur:"4–30s",
+    bestFor:"Whole scenes in ONE pass — single-pass 30s clips with up to 50 multimodal references.",
     promptFormula:"the 2.0 layered grammar stretched over up to 30s — timeline blocks carry an entire scene in a single render.",
-    capabilities:["Native single-pass 30s clips","4K output · 10-bit colour","Up to 50 multimodal references","Local in-clip edits","Whole-scene generation","Native audio"],
+    capabilities:["Native single-pass 30s clips","Up to 50 multimodal references","Whole-scene generation","Native audio","Strong character consistency","Output up to 720p"],
     tiers:[
-      // PROVISIONAL endpoint ids (mirroring 2.0's naming) + rates (+25% over 2.0) —
-      // confirm both against fal's listing before flipping status to "active".
-      { id:"standard", label:"Standard", fast:false, maxRes:"4K", falModel:"bytedance/seedance-2.5/reference-to-video",
-        note:"Best quality · single-pass 30s · resolution up to 4K",
-        creditRate:(window.turnVideoCreditRates&&window.turnVideoCreditRates("seedance-2.5","standard")) || { "480p":0.65, "720p":1.25, "1080p":2.5, "4K":6.5 } },
-      { id:"fast",     label:"Fast",     fast:true,  maxRes:"720p", falModel:"bytedance/seedance-2.5/fast/reference-to-video",
-        note:"Lower latency and cost for iteration · capped at 720p",
-        creditRate:(window.turnVideoCreditRates&&window.turnVideoCreditRates("seedance-2.5","fast")) || { "480p":0.5, "720p":1 } },
+      // fal lists ONE endpoint (no fast tier) at 480p/720p only — rates in
+      // app/pricing.jsx are the real fal per-second prices (2026-08-07).
+      { id:"standard", label:"Standard", fast:false, maxRes:"720p", falModel:"bytedance/seedance-2.5/reference-to-video",
+        note:"Single-pass up to 30s · up to 50 references · resolution up to 720p",
+        creditRate:(window.turnVideoCreditRates&&window.turnVideoCreditRates("seedance-2.5","standard")) || { "480p":0.75, "720p":1.6 } },
     ],
-    note:"Released 2026-07-31: native single-pass 30s clips in 4K (10-bit colour), up to 50 multimodal references, and local in-clip edits. Waiting on fal.ai to list it — the app is already wired for its 30s ceiling, so activation is a status flip once the endpoint ids are confirmed." },
+    note:"Live on fal: native single-pass 30s clips with up to 50 multimodal references and whole-scene generation. Output tops out at 720p (fal lists no 1080p/4K for 2.5) — render in 2.0 Standard when you need 1080p/4K masters." },
 ];
 function seedanceModelOf(id){ return SEEDANCE_MODELS.find(m=>m.id===id) || SEEDANCE_MODELS[0]; }
 function seedanceTierOf(model, tierId){ return (model&&model.tiers||[]).find(t=>t.id===tierId) || (model&&model.tiers||[])[0] || null; }
@@ -1636,8 +1634,27 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
           assetRole:sid===p.id?"master_reference":"derived_reference",
           assetSourceQuality:sid===p.id?"prop_master_sheet":"prop_state_sheet" });
       });
-      // References are beat/clip-scoped: do not pull in neighboring scene assets unless
-      // this selected beat's shot data actually says the cast, prop or location is in frame.
+      // SCENE-WIDE references (user ruling 2026-08-07): the rest of this scene's cast
+      // and props — from the OTHER clips' derivations — are offerable too, so the user
+      // decides when to combine elements into their own shots. They default OFF
+      // (sceneOnly → the extraOn set) and ride the same include/exclude machinery;
+      // @mentioning one in a prompt box auto-includes it.
+      const _seen = new Set(out.map(a=>a.key));
+      (sceneClips||[]).forEach(c2=>{
+        const dd = (c2&&c2.data)||{};
+        (dd.cast||[]).forEach(c=>{ const k="c:"+c.id; if(_seen.has(k)) return; _seen.add(k);
+          const u=imgs[c.id];
+          out.push({ key:k, kind:"image", label:c.name+" reference", url:u, ready:!!u, id:c.id, sceneOnly:true,
+            assetRole:"master_reference", assetSourceQuality:"character_master_sheet" }); });
+        (dd.props||[]).forEach(p=>{ const k="p:"+p.id; if(_seen.has(k)) return; _seen.add(k);
+          const sid = p.sheetId || p.id, u = imgs[sid];
+          const plab = p.name+(p.stateLabel?(" \u2014 "+p.stateLabel):"")+(p.holder?(" \u00b7 "+(p.kind==="worn"?"worn by ":"carried by ")+p.holder):"");
+          out.push({ key:k, kind:"image", label:plab, url:u||"", ready:!!u, id:sid, sceneOnly:true,
+            assetRole:sid===p.id?"master_reference":"derived_reference",
+            assetSourceQuality:sid===p.id?"prop_master_sheet":"prop_state_sheet" }); });
+      });
+      // The previous clip stays beat/clip-scoped continuity: it attaches only when
+      // this selected beat really follows a rendered clip.
       if(prevVideoSafe) out.push({ key:"prev", kind:"video", label:"Previous clip (continuity)", url:prevVideo, ready:true,
         assetRole:"final_take", assetSourceQuality:"approved_or_current_video_take" });
     }
@@ -1654,7 +1671,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
       out.push({ key:"a:"+sh.id, kind:"audio", label:speaker+" line", url:u||"", ready:!!u, shotId:sh.id });
     });
     return out;
-  }, [clip.id, activeShot.id, sourceMode, dialogueAudio, modelId, shotStartFrame, JSON.stringify((storyAssets.halves||[]).map(h=>h.id+":"+!!h.url)), storyAssets.top, storyAssets.bottom, storyAssets.sheet, prevVideo, prevVideoSafe, JSON.stringify(prevVideoMeta||{}), JSON.stringify(d.cast), JSON.stringify(d.props), d.loc&&d.loc.id, d.locSheet&&d.locSheet.id, imgs, auds]);
+  }, [clip.id, activeShot.id, sourceMode, dialogueAudio, modelId, shotStartFrame, JSON.stringify((storyAssets.halves||[]).map(h=>h.id+":"+!!h.url)), storyAssets.top, storyAssets.bottom, storyAssets.sheet, prevVideo, prevVideoSafe, JSON.stringify(prevVideoMeta||{}), JSON.stringify(d.cast), JSON.stringify(d.props), d.loc&&d.loc.id, d.locSheet&&d.locSheet.id, JSON.stringify((sceneClips||[]).map(c2=>{ const dd=(c2&&c2.data)||{}; return (dd.cast||[]).map(x=>x.id).join(",")+"|"+(dd.props||[]).map(x=>x.id+":"+(x.sheetId||"")).join(","); })), imgs, auds]);
 
   // assets default ON when ready; user can toggle (off set). @tags number the INCLUDED
   // assets only — attachment order is what fal sees, so excluding @Image2 must renumber
@@ -1979,9 +1996,35 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   const promptKeyRef = React.useRef(STAGE_PROMPT_SCHEMA+"·"+clip.id+"·"+activeShot.id);
   // @-mention autocomplete lives in StagePromptArea (module level) so EVERY prompt
   // box — composer, Director and each multi-shot row — shares the same dropdown +
-  // unresolved-token warning. mentionables = this render's INCLUDED assets only.
-  const mentionables = promptRefAssets
-    .map(a=>({ t:stageAssetMention(a), label:String(a.label||""), kind:a.kind, url:String(a.url||"") }));
+  // unresolved-token warning. The dropdown offers EVERY ready asset (user ruling
+  // 2026-08-07: all scene-level elements reachable from the prompt): included ones
+  // under their real token, not-yet-included ones under the PROSPECTIVE token they'd
+  // get once included — @tokens number the INCLUDED set only, so picking one
+  // auto-includes it (see includeMention) before the token lands in the text.
+  const mentionables = (()=>{ const n={image:0,video:0,audio:0}, out=[];
+    tagged.forEach(a=>{
+      if(a.kind==="text" || n[a.kind]==null) return;
+      if(on(a)){ n[a.kind]++;
+        out.push({ t:stageAssetMention(a), label:String(a.label||""), kind:a.kind, url:String(a.url||""), key:a.key, included:true }); }
+      else if(a.ready)
+        out.push({ t:"@"+({image:"Image",video:"Video",audio:"Audio"}[a.kind])+(n[a.kind]+1), label:String(a.label||""), kind:a.kind, url:String(a.url||""), key:a.key, included:false });
+    });
+    return out; })();
+  // picking a NOT-yet-included asset from the dropdown includes it first (its token
+  // has no meaning otherwise); returns false — and warns — when the input budget is full
+  const includeMention = (m)=>{
+    if(!m || m.included!==false) return true;
+    const a = tagged.find(x=>x.key===m.key);
+    if(!a || !a.ready) return false;
+    if(on(a)) return true;
+    if(a.locked) return false;
+    if(budgetLeft<=0){
+      if(typeof window.appToast==="function") window.appToast((model.label||"This model")+" accepts up to "+assetLimit+" inputs — exclude an asset before adding this one.","error");
+      return false;
+    }
+    toggle(a);
+    return true;
+  };
   const [mentionBox, setMentionBox] = React.useState(null);  // {start, query, hi}
   const promptRef = React.useRef(null);                      // StageMentionEditor imperative API
   const mentionItems = (q)=>{ q=String(q||"").toLowerCase();
@@ -1994,7 +2037,9 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     const pos = (caret==null) ? t.length : Math.min(caret, t.length);
     const m = /(?:^|[\s\n])@([A-Za-z0-9]*)$/.exec(t.slice(0, pos));
     setMentionBox(m ? { start:pos-m[1].length-1, query:m[1], hi:0 } : null); };
-  const insertMention = (tok)=>{ const api=promptRef.current; if(!api||!mentionBox) return;
+  const insertMention = (m)=>{ const api=promptRef.current; if(!api||!mentionBox) return;
+    if(!includeMention(m)){ setMentionBox(null); return; }
+    const tok = m.t;
     const caret = api.caretOffset();
     const next = (prompt.slice(0,mentionBox.start)+tok+" "+prompt.slice(caret)).slice(0,PANEL_PROMPT_MAX);
     const pos = Math.min(mentionBox.start+tok.length+1, next.length);
@@ -2006,10 +2051,11 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     if(e.key==="ArrowDown"||e.key==="ArrowUp"){ e.preventDefault();
       setMentionBox(b=>({ ...b, hi:(b.hi+(e.key==="ArrowDown"?1:-1)+Math.max(1,items.length))%Math.max(1,items.length) })); }
     else if((e.key==="Enter"||e.key==="Tab") && items.length){ e.preventDefault();
-      insertMention(items[Math.min(mentionBox.hi, items.length-1)].t); }
+      insertMention(items[Math.min(mentionBox.hi, items.length-1)]); }
     else if(e.key==="Escape"){ setMentionBox(null); } };
-  // tokens that don't resolve to an included asset (typo, or the asset was excluded)
-  const badMentions = (()=>{ const known = new Set(mentionables.map(m=>m.t.toLowerCase()));
+  // tokens that don't resolve to an INCLUDED asset (typo, or the asset was excluded) —
+  // prospective tokens of not-yet-included assets deliberately don't count as known
+  const badMentions = (()=>{ const known = new Set(mentionables.filter(m=>m.included!==false).map(m=>m.t.toLowerCase()));
     const out = [], re = /@(image|video|audio)\d+/gi; let mm;
     while((mm = re.exec(prompt))){ if(!known.has(mm[0].toLowerCase()) && out.indexOf(mm[0])<0) out.push(mm[0]); }
     return out; })();
@@ -2800,7 +2846,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
           !folded && _stEl(StagePromptArea,{className:"stage2-ms-text"+(edited?" edited":""),rows:3,fill:true,
             placeholder:"Describe the shot — who is where and what is happening.",
             value: edited ? String(sh.vidText) : canon,
-            maxLength:500,mentionables,
+            maxLength:500,mentionables,onMentionPick:includeMention,
             setValue:(v)=>{ if(!onUpdateShot) return;
               onUpdateShot(sh.id, { vidText: v.trim()==="" ? undefined : v }); },
             title:"This shot's video description — compiled into the prompt. Editing saves a video-only override (the shot card's canon Action is never changed); ↺ derived restores the live text."}));
@@ -2858,9 +2904,10 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         badMentions.length>0 && _stEl("div",{className:"stage2-mention-warn"},
           "⚠ "+badMentions.join(", ")+" — not among this render's included assets; the model will guess. Fix the token or include the asset."),
         mentionBox && mentionItems(mentionBox.query).length>0 && _stEl("div",{className:"stage2-mention-box"},
-          mentionItems(mentionBox.query).map((m,i)=>_stEl("button",{key:m.t,type:"button",
+          mentionItems(mentionBox.query).map((m,i)=>_stEl("button",{key:m.t+":"+(m.key||""),type:"button",
             className:"stage2-mention-item"+(i===mentionBox.hi?" hi":""),
-            onMouseDown:e=>{ e.preventDefault(); insertMention(m.t); }},
+            title: m.included===false ? m.label+" — not among this render's inputs yet; picking it includes it" : undefined,
+            onMouseDown:e=>{ e.preventDefault(); insertMention(m); }},
             // thumbnail, Seedance-style: the asset's image, or a glyph tile for video/audio
             m.kind==="image" && m.url
               ? _stEl("img",{className:"stage2-mention-thumb",src:m.url,alt:""})
@@ -2869,7 +2916,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
             _stEl("span",{className:"stage2-mention-main"},
               _stEl("b",null,m.t), m.label && _stEl("span",{className:"stage2-mention-label"},m.label)),
             _stEl("span",{className:"stage2-mention-kind"},
-              m.kind==="image"?"Image":m.kind==="video"?"Video":"Audio"))))),
+              (m.kind==="image"?"Image":m.kind==="video"?"Video":"Audio")+(m.included===false?" · add":"")))))),
       seedanceToolbar)),
       // (cancelling an in-flight render lives in the Render settings panel — "Cancel render";
       //  the REFERENCES-added-at-render preview lives in the panel's Inputs tab)
@@ -2957,7 +3004,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
           _stEl("b",null,model.label+" Director"),
           _stEl("span",{className:"stage2-director-badge"},"PRIMARY PROMPT"))),
       _stEl(StagePromptArea,{className:"stage2-director-text",value:prompt,setValue:setPrompt,
-        mentionables,fill:true,placeholder:"Describe the video you want to create…",maxLength:PANEL_PROMPT_MAX}),
+        mentionables,onMentionPick:includeMention,fill:true,placeholder:"Describe the video you want to create…",maxLength:PANEL_PROMPT_MAX}),
       _stEl("div",{className:"stage2-director-chips"},
         promptChips.map(([k,v],i)=>_stEl("button",{key:k+i,type:"button",onClick:()=>onChip({k,v,label:v}),title:"Add "+k+" to prompt"},
           _stEl("b",null,k),_stEl("span",null,v))))),
@@ -3736,15 +3783,20 @@ function StagePromptArea(props){
   const caretToken = (el)=>{ const upto = el.value.slice(0, el.selectionStart||0);
     const m = /(?:^|[\s\n])@([A-Za-z0-9]*)$/.exec(upto);
     return m ? { start:(el.selectionStart||0)-m[1].length-1, query:m[1] } : null; };
-  const insert = (tok)=>{ const el=taRef.current; if(!el||!box) return;
+  const insert = (m)=>{ const el=taRef.current; if(!el||!box) return;
+    // a not-yet-included asset must be included before its token means anything —
+    // the parent's onMentionPick does that (returns false when it can't, e.g. budget full)
+    if(props.onMentionPick && props.onMentionPick(m)===false){ setBox(null); return; }
+    const tok = m.t;
     const caret = el.selectionStart||0;
     const val = String(props.value||"");
     const next = (val.slice(0,box.start)+tok+" "+val.slice(caret)).slice(0,max);
     const pos = box.start+tok.length+1;
     props.setValue(next); setBox(null);
     requestAnimationFrame(()=>{ try{ el.focus(); el.setSelectionRange(pos,pos); }catch(_e){} }); };
-  // tokens that don't resolve to an included asset (typo, or the asset was excluded)
-  const bad = (()=>{ const known = new Set(ment.map(m=>m.t.toLowerCase()));
+  // tokens that don't resolve to an INCLUDED asset (typo, or the asset was excluded) —
+  // prospective tokens of not-yet-included assets deliberately don't count as known
+  const bad = (()=>{ const known = new Set(ment.filter(m=>m.included!==false).map(m=>m.t.toLowerCase()));
     const out = [], re = /@(image|video|audio)\d+/gi; let mm; const val = String(props.value||"");
     while((mm = re.exec(val))){ if(!known.has(mm[0].toLowerCase()) && out.indexOf(mm[0])<0) out.push(mm[0]); }
     return out; })();
@@ -3758,15 +3810,16 @@ function StagePromptArea(props){
         if(e.key==="ArrowDown"||e.key==="ArrowUp"){ e.preventDefault();
           setBox(b=>({ ...b, hi:(b.hi+(e.key==="ArrowDown"?1:-1)+Math.max(1,list.length))%Math.max(1,list.length) })); }
         else if((e.key==="Enter"||e.key==="Tab") && list.length){ e.preventDefault();
-          insert(list[Math.min(box.hi, list.length-1)].t); }
+          insert(list[Math.min(box.hi, list.length-1)]); }
         else if(e.key==="Escape"){ setBox(null); } },
       onBlur:()=>setTimeout(()=>setBox(null),120)}),
     props.warn!==false && bad.length>0 && _stEl("div",{className:"stage2-mention-warn"},
       "⚠ "+bad.join(", ")+" — not among this render's included assets; the model will guess. Fix the token or include the asset."),
     box && list.length>0 && _stEl("div",{className:"stage2-mention-box"},
-      list.map((m,i)=>_stEl("button",{key:m.t,type:"button",
+      list.map((m,i)=>_stEl("button",{key:m.t+":"+(m.key||""),type:"button",
         className:"stage2-mention-item"+(i===box.hi?" hi":""),
-        onMouseDown:e=>{ e.preventDefault(); insert(m.t); }},
+        title: m.included===false ? m.label+" — not among this render's inputs yet; picking it includes it" : undefined,
+        onMouseDown:e=>{ e.preventDefault(); insert(m); }},
         m.kind==="image" && m.url
           ? _stEl("img",{className:"stage2-mention-thumb",src:m.url,alt:""})
           : _stEl("span",{className:"stage2-mention-thumb tile"},
@@ -3774,7 +3827,7 @@ function StagePromptArea(props){
         _stEl("span",{className:"stage2-mention-main"},
           _stEl("b",null,m.t), m.label && _stEl("span",{className:"stage2-mention-label"},m.label)),
         _stEl("span",{className:"stage2-mention-kind"},
-          m.kind==="image"?"Image":m.kind==="video"?"Video":"Audio")))));
+          (m.kind==="image"?"Image":m.kind==="video"?"Video":"Audio")+(m.included===false?" · add":""))))));
 }
 /* one BEAT's rail name, resolved the way the Art Room names it: the scripted beat
    title first (the canon text the Shots tab shows as "Scripted"), then the beat

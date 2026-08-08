@@ -2811,7 +2811,9 @@ html[data-theme="dark"] .dt-viewing svg{color:oklch(0.82 0.09 296)}
   padding:7px 6px;cursor:pointer;background:var(--bg-2);border:1px solid var(--line-2);
   border-radius:999px;box-shadow:0 8px 28px rgba(15,16,18,.14);transition:.15s}
 .nb-dock-toggle:hover{border-color:var(--line-3);transform:translateY(-1px)}
-.nb-dock.open .nb-dock-toggle{border-color:var(--txt-0)}
+/* open (selected) keeps the HOVER look — same 1px border weight/colour and the soft
+   raised pill — instead of the heavier near-black ring it used to switch to */
+.nb-dock.open .nb-dock-toggle{border-color:var(--line-3);transform:translateY(-1px)}
 .nb-dock-chip{display:block;font-family:var(--f-mono);font-size:8.5px;font-weight:600;
   letter-spacing:.03em;text-align:center;color:var(--txt-2);background:var(--bg-3);
   border:1px solid var(--line);border-radius:999px;padding:5px 0;white-space:nowrap}
@@ -6285,8 +6287,11 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
   border-radius:9px;background:var(--bg-2);cursor:pointer;transition:.12s;min-width:0}
 .bc-shot-row:hover{border-color:var(--line-3);background:var(--bg-3)}
 /* open row: square off the bottom + drop the seam border so the expanded editor
-   below reads as the SAME container (user ruling 2026-08-01) */
-.bc-shot-row.on{border-color:var(--pos);border-bottom-color:transparent;border-radius:9px 9px 0 0}
+   below reads as the SAME container (user ruling 2026-08-01).
+   2px all around (user ruling 2026-08-07: full orange frame, not just the top);
+   padding compensates the extra border px so content doesn't shift. */
+.bc-shot-row.on{border-width:2px;border-color:var(--pos);border-bottom-color:transparent;
+  border-radius:12px 12px 0 0;padding:5px 8px}
 /* "start here" guidance: the next frame in the rolling chain */
 .bc-shot-row.next{border-color:var(--line-2);background:var(--bg-2)}
 /* rendering RIGHT NOW in the chain — static accent only */
@@ -6314,8 +6319,9 @@ html[data-theme="light"] .char-voice-btn.on{background:oklch(0.56 0.11 195 / .16
 .bc-shot-chev{flex:0 0 auto;color:var(--txt-3);display:grid;place-items:center}
 .bc-shot-chev svg{transition:.15s}
 .bc-shot-chev.open svg{transform:rotate(90deg)}
-/* open editor: keep the selected row as the state marker, without a second orange frame */
-.bc-shot-expand{border:1px solid var(--line-2);border-top:none;border-radius:0 0 12px 12px;background:var(--bg-2);padding:10px;margin-top:-7px}
+/* open editor: continues the selected row's orange frame — 2px pos sides+bottom so the
+   row+editor read as ONE bordered unit (user ruling 2026-08-07); radius matches the row */
+.bc-shot-expand{border:2px solid var(--pos);border-top:none;border-radius:0 0 12px 12px;background:var(--bg-2);padding:10px 9px 9px;margin-top:-7px}
 .bc-shot-expand .sheet-card{width:100%;border:none;border-radius:0;background:transparent;box-shadow:none}
 .bc-shot-row.on:has(+ .bc-shot-expand .shot-card.gening){
   border-color:var(--pos);border-bottom-color:transparent;background:color-mix(in srgb,var(--pos) 12%,var(--bg-2))}

@@ -59,11 +59,11 @@
           standard: { "480p":0.1512, "720p":0.3034, "1080p":0.6820, "4K":1.5500 },
           fast:     { "480p":0.1210, "720p":0.2427 },
         },
-        // PROVISIONAL (2026-08-01): 2.5 isn't listed on fal yet — scaled +25% over 2.0
-        // until real per-second pricing lands; the pricing watch flags corrections.
+        // REAL fal rates (verified 2026-08-07 against bytedance/seedance-2.5/reference-to-video):
+        // token-based pricing ≈ $0.4730/s at 720p, $0.2205/s at 480p. fal lists NO
+        // 1080p/4K output and NO fast tier for 2.5 — only these two entries exist.
         "seedance-2.5": {
-          standard: { "480p":0.1890, "720p":0.3793, "1080p":0.8525, "4K":1.9375 },
-          fast:     { "480p":0.1513, "720p":0.3034 },
+          standard: { "480p":0.2205, "720p":0.4730 },
         },
         "kling-3.0": {
           standard: { "480p":0.1260, "720p":0.1260, "1080p":0.1260 },
