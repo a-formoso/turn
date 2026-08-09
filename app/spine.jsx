@@ -165,7 +165,7 @@ function smoothD(pts){
   return d;
 }
 
-function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddScene, follow, runtimes }){
+function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddScene, follow, runtimes, readOnly }){
   // minutes per act, for the ruler's pacing readout
   const actMin = (act)=>{
     if(!runtimes) return null;
@@ -365,18 +365,18 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
         const sel = s.id === selId;
         const fDrives = follow && follow.drivenIds.has(s.id);
         return React.createElement("div",{key:s.id,
-          draggable:true,
-          onDragStart:(e)=>{ setDragIdx(ci); e.dataTransfer.effectAllowed="move"; },
-          onDragOver:(e)=>{ e.preventDefault(); if(overIdx!==ci) setOverIdx(ci); },
+          draggable:!readOnly,
+          onDragStart:(e)=>{ if(readOnly){ e.preventDefault(); return; } setDragIdx(ci); e.dataTransfer.effectAllowed="move"; },
+          onDragOver:(e)=>{ if(readOnly) return; e.preventDefault(); if(overIdx!==ci) setOverIdx(ci); },
           onDragEnd:()=>{ setDragIdx(null); setOverIdx(null); },
-          onDrop:(e)=>{ e.preventDefault(); if(dragIdx!=null && dragIdx!==ci) onReorder(dragIdx, ci); setDragIdx(null); setOverIdx(null); },
+          onDrop:(e)=>{ if(readOnly) return; e.preventDefault(); if(dragIdx!=null && dragIdx!==ci) onReorder(dragIdx, ci); setDragIdx(null); setOverIdx(null); },
           className:`scard ${sel?"sel":""} ${s.kind==="incite"?"incite":""} `+
                     `${["story-climax","act-climax","midpoint"].includes(s.kind)?"climax":""} `+
                     `${dragIdx===ci?"dragging":""} ${overIdx===ci&&dragIdx!=null&&dragIdx!==ci?"dragover":""} `+
                     `${follow && !fInvolved(s) ? "dim":""}`,
           style:{width:COL_W, ...(fDrives ? {boxShadow:`inset 0 2px 0 ${follow.color}`+(sel?", inset 0 0 0 1px var(--pos-line)":"")} : null)},
           onClick:()=>onSelect(s.id)},
-          React.createElement("span",{className:"scard-grip",title:"Drag to reorder"},React.createElement(Icon.grip,{s:14})),
+          !readOnly && React.createElement("span",{className:"scard-grip",title:"Drag to reorder"},React.createElement(Icon.grip,{s:14})),
           React.createElement("div",{className:"scard-top"},
             React.createElement("span",{className:"scard-no"},String(s.no).padStart(2,"0")),
             React.createElement("div",{className:"scard-conf",title:`Conflict level ${s.conf}`},
@@ -400,7 +400,7 @@ function SpineCanvas({ scenes, selId, onSelect, showFramework, onReorder, onAddS
                 : "Estimated screen time"+(runtimes[s.id].approx?" (rough — from beats, not yet drafted)":" (from the draft, ≈1 page/min)")},
               (runtimes[s.id].approx?"~":"")+fmtClock(runtimes[s.id].sec))));
       }),
-      onAddScene && React.createElement("button",{className:"spine-add",style:{height:"auto"},
+      onAddScene && React.createElement("button",{className:"spine-add",style:{height:"auto"},disabled:readOnly,
         onClick:()=>onAddScene(scenes.length?scenes[scenes.length-1].id:null)},
         React.createElement(Icon.plus,{s:18}),"Add scene")),
   );

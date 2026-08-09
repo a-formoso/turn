@@ -363,11 +363,25 @@ function castPronounBlock(cast){
 }
 window.castPronounBlock = castPronounBlock;
 
+/* Active-project resolver for prompt builders. TURN_DATA is immutable bootstrap/sample
+   data; once App is mounted, the live film is window.turnProject. Callers that already
+   own project state pass it explicitly so prompt correctness never depends on effect
+   timing. The seed fallback remains only for pre-App/bootstrap compatibility. */
+function writingProjectOf(project){
+  return project || window.turnProject || (window.TURN_DATA||{}).PROJECT || {};
+}
+window.writingProjectOf = writingProjectOf;
+function writingLoglineOf(project){
+  const P = writingProjectOf(project);
+  return String(P.logline || P.premise || "");
+}
+window.writingLoglineOf = writingLoglineOf;
+
 /* shared story context so every generation stays continuous + on-theme */
-function storyContext(scene, prevScene){
-  const P = (window.TURN_DATA||{}).PROJECT || {};
+function storyContext(scene, prevScene, project){
+  const P = writingProjectOf(project);
   const ci = P.controllingIdea || {};
-  let s = `FILM: ${P.title||"Untitled"} \u2014 ${P.genre||""}. Logline: ${P.premise||""}\n`;
+  let s = `FILM: ${P.title||"Untitled"} \u2014 ${P.genre||""}. Logline: ${writingLoglineOf(P)}\n`;
   s += `Controlling idea: ${ci.value||""} ${ci.cause||""}\n`;
   if(prevScene) s += `Previous scene (${prevScene.no}. ${prevScene.title}) ended on ${prevScene.closeValue} (${chargeStr(prevScene.closeCharge)}). Maintain continuity from it.\n`;
   s += `\nSCENE ${scene.no}: "${scene.title}"\n${scene.loc}\n`;
@@ -379,7 +393,7 @@ function storyContext(scene, prevScene){
 
 function beatsBrief(beats){
   if(!beats || !beats.rows) return "(no beats mapped \u2014 invent a tight, turning scene.)";
-  let s = `Driver=${beats.driverLabel}, Reactor=${beats.reactorLabel}. Desire: ${beats.desire}. Antagonism: ${beats.obstacle}\nBEATS (expand each, keep the beat number):\n`;
+  let s = `Driver=${beats.driverLabel}, Reactor=${beats.reactorLabel}. Desire: ${beats.desire}. Antagonism: ${beats.obstacle}. Result: ${beats.result||"(derive the resolved outcome from the final beat)"}\nBEATS (expand each, keep the beat number):\n`;
   beats.rows.forEach(r=>{ s += `  Beat ${r.n}: ${r.drive.a} \u2014 ${r.drive.d}  //  ${r.react.a} \u2014 ${r.react.d}${r.n===beats.turnAt?"  [TURNING POINT]":""}\n`; });
   return s;
 }
@@ -467,7 +481,10 @@ function realignBlockBeats(blocks, bm){
   const sim = real.map(u=>{ const ut = toks(u.text); return rows.map((r,j)=>{
     let hit = 0; ut.forEach(w=>{ if(rowToks[j].has(w)) hit++; });
     let s = hit / Math.sqrt((ut.size||1) * (rowToks[j].size||1));
-    if(Number(u.tag)===Number(r.n)) s += 0.02;   // the model's own tag breaks ties
+     // Dialogue and silent reaction units often have little lexical overlap with
+     // development prose. In low-evidence cases preserve a valid model tag rather
+     // than letting one shared word pull a whole cue→paren→dialogue bundle sideways.
+     if(Number(u.tag)===Number(r.n)) s += (hit===0 || ut.size<2) ? 0.28 : 0.02;
     return s; }); });
   // monotonic DP: each unit takes a beat >= its predecessor's, maximising total score
   const S = [], P = [];
@@ -496,6 +513,55 @@ function realignBlockBeats(blocks, bm){
 }
 window.realignBlockBeats = realignBlockBeats;
 
+/* Shared screenplay structure resolver. It keeps cue→parenthetical→dialogue
+   bundles intact, reports orphan dialogue / cue text embedded in action, and can
+   require every authored beat to have real prose. AI callers reject invalid
+   output instead of silently shipping a malformed or truncated screenplay. */
+function validateScreenplayBlocks(blocks, bm, opts){
+  opts = opts || {};
+  const list = Array.isArray(blocks) ? blocks.filter(b=>b&&String(b.text||"").trim()) : [];
+  const issues = [];
+  let cue = null;
+  list.forEach((b,i)=>{
+    if(b.type==="char"){
+      if(cue) issues.push("character cue without dialogue");
+      cue={ beat:Number(b.beat)||1, at:i }; return;
+    }
+    if(b.type==="paren"){
+      if(!cue) issues.push("parenthetical without a character cue");
+      return;
+    }
+    if(b.type==="dia"){
+      if(!cue) issues.push("dialogue without a character cue");
+      else if(Number(b.beat)!==cue.beat) issues.push("dialogue separated from its character cue");
+      cue = null; return;
+    }
+    if(cue) issues.push("character cue interrupted before dialogue");
+    if(b.type==="action"){
+      // Catch the common model failure where a cue and its spoken line are packed
+      // into an action paragraph (e.g. "MARCUS: Sorry, sir.").
+      if(/(?:^|\s)[A-Z][A-Z .'\u2019-]{1,30}:\s*[“"']?[A-Z]/.test(String(b.text||"")))
+        issues.push("character cue or dialogue embedded in action");
+    }
+    cue = null;
+  });
+  if(cue) issues.push("character cue without dialogue");
+  if(opts.requireAllBeats && bm && Array.isArray(bm.rows)){
+    const present = new Set(list.filter(b=>b.type!=="scene"&&b.type!=="trans").map(b=>Number(b.beat)));
+    bm.rows.forEach(r=>{ if(!present.has(Number(r.n))) issues.push("missing screenplay section for beat "+r.n); });
+  }
+  return { blocks:list, issues:Array.from(new Set(issues)), valid:issues.length===0 };
+}
+window.validateScreenplayBlocks = validateScreenplayBlocks;
+
+function resolveScreenplayResponse(res, scene, bm, opts){
+  const parsed = parseScreenplay(res, scene);
+  if(!parsed) return { blocks:null, issues:["screenplay response was not parseable"], valid:false };
+  const aligned = bm ? realignBlockBeats(parsed, bm) : parsed;
+  return validateScreenplayBlocks(aligned, bm, opts);
+}
+window.resolveScreenplayResponse = resolveScreenplayResponse;
+
 const BLOCK_SPEC = 'Return ONLY JSON: {"beats":[{"n":<beat#>,"blocks":[{"type":"action|char|paren|dia|trans|scene","text":"..."}]}]}. '+
   'Use professional screenplay elements (same standard as the exported script): '+
   '"action" = present-tense scene description; "char" = a character cue in CAPS, with an extension when apt \u2014 (V.O.), (O.S.), (CONT\u2019D); '+
@@ -509,7 +575,7 @@ const BLOCK_SPEC = 'Return ONLY JSON: {"beats":[{"n":<beat#>,"blocks":[{"type":"
   'Do NOT slug a mere direction of attention within one space (looking across a room, a shelf, a corner) \u2014 only a space the camera must physically enter. '+
   'Also use "INTERCUT \u2014 <PLACE A> / <PLACE B>" for a two-ended phone/comm conversation AFTER the second place has been slugged once. '+
   'NEVER emit the scene\u2019s own opening slugline (the app adds it). '+
-  '1\u20132 blocks per beat, action one or two sentences, dialogue under 18 words. No commentary, no markdown.';
+  'Use as many blocks as professional formatting requires: spoken dialogue MUST be separate "char", optional "paren", then "dia" blocks (never embed a cue or spoken line inside "action"). Keep action blocks to one or two sentences and dialogue under 18 words. No commentary, no markdown.';
 
 /* House style — distilled from a professional shooting script (the project blueprint).
    Injected into every generative pass so MUSE writes like a real screenplay. */
@@ -531,22 +597,25 @@ const SCREENPLAY_STYLE = 'HOUSE STYLE (write like a professional shooting script
   '\u2022 ORIGINALITY \u2014 critical: this is an ORIGINAL film. NEVER borrow, paraphrase, or echo lines, images, character names, or signature moments from existing movies, even if the premise resembles one. If the story feels close to a famous film (e.g. a hidden controlled reality, a chosen one, a heist crew), deliberately AVOID that film\u2019s iconic dialogue and beats \u2014 no \u201cred pill,\u201d \u201cthere is no spoon,\u201d \u201cwake up,\u201d \u201cthe one,\u201d etc. Invent fresh, specific lines grounded in THIS film\u2019s unique world, props, and characters. Generic genre clich\u00e9s and quotable movie-isms are forbidden; surprise the reader with the particular.';
 
 /* ---- DRAFTING: beats -> brand-new screenplay prose ---- */
-async function aiDraftScene(scene, beats, prevScene){
+async function aiDraftScene(scene, beats, prevScene, project){
   if(!aiAvailable()) return autoDraftScene(scene, beats, prevScene);
   // the project FORMAT's screenplay emphasis (commercial \u2192 VO/supers; documentary
   // \u2192 interview beats); "full" formats carry no brief and draft as before
-  const fmtBrief = (typeof formatOf==="function") ? (formatOf(window.turnProject).screenplayBrief||"") : "";
-  const prompt = storyContext(scene, prevScene) + "\n" + castPronounBlock(window.turnCast) + beatsBrief(beats) +
+  const P = writingProjectOf(project);
+  const fmtBrief = (typeof formatOf==="function") ? (formatOf(P).screenplayBrief||"") : "";
+  const prompt = storyContext(scene, prevScene, P) + "\n" + castPronounBlock(window.turnCast) + beatsBrief(beats) +
     "\n\nWrite this scene as original screenplay prose, expanding each beat in order. "+
     "It must dramatize the value turn through action and subtext \u2014 never state the theme outright.\n\n" +
     (fmtBrief ? "FORMAT: "+fmtBrief+".\n\n" : "") + SCREENPLAY_STYLE + "\n\n" + BLOCK_SPEC;
   try{
-    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
-    const blocks = parseScreenplay(res, scene);
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }], maxTokens:8192 });
+    if(window.__lastWritingTruncated) throw new Error("Screenplay draft was truncated.");
+    const checked = resolveScreenplayResponse(res, scene, beats, {requireAllBeats:true});
+    const blocks = checked.valid ? checked.blocks : null;
     // never trust the model's beat tags positionally — re-align them by CONTENT
     // against the beat map (shots, storyboards and dialogue-speaker lookups all
     // read the script through these tags)
-    if(blocks) return { blocks: realignBlockBeats(blocks, beats), ai:true, auto:false, by:writingStamp() };
+    if(blocks) return { blocks, ai:true, auto:false, by:writingStamp() };
   }catch(e){}
   return autoDraftScene(scene, beats, prevScene);
 }
@@ -559,7 +628,7 @@ window.aiDraftScene = aiDraftScene;
    drive side — same beat count, same escalation shape, reactor kept unless the
    new driver WAS the reactor. The screenplay is then rebuilt separately via
    "Redraft script from beats" (user-triggered, so nothing overwrites unseen). */
-async function aiRecastDriver(scene, beats, characters, newDriverId, oldDriverId){
+async function aiRecastDriver(scene, beats, characters, newDriverId, oldDriverId, project){
   if(!aiAvailable() || !scene || !beats) return null;
   const nameOf = (id)=>(((characters||[]).find(c=>c.id===id)||{}).name || String(id||"").toUpperCase());
   const NEW = nameOf(newDriverId), OLD = nameOf(oldDriverId);
@@ -567,20 +636,22 @@ async function aiRecastDriver(scene, beats, characters, newDriverId, oldDriverId
     drive:{ a:(r.drive&&r.drive.a)||"", d:(r.drive&&r.drive.d)||"" },
     react:{ a:(r.react&&r.react.a)||"", d:(r.react&&r.react.d)||"" } }));
   if(!rows.length) return null;
-  const prompt = storyContext(scene, null) + "\n" + castPronounBlock(characters) +
+  const prompt = storyContext(scene, null, project) + "\n" + castPronounBlock(characters) +
     "\nCURRENT BEAT MAP (the drive side currently describes "+OLD+"):\n" +
-    JSON.stringify({ desire:beats.desire, antagonism:beats.obstacle, reactor:beats.reactorLabel, rows }) +
+    JSON.stringify({ desire:beats.desire, antagonism:beats.obstacle, result:beats.result||"", reactor:beats.reactorLabel, rows }) +
     "\n\nTHE SCENE'S DRIVER HAS CHANGED: "+NEW+" now DRIVES this scene (it was "+OLD+"). "+
     "Rewrite the scene at the subtext level so "+NEW+" is the one driving:\n"+
     "- summary: 1-2 sentences of what happens, with "+NEW+" driving.\n"+
     "- objective: "+NEW+"'s scene objective, one line.\n"+
     "- desire: what "+NEW+" wants here.\n"+
     "- antagonism: what blocks them (keep the reactor "+(beats.reactorLabel||"")+" unless "+NEW+" WAS the reactor).\n"+
+    "- result: the concrete resolved outcome by the final beat after "+NEW+" drives the scene.\n"+
     "- rows: EXACTLY "+rows.length+" beats, the same escalation shape and turn; every drive action is now "+NEW+"'s ("+OLD+" may remain only in a non-driving role if they'd realistically still be in the scene). `a` stays a 1-3 word verb phrase, `d` is the prose.\n"+
     "Use the cast pronouns exactly.\n"+
-    'Return ONLY JSON: {"summary":"...","objective":"...","desire":"...","antagonism":"...","rows":[{"n":1,"drive":{"a":"...","d":"..."},"react":{"a":"...","d":"..."}}]}';
+    'Return ONLY JSON: {"summary":"...","objective":"...","desire":"...","antagonism":"...","result":"...","rows":[{"n":1,"drive":{"a":"...","d":"..."},"react":{"a":"...","d":"..."}}]}';
   try{
-    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }], maxTokens:4096 });
+    if(window.__lastWritingTruncated) return null;
     const j = extractJSON(res); if(!j) return null;
     const cl = (x,n)=>scrubBrand(String(x||"").trim()).slice(0,n);
     const outRows = (Array.isArray(j.rows) && j.rows.length===rows.length) ? j.rows.map((r,i)=>({ n:i+1,
@@ -588,7 +659,7 @@ async function aiRecastDriver(scene, beats, characters, newDriverId, oldDriverId
       drive:{ a:cl(r.drive&&r.drive.a,42)||rows[i].drive.a||"Action", d:cl(r.drive&&r.drive.d,320)||rows[i].drive.d },
       react:{ a:cl(r.react&&r.react.a,42)||rows[i].react.a||"Reaction", d:cl(r.react&&r.react.d,320)||rows[i].react.d } })) : null;
     return { summary:cl(j.summary,320), objective:cl(j.objective,200),
-      desire:cl(j.desire,260), obstacle:cl(j.antagonism||j.obstacle,260), rows:outRows, by:writingStamp() };
+      desire:cl(j.desire,260), obstacle:cl(j.antagonism||j.obstacle,260), result:cl(j.result,320), rows:outRows, by:writingStamp() };
   }catch(e){ return null; }
 }
 window.aiRecastDriver = aiRecastDriver;
@@ -611,7 +682,7 @@ const SELF_CONTAINED_BEATS = "SELF-CONTAINED — write this so it reads ON ITS O
   "Each beat/shot must be legible without reading the others.";
 window.SELF_CONTAINED_BEATS = SELF_CONTAINED_BEATS;
 
-async function aiAuthorScene(scene, prevScene, characters){
+async function aiAuthorScene(scene, prevScene, characters, project){
   if(!aiAvailable()) return null;
   const blank = !scene.summary || /^a new scene/i.test(scene.summary) || scene.title==="New Scene";
   const ask = blank
@@ -622,8 +693,9 @@ async function aiAuthorScene(scene, prevScene, characters){
   const castList = cast.map(c=>c.id+" ("+c.name+")").join(", ");
   const castIds = cast.map(c=>c.id);
   const driverEnum = castIds.length ? castIds.join("|") : "lead";
-  const fwBrief = (typeof frameworkOf==="function") ? (frameworkOf(window.turnProject).authorBrief||"") : "";
-  const prompt = storyContext(scene, prevScene) +
+  const P = writingProjectOf(project);
+  const fwBrief = (typeof frameworkOf==="function") ? (frameworkOf(P).authorBrief||"") : "";
+  const prompt = storyContext(scene, prevScene, P) +
     (fwBrief ? "\n\n"+fwBrief : "") +
     "\n\nCAST of this film (use ONLY these characters \u2014 never invent or borrow names from other films): "+ (castList||"(none defined)") +
     "\n" + castPronounBlock(cast) +
@@ -633,14 +705,15 @@ async function aiAuthorScene(scene, prevScene, characters){
     '"objective":"what the driver actively pursues in the scene",'+
     '"driver":"'+driverEnum+'",'+
     '"openValue":"OneWord","openCharge":-3 to 3,"closeValue":"OneWord","closeCharge":-3 to 3,'+
-    '"driverLabel":"the driver\'s NAME from the cast","reactorLabel":"another cast member\'s NAME","desire":"the driver\'s want","obstacle":"what blocks it","turnAt":<the beat number where the value flips>,'+
+    '"driverLabel":"the driver\'s NAME from the cast","reactorLabel":"another cast member\'s NAME","desire":"the driver\'s want","obstacle":"what blocks it","result":"the concrete resolved outcome by the final beat","turnAt":<the beat number where the value flips>,'+
     '"beats":[{"drive":{"a":"ActionVerb","d":"behaviour in present tense"},"react":{"a":"ReactionVerb","d":"behaviour"},"charge":-3 to 3}]'+
     "}. Give 4-6 beats. The scene MUST turn its value: openCharge and closeCharge must differ in sign or by >=2. "+
     "Each beat's charge = where the scene's emotional value stands at the END of that beat: start near openCharge, end at closeCharge, "+
     "and make the decisive shift land ON the turn beat \u2014 beats may oscillate, but the through-line must read.\n"+
     "Each beat's drive/react `d`: "+SELF_CONTAINED_BEATS;
   try{
-    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }], maxTokens:4096 });
+    if(window.__lastWritingTruncated) return null;
     const j = extractJSON(res);
     if(!j || !Array.isArray(j.beats) || !j.beats.length) return null;
     // resolve a label to a real cast name (so beats/scripts never show a foreign character)
@@ -658,7 +731,7 @@ async function aiAuthorScene(scene, prevScene, characters){
     const beats = {
       driverLabel: resolveLabel(j.driverLabel, driverName || "DRIVER"),
       reactorLabel: resolveLabel(j.reactorLabel, "REACTOR"),
-      desire: j.desire||"", obstacle: j.obstacle||"",
+      desire: j.desire||"", obstacle: j.obstacle||"", result:j.result||"",
       turnAt: Math.max(0, Math.min(j.beats.length, Math.round(Number(j.turnAt))||0)),
       rows: j.beats.map((b,i)=>({ n:i+1,
         drive:{ a:(b.drive&&b.drive.a)||"Action", d:(b.drive&&b.drive.d)||"" },
@@ -696,7 +769,7 @@ window.aiAuthorScene = aiAuthorScene;
    aiAuthorScene's `beats`, derived from the action/reaction in the prose. */
 /* clamp an AI-proposed per-beat value charge to a clean integer -3..+3 (or absent) */
 function _beatChg(v){ const n=Math.round(Number(v)); return Number.isFinite(n) ? {charge: Math.max(-3, Math.min(3, n))} : {}; }
-async function aiBeatsFromScript(scene, draft, characters){
+async function aiBeatsFromScript(scene, draft, characters, project){
   if(!aiAvailable()) return null;
   const blocks = (draft && (draft.blocks||draft)) || [];
   if(!Array.isArray(blocks) || !blocks.length) return null;
@@ -707,15 +780,17 @@ async function aiBeatsFromScript(scene, draft, characters){
   beatNos.forEach(n=>{ body += "\nBEAT "+n+":\n"; byBeat[n].forEach(b=>{ const t=b.type, tx=b.text||"";
     if(t==="action") body+="  "+tx+"\n"; else if(t==="char") body+="  "+tx+": "; else if(t==="dia") body+=tx+"\n"; else if(t==="paren") body+="("+tx+") "; }); });
   const prompt =
-    "Below is a scene's FINISHED screenplay, already split into numbered beats. RECONSTRUCT its BEAT MAP — "+
+    storyContext(scene, null, project)+"\n"+
+    "Below is this scene's FINISHED screenplay, already split into numbered beats. RECONSTRUCT its BEAT MAP — "+
     "the action/reaction subtext exchange for each beat — FROM the prose. Keep the SAME beat numbers and count.\n\n"+
     castPronounBlock(cast)+"\nSCENE "+scene.no+" — "+(scene.title||"")+"\n"+body+"\n\n"+
     "Each beat's drive/react `d`: "+SELF_CONTAINED_BEATS+"\n"+
     "For every beat also give charge = where the scene's emotional value stands at the END of that beat, an integer -3 (worst) to +3 (best): "+
     "read it off the prose \u2014 the sequence should track the scene's emotional arc and make its decisive shift ON the turn beat.\n"+
-    'Return ONLY JSON: {"driverLabel":"the character driving the scene (a CAST name)","reactorLabel":"the main other character (a CAST name)","desire":"what the driver wants here","obstacle":"what blocks it","turnAt":<beat# where the value flips>,"beats":[{"n":<beat#>,"drive":{"a":"ActionVerb","d":"what the driver DOES this beat, present tense"},"react":{"a":"ReactionVerb","d":"how the other responds"},"charge":<-3..3>}]}';
+    'Return ONLY JSON: {"driverLabel":"the character driving the scene (a CAST name)","reactorLabel":"the main other character (a CAST name)","desire":"what the driver wants here","obstacle":"what blocks it","result":"the concrete resolved outcome by the final beat","turnAt":<beat# where the value flips>,"beats":[{"n":<beat#>,"drive":{"a":"ActionVerb","d":"what the driver DOES this beat, present tense"},"react":{"a":"ReactionVerb","d":"how the other responds"},"charge":<-3..3>}]}';
   try{
-    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }], maxTokens:4096 });
+    if(window.__lastWritingTruncated) return null;
     const j = extractJSON(res);
     if(!j || !Array.isArray(j.beats) || !j.beats.length) return null;
     const resolveLabel = (lab, fb)=>{ const s=(lab||"").toString().trim(); if(!s) return fb;
@@ -729,23 +804,25 @@ async function aiBeatsFromScript(scene, draft, characters){
       .sort((a,b)=>a.n-b.n).map((r,k)=>({ ...r, n:k+1 }));
     return { driverLabel:resolveLabel(j.driverLabel,"DRIVER"), reactorLabel:resolveLabel(j.reactorLabel,"REACTOR"),
       desire:clipWords(scrubBrand((j.desire||"").toString()),160), obstacle:clipWords(scrubBrand((j.obstacle||"").toString()),160),
+      result:clipWords(scrubBrand((j.result||"").toString()),220),
       turnAt: Math.max(0, Math.min(rows.length, Math.round(Number(j.turnAt))||0)), rows, by:writingStamp() };
   }catch(e){ return null; }
 }
 window.aiBeatsFromScript = aiBeatsFromScript;
 
 /* ---- POLISH PASS: structural draft -> final prose, beats locked ---- */
-async function aiPolishScene(scene, beats, structuralBlocks, prevScene){
+async function aiPolishScene(scene, beats, structuralBlocks, prevScene, project){
   if(!aiAvailable()) return null;
   const rough = (structuralBlocks||[]).filter(b=>b.type!=="scene")
     .map(b=>`[beat ${b.beat}] ${b.text}`).join("\n");
-  const prompt = storyContext(scene, prevScene) + "\n" + beatsBrief(beats) +
+  const prompt = storyContext(scene, prevScene, project) + "\n" + beatsBrief(beats) +
     "\n\nSTRUCTURAL DRAFT (rough beat expansion):\n" + rough +
     "\n\nRewrite this into FINAL, polished screenplay prose. The beats are LOCKED \u2014 keep the same beat numbers and the same dramatic action in each; only elevate the craft.\n\n" + SCREENPLAY_STYLE + "\n\n" + BLOCK_SPEC;
   try{
-    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
-    const blocks = parseScreenplay(res, scene);
-    if(blocks) return { blocks, ai:true, auto:false, polished:true, by:writingStamp() };
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }], maxTokens:8192 });
+    if(window.__lastWritingTruncated) return null;
+    const checked = resolveScreenplayResponse(res, scene, beats, {requireAllBeats:true});
+    if(checked.valid) return { blocks:checked.blocks, ai:true, auto:false, polished:true, by:writingStamp() };
   }catch(e){}
   return null;
 }
@@ -756,7 +833,7 @@ window.aiPolishScene = aiPolishScene;
    to this beat"). The neighbouring beats' existing text rides as READ-ONLY context so
    the new prose bridges seamlessly; returns blocks force-tagged to that beat, ready to
    splice in beat order (the caller commits the result as a normal version). */
-async function aiWriteBeatText(scene, beats, beatN, screenplay, prevScene){
+async function aiWriteBeatText(scene, beats, beatN, screenplay, prevScene, project){
   if(!aiAvailable() || !beats || !screenplay) return null;
   const n = Number(beatN);
   const row = (beats.rows||[]).find(x=>Number(x.n)===n);
@@ -770,7 +847,7 @@ async function aiWriteBeatText(scene, beats, beatN, screenplay, prevScene){
   const nextN = nums.find(x=>x>n);
   const prevTxt = prevN!=null ? beatText(prevN) : "";
   const nextTxt = nextN!=null ? beatText(nextN) : "";
-  const prompt = storyContext(scene, prevScene) + "\n" + castPronounBlock(window.turnCast) + beatsBrief(beats) +
+  const prompt = storyContext(scene, prevScene, project) + "\n" + castPronounBlock(window.turnCast) + beatsBrief(beats) +
     "\n\nThis scene's screenplay is ALREADY WRITTEN, but beat "+n+" was never dramatized — there is a gap in the prose."+
     "\nBEAT "+n+" — the ONLY beat to write"+(Number(beats.turnAt)===n?" (this is the scene's TURNING POINT)":"")+":"+
     "\n- "+(beats.driverLabel||"Driver")+" ("+((row.drive&&row.drive.a)||"Action")+"): "+((row.drive&&row.drive.d)||"")+
@@ -780,8 +857,10 @@ async function aiWriteBeatText(scene, beats, beatN, screenplay, prevScene){
     "\n\nWrite ONLY beat "+n+"'s screenplay prose — 1-3 blocks that dramatize its action/reaction exchange and bridge the surrounding text seamlessly (match its tone, tense and register). "+
     "The action stays in this scene's existing location — no new sluglines.\n\n" + SCREENPLAY_STYLE + "\n\n" + BLOCK_SPEC;
   try{
-    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }] });
-    const parsed = parseScreenplay(res, scene) || [];
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }], maxTokens:2048 });
+    if(window.__lastWritingTruncated) return null;
+    const checked = resolveScreenplayResponse(res, scene, null, {});
+    const parsed = checked.valid ? checked.blocks : [];
     const out = parsed.filter(b=> b && b.type!=="scene" && String(b.text||"").trim())
       .map(b=>({ beat:n, type:b.type, text:scrubBrand(String(b.text).trim()) })).slice(0,6);
     return out.length ? { blocks:out, by:writingStamp() } : null;
@@ -1095,8 +1174,8 @@ function museSystemPrompt(){
     "8. CONVERSATION. This is a continuing chat — build on what was already said and don't repeat yourself. If a request is genuinely ambiguous, ask ONE short clarifying question instead of guessing. Where it helps, end with a clear next step.",
   ].join("\n") + appBrief();
 }
-function museContext(scenes, selScene){
-  const P = (window.TURN_DATA||{}).PROJECT || {};
+function museContext(scenes, selScene, project){
+  const P = writingProjectOf(project);
   const has = Array.isArray(scenes) && scenes.length;
   return "\n\nCURRENT PROJECT CONTEXT (for this conversation):\n"+
     (P.title?("FILM: "+P.title+(P.genre?(" ("+P.genre+")"):"")+". "):"")+
@@ -1107,12 +1186,12 @@ function museContext(scenes, selScene){
 /* Multi-turn MUSE chat. `turns` = [{role:'user'|'ai', text}] oldest->newest, ending
    with the user's current message. Gemma has no system role, so the protocol +
    project context are folded into the first user turn and the dialogue replays. */
-async function aiMuseChat(turns, scenes, selScene){
+async function aiMuseChat(turns, scenes, selScene, project){
   if(!aiAvailable()) return null;
   const hist = (turns||[]).filter(t=>t && t.text && String(t.text).trim());
   if(!hist.length) return null;
   const recent = hist.slice(-10);                       // bound tokens on long chats
-  const preamble = museSystemPrompt() + museContext(scenes, selScene);
+  const preamble = museSystemPrompt() + museContext(scenes, selScene, project);
   let firstUser = true;
   const msgs = recent.map(t=>{
     const role = t.role==="ai" ? "assistant" : "user";
@@ -1136,8 +1215,8 @@ async function aiMuseChat(turns, scenes, selScene){
 window.aiMuseChat = aiMuseChat;
 
 /* Single-turn convenience wrapper (kept for back-compat — swallows errors, returns null). */
-async function aiMuseReply(question, scenes, selScene){
-  try{ return await aiMuseChat([{ role:"user", text:question }], scenes, selScene); }
+async function aiMuseReply(question, scenes, selScene, project){
+  try{ return await aiMuseChat([{ role:"user", text:question }], scenes, selScene, project); }
   catch(e){ return null; }
 }
 window.aiMuseReply = aiMuseReply;
@@ -1145,9 +1224,9 @@ window.aiMuseReply = aiMuseReply;
 
 /* Suggest 3 short, specific follow-up questions the writer could ask next,
    based on the exchange that just happened. Returns string[] (or null). */
-async function aiMuseFollowups(question, answer, scenes, selScene){
+async function aiMuseFollowups(question, answer, scenes, selScene, project){
   if(!aiAvailable()) return null;
-  const P = (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const sys = "You are MUSE, a story-structure co-writer. Based on the exchange below, propose 3 SHORT follow-up questions the writer might ask next to push the work forward. "+
     "Each must be specific to this story and this conversation \u2014 a natural next step, not a generic prompt. "+
     "Phrase them as the WRITER would ask MUSE (first person, e.g. \"Show me how to fix Scene 6\"). Max 7 words each. "+
@@ -1174,11 +1253,12 @@ window.aiMuseFollowups = aiMuseFollowups;
    ============================================================ */
 
 /* Story Doctor: suggest a sharper CLOSING value that makes a flat scene turn. */
-async function aiSuggestTurn(scene, prevScene){
+async function aiSuggestTurn(scene, prevScene, project){
   if(!aiAvailable()) return null;
   // framework lens (frameworks.jsx): Kish\u014dtenketsu reframes the "turn" as movement
-  const fwB = (typeof frameworkOf==="function") ? (frameworkOf(window.turnProject).authorBrief||"") : "";
-  const prompt = storyContext(scene, prevScene) +
+  const P = writingProjectOf(project);
+  const fwB = (typeof frameworkOf==="function") ? (frameworkOf(P).authorBrief||"") : "";
+  const prompt = storyContext(scene, prevScene, P) +
     (fwB ? "\n\n"+fwB : "") +
     "\n\nThis scene currently does NOT turn \u2014 it opens and closes on the same value charge ("+
     chargeStr(scene.openCharge)+" \u2192 "+chargeStr(scene.closeCharge)+"), so it reads as flat exposition. "+
@@ -1241,9 +1321,9 @@ async function aiPlantLine(targetScene, factLabel, mode){
 window.aiPlantLine = aiPlantLine;
 
 /* Table-read: whole-script pacing / tone / voice critique. */
-async function aiTableRead(scenes, drafts){
+async function aiTableRead(scenes, drafts, project){
   if(!aiAvailable()) return null;
-  const P = (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   let script = "";
   scenes.forEach(s=>{ const d = drafts[s.id]; if(!d) return;
     script += "\n[SCENE "+s.no+": "+s.title+"]  ("+chargeStr(s.openCharge)+"\u2192"+chargeStr(s.closeCharge)+")\n";
@@ -1989,9 +2069,9 @@ window.composeStoryBrief = composeStoryBrief;
    scenes this character actually drives, so it stays consistent with the spine. ---- */
 async function aiDraftCharacter(character, drivenScenes, project, canon){
   if(!aiAvailable()) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const ci = P.controllingIdea || {};
-  let ctx = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". Logline: "+(P.premise||"")+"\n";
+  let ctx = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". Logline: "+writingLoglineOf(P)+"\n";
   ctx += "Controlling idea: "+(ci.value||"")+" "+(ci.cause||"")+"\n\n";
   ctx += "CHARACTER: "+character.name+" ("+(character.role||"")+")\n";
   // THE SCRIPT IS CANON for psychology too: the screenplay's own lines about this
@@ -2035,9 +2115,9 @@ window.aiDraftCharacter = aiDraftCharacter;
    whole cast in small batches (so no response truncates). Returns { id:{fields} }. */
 async function aiCastPsychology(characters, scenes, project){
   if(!aiAvailable() || !characters || !characters.length) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const ci = P.controllingIdea || {};
-  const header = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". Logline: "+(P.premise||"")+
+  const header = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". Logline: "+writingLoglineOf(P)+
     "\nControlling idea: "+(ci.value||"")+" "+(ci.cause||"")+"\n";
   const batches = [];
   for(let i=0;i<characters.length;i+=3) batches.push(characters.slice(i,i+3));
@@ -2344,9 +2424,9 @@ window.scriptEvidenceFor = scriptEvidenceFor;
 
 async function aiCastVisualBible(characters, scenes, project, canon){
   if(!aiAvailable() || !characters || !characters.length) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const period = P.setting && P.setting.period ? P.setting.period : "";
-  const header = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". "+(period?("Period/setting: "+period+", "+((P.setting&&P.setting.location)||"")):"")+"\nLogline: "+(P.premise||"")+"\n";
+  const header = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". "+(period?("Period/setting: "+period+", "+((P.setting&&P.setting.location)||"")):"")+"\nLogline: "+writingLoglineOf(P)+"\n";
   // canon = { scenes, drafts }: the FULL scene list + drafted screenplay, so each
   // character's identity derives from the script's own lines \u2014 not just the scenes
   // they drive (a reactor who drives nothing still has screenplay lines about them)
@@ -2427,9 +2507,9 @@ function mapPropEntry(e){
 
 async function aiDesignPropBible(props, characters, project){
   if(!aiAvailable() || !props || !props.length) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const period = P.setting && P.setting.period ? P.setting.period : "";
-  const header = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". "+(period?("Period/setting: "+period):"")+"\nLogline: "+(P.premise||"")+"\n";
+  const header = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". "+(period?("Period/setting: "+period):"")+"\nLogline: "+writingLoglineOf(P)+"\n";
 
   const batches = [];
   for(let i=0;i<props.length;i+=3) batches.push(props.slice(i,i+3));
@@ -2506,9 +2586,9 @@ function mapLocEntry(e){
 }
 async function aiDesignLocationBible(locations, scenes, project){
   if(!aiAvailable() || !locations || !locations.length) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const period = P.setting && P.setting.period ? P.setting.period : "";
-  const header = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". "+(period?("Period/setting: "+period):"")+"\nLogline: "+(P.premise||"")+"\n";
+  const header = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". "+(period?("Period/setting: "+period):"")+"\nLogline: "+writingLoglineOf(P)+"\n";
   const sceneOf = (id)=> (scenes||[]).find(s=>s.id===id);
 
   const batches = [];
@@ -2575,7 +2655,7 @@ window.aiLocationVisuals = aiLocationVisuals;
    open space), plus a scale class and lens. Returns a staging object. ---- */
 async function aiDraftStaging(location, scenes, project){
   if(!aiAvailable() || !location) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const sceneOf = (id)=> (scenes||[]).find(s=>s.id===id);
   const scs = (location.scenes||[]).map(id=>{ const s=sceneOf(id); return s?("#"+s.no+" "+(s.title||"")+" \u2014 "+(s.summary||"").replace(/\s+/g," ").slice(0,160)):null; }).filter(Boolean).slice(0,6);
   const ctx = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". "+(P.setting&&P.setting.period?("Period/setting: "+P.setting.period):"")+"\n"+
@@ -2625,9 +2705,9 @@ window.aiDraftStaging = aiDraftStaging;
    Returns { presets:[...4-6 bespoke...], sceneStyles:{sceneId:presetId} }. ---- */
 async function aiAssignSceneStyles(scenes, seedPresets, drafts, project){
   if(!aiAvailable() || !scenes || !scenes.length) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const cs = (typeof chargeStr==="function") ? chargeStr : (v)=> (v>0?("+"+v):(""+(v||0)));
-  let ctx = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". Logline: "+(P.premise||"")+"\n";
+  let ctx = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". Logline: "+writingLoglineOf(P)+"\n";
   if(P.theme||P.themes) ctx += "Theme: "+(P.theme||P.themes)+"\n";
   ctx += "\nVALUE-CHARGE SPINE \u2014 the film's emotional arc, scene by scene. Charge runs -3 (bleakest) to +3 (peak). "+
     "Format: #no title [ACT n] openValue(charge) \u2192 closeValue(charge) | turn :: script:\n";
@@ -2868,7 +2948,7 @@ window.aiPropScenes = aiPropScenes;
    together they cover "every prop the script names". ---- */
 async function aiDeriveSetDressing(scenes, drafts, project){
   if(!aiAvailable() || !scenes || !scenes.length) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const period = P.setting && P.setting.period ? P.setting.period : "";
   let ctx = "FILM: "+(P.title||"Untitled")+" — "+(P.genre||"")+". "+(period?("Period/setting: "+period):"")+
     "\n\nSCENES (number | what happens | action):\n";
@@ -2923,14 +3003,14 @@ window.normalizeLookCat = normalizeLookCat;
 
 async function aiResearchLookbook(scenes, project, existing){
   if(!aiAvailable()) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const sb = (typeof styleBibleOf==="function") ? styleBibleOf(P) : {};
   // only refs the DIRECTOR wrote — when the Style field still holds the auto-synced
   // lookbook brief (refs === lookbookSynced), don't feed the researcher its own output
   const _synced = ((sb.lookbookSynced)||"").trim();
   const userRefs = (((sb.refs)||"").trim() === _synced) ? "" : ((sb.refs)||"").trim();
   let ctx = "FILM: "+(P.title||"Untitled")+" — "+(P.genre||"")+".\n";
-  if(P.premise) ctx += "Logline: "+P.premise+"\n";
+  if(writingLoglineOf(P)) ctx += "Logline: "+writingLoglineOf(P)+"\n";
   if(P.setting && P.setting.period) ctx += "Period/setting: "+P.setting.period+"\n";
   const ordered = scenesInStoryOrder(scenes);
   if(ordered.length) ctx += "Beats: "+ordered.slice(0,12).map(s=>(s.title||"")).filter(Boolean).join("; ")+"\n";
@@ -3009,9 +3089,9 @@ window.aiResearchLookbook = aiResearchLookbook;
    Each becomes an "appearance state" that can be generated as a v2 sheet. ---- */
 async function aiSuggestStates(character, drivenScenes, project){
   if(!aiAvailable()) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const P = writingProjectOf(project);
   const base = [character.coreBody, character.wardrobeMask||character.wardrobe].filter(Boolean).join(" | ");
-  let ctx = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". Logline: "+(P.premise||"")+"\n";
+  let ctx = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". Logline: "+writingLoglineOf(P)+"\n";
   ctx += "CHARACTER: "+character.name+" ("+(character.role||"")+")"+(character.arc?(" \u2014 arc: "+character.arc):"")+"\n";
   if(base) ctx += "BASE LOOK (their default appearance): "+base+"\n";
   if(drivenScenes && drivenScenes.length){
@@ -3056,9 +3136,11 @@ window.aiSuggestStates = aiSuggestStates;
 async function aiDraftShots(scene, beats, drafts, locations, props, characters, project, opts){
   opts = opts || {};
   if(!aiAvailable() || !scene) return null;
-  const P = project || (window.TURN_DATA||{}).PROJECT || {};
+  const _onlyBeat = Number(opts.beatN)||0;
+  const P = writingProjectOf(project);
   const b = (beats||{})[scene.id] || {};
   const rows = b.rows || [];
+  const contextRows = _onlyBeat ? rows.filter(r=>Number(r.n)===_onlyBeat) : rows;
   const loc = (typeof locationForScene==="function") ? locationForScene(locations, scene.id) : null;
   const scProps = (typeof propsForScene==="function") ? propsForScene(props, scene.id) : [];
   const cast = (characters||[]).filter(c=> c.id===scene.driver
@@ -3066,7 +3148,7 @@ async function aiDraftShots(scene, beats, drafts, locations, props, characters, 
     || (b.reactorLabel && b.reactorLabel.toLowerCase().includes((c.name||"").toLowerCase())));
   const castList = cast.length ? cast : (characters||[]).filter(c=>c.id===scene.driver);
 
-  let ctx = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". Logline: "+(P.premise||"")+"\n";
+  let ctx = "FILM: "+(P.title||"Untitled")+" \u2014 "+(P.genre||"")+". Logline: "+writingLoglineOf(P)+"\n";
   // the project FORMAT's coverage emphasis (vertical micro-drama framing,
   // commercial product-hero shots, documentary setups); empty for "full" formats
   const covBrief = (typeof formatOf==="function") ? (formatOf(P).coverageBrief||"") : "";
@@ -3075,6 +3157,7 @@ async function aiDraftShots(scene, beats, drafts, locations, props, characters, 
   if(scene.intExt || scene.loc) ctx += " ("+(scene.loc||scene.intExt||"")+")";
   ctx += "\nSummary: "+(scene.summary||"")+"\n";
   if(scene.objective) ctx += "Scene objective: "+scene.objective+"\n";
+  if(b.result) ctx += "Scene result: "+b.result+"\n";
   if(scene.turningPoint) ctx += "Turning point: "+scene.turningPoint+"\n";
   if(loc) ctx += "LOCATION: "+(loc.name||"")+" ("+(loc.intExt||"INT")+")"+(loc.architecture?(" \u2014 "+loc.architecture):"")+"\n";
   const locSheets = (loc && typeof deriveLocationCoverageSheets==="function")
@@ -3103,21 +3186,25 @@ async function aiDraftShots(scene, beats, drafts, locations, props, characters, 
     for(let i=0;i<blocks.length;i++){
       const b=blocks[i]; const t=String(b.text||"").replace(/\s+/g," ").trim(); if(!t) continue;
       if(b.type==="scene"||b.type==="trans"||b.type==="paren"||b.type==="dia") continue;
-      if(b.type==="char"){ const nx=blocks[i+1];
-        if(nx && nx.type==="dia" && String(nx.text||"").trim()){ parts.push(t+": \u201c"+String(nx.text).replace(/\s+/g," ").trim()+"\u201d"); i++; }
+      if(b.type==="char"){
+        const par=blocks[i+1]&&blocks[i+1].type==="paren" ? String(blocks[i+1].text||"").replace(/\s+/g," ").trim() : "";
+        const di=i+(par?2:1), nx=blocks[di];
+        if(nx && nx.type==="dia" && String(nx.text||"").trim()){
+          parts.push(t+": "+(par?"("+par+") ":"")+"\u201c"+String(nx.text).replace(/\s+/g," ").trim()+"\u201d"); i=di;
+        }
         continue; }
       parts.push(t);
     }
     return parts.join("  ").slice(0,600);
   };
-  if(rows.length){
+  if(contextRows.length){
     // BEATS give the STRUCTURE (lanes, turn, charges, drive/reaction intent); each
     // beat's own SCREENPLAY text rides along as CANON content \u2014 script wins on
     // dialogue and business (user ruling: the script is canon for drafters).
     ctx += "\nBEATS \u2014 the structural skeleton for this shot list. Each beat is decomposed into its MICRO-BEATS and covered by AS MANY SHOTS as its distinct visual events genuinely need (never fewer than one; a simple beat may stay one shot, a busy beat wants several), in cut order"
       + (b.turnAt?("; the TURNING POINT is beat "+b.turnAt):"")
       + ". For each beat the DRIVER ("+driverName+") acts and the REACTOR ("+reactorName+") reacts \u2014 build the beat's coverage from THIS beat's action and reaction:\n";
-    rows.forEach(r=>{
+    contextRows.forEach(r=>{
       const dv = r.drive||{}, rc = r.react||{};
       const _chg = (r.charge!=null && r.charge!=="") ? Number(r.charge) : null;
       let line = "  Beat "+r.n+(r.n===b.turnAt?" [TURN]":"")
@@ -3129,7 +3216,7 @@ async function aiDraftShots(scene, beats, drafts, locations, props, characters, 
       if(bs) ctx += "    SCRIPT (CANON for this beat \u2014 film THIS): "+bs+"\n";
     });
     if(_draft) ctx += "  (Where a beat carries SCRIPT text, that text is CANON: derive the beat's micro-beats and shots from ITS actions, business and sound cues \u2014 the drive/reaction above is the intent, the script is the content \u2014 and never invent events the script contradicts.)\n";
-    if(rows.some(r=> r.charge!=null && r.charge!==""))
+    if(contextRows.some(r=> r.charge!=null && r.charge!==""))
       ctx += "  ([value N] = where the scene's emotional value stands at the END of that beat, -3 worst to +3 best \u2014 let the coverage follow the shifts: a drop reads tighter and starker, a rise can open up and breathe.)\n";
   } else {
     // No beats authored for this scene \u2014 fall back to the screenplay so there's still something to break down.
@@ -3139,7 +3226,6 @@ async function aiDraftShots(scene, beats, drafts, locations, props, characters, 
 
   const grammar = "size \u2208 {EWS,WS,FS,MWS,MS,MCU,CU,ECU,INSERT}; angle \u2208 {eye,high,low,top,dutch,ots,pov}; "+
     "move \u2208 {static,pan,tilt,push,pull,track,handheld,crane,steadi}; lens \u2208 {14,24,35,50,85,135}";
-  const _onlyBeat = opts.beatN || 0;
   const prompt = ctx + "\nYou are the director + DP. "+
     (_onlyBeat
       ? ("Beat "+_onlyBeat+" needs REAL COVERAGE: design 2-4 shots for THAT BEAT ONLY \u2014 one per DISTINCT VISUAL EVENT, never more than the beat's text supports (padding coverage with redundant setups is worse than too few), in cut order. "+
@@ -3172,7 +3258,11 @@ async function aiDraftShots(scene, beats, drafts, locations, props, characters, 
     // full-scene drafts emit a beats plan + every shot's fields — far past the
     // proxy's 4096-token default, which truncated the JSON and left later beats
     // to one-shot backfill ("1 shot per beat regardless of model")
-    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }], maxTokens: _onlyBeat ? undefined : 16384 });
+    const res = await window.claude.complete({ messages:[{ role:"user", content:prompt }], maxTokens: _onlyBeat ? 4096 : 16384 });
+    if(_onlyBeat && window.__lastWritingTruncated){
+      if(typeof window.appToast==="function") window.appToast("This beat's coverage reply was truncated, so no existing shots were changed.","error");
+      return null;
+    }
     if(!_onlyBeat && window.__lastWritingTruncated && typeof window.appToast==="function")
       window.appToast("The coverage draft hit the reply length limit — later beats got simple one-shot coverage. Design busy beats individually with the beat's split tool instead.","error");
     const j = extractJSON(res);

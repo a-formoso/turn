@@ -102,10 +102,11 @@ function screenplayBeatExcerpt(screenplay, beatN, max){
     if(!txt) continue;
     if(b.type==="scene") continue;
     if(b.type==="char"){
-      const next = blocks[i+1] || {};
-      if((next.type==="dia" || next.type==="paren") && _spClean(next.text)){
-        pieces.push(txt+": "+_spClean(next.text));
-        continue;
+      const par = blocks[i+1] && blocks[i+1].type==="paren" ? _spClean(blocks[i+1].text) : "";
+      const di = i+(par?2:1), dia = blocks[di] || {};
+      if(dia.type==="dia" && _spClean(dia.text)){
+        pieces.push(txt+": "+(par?"("+par+") ":"")+_spClean(dia.text));
+        i=di; continue;
       }
     }
     if(b.type==="paren") continue;
@@ -143,6 +144,23 @@ function sceneMissing(scene, drafts){
        && !/\s[–—-]\s\S/.test(slugT)) out.push("time of day");
   }
   if(!blocks.some(b=>b.type==="action" && String(b.text||"").trim())) out.push("action");
+  // Structural screenplay errors are actionable completeness failures too: every
+  // dialogue line needs a cue (with an optional parenthetical), and cue-like text
+  // must not be buried in an action paragraph.
+  let cue = false;
+  blocks.forEach(b=>{
+    if(b.type==="char"){
+      if(cue && out.indexOf("dialogue cue")<0) out.push("dialogue cue");
+      cue=true; return;
+    }
+    if(b.type==="paren") return;
+    if(b.type==="dia"){ if(!cue && out.indexOf("dialogue cue")<0) out.push("dialogue cue"); cue=false; return; }
+    if(cue && out.indexOf("dialogue cue")<0) out.push("dialogue cue");
+    if(b.type==="action" && /(?:^|\s)[A-Z][A-Z .'\u2019-]{1,30}:\s*[“"']?[A-Z]/.test(String(b.text||""))
+       && out.indexOf("dialogue in action")<0) out.push("dialogue in action");
+    cue=false;
+  });
+  if(cue && out.indexOf("dialogue cue")<0) out.push("dialogue cue");
   return out;
 }
 window.sceneMissing = sceneMissing;
@@ -314,7 +332,7 @@ function ContinuityReport({ report, onJump, onClose, currentId }){
 }
 
 function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, onDraftAll, onPolish, drafting, total,
-                     history, labelOf, onRevert, onRedo, onEditScene, continuityMap, project, onBeatFocus }){
+                     history, labelOf, onRevert, onRedo, onEditScene, continuityMap, project, onBeatFocus, readOnly }){
   const CONT = continuityMap || (window.TURN_DATA||{}).CONTINUITY || {};
   const FACTS = (window.TURN_DATA||{}).FACTS || {};
   const live = typeof aiAvailable==="function" && aiAvailable();
@@ -330,6 +348,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
   const [verFlash, setVerFlash] = React.useState(null);
   const verFlashTimer = React.useRef(null);
   React.useEffect(()=>{ setActiveBeat(null); setPolishing(false); setPolishWait(false); setJustPolished(false); setEditing(false); setVerFlash(null); setBeatWriting(null); },[scene && scene.id]);
+  React.useEffect(()=>{ if(readOnly) setEditing(false); },[readOnly]);
   // once the restored version renders, bring the first changed block into view if it's
   // off-screen (essential on mobile, where the change is usually below the fold)
   React.useEffect(()=>{
@@ -350,32 +369,34 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       React.createElement("h3",null,"Select a scene"),
       React.createElement("p",null,"Pick a scene from the spine or the story panel to draft its screenplay.")));
 
-  const idx = scenes.findIndex(s=>s.id===scene.id);
-  const prevScene = scenes[idx-1] || null;
-  const nextScene = scenes[idx+1] || null;
+  const orderedScenes=(typeof scenesInStoryOrder==="function")?scenesInStoryOrder(scenes):scenes;
+  const idx = orderedScenes.findIndex(s=>s.id===scene.id);
+  const prevScene = orderedScenes[idx-1] || null;
+  const nextScene = orderedScenes[idx+1] || null;
   const screenplay = drafts[scene.id];
-  const draftedCount = scenes.filter(s=>drafts[s.id]).length;
-  const go = (d, e)=>{ if(e && e.stopPropagation) e.stopPropagation(); const n = scenes[idx+d]; if(n) onSelectScene(n.id); };
+  const draftedCount = orderedScenes.filter(s=>drafts[s.id]).length;
+  const go = (d, e)=>{ if(e && e.stopPropagation) e.stopPropagation(); const n = orderedScenes[idx+d]; if(n) onSelectScene(n.id); };
 
   const transIn = sceneTransition(prevScene, scene);
   const transOut = nextScene ? sceneTransition(scene, nextScene) : null;
   const carry = sceneCarry(prevScene, scene, project);
 
-  const report = continuityReport(scenes, CONT, FACTS);
+  const report = continuityReport(orderedScenes, CONT, FACTS);
   const sceneConflicts = report.conflicts.filter(c=>c.sceneId===scene.id);
 
   // ---- auto-draft control / progress ----
   let control = null;
   if(drafting){
     const pct = Math.round((drafting.i/total)*100);
-    const now = scenes[Math.min(drafting.i, total-1)];
+    const now = orderedScenes[Math.min(drafting.i, total-1)];
     control = React.createElement("div",{className:"draft-prog"},
       React.createElement("div",{className:"orb"}),
       React.createElement("div",null,
         React.createElement("div",{className:"lbl"},`${live?"MUSE is drafting":"Drafting"} Sc.${String(now?now.no:total).padStart(2,"0")} \u00b7 threading continuity\u2026`),
         React.createElement("div",{className:"bar"},React.createElement("i",{style:{width:pct+"%"}}))));
   } else if(draftedCount < total){
-    control = React.createElement("button",{className:"draft-btn sm",onClick:onDraftAll},
+    control = React.createElement("button",{className:"draft-btn sm",onClick:onDraftAll,disabled:readOnly,
+      title:readOnly?"View-only access":undefined},
       React.createElement(Icon.sparkles,{s:14}),`Auto-draft all (${total-draftedCount} left)`);
   }
 
@@ -401,7 +422,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
 
     // Polish: generate a NEW version (old one is pushed to history by commitVersion)
     const runPolish = async ()=>{
-      if(polishing || !live) return;
+      if(readOnly || polishing || !live) return;
       setPolishing(true); setPolishWait(true); setJustPolished(false);
       let ok = false;
       if(onPolish){ try{ ok = await onPolish(scene, beats); }catch(e){} }
@@ -415,7 +436,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       React.createElement("button",
         // always the accent style — the primary action must read consistently orange
         // whether or not the current draft is already polished (user ruling 2026-07-19)
-        {className:"draft-btn sm",onClick:runPolish,disabled:polishing,
+        {className:"draft-btn sm",onClick:runPolish,disabled:readOnly||polishing,
          title:"Rewrite this scene's screenplay from its CURRENT beat cards — the previous draft stays in version history (Undo restores it)"},
         React.createElement(Icon.wand,{s:14}),
         polishWait ? "Redrafting\u2026"
@@ -449,11 +470,11 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
       const prevLabel = hb.back.length ? labelWithBy(hb.back[hb.back.length-1]) : null;
       const nextLabel = hb.fwd.length ? labelWithBy(hb.fwd[0]) : null;
       versionUI = React.createElement("div",{className:"ver-ctl"},
-        React.createElement("button",{className:"ver-btn",disabled:!hb.back.length||polishing,
+        React.createElement("button",{className:"ver-btn",disabled:readOnly||!hb.back.length||polishing,
           title: prevLabel?("Undo — back to "+prevLabel):"Nothing to undo",
           onClick:()=>{ if(polishing) return; flashDiff(hb.back[hb.back.length-1]); onRevert(scene.id); }},
           React.createElement(Icon.undo,{s:13}), "Undo"),
-        React.createElement("button",{className:"ver-btn",disabled:!hb.fwd.length||polishing,
+        React.createElement("button",{className:"ver-btn",disabled:readOnly||!hb.fwd.length||polishing,
           title: nextLabel?("Redo — forward to "+nextLabel):"Nothing to redo",
           onClick:()=>{ if(polishing) return; flashDiff(hb.fwd[0]); onRedo(scene.id); }},
           React.createElement(Icon.redo,{s:13}), "Redo"));
@@ -498,10 +519,10 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
     // One click AI-writes just that beat's prose (neighbouring text as read-only context),
     // splices it in beat order and commits a NEW version (Undo restores the gap).
     const writeMissingBeat = async (n)=>{
-      if(beatWriting || !live || !onEditScene) return;
+      if(readOnly || beatWriting || !live || !onEditScene) return;
       setBeatWriting(n);
       try{
-        const res = (typeof aiWriteBeatText==="function") ? await aiWriteBeatText(scene, beats, n, screenplay, prevScene) : null;
+        const res = (typeof aiWriteBeatText==="function") ? await aiWriteBeatText(scene, beats, n, screenplay, prevScene, project) : null;
         if(res && res.blocks && res.blocks.length){
           const blocks = screenplay.blocks.slice();
           let at = -1;   // after the last block belonging to an EARLIER beat (slug rides as beat 1)
@@ -541,13 +562,13 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
                       React.createElement("div",{className:"spb-action spb-missing"},"No screenplay text assigned to this beat."),
                       // one-click gap fix — only when the beat map defines this beat and MUSE is live
                       r && live && onEditScene && React.createElement("button",{className:"spb-write-btn",
-                        disabled: beatWriting!=null,
+                        disabled: readOnly||beatWriting!=null,
                         title:"MUSE writes JUST this beat's prose from its beat-map action/reaction ("+((r.drive&&r.drive.a)||"Action")+" / "+((r.react&&r.react.a)||"Reaction")+"), bridging the surrounding text — committed as a new version, Undo restores the gap.",
                         onClick:()=>writeMissingBeat(n)},
                         beatWriting===n
                           ? React.createElement(React.Fragment,null,React.createElement("span",{className:"ns-spin"}),"Writing beat "+n+"…")
                           : React.createElement(React.Fragment,null,React.createElement(Icon.sparkles,{s:12}),"Write this beat from the beat map"))),
-                editing && React.createElement(AddBlockRow,{onAdd:(kind)=>insertBlock(n, kind)}))));
+                 editing && !readOnly && React.createElement(AddBlockRow,{onAdd:(kind)=>insertBlock(n, kind)}))));
         })),
       transOut && React.createElement(TransitionBar,{trans:transOut,out:true,
         fromTo:`to Sc.${String(nextScene.no).padStart(2,"0")} ${nextScene.title}`}));
@@ -555,7 +576,7 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
 
   // EDIT toggle — only when there's a draft to edit and the parent supports committing
   const editBtn = (screenplay && onEditScene) ? React.createElement("button",
-    { className:`draft-btn sm ${editing?"":"ghost"}`, onClick:()=>setEditing(e=>!e), disabled:polishing,
+    { className:`draft-btn sm ${editing?"":"ghost"}`, onClick:()=>setEditing(e=>!e), disabled:readOnly||polishing,
       title: editing?"Finish editing the screenplay":"Edit the screenplay text directly" },
     React.createElement(editing?Icon.check:Icon.pencil,{s:14}),
     editing ? "Done editing" : "Edit") : null;
@@ -604,9 +625,9 @@ function ScriptView({ scene, beats, drafts, scenes, onSelectScene, onDraftOne, o
           ? `This scene's ${beats.rows.length} beats are mapped. ${live?"MUSE will expand them into original prose, threading":"Expanding them inherits"} the story-state above.`
           : "Map this scene into beats first, then it can be expanded into screenplay."),
         React.createElement("div",{style:{display:"flex",gap:10,justifyContent:"center"}},
-          React.createElement("button",{className:"draft-btn",onClick:()=>onDraftOne(scene)},
+          React.createElement("button",{className:"draft-btn",disabled:readOnly,onClick:()=>onDraftOne(scene)},
             React.createElement(Icon.wand,{s:15}),live?"Draft with MUSE":"Draft this scene"),
-          React.createElement("button",{className:"draft-btn ghost",onClick:onDraftAll},
+          React.createElement("button",{className:"draft-btn ghost",disabled:readOnly,onClick:onDraftAll},
             React.createElement(Icon.sparkles,{s:15}),"Auto-draft all"))));
   }
 

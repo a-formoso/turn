@@ -1269,6 +1269,13 @@ function useImageGen(opts){
       try{ proceed = await opts.beforeGenerate(gopts); }catch(e){ proceed=true; }
       if(proceed===false){ setGening(false); window.__nbGenInflight[id] = false; return; }
     }
+    // Immutable source facts that must describe what THIS request started from
+    // (rather than whatever state exists when a long remote render finishes).
+    let startMeta = null;
+    if(typeof opts.metaStart==="function"){
+      try{ startMeta = await opts.metaStart({ gopts });
+        if(!startMeta || typeof startMeta!=="object") startMeta=null; }catch(e){ startMeta=null; }
+    }
     let committedUrl = "";
     const overrideModel = gopts.model || null;
     const usedModel = overrideModel || (typeof nbGetModel==="function" ? nbGetModel() : "");
@@ -1470,6 +1477,7 @@ function useImageGen(opts){
         editInstruction: isEditMode ? (gopts.editInstruction||"") : "",
         version: priorCount + 1
       };
+      if(startMeta) Object.assign(meta, startMeta);
       // caller-supplied extra meta (e.g. a prop's owner-sheet anchor version, a
       // character sheet's baked worn-prop signature) — powers the staleness badges
       if(typeof opts.metaExtra==="function"){
@@ -4699,7 +4707,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropIds, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
   locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocIds, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onSetWorldScale, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId, sluglineUnits, onUpdateUnit, onRemoveUnit,
-  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectScene, onColorist, onShoot, onCast, onPropsMaster,
+  shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onRefineBeat, refiningBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectScene, onColorist, onShoot, onCast, onPropsMaster,
   lookbook, lookbookNote, onUpdateLookbook, onAddLookbook, onDeleteLookbook, onSetLookbookNote, onResearch, onClearLookbook,
   staleTabs, onApplyLookbook }){
   const _stale = staleTabs || {};
@@ -4763,7 +4771,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
           lookbookStale:!!_stale.stylebible,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("colorist")})
     : artView==="shots" && window.ShotList
       ? React.createElement(window.ShotList,{project,scenes,characters,props,locations,shots,beatsMap,
-          onUpdateShot,onAddShot,onDeleteShot,onSplitBeat,splittingBeat,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots,onShoot,onDirectScene,
+          onUpdateShot,onAddShot,onDeleteShot,onSplitBeat,splittingBeat,onRefineBeat,refiningBeat,onDraftSceneShots,draftingSceneShots,onDraftAllShots,draftingAllShots,onShoot,onDirectScene,
           trashItems:(trash&&trash.shots)||[],onRestore:onRestoreShot,onPurge:onPurgeShot})
       : artView==="storyboard" && window.StoryboardView
       ? React.createElement(window.StoryboardView,{project,scenes,shots,characters,props,locations,beatsMap,setArtView})

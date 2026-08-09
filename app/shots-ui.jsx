@@ -253,10 +253,35 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
     // comfortably inside the proxy window. These are input references only:
     // generated quality and resolution always follow the user's selected controls.
     referenceMaxDim: 640,
+    metaStart: ()=>({
+      shotSource:(typeof shotSourceStamp==="function")
+        ? shotSourceStamp(sh,(((window.turnContinuity||{}).drafts||{})[sh.sceneId])) : null
+    }),
     metaExtra: ()=>({
       advancedCamera:(typeof shotCameraMetadata==="function") ? shotCameraMetadata(sh) : null
     }),
   });
+  const frameSourceStatus = gen.genUrl && typeof shotAssetProvenanceStatus==="function"
+    ? shotAssetProvenanceStatus(sh,(((window.turnContinuity||{}).drafts||{})[sh.sceneId]),gen.genMeta) : "";
+  const frameSourceOverride = typeof shotSourceOverrideCurrent==="function"
+    && shotSourceOverrideCurrent(sh,(((window.turnContinuity||{}).drafts||{})[sh.sceneId]));
+  const toggleFrameApproval = async ()=>{
+    if(sh.locked){ onUpdate(sh.id,{locked:false,sourceOverride:null}); return; }
+    if(frameSourceStatus!=="current"){
+      const ok=await window.appConfirm({
+        title:frameSourceStatus==="stale"?"Approve a stale historical frame?":"Approve an unverified legacy frame?",
+        body:frameSourceStatus==="stale"
+          ?"This frame was rendered from an older shot specification or screenplay beat. Approving it is an explicit continuity override; regenerate to obtain a frame that matches the current source."
+          :"This frame has no source-revision stamp, so the app cannot verify that it matches the current shot. Approving it is an explicit continuity override; regenerate for verified coverage.",
+        confirmLabel:"Approve with override",danger:true
+      });
+      if(!ok) return;
+      onUpdate(sh.id,{locked:true,sourceOverride:(typeof shotSourceStamp==="function")
+        ? shotSourceStamp(sh,(((window.turnContinuity||{}).drafts||{})[sh.sceneId])):null});
+      return;
+    }
+    onUpdate(sh.id,{locked:true,sourceOverride:null});
+  };
 
   // Every manual Generate / Regenerate enters the scene's ordered runner. If an earlier
   // shot in the chain isn't rendered yet, the runner asks the user to generate it first
@@ -435,11 +460,20 @@ function ShotCard({ sh, scene, ctx, characters, propsAvail, beatText, prevShot, 
             onClick:()=> !isFirst && onToggleHead && onToggleHead(sh)},
             _el(Icon.pin,{s:11}), isHead && _el("span",null, isFirst?"Head":"Fresh")),
           // approve / lock — marks this frame as the APPROVED seed the next shot chains from
+          gen.genUrl && frameSourceStatus && _el("span",{className:"shot-source-badge "+frameSourceStatus,
+            title:frameSourceStatus==="current"
+              ? "This frame was rendered from the current shot specification and screenplay beat."
+              : frameSourceStatus==="stale"
+              ? "This historical frame was rendered before this shot specification or screenplay beat changed. Regenerate before using it as current coverage."
+              : "This legacy frame has no source-revision stamp, so its match to the current shot cannot be verified."},
+            frameSourceStatus==="current"?"Source current":frameSourceStatus==="stale"?"Stale source":"Source unverified"),
           gen.genUrl && _el("button",{className:"shot-lock-btn"+(sh.locked?" on":""),
             title: sh.locked
-              ? "Approved — this frame is the locked coverage reference this beat's shots build on. Click to unlock."
+              ? (frameSourceOverride?"Approved by explicit source override. Click to unlock.":"Approved — this frame is the locked coverage reference this beat's shots build on. Click to unlock.")
+              : frameSourceStatus!=="current"
+              ? "Approve this historical frame with an explicit source override, or regenerate for verified coverage."
               : "Approve this frame as the coverage reference this beat's shots build on.",
-            onClick:()=>onUpdate(sh.id,{ locked: !sh.locked })},
+            onClick:toggleFrameApproval},
             _el(Icon.check,{s:11}), _el("span",null, sh.locked?"Approved":"Approve")),
           window.QaCheckButton && _el(window.QaCheckButton,{ gen, name:beatLabel, noun:"shot frame", className:"shot-lock-btn",
             specFields:()=>({ action:(sh.action||""), composition:(sh.composition||"") }),
@@ -559,7 +593,14 @@ function beatScriptText(sceneId, n){
   const parts=[]; const blocks=d.blocks.filter(b=>Number(b.beat)===Number(n));
   for(let i=0;i<blocks.length;i++){ const b=blocks[i]; const t=String(b.text||"").replace(/\s+/g," ").trim(); if(!t) continue;
     if(b.type==="scene"||b.type==="trans"||b.type==="paren"||b.type==="dia") continue;
-    if(b.type==="char"){ const nx=blocks[i+1]; if(nx&&nx.type==="dia"&&String(nx.text||"").trim()){ parts.push(t+": \u201c"+String(nx.text).replace(/\s+/g," ").trim()+"\u201d"); i++; } continue; }
+    if(b.type==="char"){
+      const par=blocks[i+1]&&blocks[i+1].type==="paren" ? String(blocks[i+1].text||"").replace(/\s+/g," ").trim() : "";
+      const di=i+(par?2:1), nx=blocks[di];
+      if(nx&&nx.type==="dia"&&String(nx.text||"").trim()){
+        parts.push(t+": "+(par?"("+par+") ":"")+"\u201c"+String(nx.text).replace(/\s+/g," ").trim()+"\u201d"); i=di;
+      }
+      continue;
+    }
     parts.push(t); }
   return parts.join("  ");
 }
@@ -677,7 +718,7 @@ function BeatShotRow({ sh, letter, open, onToggle, isNext, live }){
    video clips — nothing about clip packing changes. */
 function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered, firstId, toggleHead,
   onAddShot, onUpdate, onDelete, onView, onGenerateShot, onRegenDownstream, onStopChain, onBatchDone,
-  batchActiveId, openShotId, setOpenShotId, sceneStart, onRenderScene, renderBusy, nextShotId }){
+  batchActiveId, openShotId, setOpenShotId, sceneStart, onRenderScene, renderBusy, nextShotId, onRefineBeat, refiningBeat }){
   const beatRow = (bm.rows||[]).find(r=>String(r.n)===String(L.n));
   // the card quotes the SCREENPLAY (canon) for this beat; the beat-map summary
   // only stands in until the scene is drafted
@@ -725,6 +766,9 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
         isTurn && _el("span",{className:"beat-lane-turn"},_el(Icon.bolt,{s:10}),"Turning point"),
         (chg!=null) && _el("span",{className:"beat-lane-chg "+(chg>0?"pos":chg<0?"neg":"")},(chg>0?"+":"")+chg),
         _el("span",{className:"beat-lane-count"},L.shots.length+" shot"+(L.shots.length!==1?"s":"")),
+        beatScriptText(scene.id,L.n) && onRefineBeat && _el("button",{className:"beat-lane-btn ghost",
+          disabled:!!refiningBeat,title:"Re-read this beat's screenplay, update its micro-beats and version/remap its logical shots. Existing media is retained but marked stale when its source no longer matches.",
+          onClick:()=>onRefineBeat(scene,L.n)},_el(Icon.sparkles,{s:11}),refiningBeat?"Refining\u2026":"Refine from screenplay"),
         onAddShot && _el("button",{className:"beat-lane-btn ghost bc-add",
           title:"Add one manual shot to this beat — it joins the rolling chain after the beat's last shot",
           onClick:()=>onAddShot(scene.id, L.n)},_el(Icon.plus,{s:11}),"Add shot")),
@@ -791,7 +835,7 @@ function BeatCard({ L, lanesLen, bm, scene, ctx, characters, propsAvail, ordered
 }
 
 function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, pager, onUpdate, onDelete, onView,
-  onAddShot, onSplitBeat, splittingBeat, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot, onRegenDownstream,
+  onAddShot, onSplitBeat, splittingBeat, onRefineBeat, refiningBeat, onDraftScene, draftingScene, batchActiveId, onBatchDone, open, onToggle, onGenerateShot, onRegenDownstream,
   onRenderScene, renderBusy, queueMode, onStopChain }){
   const loc = ctx.location;
   const driver = scene.driver ? ctx.charById[scene.driver] : null;
@@ -978,12 +1022,13 @@ function SceneShotGroup({ scene, shots, ctx, characters, propsAvail, beatsMap, p
             lanes.map((L,Li)=> _el(BeatCard,{key:"bc"+(L.canonical?"c":"o")+L.n, L, lanesLen:lanes.length, bm, scene, ctx, characters, propsAvail,
               ordered, firstId, toggleHead, onAddShot, onUpdate, onDelete, onView,
               onGenerateShot, onRegenDownstream, onStopChain, onBatchDone, batchActiveId, openShotId, setOpenShotId,
-              sceneStart:(!_sceneRendered && Li===0), onRenderScene, renderBusy, nextShotId:_nextShotId })))));
+              sceneStart:(!_sceneRendered && Li===0), onRenderScene, renderBusy, nextShotId:_nextShotId,
+              onRefineBeat,refiningBeat:refiningBeat===scene.id+"#"+L.n })))));
     })());
 }
 
 function ShotList({ project, scenes, characters, props, locations, shots, beatsMap,
-  onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onShoot,
+  onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onRefineBeat, refiningBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onShoot,
   trashItems, onRestore, onPurge }){
   const [view, setView] = React.useState(null);
   const batch = useBatchGen();
@@ -1118,7 +1163,13 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
   // committed frame. A locked-but-FRAMELESS shot \u2014 e.g. one whose generation errored or timed
   // out before being approved \u2014 must still render, never be silently skipped as "done".
   const shotHasFrame = (id)=> (typeof nbGetImage==="function") ? !!nbGetImage(id) : false;
-  const shotIsDone = (s)=> !!(s && s.locked && shotHasFrame(s.id));
+  const shotFrameStatus = (s)=> (s&&typeof shotAssetProvenanceStatus==="function")
+    ? shotAssetProvenanceStatus(s,(((window.turnContinuity||{}).drafts||{})[s.sceneId]),
+        (typeof nbGetMeta==="function"?nbGetMeta(s.id):null)) : "unverified";
+  const shotHasOverride = (s)=> !!(s&&typeof shotSourceOverrideCurrent==="function"
+    && shotSourceOverrideCurrent(s,(((window.turnContinuity||{}).drafts||{})[s.sceneId])));
+  const shotIsDone = (s)=> !!(s && s.locked && shotHasFrame(s.id)
+    && (shotFrameStatus(s)==="current" || shotHasOverride(s)));
   // Advance to the next shot. Normal scene/all runs retain shots that are already done
   // (locked + framed); manual card runs use force=true so the clicked frame can be regenerated.
   const stepChain = (ids, fromIdx, force)=>{
@@ -1231,7 +1282,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
         seen[seed.id]=true;
         let u=(typeof nbGetImage==="function")?nbGetImage(seed.id):"";
         if(!u && typeof nbLoadImage==="function"){ try{ u=await nbLoadImage(seed.id); }catch(e){} }
-        if(!u){ missing.push(seed); cur=seed; continue; }
+        if(!u || (shotFrameStatus(seed)!=="current"&&!shotHasOverride(seed))){ missing.push(seed); cur=seed; continue; }
         break;
       }
       if(missing.length){
@@ -1317,7 +1368,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
         onPrev:()=>setPIdx(i=>Math.max(0,i-1)), onNext:()=>setPIdx(i=>Math.min(scenesWithShots.length-1,i+1)) },
       ctx:ctxFor(scene),characters:characters||[],beatsMap,propsAvail:(typeof propsForScene==="function")?propsForScene(props,scene.id):[],
       onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
-      onAddShot,onSplitBeat,splittingBeat,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===scene.id,
+      onAddShot,onSplitBeat,splittingBeat,onRefineBeat,refiningBeat,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===scene.id,
       batchActiveId,onBatchDone:handleBatchDone,onGenerateShot:startShot,onRegenDownstream,
       onRenderScene:startScene,renderBusy,queueMode,onStopChain:stopChain,
       open:true,onToggle:()=>toggleScene(scene.id)})),
@@ -1328,7 +1379,7 @@ function ShotList({ project, scenes, characters, props, locations, shots, beatsM
         ctx:ctxFor(runnerScene),characters:characters||[],beatsMap,
         propsAvail:(typeof propsForScene==="function")?propsForScene(props,runnerScene.id):[],
         onUpdate:onUpdateShot,onDelete:onDeleteShot,onView:(url,e)=>setView({url,character:e}),
-        onAddShot,onSplitBeat,splittingBeat,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===runnerScene.id,
+        onAddShot,onSplitBeat,splittingBeat,onRefineBeat,refiningBeat,onDraftScene:onDraftSceneShots,draftingScene:draftingSceneShots===runnerScene.id,
         batchActiveId,onBatchDone:handleBatchDone,onGenerateShot:startShot,onRegenDownstream,
         onRenderScene:startScene,renderBusy,queueMode,onStopChain:stopChain,open:true,onToggle:()=>{}})));
 }

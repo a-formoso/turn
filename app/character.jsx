@@ -36,7 +36,7 @@ function ArcSpark({ driven }){
     }));
 }
 
-function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJumpScene, onClose, onCollapse, onFollow }){
+function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJumpScene, onClose, onCollapse, onFollow, readOnly }){
   const c = character;
   if(!c) return React.createElement("div",{className:"inspector"},
     React.createElement("div",{className:"empty"},
@@ -58,16 +58,16 @@ function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJump
       React.createElement("div",{className:"char-head"},
         React.createElement("div",{className:"char-head-av",style:{background:c.color}},initials),
         React.createElement("div",{style:{flex:1,minWidth:0}},
-          React.createElement(EditText,{value:c.name,className:"char-head-name",placeholder:"Character name\u2026",
+          React.createElement(EditText,{value:c.name,readOnly,className:"char-head-name",placeholder:"Character name\u2026",
             onCommit:v=>onUpdate(c.id,{name:v})}),
-          React.createElement(EditText,{value:c.role,className:"char-head-role",
+          React.createElement(EditText,{value:c.role,readOnly,className:"char-head-role",
             placeholder:"Role \u00b7 who they are \u2014 e.g. Texture \u00b7 community \u2014 pensioner regular\u2026",
             onCommit:v=>onUpdate(c.id,{role:v})}),
           // PRONOUNS \u2014 canonical, fed into the scene drafter (same field the Art
           // Room card edits) so the script never drifts from the character's gender
           React.createElement("div",{style:{display:"flex",alignItems:"center",gap:6,marginTop:4}},
             React.createElement("span",{className:"obj-lab",style:{marginBottom:0}},"Pronouns"),
-            React.createElement("select",{className:"char-pronoun-sel",
+            React.createElement("select",{className:"char-pronoun-sel",disabled:readOnly,
               value:((c.pronouns==="he/him"||c.pronouns==="she/her") ? c.pronouns : ((typeof window.charPronouns==="function"?window.charPronouns(c):"") || "")),
               onChange:e=>onUpdate(c.id,{pronouns:e.target.value})},
               [["","set pronouns\u2026"],["he/him","he/him"],["she/her","she/her"]].map(function(o){return React.createElement("option",{key:o[0]||"unset",value:o[0],disabled:!o[0]},o[1]);}))))),
@@ -76,15 +76,15 @@ function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJump
       React.createElement("div",{className:"insp-block",style:{marginTop:16}},
         React.createElement("div",{className:"insp-block-head"},
           React.createElement("span",{className:"eyebrow"},React.createElement(Icon.target,{s:12}),"Desire"),
-          React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(c)},
+          React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:readOnly||drafting,onClick:()=>onDraft(c)},
             React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft with MUSE")),
         React.createElement("div",{className:"char-field"},
           React.createElement("div",{className:"obj-lab"},"Conscious want"),
-          React.createElement(EditText,{value:c.conscious,multiline:true,placeholder:"What they consciously pursue\u2026",
+          React.createElement(EditText,{value:c.conscious,readOnly,multiline:true,placeholder:"What they consciously pursue\u2026",
             onCommit:v=>onUpdate(c.id,{conscious:v})})),
         React.createElement("div",{className:"char-field"},
           React.createElement("div",{className:"obj-lab"},"Unconscious need"),
-          React.createElement(EditText,{value:c.unconscious,multiline:true,placeholder:"The deeper need they may not admit\u2026",
+          React.createElement(EditText,{value:c.unconscious,readOnly,multiline:true,placeholder:"The deeper need they may not admit\u2026",
             onCommit:v=>onUpdate(c.id,{unconscious:v})})),
         // HUMAN TRUTH — the insight into human nature this character embodies, and
         // which side of the film's controlling idea it argues. Every significant
@@ -93,12 +93,12 @@ function CharacterPanel({ character, scenes, onUpdate, onDraft, drafting, onJump
           React.createElement("div",{className:"obj-lab",
             title:"The one observation about human nature this character embodies \u2014 a distinct stance on the film's controlling idea, grounded in what the script shows them DO. Drafted by \u201cDraft with MUSE\u201d; the Consistency Check flags scene-drivers without one."},
             "Human truth \u2014 the insight they embody"),
-          React.createElement(EditText,{value:c.humanTruth,multiline:true,
+          React.createElement(EditText,{value:c.humanTruth,readOnly,multiline:true,
             placeholder:"e.g. Dignity starves without witnesses \u2014 he'd rather refuse charity than be pitied\u2026",
             onCommit:v=>onUpdate(c.id,{humanTruth:v})}),
           React.createElement("div",{className:"char-argues-row"},
             React.createElement("span",{className:"obj-lab",style:{marginBottom:0}},"Argues"),
-            React.createElement("select",{className:"insp-select",value:c.argues||"",
+            React.createElement("select",{className:"insp-select",value:c.argues||"",disabled:readOnly,
               title:"Which side of the controlling idea this character's life argues",
               onChange:e=>onUpdate(c.id,{argues:e.target.value})},
               [["","\u2014 unset \u2014"],["idea","The idea"],["counter","The counter-idea"],["complicates","Complicates both"]].map(kv=>

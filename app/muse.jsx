@@ -49,7 +49,7 @@ function teaserAnswer(q){
   return null;   // unknown / too deep → gentle gate
 }
 
-function MuseDock({ scenes, selScene, aiOn, signedIn, onSignIn }){
+function MuseDock({ scenes, selScene, project, aiOn, signedIn, onSignIn }){
   const [open, setOpen] = React.useState(false);
   const [thread, setThread] = React.useState([]);   // [{q, a, err, errMsg, gate}]
   const [input, setInput] = React.useState("");
@@ -98,8 +98,8 @@ function MuseDock({ scenes, selScene, aiOn, signedIn, onSignIn }){
     setThread(t=>[...t,{q,a:null}]);
     let a=null, errMsg=null;
     try{
-      a = (typeof aiMuseChat==="function") ? await aiMuseChat(turns, scenesRef.current||[], selRef.current)
-        : (typeof aiMuseReply==="function" ? await aiMuseReply(q, scenesRef.current||[], selRef.current) : null);
+      a = (typeof aiMuseChat==="function") ? await aiMuseChat(turns, scenesRef.current||[], selRef.current, project)
+        : (typeof aiMuseReply==="function" ? await aiMuseReply(q, scenesRef.current||[], selRef.current, project) : null);
     }catch(e){ errMsg = (e && e.message) ? String(e.message) : "I can’t reach you right now — try again in a moment."; }
     if(!a && !errMsg) errMsg = "I didn’t catch a reply — try again.";
     setThread(t=>t.map((m,i)=> i===t.length-1 ? {q,a,err:!!errMsg,errMsg} : m));

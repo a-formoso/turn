@@ -9,10 +9,13 @@ function kindOptsNow(){
 }
 
 /* inline editable text — local state so the cursor never jumps */
-function EditText({ value, onCommit, className, placeholder, multiline, autoFocus }){
+function EditText({ value, onCommit, className, placeholder, multiline, autoFocus, readOnly }){
   const [v,setV] = React.useState(value==null?"":value);
-  React.useEffect(()=>{ setV(value==null?"":value); },[value]);
-  const commit = ()=>{ if(v!==(value==null?"":value)) onCommit(v); };
+  // A collaborator can be downgraded while focused in a field. Entering read-only
+  // mode discards that unsaved local buffer immediately instead of leaving text on
+  // screen that the mutation boundary will (correctly) refuse to persist.
+  React.useEffect(()=>{ setV(value==null?"":value); },[value,readOnly]);
+  const commit = ()=>{ if(!readOnly && v!==(value==null?"":value)) onCommit(v); };
   const Tag = multiline ? "textarea" : "input";
   // auto-grow a textarea to fit its content so the full text is always visible
   const ref = React.useRef(null);
@@ -21,8 +24,9 @@ function EditText({ value, onCommit, className, placeholder, multiline, autoFocu
     el.style.height = "auto"; el.style.height = el.scrollHeight + "px";
   },[multiline]);
   React.useLayoutEffect(()=>{ fit(); },[v, multiline, fit]);
-  return React.createElement(Tag,{ ref, className:"edit-in "+(className||""), value:v, placeholder, autoFocus,
-    onChange:e=>{ setV(e.target.value); if(multiline) fit(); }, onBlur:commit,
+  return React.createElement(Tag,{ ref, className:"edit-in "+(className||""), value:v, placeholder, autoFocus:readOnly?false:autoFocus,
+    readOnly:!!readOnly, "aria-readonly":readOnly?"true":undefined,
+    onChange:e=>{ if(readOnly) return; setV(e.target.value); if(multiline) fit(); }, onBlur:commit,
     onKeyDown:e=>{ if(!multiline && e.key==="Enter") e.target.blur(); },
     rows: multiline?2:undefined });
 }
@@ -125,28 +129,28 @@ function EditableItemList({ value, placeholder, onCommit, onItemRemoved, onItemR
       React.createElement(Icon.plus,{s:12}), items.length?"Add item":(placeholder||"Add item")));
 }
 
-function Stepper({ value, onChange }){
+function Stepper({ value, onChange, readOnly }){
   return React.createElement("div",{className:"stepper"},
-    React.createElement("button",{className:"step-btn",onClick:()=>onChange(Math.max(-3,value-1))},
+    React.createElement("button",{className:"step-btn",disabled:readOnly,onClick:()=>onChange(Math.max(-3,value-1))},
       React.createElement(Icon.minus,{s:14})),
     React.createElement("div",{className:`step-val ${chargeClass(value)}`},chargeStr(value)),
-    React.createElement("button",{className:"step-btn",onClick:()=>onChange(Math.min(3,value+1))},
+    React.createElement("button",{className:"step-btn",disabled:readOnly,onClick:()=>onChange(Math.min(3,value+1))},
       React.createElement(Icon.plus,{s:14})));
 }
 
-function ChargeEditor({ scene, onCharge, onUpdate }){
+function ChargeEditor({ scene, onCharge, onUpdate, readOnly }){
   return React.createElement("div",{className:"charge-grid"},
     React.createElement("div",{className:"charge-cell"},
       React.createElement("div",{className:"lab"},"Opening value"),
-      React.createElement(EditText,{value:scene.openValue,className:"charge-name",
+      React.createElement(EditText,{value:scene.openValue,className:"charge-name",readOnly,
         onCommit:v=>onUpdate(scene.id,{openValue:v})}),
-      React.createElement(Stepper,{value:scene.openCharge,onChange:v=>onCharge("openCharge",v)})),
+      React.createElement(Stepper,{value:scene.openCharge,readOnly,onChange:v=>onCharge("openCharge",v)})),
     React.createElement("div",{className:"charge-arrow"},React.createElement(Icon.arrowR,{s:16})),
     React.createElement("div",{className:"charge-cell"},
       React.createElement("div",{className:"lab"},"Closing value"),
-      React.createElement(EditText,{value:scene.closeValue,className:"charge-name",
+      React.createElement(EditText,{value:scene.closeValue,className:"charge-name",readOnly,
         onCommit:v=>onUpdate(scene.id,{closeValue:v})}),
-      React.createElement(Stepper,{value:scene.closeCharge,onChange:v=>onCharge("closeCharge",v)})));
+      React.createElement(Stepper,{value:scene.closeCharge,readOnly,onChange:v=>onCharge("closeCharge",v)})));
 }
 
 function Verdict({ scene }){
@@ -171,25 +175,25 @@ function Verdict({ scene }){
 }
 
 /* ---------- editable beat map ---------- */
-function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
+function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters, project, readOnly }){
   const [deriving, setDeriving] = React.useState(false);
   const hasScript = !!(draft && ((draft.blocks && draft.blocks.length) || (Array.isArray(draft) && draft.length)));
   const deriveFromScript = async ()=>{
     if(!(hasScript && typeof window.aiBeatsFromScript==="function" && typeof aiAvailable==="function" && aiAvailable())) return null;
-    try{ return await window.aiBeatsFromScript(scene, draft, characters); }catch(e){ return null; }
+    try{ return await window.aiBeatsFromScript(scene, draft, characters, project); }catch(e){ return null; }
   };
   // empty-state button: derive from the script if it exists, else drop a blank skeleton.
   const createMap = async ()=>{
-    if(deriving) return;
+    if(readOnly || deriving) return;
     if(hasScript){ setDeriving(true); const m = await deriveFromScript(); setDeriving(false);
       if(m && m.rows && m.rows.length){ onBeats(scene.id, m); return; } }
-    onBeats(scene.id, { driverLabel:"DRIVER", reactorLabel:"REACTOR", desire:"", obstacle:"", turnAt:0,
+    onBeats(scene.id, { driverLabel:"DRIVER", reactorLabel:"REACTOR", desire:"", obstacle:"", result:"", turnAt:0,
       rows:[{n:1,drive:{a:"Action",d:""},react:{a:"Reaction",d:""}}] });
   };
   // in-editor button: (re)build the beats from the script WITHOUT clobbering on failure;
   // confirms first if the current map already has the user's content.
   const rebuildFromScript = async (blank)=>{
-    if(deriving) return;
+    if(readOnly || deriving) return;
     if(!blank && typeof window.appConfirm==="function"){
       const ok = await window.appConfirm({ title:"Rebuild the beat map from the script?",
         body:"This replaces the current beats with ones derived from this scene's screenplay.",
@@ -200,11 +204,12 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
     if(m && m.rows && m.rows.length) onBeats(scene.id, m);
   };
   const id = scene.id;
+  beats = (typeof withBeatIdentity==="function") ? withBeatIdentity(beats,id) : beats;
   // UNDO for beat deletion — the deleted row (with its position and the turn marker)
   // is held until the user restores it, deletes another, or switches scenes. Before
   // this, a mis-click destroyed the beat with no way back (auto-save had already
   // written the deletion to the cloud within a second).
-  const [lastDeleted, setLastDeleted] = React.useState(null);   // {row, index, turnAt}
+  const [lastDeleted, setLastDeleted] = React.useState(null);   // {row, index, turnBeatId}
   React.useEffect(()=>{ setLastDeleted(null); },[id]);
   // reveal the beat the user clicked in the Script gutter — scroll it into view + flag it
   const rowRefs = React.useRef({});
@@ -219,29 +224,32 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
     React.createElement("div",{className:"empty-d"}, hasScript
       ? "This scene is already written \u2014 build its beat map FROM the script (the action / reaction subtext of each beat)."
       : "Break this scene into beats \u2014 the action / reaction exchanges that carry its subtext."),
-    React.createElement("button",{className:"flag-btn primary",style:{marginTop:4},disabled:deriving,onClick:createMap},
+    React.createElement("button",{className:"flag-btn primary",style:{marginTop:4},disabled:readOnly||deriving,onClick:createMap,
+      title:readOnly?"View-only access":undefined},
       deriving ? "Reading the script\u2026" : (hasScript ? "Create beat map from script" : "Create beat map")));
 
-  const commit = (next)=>onBeats(id,next);
+  const commit = (next)=>{ if(!readOnly) onBeats(id,next); };
   const renumber = (rows)=>rows.map((r,k)=>({...r,n:k+1}));
   const setField = (patch)=>commit({...beats,...patch});
   const setCell = (i,side,field,val)=>commit({...beats, rows:beats.rows.map((r,j)=>
     j===i ? {...r,[side]:{...r[side],[field]:val}} : r)});
   const addBeat = ()=>commit({...beats, rows:[...beats.rows,
-    {n:beats.rows.length+1, drive:{a:"Action",d:""}, react:{a:"Reaction",d:""}}]});
+    {id:"beat-"+id+"-"+Date.now().toString(36),n:beats.rows.length+1, drive:{a:"Action",d:""}, react:{a:"Reaction",d:""}}]});
   const delBeat = (i)=>{
-    setLastDeleted({ row: beats.rows[i], index: i, turnAt: beats.turnAt });
+    setLastDeleted({ row: beats.rows[i], index: i, turnBeatId: beats.turnBeatId||"" });
     const rows=renumber(beats.rows.filter((_,j)=>j!==i));
-    commit({...beats, rows, turnAt: beats.turnAt>rows.length?0:beats.turnAt}); };
+    const turnBeatId=beats.rows[i].id===beats.turnBeatId?"":beats.turnBeatId;
+    commit(withBeatIdentity({...beats, rows, turnBeatId},id)); };
   const undoDelete = ()=>{ if(!lastDeleted) return;
     const rows = beats.rows.slice();
     rows.splice(Math.min(lastDeleted.index, rows.length), 0, lastDeleted.row);
-    commit({...beats, rows:renumber(rows), turnAt:lastDeleted.turnAt});
+    commit(withBeatIdentity({...beats, rows:renumber(rows), turnBeatId:lastDeleted.turnBeatId},id));
     setLastDeleted(null); };
   const moveBeat = (i,dir)=>{ const j=i+dir; if(j<0||j>=beats.rows.length) return;
     const rows=beats.rows.slice(); const [m]=rows.splice(i,1); rows.splice(j,0,m);
-    commit({...beats, rows:renumber(rows)}); };
-  const toggleTurn = (n)=>commit({...beats, turnAt: beats.turnAt===n?0:n});
+    commit(withBeatIdentity({...beats, rows:renumber(rows)},id)); };
+  const toggleTurn = (row)=>commit(withBeatIdentity({...beats,
+    turnBeatId:beats.turnBeatId===row.id?"":row.id},id));
   // per-beat VALUE CHARGE stays a DATA layer only (r.charge, -3..+3): the AI sets it
   // when authoring beats and the Shot Designer reads the shifts — the manual ± selector
   // was removed by product decision 2026-07-19 (auto-set, consumed silently; UI noise).
@@ -250,15 +258,15 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
   // the "Build from script" button reads right and skips the overwrite confirm.
   const blankMap = (beats.rows||[]).length<=1
     && !(beats.rows||[]).some(r=>((r.drive&&r.drive.d)||"").trim() || ((r.react&&r.react.d)||"").trim())
-    && !((beats.desire||"").trim()) && !((beats.obstacle||"").trim());
+    && !((beats.desire||"").trim()) && !((beats.obstacle||"").trim()) && !((beats.result||"").trim());
   return React.createElement("div",null,
     // restore chip — appears right after a delete, until restored / next delete / scene switch
-    lastDeleted && React.createElement("button",{className:"beat-build-btn beat-undo-btn",
+    lastDeleted && React.createElement("button",{className:"beat-build-btn beat-undo-btn",disabled:readOnly,
       onClick:undoDelete,
       title:"Put the beat you just deleted back in its place — with the scene's turn marker as it was"},
       React.createElement(Icon.undo,{s:12}),
       "Undo — restore deleted beat "+(lastDeleted.index+1)),
-    hasScript && React.createElement("button",{className:"beat-build-btn primary",disabled:deriving,
+    hasScript && React.createElement("button",{className:"beat-build-btn primary",disabled:readOnly||deriving,
       onClick:()=>rebuildFromScript(blankMap),
       title:"Read this scene's screenplay and build the beat / subtext map from it"},
       React.createElement(Icon.sparkles,{s:12}),
@@ -274,38 +282,40 @@ function BeatEditor({ scene, beats, onBeats, focusBeat, draft, characters }){
     React.createElement("div",{className:"beat-labels"},
       React.createElement("div",{className:"cell"},
         React.createElement("div",{className:"obj-lab",style:{marginBottom:3}},"Driver"),
-        React.createElement(EditText,{value:beats.driverLabel,onCommit:v=>setField({driverLabel:v})})),
+        React.createElement(EditText,{value:beats.driverLabel,readOnly,onCommit:v=>setField({driverLabel:v})})),
       React.createElement("div",{className:"cell"},
         React.createElement("div",{className:"obj-lab",style:{marginBottom:3}},"Reactor"),
-        React.createElement(EditText,{value:beats.reactorLabel,onCommit:v=>setField({reactorLabel:v})}))),
+        React.createElement(EditText,{value:beats.reactorLabel,readOnly,onCommit:v=>setField({reactorLabel:v})}))),
     React.createElement("div",{style:{marginBottom:10}},
       React.createElement("div",{className:"obj-lab",style:{marginBottom:3}},"Desire"),
-      React.createElement(EditText,{value:beats.desire,multiline:true,placeholder:"What the driver wants\u2026",onCommit:v=>setField({desire:v})}),
+      React.createElement(EditText,{value:beats.desire,readOnly,multiline:true,placeholder:"What the driver wants\u2026",onCommit:v=>setField({desire:v})}),
       React.createElement("div",{className:"obj-lab",style:{margin:"8px 0 3px"}},"Antagonism"),
-      React.createElement(EditText,{value:beats.obstacle,multiline:true,placeholder:"What blocks it\u2026",onCommit:v=>setField({obstacle:v})})),
+      React.createElement(EditText,{value:beats.obstacle,readOnly,multiline:true,placeholder:"What blocks it\u2026",onCommit:v=>setField({obstacle:v})}),
+      React.createElement("div",{className:"obj-lab",style:{margin:"8px 0 3px"}},"Result"),
+      React.createElement(EditText,{value:beats.result||"",readOnly,multiline:true,placeholder:"What is resolved by the end of the scene\u2026",onCommit:v=>setField({result:v})})),
 
     beats.rows.map((r,i)=>
-      React.createElement("div",{key:i, ref:(el)=>{ rowRefs.current[r.n]=el; },
-        className:`beat-edit ${r.n===beats.turnAt?"turn":""} ${r.n===focusBeat?"focus":""}`},
+      React.createElement("div",{key:r.id, ref:(el)=>{ rowRefs.current[r.n]=el; },
+        className:`beat-edit ${r.id===beats.turnBeatId?"turn":""} ${r.n===focusBeat?"focus":""}`},
         React.createElement("div",{className:"beat-edit-head"},
           React.createElement("span",{className:"bn"},r.n),
-          React.createElement("button",{className:"beat-turn-btn",onClick:()=>toggleTurn(r.n)},
-            React.createElement(Icon.bolt,{s:10}), r.n===beats.turnAt?"Turning point":"Mark turn"),
+          React.createElement("button",{className:"beat-turn-btn",disabled:readOnly,onClick:()=>toggleTurn(r)},
+            React.createElement(Icon.bolt,{s:10}), r.id===beats.turnBeatId?"Turning point":"Mark turn"),
           React.createElement("div",{className:"beat-edit-tools"},
-            React.createElement("button",{className:"bx",disabled:i===0,onClick:()=>moveBeat(i,-1)},React.createElement(Icon.chevU,{s:14})),
-            React.createElement("button",{className:"bx",disabled:i===beats.rows.length-1,onClick:()=>moveBeat(i,1)},React.createElement(Icon.chevD,{s:14})),
-            React.createElement("button",{className:"bx",onClick:()=>delBeat(i)},React.createElement(Icon.x,{s:13})))),
+            React.createElement("button",{className:"bx",disabled:readOnly||i===0,onClick:()=>moveBeat(i,-1)},React.createElement(Icon.chevU,{s:14})),
+            React.createElement("button",{className:"bx",disabled:readOnly||i===beats.rows.length-1,onClick:()=>moveBeat(i,1)},React.createElement(Icon.chevD,{s:14})),
+            React.createElement("button",{className:"bx",disabled:readOnly,onClick:()=>delBeat(i)},React.createElement(Icon.x,{s:13})))),
         React.createElement("div",{className:"beat-edit-cols"},
           React.createElement("div",{className:"beat-edit-col"},
             React.createElement("div",{className:"clab"},beats.driverLabel||"Action"),
-            React.createElement(EditText,{value:r.drive.a,className:"bt-act",placeholder:"action",onCommit:v=>setCell(i,"drive","a",v)}),
-            React.createElement(EditText,{value:r.drive.d,className:"bt-beh",multiline:true,placeholder:"behaviour\u2026",onCommit:v=>setCell(i,"drive","d",v)})),
+            React.createElement(EditText,{value:r.drive.a,readOnly,className:"bt-act",placeholder:"action",onCommit:v=>setCell(i,"drive","a",v)}),
+            React.createElement(EditText,{value:r.drive.d,readOnly,className:"bt-beh",multiline:true,placeholder:"behaviour\u2026",onCommit:v=>setCell(i,"drive","d",v)})),
           React.createElement("div",{className:"beat-edit-col"},
             React.createElement("div",{className:"clab"},beats.reactorLabel||"Reaction"),
-            React.createElement(EditText,{value:r.react.a,className:"bt-act",placeholder:"reaction",onCommit:v=>setCell(i,"react","a",v)}),
-            React.createElement(EditText,{value:r.react.d,className:"bt-beh",multiline:true,placeholder:"behaviour\u2026",onCommit:v=>setCell(i,"react","d",v)})))) ),
+            React.createElement(EditText,{value:r.react.a,readOnly,className:"bt-act",placeholder:"reaction",onCommit:v=>setCell(i,"react","a",v)}),
+            React.createElement(EditText,{value:r.react.d,readOnly,className:"bt-beh",multiline:true,placeholder:"behaviour\u2026",onCommit:v=>setCell(i,"react","d",v)})))) ),
 
-    React.createElement("button",{className:"add-beat",onClick:addBeat},
+    React.createElement("button",{className:"add-beat",disabled:readOnly,onClick:addBeat},
       React.createElement(Icon.plus,{s:14}),"Add beat"));
 }
 
@@ -327,7 +337,7 @@ const ANALYSIS = (scene, beats) => [
 ];
 
 function Inspector({ scene, beats, draft, onCharge, onUpdate, characters, scenes, onAddScene, onDeleteScene, onMove, onBeats, onRedraftScript,
-                     sceneIndex, sceneCount, onCollapse, project, tab:tabProp, onTab, focusBeat }){
+                     sceneIndex, sceneCount, onCollapse, project, tab:tabProp, onTab, focusBeat, readOnly }){
   // tab is controllable by the parent (e.g. the Script gutter opens the Beats tab);
   // falls back to local state when no controller is wired.
   const [tabState, setTabState] = React.useState("scene");
@@ -363,20 +373,20 @@ function Inspector({ scene, beats, draft, onCharge, onUpdate, characters, scenes
       tab==="scene" && React.createElement(React.Fragment,null,
         React.createElement("div",{className:"insp-eyebrow"},
           React.createElement("span",{className:"insp-scene-no"},String(scene.no).padStart(2,"0")),
-          React.createElement("select",{className:"insp-select",value:scene.kind,
+          React.createElement("select",{className:"insp-select",value:scene.kind,disabled:readOnly,
             onChange:e=>onUpdate(scene.id,{kind:e.target.value})},
             (()=>{ const opts=kindOptsNow();
               const extra = opts.some(([v])=>v===scene.kind) ? [] : [[scene.kind, (typeof fwKindLabel==="function"&&fwKindLabel(scene.kind))||scene.kind]];
               return opts.concat(extra).map(([v,l])=>React.createElement("option",{key:v,value:v},l)); })())),
-        React.createElement(EditText,{value:scene.title,className:"insp-title",onCommit:v=>onUpdate(scene.id,{title:v})}),
-        React.createElement(EditText,{value:scene.loc,className:"loc",onCommit:v=>onUpdate(scene.id,{loc:v})}),
+        React.createElement(EditText,{value:scene.title,readOnly,className:"insp-title",onCommit:v=>onUpdate(scene.id,{title:v})}),
+        React.createElement(EditText,{value:scene.loc,readOnly,className:"loc",onCommit:v=>onUpdate(scene.id,{loc:v})}),
         React.createElement("div",{style:{height:8}}),
-        React.createElement(EditText,{value:scene.summary,className:"summary",multiline:true,onCommit:v=>onUpdate(scene.id,{summary:v})}),
+        React.createElement(EditText,{value:scene.summary,readOnly,className:"summary",multiline:true,onCommit:v=>onUpdate(scene.id,{summary:v})}),
 
         React.createElement("div",{className:"insp-block",style:{marginTop:16}},
           React.createElement("div",{className:"insp-block-head"},
             React.createElement("span",{className:"eyebrow"},React.createElement(Icon.graph,{s:12}),"Value Charge")),
-          React.createElement(ChargeEditor,{scene,onCharge,onUpdate}),
+          React.createElement(ChargeEditor,{scene,onCharge,onUpdate,readOnly}),
           React.createElement("div",{style:{height:12}}),
           React.createElement(Verdict,{scene})),
 
@@ -393,7 +403,7 @@ function Inspector({ scene, beats, draft, onCharge, onUpdate, characters, scenes
               !cur.explicit && React.createElement("span",{className:"argues-auto"},"auto")),
             React.createElement("div",{className:"argues-seg"},
               [["idea","Idea"],["counter","Counter-idea"],["neither","Neither"]].map(([v,l])=>
-                React.createElement("button",{key:v,
+                React.createElement("button",{key:v,disabled:readOnly,
                   className:"argues-btn"+(cur.side===v?" on":""),
                   title: v==="idea" ? ("This scene asserts: "+ideaT)
                        : v==="counter" ? "This scene asserts the opposite — the counter-idea wins the moment"
@@ -414,11 +424,11 @@ function Inspector({ scene, beats, draft, onCharge, onUpdate, characters, scenes
             React.createElement("span",{className:"obj-icn"},React.createElement(Icon.user,{s:14})),
             React.createElement("div",{style:{flex:1}},
               React.createElement("div",{className:"obj-lab",style:{marginBottom:4}},"Driver"),
-              React.createElement("select",{className:"insp-select",value:scene.driver,
+              React.createElement("select",{className:"insp-select",value:scene.driver,disabled:readOnly,
                 onChange:e=>onUpdate(scene.id,{driver:e.target.value})},
                 driverOpts.map(([v,l])=>React.createElement("option",{key:v,value:v},l))),
               React.createElement("div",{style:{height:8}}),
-              React.createElement(EditText,{value:scene.objective,multiline:true,
+              React.createElement(EditText,{value:scene.objective,readOnly,multiline:true,
                 placeholder:"What the driver pursues in this scene\u2026",
                 onCommit:v=>onUpdate(scene.id,{objective:v})}))),
           React.createElement("div",{className:"obj-row"},
@@ -427,27 +437,27 @@ function Inspector({ scene, beats, draft, onCharge, onUpdate, characters, scenes
               React.createElement("div",{className:"obj-lab",style:{marginBottom:5}},
                 "Conflict level \u00b7 ",["Inner","Personal","Extra-personal"][scene.conf-1]),
               React.createElement("div",{className:"conf-edit"},
-                [1,2,3].map(i=>React.createElement("div",{key:i,className:`pip ${i<=scene.conf?"on":""}`,
+                [1,2,3].map(i=>React.createElement("button",{key:i,className:`pip ${i<=scene.conf?"on":""}`,disabled:readOnly,
                   title:["Inner","Personal","Extra-personal"][i-1],
                   onClick:()=>onUpdate(scene.id,{conf:i})})))))),
 
         (typeof SceneContinuity==="function") && React.createElement(SceneContinuity,{scene,scenes,characters}),
 
         React.createElement("div",{className:"insp-actions"},
-          React.createElement("button",{className:"ia-btn",disabled:sceneIndex<=0,onClick:()=>onMove(scene.id,-1)},
+          React.createElement("button",{className:"ia-btn",disabled:readOnly||sceneIndex<=0,onClick:()=>onMove(scene.id,-1)},
             React.createElement(Icon.chevU,{s:14}),"Up"),
-          React.createElement("button",{className:"ia-btn",disabled:sceneIndex>=sceneCount-1,onClick:()=>onMove(scene.id,1)},
+          React.createElement("button",{className:"ia-btn",disabled:readOnly||sceneIndex>=sceneCount-1,onClick:()=>onMove(scene.id,1)},
             React.createElement(Icon.chevD,{s:14}),"Down"),
-          React.createElement("button",{className:"ia-btn",onClick:()=>onAddScene(scene.id)},
+          React.createElement("button",{className:"ia-btn",disabled:readOnly,onClick:()=>onAddScene(scene.id)},
             React.createElement(Icon.plus,{s:14}),"Add after"),
-          React.createElement("button",{className:"ia-btn danger",onClick:()=>onDeleteScene(scene.id)},
+          React.createElement("button",{className:"ia-btn danger",disabled:readOnly,onClick:()=>onDeleteScene(scene.id)},
             React.createElement(Icon.x,{s:13}),"Delete"))),
 
       tab==="beats" && React.createElement("div",{style:{paddingTop:2}},
         React.createElement("div",{className:"insp-eyebrow",style:{marginBottom:10}},
           React.createElement("span",{className:"insp-scene-no"},String(scene.no).padStart(2,"0")),
-          React.createElement("span",{className:"eyebrow"},"Beat / Subtext map \u2014 editable")),
-        React.createElement(BeatEditor,{scene,beats,onBeats,focusBeat,draft,characters})),
+          React.createElement("span",{className:"eyebrow"},"Beat / Subtext map \u2014 "+(readOnly?"view only":"editable"))),
+        React.createElement(BeatEditor,{scene,beats,onBeats,focusBeat,draft,characters,project,readOnly})),
 
       tab==="analysis" && React.createElement("div",{style:{paddingTop:2}},
         React.createElement("div",{className:"divider"},

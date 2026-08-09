@@ -104,7 +104,7 @@ window.OverflowMenu = OverflowMenu;
    Room tabs) as a full-width bar directly beneath the top bar, at every screen
    size. Moved out of the top bar to free its space; the panel toggles ride along
    at the edges (Writers' Room only). Replaces the old mobile-only bottom bar. */
-function ViewNav({ room, view, setView, artView, setArtView, railOpen, inspOpen, onToggleRail, onToggleInsp, onCoordinate, onAgents, staleTabs, hiddenTabs }){
+function ViewNav({ room, view, setView, artView, setArtView, railOpen, inspOpen, onToggleRail, onToggleInsp, onCoordinate, onAgents, staleTabs, hiddenTabs, readOnly }){
   // The Stage is a single full-width assembly view — no sub-view tabs (don't fall through
   // to the Writers' Room tabs); its own header carries the context.
   if(room==="stage") return null;
@@ -121,8 +121,8 @@ function ViewNav({ room, view, setView, artView, setArtView, railOpen, inspOpen,
     ? (onCoordinate && React.createElement("button",{className:"tb-btn accent vn-cta",onClick:onCoordinate,
         title:"Art Department Coordinator — runs your whole pre-production in dependency order: props → cast → locations → colour → shots → storyboard, in one click"},
         React.createElement(Icon.robot,{s:14}),React.createElement("span",{className:"vn-cta-lab"},"Run pre-production")))
-    : (onAgents && React.createElement("button",{className:"tb-btn accent vn-cta",onClick:onAgents,
-        title:"Story Editors — AI agents that refine your story: Story Doctor, Continuity Repair, Table-Read"},
+    : (onAgents && React.createElement("button",{className:"tb-btn accent vn-cta",onClick:onAgents,disabled:readOnly,
+        title:readOnly?"View-only access — Story Editors cannot change this film":"Story Editors — AI agents that refine your story: Story Doctor, Continuity Repair, Table-Read"},
         React.createElement(Icon.robot,{s:14}),React.createElement("span",{className:"vn-cta-lab"},"Story Editors")));
   return React.createElement("div",{className:"viewnav","aria-label":"Views"},
     // LEFT zone — story-panel toggle. DRAWER MODES ONLY (hidden ≥1100px via CSS):
@@ -545,7 +545,7 @@ function RailSection({ label, icon:Ic, onAdd, defaultOpen=true, children }){
     open && children);
 }
 
-function LeftRail({ project, characters, scenes, selId, selChar, onSelect, onSelectChar, onAddCharacter, showFramework, onCollapse, onAddScene, onReorder, compact }){
+function LeftRail({ project, characters, scenes, selId, selChar, onSelect, onSelectChar, onAddCharacter, showFramework, onCollapse, onAddScene, onReorder, compact, readOnly }){
   const ci = project.controllingIdea;
   const secOpen = !compact;
   // group scenes by act
@@ -585,7 +585,7 @@ function LeftRail({ project, characters, scenes, selId, selChar, onSelect, onSel
               React.createElement("div",{style:{fontSize:12,color:"var(--txt-1)",lineHeight:1.4}},v))))),
 
       // CHARACTERS
-      React.createElement(RailSection,{label:"Cast",icon:Icon.user,onAdd:onAddCharacter,defaultOpen:true},
+      React.createElement(RailSection,{label:"Cast",icon:Icon.user,onAdd:readOnly?null:onAddCharacter,defaultOpen:true},
         characters.map(c=>{
           const driven = scenes.filter(s=>s.driver===c.id).length;
           return React.createElement("div",{key:c.id,
@@ -601,7 +601,7 @@ function LeftRail({ project, characters, scenes, selId, selChar, onSelect, onSel
 
       // STORY TREE
       React.createElement(RailSection,{label:"Story Spine",icon:Icon.layers,defaultOpen:true,
-        onAdd:()=>onAddScene&&onAddScene(scenes.length?scenes[scenes.length-1].id:null)},
+        onAdd:readOnly?null:()=>onAddScene&&onAddScene(scenes.length?scenes[scenes.length-1].id:null)},
         acts.map(a=>
           React.createElement("div",{key:a.act,className:"tree-act"},
             React.createElement("div",{className:"tree-act-head",onClick:()=>setOpen(o=>({...o,[a.act]:!o[a.act]}))},
@@ -614,11 +614,11 @@ function LeftRail({ project, characters, scenes, selId, selChar, onSelect, onSel
               a.scenes.map(s=>{
                 const { flagged } = turnInfo(s);
                 const dotcol = s.closeCharge>0?"var(--pos)":s.closeCharge<0?"var(--neg)":"var(--txt-3)";
-                return React.createElement("div",{key:s.id,draggable:true,
-                  onDragStart:(e)=>{ setDragId(s.id); e.dataTransfer.effectAllowed="move"; },
-                  onDragOver:(e)=>{ e.preventDefault(); if(overId!==s.id) setOverId(s.id); },
+                return React.createElement("div",{key:s.id,draggable:!readOnly,
+                  onDragStart:(e)=>{ if(readOnly){ e.preventDefault(); return; } setDragId(s.id); e.dataTransfer.effectAllowed="move"; },
+                  onDragOver:(e)=>{ if(readOnly) return; e.preventDefault(); if(overId!==s.id) setOverId(s.id); },
                   onDragEnd:()=>{ setDragId(null); setOverId(null); },
-                  onDrop:(e)=>{ e.preventDefault(); if(dragId&&dragId!==s.id&&onReorder) onReorder(idxOf(dragId), idxOf(s.id)); setDragId(null); setOverId(null); },
+                  onDrop:(e)=>{ if(readOnly) return; e.preventDefault(); if(dragId&&dragId!==s.id&&onReorder) onReorder(idxOf(dragId), idxOf(s.id)); setDragId(null); setOverId(null); },
                   className:`tree-scene ${s.id===selId?"sel":""} ${overId===s.id&&dragId&&dragId!==s.id?"dragover":""}`,
                   onClick:()=>onSelect(s.id)},
                   React.createElement("span",{className:"tree-scene-no"},String(s.no).padStart(2,"0")),
@@ -627,7 +627,7 @@ function LeftRail({ project, characters, scenes, selId, selChar, onSelect, onSel
                   flagged && React.createElement("span",{className:"tree-flag",title:"Doesn't turn"},
                     React.createElement(Icon.alert,{s:12})));
               }),
-              onAddScene && React.createElement("div",{className:"tree-scene",style:{color:"var(--txt-3)",fontStyle:"italic"},
+              onAddScene && !readOnly && React.createElement("div",{className:"tree-scene",style:{color:"var(--txt-3)",fontStyle:"italic"},
                 onClick:()=>onAddScene(a.scenes.length?a.scenes[a.scenes.length-1].id:(scenes.length?scenes[scenes.length-1].id:null))},
                 React.createElement("span",{className:"tree-scene-no"}),
                 React.createElement("span",{style:{display:"flex",color:"var(--txt-3)"}},React.createElement(Icon.plus,{s:12})),

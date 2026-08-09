@@ -564,6 +564,23 @@ function App(){
   const _projRow = (projects||[]).find(p=>p.id===currentProjectId) || null;
   const shareRole = (_projRow && _projRow.shareRole) || (_projRow && _projRow.isOwner ? "owner" : "");
   const readOnlyShare = shareRole === "view_only";
+  /* LIVE mutation boundary for view-only collaborators. Disabled controls are the
+     visible contract; every Writers' Room setter/async apply path also checks this
+     ref so keyboard/programmatic calls and results already in flight cannot alter
+     local story state that RLS will never persist. */
+  const readOnlyShareRef = React.useRef(false);
+  readOnlyShareRef.current = readOnlyShare;
+  const readOnlyNoticeRef = React.useRef(0);
+  const canMutateSharedFilm = ()=>{
+    if(!readOnlyShareRef.current) return true;
+    const now = Date.now();
+    if(now-(readOnlyNoticeRef.current||0)>2500){
+      readOnlyNoticeRef.current = now;
+      if(typeof window.appToast==="function")
+        window.appToast("View-only access — ask the owner for Writer access to make changes.","error");
+    }
+    return false;
+  };
   /* PRESENCE — who else has this film open. Joins a Realtime channel per film and leaves
      on switch/sign-out. Purely additive: if Realtime isn't enabled the list stays empty
      and nothing renders, so this can never break the app for a solo user. */
@@ -719,7 +736,7 @@ function App(){
     [scenes, drafts, slugUnitsOv]);
   // the CONTINUITY GRAPH, exposed for prompt builders that have no props/scenes/locations
   // params (e.g. the location plate folds in the environment props it owns — locations.jsx)
-  React.useEffect(()=>{ window.turnContinuity = { props, scenes, locations, characters, drafts, sluglineUnits }; },[props, scenes, locations, characters, drafts, sluglineUnits]);
+  React.useEffect(()=>{ window.turnContinuity = { props, scenes, locations, characters, drafts, beatsMap, shots, sluglineUnits }; },[props, scenes, locations, characters, drafts, beatsMap, shots, sluglineUnits]);
   React.useEffect(()=>{
     window.turnAttachPropReference = (propId, ref)=>{
       if(!propId || !ref || !ref.url) return false;
@@ -795,7 +812,8 @@ function App(){
     setShots(d.shots||[]);
     setProject(d.project||(isAdmin?PROJECT:{ title:"Untitled film", genre:"", logline:"", controllingIdea:{} }));
     setDrafts(d.drafts||(isAdmin?SCREENPLAY:{}));
-    setBeatsMap(d.beatsMap||(isAdmin?BEATS:{}));
+    const loadedBeats=d.beatsMap||(isAdmin?BEATS:{});
+    setBeatsMap((typeof withBeatMapIdentity==="function")?withBeatMapIdentity(loadedBeats):loadedBeats);
     setHistory(d.history||{});
     setContinuityMap(d.continuityMap||(isAdmin?(CONTINUITY||{}):{}));
     // restore YOUR last scene (device-local) when it still exists in this film; the doc's
@@ -1536,7 +1554,8 @@ function App(){
   const resetStory = ()=>{
     if(!isAdmin) return;   // the Matrix sample is admin-only — belt & braces behind the hidden menu item
     clearStory();
-    setScenes(SCENES); setCharacters(CHARACTERS); setProps((window.PROPS_SEED||[])); setLocations([]); setShots([]); setProject(PROJECT); setDrafts(SCREENPLAY); setBeatsMap(BEATS);
+    setScenes(SCENES); setCharacters(CHARACTERS); setProps((window.PROPS_SEED||[])); setLocations([]); setShots([]); setProject(PROJECT); setDrafts(SCREENPLAY);
+    setBeatsMap((typeof withBeatMapIdentity==="function")?withBeatMapIdentity(BEATS):BEATS);
     setHistory({}); setContinuityMap(CONTINUITY||{}); setSelId("s4"); setSelChar(null); setPropsSeeded(false); setLocsSeeded(false); setVisualsSeeded(false);
   };
 
@@ -1551,10 +1570,14 @@ function App(){
   const startNewStory = ()=>{ if(!planActive()){ requirePlan("start a story"); return; } setNewStoryOpen(true); };
 
   // ---- character handlers ----
-  const updateCharacter = (id,patch)=>setCharacters(cs=>cs.map(c=>c.id===id?{...c,...patch}:c));
+  const updateCharacter = (id,patch)=>{
+    if(!canMutateSharedFilm()) return;
+    setCharacters(cs=>cs.map(c=>c.id===id?{...c,...patch}:c));
+  };
   // add a character BY HAND (not from the script) — gets a manual flag so its sheet
   // generation is spec-gated like hand-added props/locations.
   const addCharacter = ()=>{
+    if(!canMutateSharedFilm()) return null;
     const id = "char-"+Date.now().toString(36);
     setCharacters(cs=>[...cs, { id, name:"New character", role:"",
       color:"linear-gradient(135deg,#6a6f7a,#262a30)", conscious:"", unconscious:"", arc:"", manual:true }]);
@@ -1564,6 +1587,7 @@ function App(){
   // new character ready to type (name, role and pronouns are edited right there).
   const addCharacterAndSelect = ()=>{
     const id = addCharacter();
+    if(!id) return;
     setSelChar(id); setInspOpen(true);
   };
   // SOFT DELETE: move the full character into the restore bin (its scenes are scene-side
@@ -1589,12 +1613,12 @@ function App(){
   };
   const [charDrafting, setCharDrafting] = React.useState(null);
   const draftCharacter = async (ch)=>{
-    if(charDrafting) return;
+    if(!canMutateSharedFilm() || charDrafting) return;
     setCharDrafting(ch.id);
     const driven = scenes.filter(s=>s.driver===ch.id);
     try{
       const res = (typeof aiDraftCharacter==="function") ? await aiDraftCharacter(ch, driven, project, { scenes, drafts }) : null;
-      if(res) updateCharacter(ch.id, res);
+      if(res && canMutateSharedFilm()) updateCharacter(ch.id, res);
     }catch(e){}
     setCharDrafting(null);
   };
@@ -2345,7 +2369,16 @@ function App(){
   // ---- Art Room: SHOT LIST ----
   // A shot = one beat. "Draft all shots" derives the shot breakdown for every scene
   // that doesn't have one yet (non-destructive); per-scene re-draft replaces one scene.
-  const updateShot = (id,patch)=> setShots(ss=>ss.map(s=>s.id===id?{...s,...patch}:s));
+  const updateShot = (id,patch)=> setShots(ss=>ss.map(s=>{
+    if(s.id!==id) return s;
+    const next={...s,...patch};
+    const before=(typeof shotSpecFingerprint==="function")?shotSpecFingerprint(s):"";
+    const after=(typeof shotSpecFingerprint==="function")?shotSpecFingerprint(next):"";
+    next.specRev=(typeof shotSpecRevision==="function")?shotSpecRevision(s):(Math.max(1,Number(s.specRev)||1));
+    if(before!==after) next.specRev++;
+    next.specHash=after;
+    return next;
+  }));
   const deleteShot = (id)=>{
     const sh = (shots||[]).find(x=>x.id===id); if(!sh) return;
     setShots(ss=>ss.filter(s=>s.id!==id));
@@ -2441,7 +2474,8 @@ function App(){
       size:"MS", angle:"eye", move:"static", lens:"50", composition:"",
       subjects:(sc&&sc.driver)?[sc.driver]:[], locationId:loc?loc.id:"", props:[],
       action:(seed&&seed.action)||"", covers:(seed&&Array.isArray(seed.covers))?seed.covers:[],
-      dialogue:"", negativePrompt:"", manual:true }]);
+      dialogue:"", negativePrompt:"", manual:true, specRev:1,
+      specHash:"" }].map(s=>({...s,specHash:(typeof shotSpecFingerprint==="function")?shotSpecFingerprint(s):""})));
   };
   const completeDraftedShotCoverage = (scene, list)=>{
     const bm = (beatsMap||{})[scene.id] || {};
@@ -2558,6 +2592,62 @@ function App(){
   // distinct visual event); the beat's current shot(s) are replaced (confirmed
   // first). Writing-model credits only; frames render separately in chain order.
   const [splittingBeat, setSplittingBeat] = React.useState(null);
+  const [refiningBeat, setRefiningBeat] = React.useState(null);
+  // SCREENPLAY → MICRO-BEATS: re-read one screenplay section and update that
+  // beat's plan/shot specs without replacing shot ids. Generated frames and video
+  // takes are keyed by those ids, so they remain intact; newly exposed actions
+  // with no mapped shot appear as "uncovered — add shot" in the beat card.
+  const refineBeatFromScreenplay = async (scene, beatN)=>{
+    const key=scene&&scene.id+"#"+beatN;
+    if(!scene || refiningBeat || splittingBeat) return;
+    const draft=drafts[scene.id];
+    const hasScript=!!(draft&&Array.isArray(draft.blocks)&&draft.blocks.some(b=>Number(b.beat)===Number(beatN)&&b.type!=="scene"));
+    if(!hasScript){ if(window.appToast) window.appToast("Write this beat's screenplay section before refining its micro-beats.","error"); return; }
+    const existing=shots.filter(x=>x.sceneId===scene.id&&Number(x.beatN)===Number(beatN))
+      .sort((a,b)=>(a.order||0)-(b.order||0));
+    if(!existing.length){ if(window.appToast) window.appToast("This beat has no shots to remap yet. Add a shot or re-draft the scene first.","error"); return; }
+    let ok=true;
+    if(typeof window.appConfirm==="function") ok=await window.appConfirm({
+      title:"Refine beat "+beatN+" from its screenplay?",
+         body:"This re-derives the beat's ordered micro-beats and remaps its existing shot specifications. Logical shot IDs and Director notes stay in place, but frames and takes rendered from the old specification will be marked stale. Any newly exposed action without a shot will be marked uncovered.",
+      confirmLabel:"Refine micro-beats",cancelLabel:"Cancel"});
+    if(!ok) return;
+    setRefiningBeat(key);
+    try{
+      const raw=typeof aiDraftShots==="function"
+        ? await aiDraftShots(scene,beatsMap,drafts,locations,props,characters,lbProject("shots"),{beatN,refine:true}) : null;
+      const rows=(raw||[]).filter(r=>Number(r.beat)===Number(beatN));
+      const plan=(rows.map(r=>r.beatPlan).find(p=>p&&Array.isArray(p.micro))||null);
+      if(!rows.length||!plan||!plan.micro.length) throw new Error("The screenplay refinement returned no usable micro-beat plan.");
+      const oldPlan=existing.map(s=>s.beatPlan).find(Boolean)||{};
+      const finalPlan={ micro:plan.micro, protect:plan.protect||oldPlan.protect||"" };
+      // Preserve the current number/order/ids of setups, but update their specs from
+      // the screenplay-derived coverage. Then ask the ONE canonical coverage matcher
+      // to remap those preserved setups onto the new micro-plan; anything it cannot
+      // justify remains uncovered in the existing add-shot UI.
+       const sourceScreenplayRev=(typeof screenplayBeatRevision==="function")?screenplayBeatRevision(draft,beatN):"";
+       const remapped=existing.map((sh,idx)=>{
+        const ri=Math.min(rows.length-1,Math.floor(idx*rows.length/existing.length));
+        const n=normalizeShot(rows[ri],scene,idx,locations,props,characters,beatsMap);
+         const next={ ...sh, size:n.size,angle:n.angle,move:n.move,lens:n.lens,
+          composition:n.composition,subjects:n.subjects,props:n.props,action:n.action,
+          dialogue:n.dialogue,locationSide:n.locationSide,covers:[],
+           purpose:n.purpose,priority:n.priority,beatPlan:finalPlan,sourceScreenplayRev };
+         const changed=(typeof shotSpecFingerprint==="function")&&shotSpecFingerprint(sh)!==shotSpecFingerprint(next);
+         next.specRev=(typeof shotSpecRevision==="function"?shotSpecRevision(sh):(Number(sh.specRev)||1))+(changed?1:0);
+         next.specHash=(typeof shotSpecFingerprint==="function")?shotSpecFingerprint(next):"";
+         return next;
+      });
+      const coverage=(typeof window.microCoverage==="function")
+        ? window.microCoverage(remapped,finalPlan.micro,{force:true}) : {map:{}};
+      setShots(ss=>ss.map(sh=>{
+        const n=remapped.find(x=>x.id===sh.id); if(!n) return sh;
+        return { ...n, covers:Array.from((coverage.map&&coverage.map[sh.id])||[]) };
+      }));
+       if(window.appToast) window.appToast("Beat "+beatN+" refined. Logical shot IDs were preserved; media from changed shot specifications is now marked stale.","ok");
+    }catch(e){ if(window.appToast) window.appToast(String((e&&e.message)||"Beat refinement failed."),"error"); }
+    setRefiningBeat(null);
+  };
   const splitBeatCoverage = async (scene, beatN)=>{
     if(splittingBeat || !scene) return;
     const existing = shots.filter(x=>x.sceneId===scene.id && x.beatN===beatN);
@@ -2739,12 +2829,15 @@ function App(){
   // (because that write is a bare try/catch) saves then failed silently forever.
   const HISTORY_MAX = 12;
   const commitVersion = (id, next)=>{
+    if(!canMutateSharedFilm()) return false;
     const prev = drafts[id];
     if(prev) setHistory(h=>{ const e=h[id]||{back:[],fwd:[]};
       return {...h,[id]:{ back:[...e.back, prev].slice(-HISTORY_MAX), fwd:[] }}; });
     setDrafts(d=>({...d,[id]:next}));
+    return true;
   };
   const revertVersion = (id)=>{
+    if(!canMutateSharedFilm()) return;
     const e = history[id]; if(!e||!e.back.length) return;
     const prev = e.back[e.back.length-1];
     const cur = drafts[id];
@@ -2752,6 +2845,7 @@ function App(){
     setDrafts(d=>({...d,[id]:prev}));
   };
   const redoVersion = (id)=>{
+    if(!canMutateSharedFilm()) return;
     const e = history[id]; if(!e||!e.fwd.length) return;
     const nextV = e.fwd[0];
     const cur = drafts[id];
@@ -2760,67 +2854,79 @@ function App(){
   };
 
   const draftOne = async (s)=>{
-    if(drafts[s.id]) return;
-    const i = scenes.findIndex(x=>x.id===s.id);
-    setDrafting({ i:i<0?0:i, total:scenes.length, one:true });
+    if(!canMutateSharedFilm() || drafts[s.id]) return;
+    const ordered=scenesInStoryOrder(scenes);
+    const i = ordered.findIndex(x=>x.id===s.id);
+    const prev=i>0?ordered[i-1]:null;
+    setDrafting({ i:i<0?0:i, total:ordered.length, one:true });
     let scn = s, beats = beatsMap[s.id];
     // a beats-less scene: author the whole scene (summary, charge, beats) first
     // the film this draft belongs to — a scene written after the user switches films
     // must not land in the new one (scene ids repeat across films)
     const owner = currentProjectId;
     if(!beats && typeof aiAuthorScene==="function" && aiAvailable()){
-      const authored = await aiAuthorScene(s, i>0?scenes[i-1]:null, characters);
-      if(owner !== projIdRef.current){ setDrafting(null); return; }
+      const authored = await aiAuthorScene(s, prev, characters, project);
+      if(owner !== projIdRef.current || !canMutateSharedFilm()){ setDrafting(null); return; }
       if(authored){
         scn = {...s, ...authored.patch}; beats = authored.beats;
         setScenes(ss=>ss.map(x=>x.id===s.id?{...x,...authored.patch}:x));
         setBeatsFor(s.id, authored.beats);
       }
     }
-    const res = await aiDraftScene(scn, beats, i>0?scenes[i-1]:null);
-    if(owner !== projIdRef.current){ setDrafting(null); return; }
+    const res = await aiDraftScene(scn, beats, prev, project);
+    if(owner !== projIdRef.current || !canMutateSharedFilm()){ setDrafting(null); return; }
     setDrafts(d=>({...d,[s.id]:res}));
     setDrafting(null);
   };
   const draftAll = async ()=>{
-    if(draftingRef.current) return;
+    if(!canMutateSharedFilm() || draftingRef.current) return;
     draftingRef.current = true;
-    const tot = scenes.length;
+    // One canonical, mutable story-order snapshot for the whole run. When authoring
+    // fills a blank scene, patch this working sequence before drafting its successor
+    // so continuity never reads the stale render-closure scene.
+    const working = scenesInStoryOrder(scenes).map(s=>({...s}));
+    const tot = working.length;
     const have = {...drafts};
     const owner = currentProjectId;   // abort the whole run if the user switches films
-    for(let i=0;i<tot;i++){
-      if(owner !== projIdRef.current) break;
-      const s = scenes[i];
-      setDrafting({ i, total:tot });
-      if(have[s.id]) continue;
-      let scn = s, beats = beatsMap[s.id];
-      if(!beats && typeof aiAuthorScene==="function" && aiAvailable()){
-        const authored = await aiAuthorScene(s, i>0?scenes[i-1]:null, characters);
-        if(owner !== projIdRef.current) break;
-        if(authored){
-          scn = {...s, ...authored.patch}; beats = authored.beats;
-          setScenes(ss=>ss.map(x=>x.id===s.id?{...x,...authored.patch}:x));
-          setBeatsFor(s.id, authored.beats);
+    try{
+      for(let i=0;i<tot;i++){
+        if(owner !== projIdRef.current || readOnlyShareRef.current) break;
+        const s = working[i], prev=i>0?working[i-1]:null;
+        setDrafting({ i, total:tot });
+        if(have[s.id]) continue;
+        let scn = s, beats = beatsMap[s.id];
+        if(!beats && typeof aiAuthorScene==="function" && aiAvailable()){
+          const authored = await aiAuthorScene(s, prev, characters, project);
+          if(owner !== projIdRef.current || readOnlyShareRef.current) break;
+          if(authored){
+            scn = {...s, ...authored.patch}; working[i]=scn; beats = authored.beats;
+            setScenes(ss=>ss.map(x=>x.id===s.id?{...x,...authored.patch}:x));
+            setBeatsFor(s.id, authored.beats);
+          }
         }
+        const res = await aiDraftScene(scn, beats, prev, project);
+        if(owner !== projIdRef.current || readOnlyShareRef.current) break;
+        have[s.id] = res;
+        setDrafts(d=>({...d,[s.id]:res}));
       }
-      const res = await aiDraftScene(scn, beats, i>0?scenes[i-1]:null);
-      if(owner !== projIdRef.current) break;
-      have[s.id] = res;
-      setDrafts(d=>({...d,[s.id]:res}));
+      setDrafting({ i:tot, total:tot });
+      setTimeout(()=>setDrafting(null), 320);
+    } finally {
+      draftingRef.current = false;
     }
-    setDrafting({ i:tot, total:tot });
-    setTimeout(()=>setDrafting(null), 320);
-    draftingRef.current = false;
   };
   // polish: regenerate one scene's prose as genuinely new final text (beats locked)
   const [polishBusy, setPolishBusy] = React.useState(null);
   const polishScene = async (s, beatsForScene)=>{
+    if(!canMutateSharedFilm()) return false;
     setPolishBusy({ no:s && s.no });
-    const i = scenes.findIndex(x=>x.id===s.id);
+    const ordered=scenesInStoryOrder(scenes);
+    const i = ordered.findIndex(x=>x.id===s.id);
+    const prev=i>0?ordered[i-1]:null;
     try{
-      const structural = autoDraftScene(s, beatsForScene, i>0?scenes[i-1]:null);
-      const res = await aiPolishScene(s, beatsForScene, structural.blocks, i>0?scenes[i-1]:null);
-      if(res){ commitVersion(s.id, res); return true; }
+      const structural = autoDraftScene(s, beatsForScene, prev);
+      const res = await aiPolishScene(s, beatsForScene, structural.blocks, prev, project);
+      if(res && canMutateSharedFilm()){ return commitVersion(s.id, res); }
       return false; // fall back to seed prose animation
     }catch(e){
       return false;
@@ -2856,6 +2962,7 @@ function App(){
      Offer to RECAST the scene's subtext for the new driver; the screenplay is
      then rebuilt with "Redraft script from beats" so nothing rewrites unseen. */
   const _offerDriverRecast = async (sceneId, oldId, newId)=>{
+    if(!canMutateSharedFilm()) return;
     const scn = scenes.find(s=>s.id===sceneId); if(!scn) return;
     const b = beatsMap[sceneId];
     if(!b || !b.rows || !b.rows.length) return;
@@ -2868,11 +2975,11 @@ function App(){
     if(!ok) return;
     setRecastBusy({ no:scn.no, name:NEW });
     try{
-      const res = await window.aiRecastDriver(scn, b, characters, newId, oldId);
-      if(res){
+      const res = await window.aiRecastDriver(scn, b, characters, newId, oldId, project);
+      if(res && canMutateSharedFilm()){
         updateScene(sceneId, { ...(res.summary?{summary:res.summary}:{}), ...(res.objective?{objective:res.objective}:{}) });
         setBeatsMap(m=>{ const cur=m[sceneId]||b; return { ...m, [sceneId]:{ ...cur, driverLabel:NEW,
-          desire:res.desire||cur.desire, obstacle:res.obstacle||cur.obstacle, rows:res.rows||cur.rows } }; });
+          desire:res.desire||cur.desire, obstacle:res.obstacle||cur.obstacle, result:res.result||cur.result, rows:res.rows||cur.rows } }; });
         if(typeof window.appToast==="function")
           window.appToast("Scene "+scn.no+" recast for "+NEW+" \u2014 review the beats, then \u2018Redraft script from beats\u2019 to rebuild the screenplay.","ok");
       } else if(typeof window.appToast==="function")
@@ -2881,6 +2988,7 @@ function App(){
     setRecastBusy(null);
   };
   const updateScene = (id,patch)=>{
+    if(!canMutateSharedFilm()) return;
     const before = patch.driver ? ((scenes.find(s=>s.id===id)||{}).driver) : null;
     setScenes(ss=>ss.map(s=>s.id===id?{...s,...patch}:s));
     // the Beats tab's DRIVER label is a stored string — changing the scene's
@@ -2895,6 +3003,7 @@ function App(){
   };
   const onCharge = (field,val)=>updateScene(selId,{[field]:val});
   const addScene = (afterId)=>{
+    if(!canMutateSharedFilm()) return;
     const id = newId();
     setScenes(ss=>{
       const i = afterId!=null ? ss.findIndex(s=>s.id===afterId) : ss.length-1;
@@ -2912,6 +3021,7 @@ function App(){
     setSelId(id);
   };
   const deleteScene = (id)=>{
+    if(!canMutateSharedFilm()) return;
     const i = scenes.findIndex(s=>s.id===id);
     const remaining = scenes.filter(s=>s.id!==id);
     if(!remaining.length) return;
@@ -2926,12 +3036,19 @@ function App(){
     setContinuityMap(c=>{ if(!c || !c[id]) return c; const n={...c}; delete n[id]; return n; });
     setSelId(nxt ? nxt.id : null);
   };
-  const reorderScenes = (fromIdx,toIdx)=>setScenes(ss=>{
-    if(toIdx<0||toIdx>=ss.length||fromIdx===toIdx||fromIdx<0) return ss;
-    const out=ss.slice(); const [m]=out.splice(fromIdx,1); out.splice(toIdx,0,m); return renum(out);
-  });
+  const reorderScenes = (fromIdx,toIdx)=>{
+    if(!canMutateSharedFilm()) return;
+    setScenes(ss=>{
+      if(toIdx<0||toIdx>=ss.length||fromIdx===toIdx||fromIdx<0) return ss;
+      const out=ss.slice(); const [m]=out.splice(fromIdx,1); out.splice(toIdx,0,m); return renum(out);
+    });
+  };
   const moveScene = (id,dir)=>{ const i=scenes.findIndex(s=>s.id===id); reorderScenes(i,i+dir); };
-  const setBeatsFor = (sceneId,next)=>setBeatsMap(m=>({...m,[sceneId]:next}));
+  const setBeatsFor = (sceneId,next)=>{
+    if(!canMutateSharedFilm()) return;
+    const identified=(typeof withBeatIdentity==="function")?withBeatIdentity(next,sceneId):next;
+    setBeatsMap(m=>({...m,[sceneId]:identified}));
+  };
 
   const onFixScene = (scene)=>{
     const target = scene.openCharge >= 0 ? Math.max(-3, scene.openCharge-2) : Math.min(3, scene.openCharge+2);
@@ -2966,6 +3083,10 @@ function App(){
     // the film this run belongs to — captured when the agent starts
     const ownerProjectId = currentProjectId;
     const sync = ()=>{
+      if(readOnlyShareRef.current){
+        try{ emit && emit({k:"flag", t:"Your access is view-only, so these proposed changes were NOT applied. Ask the owner for Writer access."}); }catch(e){}
+        return;
+      }
       // WRONG-FILM GUARD: an agent run takes minutes and the film switcher stays live.
       // Unguarded, a run that finished after a switch wrote its captured scenes, drafts,
       // beats, characters and project straight into whatever film was now open — and the
@@ -2991,7 +3112,7 @@ function App(){
         }
         setProject({...model.project});
       }
-      setBeatsMap({...model.beats});
+      setBeatsMap((typeof withBeatMapIdentity==="function")?withBeatMapIdentity(model.beats):{...model.beats});
       setDrafts({...model.drafts});
       setContinuityMap(Object.fromEntries(Object.entries(model.continuity).map(([k,v])=>[k,{...v}])));
     };
@@ -3004,18 +3125,18 @@ function App(){
         props: props.map(p=>({...p})),
         locations: locations.map(l=>({...l})),
         shots: (shots||[]).map(s=>({...s})),
-        patchProp:(id,patch)=> setProps(ps=>ps.map(p=>p.id===id?{...p,...patch}:p)),
-        patchLocation:(id,patch)=> setLocations(ls=>ls.map(l=>l.id===id?{...l,...patch}:l)),
+        patchProp:(id,patch)=>{ if(!readOnlyShareRef.current) setProps(ps=>ps.map(p=>p.id===id?{...p,...patch}:p)); },
+        patchLocation:(id,patch)=>{ if(!readOnlyShareRef.current) setLocations(ls=>ls.map(l=>l.id===id?{...l,...patch}:l)); },
       },
       ai:{ available: (typeof aiAvailable==="function" && aiAvailable()),
-        suggestTurn:(s,p)=>window.aiSuggestTurn(s,p),
+        suggestTurn:(s,p)=>window.aiSuggestTurn(s,p,model.project),
         plantLine:(s,f,m)=>window.aiPlantLine(s,f,m),
-        tableRead:(sc,dr)=>window.aiTableRead(sc,dr),
+        tableRead:(sc,dr)=>window.aiTableRead(sc,dr,model.project),
         voiceCheck:(sc,dr)=>window.aiVoiceCheck(sc,dr),
         buildSpine:(b)=>window.aiBuildSpine(b, (project&&project.format)||"film", (project&&project.framework)||"threeact"),
         buildStoryWorld:(b,sp)=>window.aiBuildStoryWorld(b,sp),
-        authorScene:(s,p)=>window.aiAuthorScene(s,p,model.characters),
-        draftScene:(s,b,p)=>window.aiDraftScene(s,b,p),
+        authorScene:(s,p)=>window.aiAuthorScene(s,p,model.characters,model.project),
+        draftScene:(s,b,p)=>window.aiDraftScene(s,b,p,model.project),
       } };
   };
 
@@ -3453,13 +3574,14 @@ function App(){
 
   // restore the most recent pre-run snapshot
   const undoLastAgent = ()=>{
+    if(!canMutateSharedFilm()) return;
     setAgentUndo(st=>{
       if(!st.length) return st;
       const snap = st[st.length-1];
       setScenes(snap.scenes.map(s=>({...s})));
       if(snap.characters) setCharacters(snap.characters.map(c=>({...c})));
       if(snap.project) setProject({...snap.project});
-      setBeatsMap({...snap.beats});
+      setBeatsMap((typeof withBeatMapIdentity==="function")?withBeatMapIdentity(snap.beats):{...snap.beats});
       setDrafts({...snap.drafts});
       setContinuityMap(Object.fromEntries(Object.entries(snap.continuity).map(([k,v])=>[k,{...v}])));
       const ids = new Set(snap.scenes.map(s=>s.id));
@@ -3571,18 +3693,18 @@ function App(){
       authOpen && React.createElement(AuthModal,{ initialMode:authMode, plan:intendedPlan, light:true,
         onClose:()=>setAuthOpen(false), onAuthed:(s)=>{ if(s) setSession(s); } }),
       (typeof MuseDock!=="undefined") && React.createElement(MuseDock,{
-        scenes:[], selScene:null, signedIn:false, aiOn:false, onSignIn:()=>openAuth("signup") }));
+      scenes:[], selScene:null, project:null, signedIn:false, aiOn:false, onSignIn:()=>openAuth("signup") }));
   }
 
   return React.createElement("div",{className:`app vp-${vp} ${densClass} ${premiumClass}`+(readOnlyShare?" is-readonly":"")},
     window.ConfirmHost && React.createElement(window.ConfirmHost,null),
     /* VIEW-ONLY BANNER — say it UP FRONT. RLS rejects this user's writes, so without a
        standing notice they could work for an hour and only discover it from a failed save. */
-    readOnlyShare && React.createElement("div",{className:"readonly-banner"},
+    readOnlyShare && React.createElement("div",{className:"readonly-banner",role:"status"},
       React.createElement(Icon.eye||Icon.warn,{s:13}),
       React.createElement("span",null,
         React.createElement("b",null,"View-only access — "),
-        "you can open and read this film, but nothing you change here is saved. Ask the owner for Writer access to edit it.")),
+        "you can navigate, inspect, export and play this film. Editing and AI-write actions are disabled. Ask the owner for Writer access to edit it.")),
     // the post-checkout welcome card (/?welcome=1): live-updates as the webhook's
     // grant streams into the balance; its CTA goes straight to New Story
     welcomeOpen && session && window.WelcomePlanCard && React.createElement(window.WelcomePlanCard,{
@@ -3696,11 +3818,11 @@ function App(){
       onToggleInsp:toggleInsp}),
 
     // the room's view tabs, moved out of the top bar to a full-width bar beneath it
-    room!=="stage" && React.createElement(ViewNav,{room,view,setView,artView,setArtView,staleTabs,
+    room!=="stage" && React.createElement(ViewNav,{room,view,setView,artView,setArtView,staleTabs,readOnly:readOnlyShare,
       hiddenTabs:(typeof tabHidden==="function") ? Object.fromEntries((window.ART_TABS||[]).map(t=>[t.id, tabHidden(project, t.id)])) : null,
       railOpen,inspOpen,onToggleRail:toggleRail,onToggleInsp:toggleInsp,
       onCoordinate:async ()=>{ if(await requireStory("Art Department Coordinator")) setCoordConfirm(true); },
-      onAgents:async ()=>{ if(await requireStory("Story Editors")) setAgentsOpen(true); }}),
+      onAgents:async ()=>{ if(!canMutateSharedFilm()) return; if(await requireStory("Story Editors")) setAgentsOpen(true); }}),
 
     authOpen && React.createElement(AuthModal,{ initialMode:authMode, plan:intendedPlan,
       onClose:()=>setAuthOpen(false),
@@ -3758,6 +3880,7 @@ function App(){
             onAddStyleRefImages:addStyleRefImages,onRemoveStyleRefImage:removeStyleRefImage,
             onDraftStaging:draftLocationStaging,draftingStageId,
             shots,beatsMap,onUpdateShot:updateShot,onAddShot:addShot,onDeleteShot:deleteShot,onSplitBeat:splitBeatCoverage,splittingBeat,
+            onRefineBeat:refineBeatFromScreenplay,refiningBeat,
             onDraftSceneShots:draftSceneShots,draftingSceneShots,onDraftAllShots:draftAllShots,draftingAllShots}))
         : React.createElement(React.Fragment,null,
       // scrim behind any open overlay drawer
@@ -3770,14 +3893,14 @@ function App(){
             onSelectChar:(id)=>{ setSelChar(id); setInspOpen(true); setRailOpen(false); },
             onAddCharacter:addCharacterAndSelect,
             showFramework:t.framework,onCollapse:()=>setRailOpen(false),
-            onAddScene:addScene,onReorder:reorderScenes,compact:!wide}))
+            onAddScene:addScene,onReorder:reorderScenes,compact:!wide,readOnly:readOnlyShare}))
         : (railOpen
           ? React.createElement(LeftRail,{project,characters,scenes,selId,selChar,
               onSelect:selectScene,
               onSelectChar:(id)=>{ setSelChar(id); setInspOpen(true); },
               onAddCharacter:addCharacterAndSelect,
               showFramework:t.framework,onCollapse:()=>setRailOpen(false),
-              onAddScene:addScene,onReorder:reorderScenes,compact:!wide})
+              onAddScene:addScene,onReorder:reorderScenes,compact:!wide,readOnly:readOnlyShare})
           : React.createElement(CollapsedStrip,{side:"left",label:"Story",icon:Icon.panelLeft,
               onExpand:()=>setRailOpen(true),flagCount:scenes.filter(s=>turnInfo(s).flagged).length}))),
 
@@ -3806,7 +3929,7 @@ function App(){
           characters,scenes,beatsMap,followId:followChar,onFollow:setFollowChar}),
         view==="spine" && scenes.length>0 && React.createElement(DragScroll,{className:"canvas-scroll spine-pan"},
           React.createElement(SpineCanvas,{scenes,selId,onSelect:selectSceneDetail,showFramework:t.framework,
-            onReorder:reorderScenes,onAddScene:addScene,runtimes:runtimeMap,
+            onReorder:reorderScenes,onAddScene:addScene,runtimes:runtimeMap,readOnly:readOnlyShare,
             follow:(()=>{ if(!followChar) return null;
               const c = characters.find(x=>x.id===followChar); if(!c) return null;
               const tl = characterThroughline(c, scenes, beatsMap);
@@ -3822,7 +3945,7 @@ function App(){
           drafts, scenes, onSelectScene:selectSceneBrowse, onPolish:polishScene,
           onDraftOne:draftOne, onDraftAll:draftAll, drafting, total:scenes.length,
           history: sel ? (history[sel.id]||{back:[],fwd:[]}) : {back:[],fwd:[]},
-          labelOf, onRevert:revertVersion, onRedo:redoVersion, onEditScene:commitVersion, continuityMap, project,
+          labelOf, onRevert:revertVersion, onRedo:redoVersion, onEditScene:commitVersion, continuityMap, project,readOnly:readOnlyShare,
           // click a beat in the Script gutter → reveal it in the Inspector's Beats tab
           onBeatFocus:(n)=>{ setSelChar(null); setInspTab("beats"); setFocusBeat(n);
             if(!inspDrawer) setInspOpen(true); }}),
@@ -3835,7 +3958,7 @@ function App(){
         const charObj = selChar ? characters.find(c=>c.id===selChar) : null;
         const inspectorEl = charObj
           ? React.createElement(CharacterPanel,{character:charObj, scenes,
-              onUpdate:updateCharacter, onDraft:draftCharacter, drafting:charDrafting===charObj.id,
+              onUpdate:updateCharacter, onDraft:draftCharacter, drafting:charDrafting===charObj.id,readOnly:readOnlyShare,
               onJumpScene:(id)=>selectScene(id), onClose:()=>setSelChar(null),
               onCollapse:()=>setInspOpen(false),
               onFollow:(id)=>{ setFollowChar(id); setView("spine");
@@ -3859,7 +3982,7 @@ function App(){
               },
               sceneIndex:scenes.findIndex(s=>s.id===selId),sceneCount:scenes.length,
               onCollapse:()=>setInspOpen(false),project,
-              tab:inspTab,onTab:setInspTab,focusBeat});
+              tab:inspTab,onTab:setInspTab,focusBeat,readOnly:readOnlyShare});
         return inspDrawer
           ? (inspOpen && inspectorEl)
           : (inspOpen
@@ -3869,7 +3992,7 @@ function App(){
       })())),
 
     // Agents — Writers' Room modal
-    agentsOpen && React.createElement(AgentsPanel,{
+    agentsOpen && !readOnlyShare && React.createElement(AgentsPanel,{
       onClose:()=>{ setAgentsOpen(false); setAgentLaunch(null); },
       onView:(v)=>{ setRoom("writers"); setView(v||"spine"); setAgentsOpen(false); setAgentLaunch(null); },
       ctxFactory:agentCtxFactory,
@@ -4019,7 +4142,7 @@ function App(){
     // (a few hand-written tastes + a sign-up nudge), so visitors get a feel without the
     // full studio. signedIn flips the mode; onSignIn opens the auth modal.
     (typeof MuseDock!=="undefined") && React.createElement(MuseDock,{
-      scenes, selScene:sel, signedIn: !!session, onSignIn:()=>setAuthOpen(true),
+      scenes, selScene:sel, project, signedIn: !!session, onSignIn:()=>setAuthOpen(true),
       aiOn: (typeof aiAvailable==="function" && aiAvailable())}),
     // the floating WRITING-engine dock (mirror of the Art Room's image dock) —
     // wherever text models run: the Writers' Room and the Art Room
@@ -4030,7 +4153,7 @@ function App(){
     // Suppressed for Adaptation (full build-from-scratch): the toast is easy to miss
     // beneath the result modal, and the in-room "Undo last" still covers it.
     studioProgress && React.createElement(StudioProgressOverlay, studioProgress),
-    agentUndo.length>0 && agentUndo[agentUndo.length-1].label!=="Adaptation" && React.createElement("div",{className:"agent-undo"},
+    !readOnlyShare && agentUndo.length>0 && agentUndo[agentUndo.length-1].label!=="Adaptation" && React.createElement("div",{className:"agent-undo"},
       React.createElement("span",{className:"au-ic"},React.createElement(Icon.undo,{s:15})),
       React.createElement("div",{className:"au-text"},
         React.createElement("div",{className:"au-t"},agentUndo[agentUndo.length-1].label+" changed your story"),

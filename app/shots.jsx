@@ -1883,7 +1883,7 @@ function normalizeShot(raw, scene, idx, locations, props, characters, beats){
   };
   const action = specText(raw.action,300) || specText(beatAction,300) || specText(scene.summary,300);
   const sideRaw = String(raw.locationSide || raw.side || "").toUpperCase();
-  return {
+  const out = {
     id: "shot-"+scene.id+"-"+beatNo+"-"+Date.now().toString(36)+idx,
     sceneId: scene.id, beatN: beatNo, order: idx,
     size: pick(raw.size, sizeIds, "MS"),
@@ -1912,7 +1912,10 @@ function normalizeShot(raw, scene, idx, locations, props, characters, beats){
       : undefined,
     // no dur: a drafted shot stays on AUTO — its length can't be predicted, only
     // budgeted (dialogue-anchored estimate via shotDur); the user pins by hand
-    negativePrompt:""
+    negativePrompt:"",
+    specRev:1
   };
+  out.specHash = (typeof shotSpecFingerprint==="function") ? shotSpecFingerprint(out) : "";
+  return out;
 }
 window.normalizeShot = normalizeShot;
