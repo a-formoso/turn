@@ -1275,9 +1275,11 @@ function stageAssetRole(a, refs){
   if(a.kind==="video") return T+" is the previous clip — match its camera movement, pacing and continuity.";
   if(k==="frame") return T+" is the first frame — start from this exact composition.";
   if(k.indexOf("shotframe:")===0) return T+" is "+(label.toLowerCase()||"a later shot's frame")+" — anchor that shot's composition and blocking to it.";
+  if(k.indexOf("scene-shotframe:")===0) return T+" is a scene shot frame chosen by the director — use its composition, identity and continuity where the prompt mentions it.";
   if(k.indexOf("sb-half")===0 || k==="sb-sheet") return T+" is the storyboard for this clip — follow its composition, blocking and panel order.";
   if(k.indexOf("c:")===0) return T+" is "+(label.replace(/\s+reference$/i,"")||"the character")+"'s identity reference — keep their appearance exactly consistent.";
   if(k==="loc") return T+" is the "+(label||"location plate")+" — keep its geography and lighting.";
+  if(k.indexOf("scene-loc:")===0) return T+" is a scene location reference chosen by the director — preserve its geography, set dressing and lighting.";
   if(k.indexOf("p:")===0) return T+" is the "+(label||"prop")+" — keep this object's design consistent.";
   return T+" is "+(label||"a reference")+".";
 }
@@ -1745,8 +1747,75 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
       // package must show it or the user only learns at lip-sync time
       out.push({ key:"a:"+sh.id, kind:"audio", label:speaker+" line", url:u||"", ready:!!u, shotId:sh.id });
     });
+
+    /* The automatic package above stays CLIP-precise. The @ picker also needs the
+       wider scene palette so a director can deliberately bring an off-camera actor,
+       prop, alternate location plate, shot frame or recorded line into this render.
+       These rows are sceneOnly: ready assets are discoverable but OFF until chosen. */
+    const present = new Set(out.map(a=>a.kind+":"+(a.id||a.shotId||a.key)));
+    const addSceneAsset = (a)=>{
+      if(!a || !a.ready) return;
+      const sig = a.kind+":"+(a.id||a.shotId||a.key);
+      if(present.has(sig)) return;
+      present.add(sig);
+      out.push({ ...a, sceneOnly:true });
+    };
+    const sceneShots = [];
+    const seenShots = new Set();
+    (sceneClips||[]).forEach(sc=>((sc&&sc.data&&sc.data.shots)||[]).forEach(sh=>{
+      if(sh&&sh.id&&!seenShots.has(sh.id)){ seenShots.add(sh.id); sceneShots.push(sh); }
+    }));
+    if(_mRefs){
+      const rosterIds = (typeof sceneRoster==="function")
+        ? sceneRoster(scene, ctx.characters||[], ctx.drafts||{}, sceneShots)
+        : _uniq(sceneShots.flatMap(sh=>sh.subjects||[]));
+      const rosterSet = new Set(rosterIds);
+      rosterIds.forEach(id=>{ const c=(ctx.charById||{})[id]; const u=imgs[id];
+        if(c&&u) addSceneAsset({ key:"c:"+id, kind:"image", group:"Characters", label:(c.name||"Character")+" reference", url:u, ready:true, id,
+          assetRole:"master_reference", assetSourceQuality:"character_master_sheet" });
+      });
+
+      const scenePropIds = new Set();
+      (sceneClips||[]).forEach(sc=>((sc&&sc.data&&sc.data.props)||[]).forEach(p=>p&&p.id&&scenePropIds.add(p.id)));
+      (ctx.props||[]).forEach(p=>{
+        if(!p||!p.id) return;
+        if((Array.isArray(p.scenes)&&p.scenes.indexOf(scene.id)>=0) || (p.ownerId&&rosterSet.has(p.ownerId))) scenePropIds.add(p.id);
+      });
+      scenePropIds.forEach(id=>{
+        const p=(ctx.propById||{})[id]; if(!p) return;
+        const so=(typeof shotPropSheetId==="function") ? shotPropSheetId(p,scene,ctx.scenes||[]) : {id:p.id,state:null};
+        const co=(typeof custodyOwnerAt==="function") ? custodyOwnerAt(p,scene,ctx.scenes||[]) : {name:p.ownerName||""};
+        const sid=so.id||p.id, u=imgs[sid];
+        if(u) addSceneAsset({ key:"p:"+p.id, kind:"image", group:"Props", label:(p.name||"Prop")
+            +(so.state&&so.state.label?(" — "+so.state.label):"")
+            +(co.name?(" · "+((p.kind||"")==="worn"?"worn by ":"carried by ")+co.name):""),
+          url:u, ready:true, id:sid, assetRole:sid===p.id?"master_reference":"derived_reference",
+          assetSourceQuality:sid===p.id?"prop_master_sheet":"prop_state_sheet" });
+      });
+
+      const loc=(typeof locationForScene==="function") ? locationForScene(ctx.locations||[],scene.id) : d.loc;
+      if(loc){ const u=imgs[loc.id];
+        if(u) addSceneAsset({ key:"scene-loc:"+loc.id, kind:"image", group:"Locations", label:(loc.name||"Location")+" master plate", url:u, ready:true, id:loc.id,
+          assetRole:"master_reference", assetSourceQuality:"location_master_plate" });
+      }
+      (sceneClips||[]).forEach(sc=>{ const ls=sc&&sc.data&&sc.data.locSheet; if(!ls||!ls.id) return; const u=imgs[ls.id];
+        if(u) addSceneAsset({ key:"scene-loc:"+ls.id, kind:"image", group:"Locations", label:(ls.name||"Location")+(ls.role?(" · "+ls.role):"")+" coverage sheet", url:u, ready:true, id:ls.id,
+          assetRole:"derived_reference", assetSourceQuality:"location_coverage_full_frame" });
+      });
+      sceneShots.forEach((sh,i)=>{ const u=imgs[sh.id];
+        if(u) addSceneAsset({ key:"scene-shotframe:"+sh.id, kind:"image", group:"Shot frames", label:"Scene shot "+(i+1)+" frame", url:u, ready:true, id:sh.id,
+          assetRole:"shot_anchor", assetSourceQuality:"shot_frame_full_frame" });
+      });
+    }
+    if(_mAud) sceneShots.forEach(sh=>{
+      if(!String(sh&&sh.dialogue||"").trim()) return;
+      const u=auds[sh.id]; if(!u) return;
+      const exact=stageShotDialogueLine(scene,ctx.drafts,sh,ctx);
+      const speaker=(exact&&exact.speaker) || (sh.lineAudio&&sh.lineAudio.speaker) || "Character";
+      addSceneAsset({ key:"a:"+sh.id, kind:"audio", group:"Voices", label:speaker+" voice · "+_firstWords((exact&&exact.text)||sh.dialogue,6), url:u, ready:true, shotId:sh.id });
+    });
     return out;
-  }, [clip.id, activeShot.id, sourceMode, dialogueAudio, modelId, shotStartFrame, JSON.stringify((storyAssets.halves||[]).map(h=>h.id+":"+!!h.url)), storyAssets.top, storyAssets.bottom, storyAssets.sheet, prevVideo, prevVideoSafe, JSON.stringify(prevVideoMeta||{}), JSON.stringify(d.cast), JSON.stringify(d.props), d.loc&&d.loc.id, d.locSheet&&d.locSheet.id, JSON.stringify((sceneClips||[]).map(c2=>{ const dd=(c2&&c2.data)||{}; return (dd.cast||[]).map(x=>x.id).join(",")+"|"+(dd.props||[]).map(x=>x.id+":"+(x.sheetId||"")).join(","); })), imgs, auds]);
+  }, [clip.id, activeShot.id, sourceMode, dialogueAudio, modelId, shotStartFrame, JSON.stringify((storyAssets.halves||[]).map(h=>h.id+":"+!!h.url)), storyAssets.top, storyAssets.bottom, storyAssets.sheet, prevVideo, prevVideoSafe, JSON.stringify(prevVideoMeta||{}), JSON.stringify(d.cast), JSON.stringify(d.props), d.loc&&d.loc.id, d.locSheet&&d.locSheet.id, JSON.stringify((sceneClips||[]).map(sc=>{ const dd=(sc&&sc.data)||{}; return (sc&&sc.id||"")+"|"+(dd.cast||[]).map(x=>x.id).join(",")+"|"+(dd.props||[]).map(x=>x.id+":"+(x.sheetId||"")).join(",")+"|"+(dd.shots||[]).map(x=>x.id+":"+(x.dialogue||"")).join(",")+"|"+((dd.locSheet&&dd.locSheet.id)||""); })), imgs, auds]);
 
   // assets default ON when ready; user can toggle (off set). @tags number the INCLUDED
   // assets only — attachment order is what fal sees, so excluding @Image2 must renumber
@@ -1760,10 +1829,15 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   const imgFailed = (a)=> imgFail.has(a.key+"|"+(a.url||""));
   const noteImgFail = (a)=> setImgFail(s=>{ const k=a.key+"|"+(a.url||""); if(s.has(k)) return s; const n=new Set(s); n.add(k); return n; });
   const on = (a)=> a.ready && (a.sceneOnly ? extraOn.has(a.key) : !off.has(a.key));
-  const tagged = React.useMemo(()=>{ const n={text:0,image:0,video:0,audio:0};
-    return assets.map(a=>{
-      if(!on(a)) return { ...a, tag:"" };
-      n[a.kind]++; return { ...a, tag:"@"+a.kind+n[a.kind] }; }); }, [assets, off, extraOn]);
+  const tagged = React.useMemo(()=>{
+    const n={text:0,image:0,video:0,audio:0}, tags={};
+    // Scene-only choices append in the order the director chose them. Adding another
+    // scene asset therefore never renumbers an earlier hand-inserted @ token.
+    const base=assets.filter(a=>!a.sceneOnly&&on(a));
+    const extras=Array.from(extraOn).map(k=>assets.find(a=>a.sceneOnly&&a.key===k)).filter(a=>a&&on(a));
+    base.concat(extras).forEach(a=>{ n[a.kind]++; tags[a.key]="@"+a.kind+n[a.kind]; });
+    return assets.map(a=>({ ...a, tag:tags[a.key]||"" }));
+  }, [assets, off, extraOn]);
   const toggle = (a)=>{ if(a.locked||!a.ready) return;
     const set = a.sceneOnly ? setExtraOn : setOff;
     set(s=>{ const n=new Set(s); n.has(a.key)?n.delete(a.key):n.add(a.key); return n; }); };
@@ -1776,9 +1850,10 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     if(st==="excluded") return base+" · excluded, click to include";
     return base+" · missing; generate this source asset first";
   };
-  const onImages = tagged.filter(a=>a.kind==="image" && on(a));
-  const onVideos = tagged.filter(a=>a.kind==="video" && on(a));
-  const onAudios = tagged.filter(a=>a.kind==="audio" && on(a));
+  const tagOrder = (a)=>Number((String(a&&a.tag||"").match(/\d+$/)||[9999])[0]);
+  const onImages = tagged.filter(a=>a.kind==="image" && on(a)).sort((a,b)=>tagOrder(a)-tagOrder(b));
+  const onVideos = tagged.filter(a=>a.kind==="video" && on(a)).sort((a,b)=>tagOrder(a)-tagOrder(b));
+  const onAudios = tagged.filter(a=>a.kind==="audio" && on(a)).sort((a,b)=>tagOrder(a)-tagOrder(b));
   // the line-audio files that will REALLY attach (order = @AudioN order) — the recipes
   // number their lip-sync tags from this, so a deselected line drops out consistently
   const audioIncluded = onAudios.map(a=>a.shotId).filter(Boolean);
@@ -2086,12 +2161,18 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   const mentionables = (()=>{ const n={image:0,video:0,audio:0}, out=[];
     tagged.forEach(a=>{
       if(a.kind==="text" || n[a.kind]==null) return;
+      const group = a.group || (String(a.key).indexOf("c:")===0 ? "Characters"
+        : String(a.key).indexOf("p:")===0 ? "Props"
+        : a.key==="loc" || String(a.key).indexOf("scene-loc:")===0 ? "Locations"
+        : String(a.key).indexOf("scene-shotframe:")===0 ? "Shot frames"
+        : a.kind==="audio" ? "Voices" : "References");
       if(on(a)){ n[a.kind]++;
-        out.push({ t:stageAssetMention(a), label:String(a.label||""), kind:a.kind, url:String(a.url||""), key:a.key, included:true }); }
+        out.push({ t:stageAssetMention(a), label:String(a.label||""), kind:a.kind, url:String(a.url||""), key:a.key, assetKey:a.key, group, included:true }); }
       else if(a.ready)
-        out.push({ t:"@"+({image:"Image",video:"Video",audio:"Audio"}[a.kind])+(n[a.kind]+1), label:String(a.label||""), kind:a.kind, url:String(a.url||""), key:a.key, included:false });
+        out.push({ t:"@"+({image:"Image",video:"Video",audio:"Audio"}[a.kind])+(n[a.kind]+1), label:String(a.label||""), kind:a.kind, url:String(a.url||""), key:a.key, assetKey:a.key, group, included:false });
     });
     return out; })();
+  const availableMentionables = mentionables;
   // picking a NOT-yet-included asset from the dropdown includes it first (its token
   // has no meaning otherwise); returns false — and warns — when the input budget is full
   const includeMention = (m)=>{
@@ -2107,10 +2188,11 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     toggle(a);
     return true;
   };
+  const includeMentionAsset = includeMention;
   const [mentionBox, setMentionBox] = React.useState(null);  // {start, query, hi}
   const promptRef = React.useRef(null);                      // StageMentionEditor imperative API
   const mentionItems = (q)=>{ q=String(q||"").toLowerCase();
-    return mentionables.filter(m=>!q || m.t.toLowerCase().indexOf(q)>=0 || m.label.toLowerCase().indexOf(q)>=0).slice(0,8); };
+    return availableMentionables.filter(m=>!q || m.t.toLowerCase().indexOf(q)>=0 || m.label.toLowerCase().indexOf(q)>=0 || m.group.toLowerCase().indexOf(q)>=0).slice(0,12); };
   // the chip editor reports (text, absolute caret offset) — same @-token detection
   // the old textarea did against selectionStart
   const onPromptChange = (text, caret)=>{ const t = String(text||"").slice(0,PANEL_PROMPT_MAX);
@@ -2516,7 +2598,9 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   ].filter(x=>x[1]);
   // EVERY input reference shows in the strip (no +N overflow) — excluded ones dim,
   // clicking any chip still toggles it in/out of the render.
-  const composerAssets = tagged;
+  // Keep the compact strip beat-focused; scene-wide choices appear here once the
+  // director mentions/includes them instead of flooding every clip by default.
+  const composerAssets = tagged.filter(a=>!a.sceneOnly||on(a));
   const composerCredit = String(totalCost);   // the render's TOTAL cost, number only (balance lives in the footer)
   // each pill opens a dropdown of options — the inline alternative to the right panel.
   const composerMenus = [
@@ -2597,7 +2681,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
   },[trayOpen]);
   React.useEffect(()=>{ setTrayOpen(null); }, [clip.id]);
   const trayAssets = trayOpen==="elems"
-    ? tagged.filter(a=>String(a.key).indexOf("c:")===0 || a.key==="loc" || String(a.key).indexOf("p:")===0)
+    ? tagged.filter(a=>String(a.key).indexOf("c:")===0 || a.key==="loc" || String(a.key).indexOf("scene-loc:")===0 || String(a.key).indexOf("p:")===0)
     : tagged;
   const tray = trayOpen && trayPos && _stEl("div",{ref:trayRef,className:"stage2-asset-tray",style:{left:trayPos.left+"px",top:trayPos.top+"px"}},
     _stEl("b",{className:"stage2-tray-h"},
@@ -2696,8 +2780,10 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
     return ()=>{ document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
   }, [sdMenu]);
   React.useEffect(()=>{ setSdMenu(null); }, [clip.id]);
-  const insertToolbarMention = (tok)=>{
-    tok = String(tok||"").trim();
+  const insertToolbarMention = (m)=>{
+    if(!m) return;
+    if(!includeMentionAsset(m)) return;
+    const tok = String(m.t||"").trim();
     if(!tok) return;
     const api = promptRef.current;
     const cur = String(prompt||"");
@@ -2797,12 +2883,13 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
         _stEl(React.Fragment,null,_stEl("span",{className:"sdbar-at"},"@")),
         _stEl("div",{className:"sdbar-pop sdbar-pop-mention"},
           _stEl("label",null,'Use "@" to mention'),
-          mentionables.length
+          availableMentionables.length
             ? _stEl("div",{className:"sdbar-mention-list"},
-                mentionables.slice(0,8).map(m=>_stEl("button",{key:m.t,type:"button",onClick:()=>{ insertToolbarMention(m.t); setSdMenu(null); }},
+                availableMentionables.map(m=>_stEl("button",{key:m.assetKey+":"+m.t,type:"button",onClick:()=>{ insertToolbarMention(m); setSdMenu(null); }},
                   m.kind==="image" && m.url ? _stEl("img",{src:m.url,alt:""}) : _stEl("span",{className:"tile"},m.kind==="audio"?"♪":"▸"),
-                  _stEl("span",null,_stEl("b",null,m.t), _stEl("small",null,m.label)))))
-            : _stEl("div",{className:"sdbar-empty"},"No included references yet."),
+                  _stEl("span",null,_stEl("b",null,m.t), _stEl("small",null,m.label)),
+                  _stEl("em",{className:"sdbar-mention-group"},m.included?"Included":m.group))))
+            : _stEl("div",{className:"sdbar-empty"},"No scene references are ready yet."),
           _stEl("div",{className:"sdbar-addbox"},
             _stEl("button",{type:"button",onClick:()=>{ if(window.appToast) window.appToast("Upload new references from the Art Room asset tabs."); }},"↑ Upload from device"))))),
     _stEl("div",{className:"sdbar-right"},
@@ -3013,7 +3100,7 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
             _stEl("span",{className:"stage2-mention-main"},
               _stEl("b",null,m.t), m.label && _stEl("span",{className:"stage2-mention-label"},m.label)),
             _stEl("span",{className:"stage2-mention-kind"},
-              (m.kind==="image"?"Image":m.kind==="video"?"Video":"Audio")+(m.included===false?" · add":"")))))),
+              m.included?"Included":(m.group|| (m.kind==="image"?"Image":m.kind==="video"?"Video":"Audio"))))))),
       seedanceToolbar)),
       // (cancelling an in-flight render lives in the Render settings panel — "Cancel render";
       //  the REFERENCES-added-at-render preview lives in the panel's Inputs tab)
