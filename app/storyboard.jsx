@@ -31,6 +31,31 @@ function sbBeatRow(beatsMap, sh){
   const bm = (beatsMap||{})[sh.sceneId]; if(!bm) return null;
   return (bm.rows||[]).find(r=> String(r.n)===String(sh.beatN)) || null;
 }
+
+const SB_CONF_LABELS = ["Inner","Personal","Extra-personal"];
+function StoryboardSceneStyleChip({ project, sceneId }){
+  const preset = (typeof scenePreset==="function") ? scenePreset(project, sceneId) : null;
+  if(!preset) return _sbEl("span",{className:"shot-style-chip empty",
+    title:"No Style Bible preset assigned to this scene yet. Use the Styles tab to set one."},
+    _sbEl(Icon.layers,{s:11}),"No style preset");
+  const pal = (preset.palette||[]).slice(0,3);
+  const title = [preset.name||"Scene style",preset.grade,
+    preset.lighting?("Lighting: "+preset.lighting):"",
+    preset.lens?("Lens: "+preset.lens):"",
+    preset.texture?("Texture: "+preset.texture):""].filter(Boolean).join("\n");
+  return _sbEl("span",{className:"shot-style-chip",title},
+    _sbEl(Icon.layers,{s:11}),
+    _sbEl("span",{className:"shot-style-chip-text"},"Style: "+(preset.name||"Scene preset")),
+    !!pal.length && _sbEl("span",{className:"shot-style-swatches"},
+      pal.map((c,i)=>_sbEl("span",{key:i,className:"shot-style-swatch",style:{background:c}}))));
+}
+
+function StoryboardSceneCtxItem({ label, value }){
+  if(!value) return null;
+  return _sbEl("div",{className:"ssx-item"},
+    _sbEl("div",{className:"ssx-k"},label),
+    _sbEl("div",{className:"ssx-v"},value));
+}
 /* the names of the characters in a shot's frame */
 function sbInFrame(sh, ctx){
   const ids = (typeof inFrameCast==="function") ? inFrameCast(sh, ctx.scene, Object.values(ctx.charById||{})) : (sh.subjects||[]);
@@ -656,6 +681,7 @@ function StoryboardPage({ project, scene, page, pageCount, ctx, beatsMap, onView
 function StoryboardView({ project, scenes, shots, characters, props, locations, beatsMap, setArtView }){
   const [view, setView]   = React.useState(null);   // lightbox {url, character}
   const [frames, setFrames] = React.useState({});    // sheetId -> url (for the progress count)
+  const [jumpOpen, setJumpOpen] = React.useState(false);
 
   const ordered = React.useMemo(()=> scenesInStoryOrder(scenes), [scenes]);
   const shotsByScene = React.useMemo(()=>{
@@ -704,31 +730,36 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
   const totalSheets = allSheetIds.length;
   const readySheets = allSheetIds.filter(id=>frames[id]).length;
 
-  // per-scene fold state (persisted) — long boards collapse to their scene headers.
-  // DEFAULT: every scene starts open; folding is manual and remembered per-scene.
-  const [collapsed, setCollapsed] = React.useState(()=>{ try{ return JSON.parse(localStorage.getItem("turn_sb_collapsed")||"{}")||{}; }catch(e){ return {}; } });
-  React.useEffect(()=>{ try{ localStorage.setItem("turn_sb_collapsed", JSON.stringify(collapsed)); }catch(e){} },[collapsed]);
-  const toggleScene = (id)=> setCollapsed(c=>({ ...c, [id]: !c[id] }));
-
   // compose every sheet whose shots have frames — instant per sheet, no generation cost
   const [composingAll, setComposingAll] = React.useState(null);   // {i,total} | null
-  const composeAll = async ()=>{
-    if(composingAll) return;
-    const jobs = pagesByScene.flatMap(g=>g.pages.map(p=>({ scene:g.scene, page:p })));
-    setComposingAll({ i:0, total:jobs.length });
+  const [composingScene, setComposingScene] = React.useState(null); // {id,i,total} | null
+  const composeJobs = async (jobs, onProgress)=>{
     for(let i=0;i<jobs.length;i++){
-      setComposingAll({ i:i+1, total:jobs.length });
+      if(onProgress) onProgress(i+1,jobs.length);
       const { scene, page } = jobs[i];
       try{
         const dataUrl = await composeStoryboardSheet(scene, page, ctxFor(scene), beatsMap);
-        if(!dataUrl) continue;   // no frames for this scene yet — skip, don't blank it
+        if(!dataUrl) continue;
         const meta = { model:"Composited from shot frames", composed:true, panels:page.shots.length, ts:Date.now() };
         const r = (typeof nbCommit==="function") ? await nbCommit("sbsheet-"+page.id, dataUrl, meta, []) : null;
         try{ sessionStorage.removeItem("turn_sb_hold_"+"sbsheet-"+page.id); }catch(e){}
         window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:"sbsheet-"+page.id, url:(r&&r.url)||dataUrl } }));
       }catch(e){}
     }
+  };
+  const composeAll = async ()=>{
+    if(composingAll || composingScene) return;
+    const jobs = pagesByScene.flatMap(g=>g.pages.map(p=>({ scene:g.scene, page:p })));
+    setComposingAll({ i:0, total:jobs.length });
+    await composeJobs(jobs,(i,total)=>setComposingAll({i,total}));
     setComposingAll(null);
+  };
+  const composeOneScene = async (scene,pages)=>{
+    if(composingAll || composingScene || !scene) return;
+    const jobs=(pages||[]).map(page=>({scene,page}));
+    setComposingScene({id:scene.id,i:0,total:jobs.length});
+    await composeJobs(jobs,(i,total)=>setComposingScene({id:scene.id,i,total}));
+    setComposingScene(null);
   };
 
   // jump to a shot in the Shot List (pre-expand its scene, switch tab, scroll + flash)
@@ -777,7 +808,7 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
           _sbEl("div",{style:{fontFamily:"var(--f-mono)",fontSize:11,letterSpacing:".03em",color:"var(--txt-3)",marginTop:4}},
             readySheets+" of "+totalSheets+" sheet"+(totalSheets!==1?"s":"")+" ready")),
         _sbEl("div",{className:"art-intro-actions"},
-          _sbEl("button",{className:"art-draftall",disabled:!!composingAll||!totalSheets,onClick:composeAll,
+          _sbEl("button",{className:"art-draftall",disabled:!!composingAll||!!composingScene||!totalSheets,onClick:composeAll,
             title:"Lay every scene's generated shot frames into its sheets — instant and free; scenes with no frames yet are skipped"},
             _sbEl(Icon.board,{s:14}), composingAll?("Composing "+composingAll.i+"/"+composingAll.total+"…"):"Compose all from frames"),
           _sbEl("button",{className:"art-draftall ghost",disabled:!readySheets,
@@ -785,26 +816,66 @@ function StoryboardView({ project, scenes, shots, characters, props, locations, 
             title:"Preview the storyboard as a printable document (sheet images inlined for keeps), then print / save as PDF or download the HTML"},
             _sbEl(Icon.download,{s:14}),"Export storyboard"))) ),
 
-    (typeof ScenePager!=="undefined") && pagesByScene.length>0 && (()=>{ const cs=pagesByScene[Math.min(pIdx,pagesByScene.length-1)]; const cl=cs&&ctxFor(cs.scene).location;
-      return _sbEl(ScenePager,{ idx:Math.min(pIdx,pagesByScene.length-1), total:pagesByScene.length,
-        title:cs&&cs.scene.title, sub:cl&&cl.name, scenes:pagesByScene.map(p=>p.scene), onJump:setPIdx,
-        onPrev:()=>setPIdx(i=>Math.max(0,i-1)), onNext:()=>setPIdx(i=>Math.min(pagesByScene.length-1,i+1)) }); })(),
-
     pagesByScene.slice(Math.min(pIdx,pagesByScene.length-1), Math.min(pIdx,pagesByScene.length-1)+1).map(({scene,pages})=>{
       const ctx = ctxFor(scene);
       const ln = ctx.location ? ctx.location.name : "";
-      const open = !collapsed[scene.id];
-      return _sbEl("div",{className:"sb-scene"+(open?"":" collapsed"),key:scene.id},
-        _sbEl("div",{className:"sb-scene-head"},
-          _sbEl("button",{className:"shot-scene-fold",onClick:()=>toggleScene(scene.id),
-            title:open?"Collapse this scene":"Expand this scene","aria-expanded":open?"true":"false"},
-            _sbEl(Icon.chevR,{s:15})),
-          _sbEl("span",{className:"sb-scene-no"},String(scene.no).padStart(2,"0")),
-          _sbEl("span",{className:"sb-scene-title",onClick:()=>toggleScene(scene.id),style:{cursor:"pointer"}},scene.title||"Untitled scene"),
-          ln && _sbEl("span",{className:"sb-scene-loc"},_sbEl(Icon.globe,{s:11}),ln),
-          _sbEl("span",{className:"sb-scene-count"},
-            pages.length>1 ? (pages.length+" pages") : (shotsByScene[scene.id].length+" shots"))),
-        open && pages.map(page=> _sbEl(StoryboardPage,{key:page.id,project,scene,page,pageCount:pages.length,ctx,beatsMap,
+      const sceneShots=shotsByScene[scene.id]||[];
+      const bm=sbBeatMeta(beatsMap,scene.id);
+      const driver=scene.driver&&charById[scene.driver];
+      const driverName=(driver&&driver.name)||bm.driverLabel||"";
+      const confLab=scene.conf ? SB_CONF_LABELS[scene.conf-1] : "";
+      const beatCounts=[];
+      sceneShots.forEach(sh=>{ const n=Number(sh.beatN)||0; let row=beatCounts.find(x=>x.n===n);
+        if(!row){ row={n,count:0}; beatCounts.push(row); } row.count++; });
+      const sceneBusy=composingScene&&composingScene.id===scene.id;
+      return _sbEl("div",{className:"sb-scene",key:scene.id},
+        _sbEl("div",{className:"shot-scene-card sb-scene-summary"},
+          _sbEl("div",{className:"shot-scene-head merged"},
+            _sbEl("button",{className:"scene-pager-arrow",disabled:pIdx<=0,
+              onClick:()=>{setJumpOpen(false);setPIdx(i=>Math.max(0,i-1));},title:"Previous scene (←)","aria-label":"Previous scene"},
+              _sbEl(Icon.chevL,{s:18})),
+            _sbEl("div",{className:"shot-scene-meta"},
+              _sbEl("span",{className:"scene-pager-no ssg-jump",role:"button",tabIndex:0,title:"Jump to a scene",
+                onClick:()=>setJumpOpen(o=>!o)},
+                "Scene "+(pIdx+1)+" of "+pagesByScene.length,_sbEl(Icon.chevD,{s:10}),
+                jumpOpen&&_sbEl("div",{className:"scene-pager-menu",onClick:e=>e.stopPropagation()},
+                  pagesByScene.map((sx,i)=>_sbEl("button",{key:sx.scene.id||i,className:"scene-pager-menu-item"+(i===pIdx?" on":""),
+                    onClick:()=>{setPIdx(i);setJumpOpen(false);}},
+                    _sbEl("span",{className:"scene-pager-menu-no"},String(sx.scene.no||(i+1)).padStart(2,"0")),
+                    _sbEl("span",{className:"scene-pager-menu-t"},sx.scene.title||"Untitled scene"),
+                    i===pIdx&&_sbEl(Icon.check,{s:13}))))),
+              _sbEl("div",{className:"shot-scene-title"},scene.title||"Untitled scene"),
+              _sbEl("div",{className:"shot-scene-style-row"},
+                _sbEl(StoryboardSceneStyleChip,{project,sceneId:scene.id})),
+              _sbEl("div",{className:"shot-scene-sub"},
+                (ln?("Location: "+ln+"   ·   "):"")+sceneShots.length+" shot"+(sceneShots.length!==1?"s":"")+"   ·   "+pages.length+" sheet"+(pages.length!==1?"s":"")),
+              beatCounts.length>1&&_sbEl("div",{className:"ssx-beat-strip",title:"Shots per beat — storyboard coverage distribution"},
+                beatCounts.map(b=>_sbEl("span",{key:"sb"+b.n,className:"ssx-beat-seg",style:{flexGrow:Math.max(1,b.count)},
+                  title:"Beat "+b.n+" — "+b.count+" shot"+(b.count!==1?"s":"")},b.count)))),
+            _sbEl("div",{className:"shot-scene-acts"},
+              _sbEl("button",{className:"char-draft-btn primary",disabled:!!composingAll||!!composingScene,
+                onClick:()=>composeOneScene(scene,pages),
+                title:"Lay this scene's current shot frames into its storyboard sheets — instant and free"},
+                _sbEl(Icon.board,{s:12}),sceneBusy?("Composing "+composingScene.i+"/"+composingScene.total+"…"):("Compose Scene "+String(scene.no).padStart(2,"0")+" from frames")),
+              _sbEl("button",{className:"char-draft-btn ghost",onClick:()=>setArtView&&setArtView("shots"),
+                title:"Open this scene's source frames and shot design in the Shots tab"},
+                _sbEl(Icon.film,{s:12}),"Edit shots")),
+            _sbEl("button",{className:"scene-pager-arrow",disabled:pIdx>=pagesByScene.length-1,
+              onClick:()=>{setJumpOpen(false);setPIdx(i=>Math.min(pagesByScene.length-1,i+1));},title:"Next scene (→)","aria-label":"Next scene"},
+              _sbEl(Icon.chevR,{s:18}))),
+          _sbEl("div",{className:"shot-scene-ctx"},
+            scene.summary&&_sbEl("div",{className:"ssx-desc"},scene.summary),
+            _sbEl("div",{className:"ssx-grid"},
+              _sbEl(StoryboardSceneCtxItem,{label:"Driver",value:driverName}),
+              _sbEl(StoryboardSceneCtxItem,{label:"Reactor",value:bm.reactorLabel}),
+              _sbEl(StoryboardSceneCtxItem,{label:"Driver's goal",value:scene.objective}),
+              _sbEl(StoryboardSceneCtxItem,{label:"Antagonism",value:bm.obstacle}),
+              scene.conf&&_sbEl("div",{className:"ssx-item"},
+                _sbEl("div",{className:"ssx-k"},"Conflict level"),
+                _sbEl("div",{className:"ssx-conf"},
+                  confLab&&_sbEl("span",{className:"ssx-conf-lab"},confLab),
+                  _sbEl("div",{className:"ssx-pips"},[1,2,3].map(i=>_sbEl("span",{key:i,className:"ssx-pip"+(i<=scene.conf?" on":"")})))))))),
+        pages.map(page=>_sbEl(StoryboardPage,{key:page.id,project,scene,page,pageCount:pages.length,ctx,beatsMap,
           onView:setView,jumpToShot})));
     }));
 }

@@ -709,10 +709,27 @@ window.nbLoadCameoAngles=nbLoadCameoAngles; window.nbLoadCameoFull=nbLoadCameoFu
 window.nbSetCameo=nbSetCameo; window.nbClearCameo=nbClearCameo; window.nbListCameos=nbListCameos;
 
 /* ===== backend-agnostic commit / clear / revert / details (used by useImageGen) ===== */
+async function nbCommitImageDimensions(src){
+  if(!src || typeof Image==="undefined") return null;
+  return await new Promise(resolve=>{ const im=new Image();
+    im.onload=()=>resolve(im.naturalWidth&&im.naturalHeight ? { w:im.naturalWidth, h:im.naturalHeight } : null);
+    im.onerror=()=>resolve(null); im.src=src; });
+}
 async function nbCommit(id, dataUrl, meta, refs, kind, epoch){
   // the scope moved while this was generating — the result belongs to a film that is no
   // longer open, and this id means something different here. Drop it rather than clobber.
   if(epoch!=null && epoch!==_nbEpoch) return { tier:"stale", url:dataUrl };
+  meta = { ...(meta||{}) };
+  if((!meta.pixelW || !meta.pixelH) && dataUrl){
+    const dims = await nbCommitImageDimensions(dataUrl);
+    if(dims){ meta.pixelW=dims.w; meta.pixelH=dims.h; }
+  }
+  if(!meta.iso){
+    const now=new Date();
+    meta.iso=now.toISOString();
+    if(!meta.date) meta.date=now.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+    if(!meta.time) meta.time=now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+  }
   meta = (typeof nbWithAssetProvenance==="function") ? nbWithAssetProvenance(id, meta, kind) : (meta||null);
   refs = (typeof nbPreferBestAssetRefs==="function") ? nbPreferBestAssetRefs(refs||[]) : (refs||[]);
   if(_nbBackend==="cloud"){

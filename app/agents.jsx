@@ -976,7 +976,9 @@ async function agentWearProps(ctx){
     if(ctx.cancelled()){ ctx.emit({k:"flag", t:"Stopped — "+done+" dressed."}); return; }
     ctx.emit({k:"act", t:"Dressing "+(c.name||"a character")+" in "+worn.length+" worn prop"+(worn.length!==1?"s":"")+" ("+worn.map(p=>p.name).join(", ").slice(0,80)+")…"});
     try{
-      const masterUrl = await cast.generateMaster(c);
+      // Updating a continuity master must be an edit of the approved character,
+      // not a fresh casting pass that happens to share the same text prompt.
+      const masterUrl = await cast.generateMaster(c,{deriveFromCurrent:true});
       // refresh ONLY appearance states that already exist, off the new master
       for(const st of (c.states||[])){
         if(ctx.cancelled()) return;

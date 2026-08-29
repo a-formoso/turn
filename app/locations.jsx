@@ -1170,24 +1170,20 @@ function locScenePresets(l, project){
 }
 window.locScenePresets = locScenePresets;
 
-/* The effective SCALE CLASS of a location's WORLD: the project-wide "world scale" toggle
-   (project.worldScale = A/B/C/D) wins; otherwise it's derived from the scale of the characters
-   who DRIVE the scenes set here (a critter film's drivers are all Class B → the place renders
-   at critter scale). Returns A when nobody non-human occupies it (so it stays inert). */
+/* The effective SCALE CLASS of a location's WORLD is derived from the characters who
+   DRIVE the scenes set here (a critter film's drivers are all Class B, so the place
+   renders at critter scale). This is intentionally automatic: a stale project-wide
+   override from an older save must not silently change newly generated locations. */
 function locationScaleClass(l, project){
-  const wRaw = String((project && project.worldScale) || "").trim();
-  // project-wide override: any explicit value (A/B/C/D, or free text like "critter"/"giant")
-  // resolves; only empty or "auto" falls through to per-location derivation.
-  if(wRaw && !/^auto$/i.test(wRaw)) return (typeof scaleClassOf==="function") ? scaleClassOf({scaleClass:wRaw}) : "A";
   if(typeof scaleClassOf!=="function") return "A";
   const C = window.turnContinuity || {};
   const chars = C.characters || [], scenes = C.scenes || [];
   if(!chars.length || !scenes.length) return "A";
   const byId = {}; chars.forEach(c=>{ if(c&&c.id) byId[c.id]=c; });
   const sids = Array.isArray(l && l.scenes) ? l.scenes : [];
-  const counts = { A:0, B:0, C:0 };
+  const counts = { A:0, B:0, C:0, D:0 };
   sids.forEach(sid=>{ const sc=scenes.find(s=>s.id===sid); const drv=sc&&sc.driver&&byId[sc.driver]; if(drv) counts[scaleClassOf(drv)]++; });
-  const nonA = [["B",counts.B],["C",counts.C]].filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
+  const nonA = [["B",counts.B],["C",counts.C],["D",counts.D]].filter(x=>x[1]>0).sort((a,b)=>b[1]-a[1]);
   return nonA.length ? nonA[0][0] : "A";
 }
 window.locationScaleClass = locationScaleClass;
@@ -1351,6 +1347,11 @@ function locationEnvironmentProps(l){
   const livingRe = /\b(character|cast|person|people|animal|creature|wildlife|insect|bug|fly|firefly|frog|toad|bird|moth|beetle|spider|mouse|rat|face|eye|body|silhouette)\b/i;
   const locIdOf = (sid)=>{ const m=(typeof locationForScene==="function")?locationForScene(locations, sid):null; return m?m.id:""; };
   return props.filter(p=>{
+    const locationScenes=(C.scenes||[]).filter(s=>{ const loc=(typeof locationForScene==="function")?locationForScene(locations,s.id):null; return loc&&loc.id===l.id; });
+    if(typeof propStateAt==="function" && Array.isArray(p.continuityEvents) && p.continuityEvents.length){
+      const placed=locationScenes.some(s=>{ const st=propStateAt(p,s.id,null,null,null,C); return st&&st.active&&st.placement&&st.placement.locationId===l.id; });
+      if(placed) return true;
+    }
     if(p.ownerId || p.ownerName) return false;
     if((p.kind||"carried")==="worn") return false;
     const blob = [p.name,p.form,p.material,p.detail].filter(Boolean).join(" ");
@@ -1571,7 +1572,17 @@ function locDressingProps(l){
     const home = (typeof propHomeLocation==="function") ? propHomeLocation(p) : null;
     return (home && home.id) || "";
   };
-  return props.filter(p=> p && p.kind==="dressing" && homeId(p)===l.id);
+  return props.filter(p=>{
+    if(!p) return false;
+    if(typeof propStateAt==="function" && Array.isArray(p.continuityEvents) && p.continuityEvents.length){
+      const C=window.turnContinuity||{};
+      const here=(C.scenes||[]).some(s=>{ const loc=(typeof locationForScene==="function")?locationForScene(C.locations||[],s.id):null;
+        if(!loc||loc.id!==l.id) return false;
+        const st=propStateAt(p,s.id,null,null,null,C); return st&&st.active&&st.placement&&st.placement.locationId===l.id; });
+      if(here) return true;
+    }
+    return p.kind==="dressing" && homeId(p)===l.id;
+  });
 }
 window.locDressingProps = locDressingProps;
 function locDressingEditText(p){

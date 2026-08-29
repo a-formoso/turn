@@ -994,6 +994,63 @@ function wornPropsSig(props, charId){
     .sort().join(";;");
 }
 window.wornPropsSig = wornPropsSig;
+function wornReferenceExclusionSet(character){
+  return new Set(Array.isArray(character && character.wornReferenceExclusions)
+    ? character.wornReferenceExclusions.filter(Boolean) : []);
+}
+function wornReferenceVersionStamp(meta){
+  if(!meta) return "";
+  return [meta.version||0, meta.iso||"", meta.pixelW||0, meta.pixelH||0].join("|");
+}
+/* A character sheet records the exact worn-prop asset versions it saw. This is a
+   dependency contract, not just a reference count: when a prop is regenerated the
+   character can explain which design changed and offer an identity-preserving update. */
+async function loadWornReferenceSnapshot(character, wornProps, usedIds){
+  const excluded = wornReferenceExclusionSet(character);
+  const actuallyUsed = usedIds instanceof Set ? usedIds : null;
+  const rows = [];
+  for(const p of (wornProps||[])){
+    let url = (typeof nbGetImage==="function") ? nbGetImage(p.id) : "";
+    if(!url && typeof nbLoadImage==="function"){
+      try{ url = await nbLoadImage(p.id); }catch(e){}
+    }
+    const available = !!url;
+    const visual = available && !excluded.has(p.id) && (!actuallyUsed || actuallyUsed.has(p.id));
+    let meta = null;
+    if(available && typeof nbLoadDetailsAsset==="function"){
+      try{ const d = await nbLoadDetailsAsset(p.id, url); meta = d && d.meta; }catch(e){}
+    }
+    rows.push({
+      refId:p.id,
+      name:p.name||"Worn prop",
+      mode:visual?"visual":"text",
+      excluded:excluded.has(p.id),
+      available,
+      version:meta && meta.version || null,
+      generated:meta && meta.iso || "",
+      versionStamp:wornReferenceVersionStamp(meta),
+    });
+  }
+  return rows;
+}
+function compareWornReferenceSnapshots(baked, current){
+  const oldMap = new Map((baked||[]).filter(Boolean).map(r=>[r.refId,r]));
+  const reasons = [];
+  (current||[]).forEach(row=>{
+    const old = oldMap.get(row.refId);
+    if(row.mode==="visual"){
+      if(!old || old.mode!=="visual") reasons.push((row.name||"A worn prop")+" is ready to lock");
+      else if((old.versionStamp||"") !== (row.versionStamp||"")) reasons.push((row.name||"A worn prop")+" has a newer design");
+    } else if(old && old.mode==="visual"){
+      reasons.push((row.name||"A worn prop")+(row.excluded?" was switched to text-only":" no longer has a usable sheet"));
+    }
+    oldMap.delete(row.refId);
+  });
+  oldMap.forEach(row=> reasons.push((row.name||"A worn prop")+" is no longer linked"));
+  return reasons;
+}
+window.loadWornReferenceSnapshot = loadWornReferenceSnapshot;
+window.compareWornReferenceSnapshots = compareWornReferenceSnapshots;
 function buildCharRefPrompt(c, project, props){
   const P = project || {};
   const v = charVisualDefaults(c);
@@ -1137,6 +1194,12 @@ window.buildRefFromPhotoPrompt = buildRefFromPhotoPrompt;
    setting and CANNOT be recovered from a finished image, so it's left unknown. */
 function nbResLabel(w,h){ const lng=Math.max(w||0,h||0); if(!lng) return "—";
   const tier = lng<=1280 ? "1K" : (lng<=2600 ? "2K" : "4K"); return tier+" · "+w+"×"+h; }
+function nbImageDimensions(src){
+  if(!src) return Promise.resolve(null);
+  return new Promise((resolve)=>{ const im=new Image();
+    im.onload=()=>resolve(im.naturalWidth&&im.naturalHeight ? { w:im.naturalWidth, h:im.naturalHeight } : null);
+    im.onerror=()=>resolve(null); im.src=src; });
+}
 function nbAspectLabel(w,h){ if(!w||!h) return "—"; const r=w/h;
   const known=[["21:9",21/9],["16:9",16/9],["3:2",3/2],["4:3",4/3],["1:1",1],["4:5",4/5],["3:4",3/4],["2:3",2/3],["9:16",9/16]];
   let best=known[0],bd=1e9; for(const k of known){ const d=Math.abs(k[1]-r); if(d<bd){ bd=d; best=k; } }
@@ -1309,6 +1372,7 @@ function useImageGen(opts){
     }
     if(isEditMode){ refImage = gopts.editBaseUrl || genUrl; mode = "edit"; }
     else if(useSimple){ mode = "simple"; }
+    else if(gopts.deriveFromCurrent && genUrl){ refImage = genUrl; mode = "base"; }
     else if(slotHasRef && typeof nbGetSlotImage==="function"){ refImage = nbGetSlotImage(slotId); mode = "photo"; }
     else if(opts.referenceFallback){ const b = await opts.referenceFallback(gopts); if(b){ refImage = b; mode = "base"; } }
     else if(cameoUrl){ refImage = cameoUrl; mode = "cameo"; }
@@ -1438,6 +1502,9 @@ function useImageGen(opts){
       }
       // cancelled mid-flight (Stop): discard the result — don't commit over the frame.
       if(window.__nbGenCancel && window.__nbGenCancel[id]) throw { __cancelled:true };
+      // Record the actual returned pixels as well as the requested resolution tier.
+      // Providers can return dimensions that differ slightly from the nominal tier.
+      const outputDims = await nbImageDimensions(url);
       /* version number from existing history (nbCommit rolls history internally) */
       let priorCount = 0;
       try{
@@ -1457,6 +1524,8 @@ function useImageGen(opts){
         renderStyleLabel,
         aspect: genOpts.aspectRatio || ((typeof nbGetAspect==="function") ? nbGetAspect() : "16:9"),
         size: genOpts.imageSize || ((typeof nbGetRes==="function") ? nbGetRes() : "2K"),
+        pixelW: outputDims && outputDims.w,
+        pixelH: outputDims && outputDims.h,
         // quality is a GPT Image (OpenAI) setting only — low/medium/high; Nano Banana
         // has no such control (its "quality" IS its resolution tier), so leave it unset there.
         quality: (typeof isGptImageModel==="function" && isGptImageModel(actualModel))
@@ -1477,6 +1546,13 @@ function useImageGen(opts){
         editInstruction: isEditMode ? (gopts.editInstruction||"") : "",
         version: priorCount + 1
       };
+      if(isEditMode && typeof propReferenceSnapshot==="function"){
+        const prior=(genMeta&&Array.isArray(genMeta.propDependencies))?genMeta.propDependencies:[];
+        const depIds=[...prior.map(r=>r&&r.propId),
+          ...(Array.isArray(gopts.propDependencyIds)?gopts.propDependencyIds:[]),
+          ...(Array.isArray(gopts.editRefMeta)?gopts.editRefMeta.map(r=>r&&r.refId):[])].filter(Boolean);
+        if(depIds.length) meta.propDependencies=propReferenceSnapshot(depIds,window.turnContinuity||{});
+      }
       if(startMeta) Object.assign(meta, startMeta);
       // caller-supplied extra meta (e.g. a prop's owner-sheet anchor version, a
       // character sheet's baked worn-prop signature) — powers the staleness badges
@@ -1809,6 +1885,40 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
   // when inspecting an earlier version, the whole form (hero, metadata, prompt) reflects IT
   const meta = selVer ? (selVer.meta || {}) : curMeta;
   const heroUrl = selVer ? selVer.url : gen.genUrl;
+  const [measuredDims, setMeasuredDims] = React.useState(null);
+  React.useEffect(()=>{
+    if(meta.pixelW && meta.pixelH){ setMeasuredDims({ w:Number(meta.pixelW), h:Number(meta.pixelH) }); return; }
+    let alive=true; setMeasuredDims(null);
+    nbImageDimensions(heroUrl).then(d=>{ if(alive) setMeasuredDims(d); });
+    return ()=>{ alive=false; };
+  },[heroUrl, meta.pixelW, meta.pixelH]);
+  const pixelW = Number(meta.pixelW) || (measuredDims && measuredDims.w);
+  const pixelH = Number(meta.pixelH) || (measuredDims && measuredDims.h);
+  const resolutionDetail = (()=>{
+    const stored = String(meta.size||"").trim();
+    if(stored.includes("×")) return stored;
+    if(pixelW && pixelH){
+      const measured = nbResLabel(pixelW,pixelH);
+      const tier = stored && stored!=="—" ? stored : measured.split(" · ")[0];
+      return tier+" · "+pixelW+"×"+pixelH;
+    }
+    return stored;
+  })();
+  const aspectDetail = meta.aspect || ((pixelW && pixelH) ? nbAspectLabel(pixelW,pixelH) : "");
+  const modelDetail = meta.modelLabel
+    || ((window.NB_MODELS||[]).find(m=>m.id===meta.modelId)||{}).label
+    || meta.modelId;
+  const generatedDetail = (()=>{
+    let date=meta.date||"", time=meta.time||"";
+    if((!date || !time) && meta.iso){
+      const d=new Date(meta.iso);
+      if(!Number.isNaN(d.getTime())){
+        if(!date) date=d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+        if(!time) time=d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+      }
+    }
+    return [date,time].filter(Boolean).join(" · ");
+  })();
   const refs = (data && data.refs) || [];
   const history = (data && data.history) || [];
   /* Reference-image resolution tied to the ANCHORED version (selected or current).
@@ -1879,6 +1989,20 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
     React.createElement("span",{className:"dt-camera-k"},label),
     React.createElement("span",{className:"dt-camera-v"},
       x.auto ? ("Auto -> "+(x.effectiveLabel||"Auto")) : (x.effectiveLabel||x.selectedLabel||"Custom"))) : null;
+  const wornReferenceSection = Array.isArray(meta.wornReferences) && meta.wornReferences.length
+    ? React.createElement("div",{className:"dt-section"},
+        React.createElement("div",{className:"dt-sec-lab"},"Worn-reference contract"),
+        React.createElement("div",{className:"dt-continuity-list"},
+          meta.wornReferences.map((r,i)=>React.createElement("div",{
+            key:r.refId||i,
+            className:"dt-continuity-row",
+          },
+            React.createElement("span",{className:"dt-continuity-name"},r.name||"Worn prop"),
+            React.createElement("span",{className:"dt-continuity-mode "+(r.mode||"text")},
+              r.mode==="visual"
+                ? ("Visual lock"+(r.version?(" · v"+r.version):""))
+                : (r.excluded?"Text-only · excluded":"Text-only"))))))
+    : null;
 
   return React.createElement("div",{className:"lb-overlay dt-overlay",onMouseDown:(e)=>{ if(e.target===e.currentTarget) onClose(); }},
     React.createElement("div",{className:"dt-panel"},
@@ -1909,12 +2033,15 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
             React.createElement(Icon.trash,{s:12}),"Delete current image \u2192 restore previous")),
         /* metadata grid */
         React.createElement("div",{className:"dt-grid"},
-          field("Model", meta.modelId || meta.modelLabel || null),
+          field("Model", modelDetail),
           field("Render style", (typeof renderStyleLabelFromMeta==="function" ? renderStyleLabelFromMeta(meta) : "") || null),
-          field("Resolution", meta.size),
-          field("Aspect ratio", meta.aspect),
+          field("Resolution", resolutionDetail),
+          field("Aspect ratio", aspectDetail),
           field("Quality", meta.quality ? String(meta.quality).replace(/^./,c=>c.toUpperCase()) : null),
-          field("Generated", (meta.date||"")+(meta.time?(" \u00b7 "+meta.time):"")),
+          field("Generated", generatedDetail),
+          field("Worn continuity", meta.wornRefSummary && meta.wornRefSummary.total
+            ? (meta.wornRefSummary.visual+" visual lock"+(meta.wornRefSummary.visual===1?"":"s")
+              +" · "+meta.wornRefSummary.text+" text-only") : null),
           ...((extraMeta||[]).filter(m=>m&&m.v).map((m,i)=>React.createElement("div",{key:"em"+i,className:"dt-field"},
             React.createElement("div",{className:"dt-flab"},m.k),
             React.createElement("div",{className:"dt-fval"},m.v)))),
@@ -1934,6 +2061,7 @@ function SheetDetails({ gen, name, noun, onClose, onView, extraMeta }){
             camField("Shutter", cam.shutter),
             camField("ISO / grain", cam.iso),
             cam.promptClause && React.createElement("div",{className:"dt-camera-note"},cam.promptClause))),
+        wornReferenceSection,
         /* prompt */
         meta.prompt && React.createElement("div",{className:"dt-section",ref:promptRef},
           React.createElement("div",{className:"dt-sec-head"},
@@ -2015,6 +2143,56 @@ function _qaWhereChips(where){
   if(parts.length>1 && parts.every(p=>p.length>2 && !/^\d+$/.test(p))) return parts;
   return [parts.join(", ")].filter(Boolean);
 }
+
+/* Compact, read-only provenance strip used by Character and Prop master cards.
+   A rendered sheet shows inputs recorded on that exact version; before the first
+   render it previews only references currently ready to attach. */
+function SheetReferenceStrip({ gen, loadRefs, onView, refreshKey }){
+  const [refs, setRefs] = React.useState([]);
+  const loadRef = React.useRef(loadRefs);
+  loadRef.current = loadRefs;
+  const refresh = React.useCallback(async ()=>{
+    let next=[];
+    try{
+      if(gen && gen.genUrl && typeof gen.loadDetails==="function"){
+        const d=await gen.loadDetails();
+        next=((d&&d.refs)||[]).filter(r=>r&&r.url).map(r=>({
+          url:r.url, note:r.label||r.note||"Reference image", refId:r.refId, kind:r.kind
+        }));
+      } else if(loadRef.current){
+        next=((await loadRef.current())||[]).filter(r=>r&&r.url);
+      }
+    }catch(e){ next=[]; }
+    setRefs(next);
+  },[gen && gen.genUrl, refreshKey]);
+  React.useEffect(()=>{
+    let live=true;
+    const run=()=>{ if(live) refresh(); };
+    run();
+    window.addEventListener("nb-gen-done",run);
+    window.addEventListener("nb-prefetched",run);
+    return ()=>{ live=false; window.removeEventListener("nb-gen-done",run); window.removeEventListener("nb-prefetched",run); };
+  },[refresh]);
+  if(!refs.length) return null;
+  const kindClass=(r)=>{
+    const k=String(r.kind||"").toLowerCase();
+    if(k.includes("character")||k.includes("cameo")) return "character";
+    if(k.includes("location")||k.includes("coverage")||k.includes("unit")) return "location";
+    return "prop";
+  };
+  return React.createElement("div",{className:"coverage-refs sheet-used-refs"},
+    React.createElement("div",{className:"shot-refs-lab"},
+      React.createElement(Icon.layers,{s:11}),gen&&gen.genUrl?"Reference images used":"Reference images"),
+    React.createElement("div",{className:"shot-refs-row coverage-refs-row"},
+      refs.map((r,i)=>React.createElement("div",{key:(r.refId||r.url||i),role:"button",tabIndex:0,
+          className:"shot-ref-thumb "+kindClass(r),title:r.note||r.label||"Reference image",
+          onClick:()=>onView&&onView(r.url,{name:r.note||r.label||"Reference image"}),
+          onKeyDown:(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); onView&&onView(r.url,{name:r.note||r.label||"Reference image"}); } }},
+        React.createElement("img",{src:r.url,alt:r.note||r.label||"Reference",loading:"lazy"}),
+        React.createElement("span",{className:"shot-ref-tick on sheet-ref-used",title:"Used in this generated image"},"\u2713")))));
+}
+window.SheetReferenceStrip = SheetReferenceStrip;
+
 /* build a targeted edit instruction from the QA findings when the model didn't
    supply one — so "edit the current image" is ALWAYS on offer, not only when the
    verdict itself recommends an edit. */
@@ -2127,8 +2305,8 @@ function QaReport({ name, noun, report, gening, onClose, onRunEdit, onRegen, spe
         (!r.promptFix) && _editBtn)));
 }
 
-/* ---- QA button — lives on the card face next to "Draft details" (chars, props,
-   locations) and in the shot head row. Self-contained: busy state, the vision
+/* ---- QA button — lives in the card controls and in the shot head row.
+   Self-contained: busy state, the vision
    read, and the report modal. Hidden until the card has a generated image. */
 function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec, showWhenEmpty }){
   const [busy, setBusy] = React.useState(false);
@@ -2162,7 +2340,7 @@ function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec, sh
       try{ contract = String(gen.buildFinal()||""); }catch(e){}
       judgedSpec = !!contract;
     }
-    if(!contract){ if(window.appToast) window.appToast("Nothing to judge against yet — Draft details first, so this card has a spec."); return; }
+    if(!contract){ if(window.appToast) window.appToast("Nothing to judge against yet — generate or design this card first, so it has a written spec."); return; }
     if(typeof window.aiImageQA!=="function"){
       if(window.appToast) window.appToast("QA check is unavailable in this build — reload the app and try again.","info");
       return;
@@ -2197,12 +2375,12 @@ function QaCheckButton({ gen, name, noun, className, specFields, onApplySpec, sh
 }
 window.QaCheckButton = QaCheckButton;
 
-function RegionEditModal({ url, name, noun, editPropRefs, onClose, onApply }){
+function RegionEditModal({ url, name, noun, entity, editPropRefs, onClose, onApply }){
   const [rect, setRect] = React.useState({ x:24, y:24, w:44, h:36 });
   const [drag, setDrag] = React.useState(null);
   const [text, setText] = React.useState("");
   const [refs, setRefs] = React.useState([]);
-  const [propOptions, setPropOptions] = React.useState([]);
+  const [referenceOptions, setReferenceOptions] = React.useState([]);
   const imgRef = React.useRef(null);
   const boxRef = React.useRef(null);
   const fileRef = React.useRef(null);
@@ -2215,19 +2393,41 @@ function RegionEditModal({ url, name, noun, editPropRefs, onClose, onApply }){
     (async ()=>{
       const C = window.turnContinuity || {};
       const byId = {};
-      (editPropRefs||[]).forEach(p=>{ if(p&&p.id) byId[p.id]=p; });
-      (C.props||[]).forEach(p=>{ if(p&&p.id) byId[p.id]=p; });
+      const add = (item, kind, attached)=>{
+        if(!item || !item.id || item.id===(entity&&entity.id)) return;
+        byId[item.id] = {
+          id:item.id,
+          name:item.name || (kind==="character"?"Character":kind==="location"?"Location":"Prop"),
+          kind,
+          attached:!!attached || !!(byId[item.id]&&byId[item.id].attached)
+        };
+      };
+      // Durable references attached to this prop come first. This is how a photo,
+      // ID card or poster can inherit a cast member's exact likeness.
+      (entity&&Array.isArray(entity.referenceImages)?entity.referenceImages:[]).forEach(r=>{
+        if(!r || !r.sourceEntityId) return;
+        const all = [...(C.characters||[]),...(C.props||[]),...(C.locations||[])];
+        const item = all.find(x=>x&&(x.id||x.key)===r.sourceEntityId);
+        if(item) add({...item,id:item.id||item.key},r.sourceKind||"reference",true);
+      });
+      (C.characters||[]).forEach(c=>add(c,"character",false));
+      (editPropRefs||[]).forEach(p=>add(p,"prop",false));
+      (C.props||[]).forEach(p=>add(p,"prop",false));
+      (C.locations||[]).forEach(l=>add({...l,id:l.id||l.key},"location",false));
       const out = [];
       for(const p of Object.values(byId)){
         let u = "";
         try{ u = (typeof nbGetImage==="function") ? nbGetImage(p.id) : ""; }catch(e){}
         if(!u && typeof nbLoadImage==="function"){ try{ u = await nbLoadImage(p.id); }catch(e){} }
-        if(u) out.push({ id:p.id, name:p.name||"Prop", url:u, note:(p.name||"Prop")+" prop sheet" });
+        if(u) out.push({ ...p, url:u,
+          note:p.kind==="character"
+            ? p.name+" character sheet \u2014 preserve this person's facial likeness"
+            : p.name+" "+p.kind+" sheet" });
       }
-      if(alive) setPropOptions(out);
+      if(alive) setReferenceOptions(out.sort((a,b)=>Number(b.attached)-Number(a.attached)));
     })();
     return ()=>{ alive=false; };
-  },[editPropRefs]);
+  },[editPropRefs,entity&&entity.id,entity&&Array.isArray(entity.referenceImages)?entity.referenceImages.map(r=>r.sourceEntityId||r.id).join(","):""]);
 
   const clamp = (n,min,max)=> Math.max(min, Math.min(max, n));
   const beginSideDrag = (e)=>{
@@ -2343,11 +2543,12 @@ function RegionEditModal({ url, name, noun, editPropRefs, onClose, onApply }){
               React.createElement(Icon.image,{s:13}),"Upload reference"),
             React.createElement("input",{ref:fileRef,type:"file",accept:"image/*",multiple:true,style:{display:"none"},
               onChange:e=>{ addFiles(e.target.files); e.target.value=""; }})),
-          propOptions.length>0 && React.createElement("div",{className:"region-props"},
-            propOptions.slice(0,10).map(p=>React.createElement("button",{key:p.id,className:"region-prop",
+          referenceOptions.length>0 && React.createElement("div",{className:"region-props"},
+            referenceOptions.slice(0,18).map(p=>React.createElement("button",{key:p.id,className:"region-prop"+(refs.some(r=>r.id===p.id)?" on":""),
               title:"Attach "+p.name+" as an edit reference",onClick:()=>addRef(p)},
               React.createElement("img",{src:p.url,alt:p.name}),
-              React.createElement("span",null,p.name)))),
+              React.createElement("span",null,p.name),
+              React.createElement("em",null,p.attached?"Attached":p.kind)))),
           refs.length>0 && React.createElement("div",{className:"sheet-edit-refs region-ref-list"},
             refs.map((r,i)=>React.createElement("span",{key:i,className:"sheet-edit-refthumb",title:r.note||"Reference image"},
               React.createElement("img",{src:r.url,alt:r.note||"Reference"}),
@@ -2494,8 +2695,10 @@ function PropReferenceModal({ url, name, noun, entity, onClose }){
 function PropSheetReferenceModal({ prop, onClose }){
   const graph = window.turnContinuity || {};
   const currentPropId = prop && prop.id;
+  const attachedRefs = Array.isArray(prop && prop.referenceImages) ? prop.referenceImages.filter(Boolean) : [];
   const candidates = [
-    ...((graph.characters||[]).filter(Boolean).map(c=>({ id:c.id, name:c.name||"Unnamed character", kind:"character", note:(c.name||"Character")+" character sheet" }))),
+    ...((graph.characters||[]).filter(Boolean).map(c=>({ id:c.id, name:c.name||"Unnamed character", kind:"character",
+      note:(c.name||"Character")+" character sheet — use this character's facial likeness when the prop depicts them; do not copy unrelated wardrobe or background" }))),
     ...((graph.props||[]).filter(p=>p&&p.id&&p.id!==currentPropId).map(p=>({ id:p.id, name:p.name||"Unnamed prop", kind:"prop", note:(p.name||"Prop")+" prop sheet" }))),
     ...((graph.locations||[]).filter(Boolean).map(l=>({ id:l.id||l.key, name:l.name||"Unnamed location", kind:"location", note:(l.name||"Location")+" location plate" })))
   ].filter(x=>x&&x.id);
@@ -2520,6 +2723,9 @@ function PropSheetReferenceModal({ prop, onClose }){
     return ()=>{ alive = false; };
   },[currentPropId, candidates.length]);
   const picked = rows.find(r=>r.id===selected);
+  const pickedAttachment = picked && attachedRefs.find(ref=>ref && (
+    ref.sourceEntityId===picked.id || ref.url===picked.url || ref.sourceUrl===picked.url
+  ));
   const attach = ()=>{
     if(!picked || !prop || !prop.id) return;
     const ref = {
@@ -2536,6 +2742,13 @@ function PropSheetReferenceModal({ prop, onClose }){
     if(ok && typeof window.appToast==="function") window.appToast("Attached "+picked.name+" to "+(prop.name||"this prop")+" as a consistency reference.","success");
     if(ok) onClose && onClose();
   };
+  const detach = ()=>{
+    if(!pickedAttachment || !prop || !prop.id) return;
+    const refKey = pickedAttachment.id || pickedAttachment.sourceEntityId || pickedAttachment.url;
+    const ok = typeof window.turnRemovePropReference==="function" && window.turnRemovePropReference(prop.id, refKey);
+    if(ok && typeof window.appToast==="function") window.appToast("Detached "+picked.name+" from "+(prop.name||"this prop")+".","success");
+    if(ok) onClose && onClose();
+  };
   return ReactDOM.createPortal(React.createElement("div",{className:"region-edit-overlay",onMouseDown:e=>{ if(e.target===e.currentTarget) onClose(); }},
     React.createElement("div",{className:"region-edit-panel prop-sheet-ref-panel"},
       React.createElement("div",{className:"region-edit-head"},
@@ -2548,12 +2761,12 @@ function PropSheetReferenceModal({ prop, onClose }){
           rows.length
             ? React.createElement("div",{className:"prop-ref-picker"},
                 rows.map(r=>React.createElement("button",{key:r.kind+":"+r.id,
-                  className:"prop-ref-pick"+(selected===r.id?" on":""),
-                  onClick:()=>{ setSelected(r.id); if(!note.trim()) setNote(r.note); }},
+                  className:"prop-ref-pick"+(selected===r.id?" on":"")+(attachedRefs.some(ref=>ref&&(ref.sourceEntityId===r.id||ref.url===r.url||ref.sourceUrl===r.url))?" attached":""),
+                  onClick:()=>{ setSelected(r.id); setNote(r.note); }},
                   React.createElement("img",{src:r.url,alt:r.name}),
                   React.createElement("span",null,
                     React.createElement("b",null,r.name),
-                    React.createElement("em",null,r.kind)))))
+                    React.createElement("em",null,r.kind+(attachedRefs.some(ref=>ref&&(ref.sourceEntityId===r.id||ref.url===r.url||ref.sourceUrl===r.url))?" \u00b7 attached":""))))))
             : React.createElement("div",{className:"region-edit-empty"},
                 React.createElement(Icon.image,{s:28}),
                 React.createElement("p",null,"No generated character, prop or location sheets found yet."))),
@@ -2568,8 +2781,9 @@ function PropSheetReferenceModal({ prop, onClose }){
             "Use this for whole-sheet influence: a character likeness for a photo prop, an owner's taste and wear patterns, a location's materials, or another prop's construction language."),
           React.createElement("div",{className:"region-edit-acts"},
             React.createElement("button",{className:"sheet-edit-cancel",onClick:onClose},"Cancel"),
-            React.createElement("button",{className:"sheet-edit-apply",disabled:!picked,onClick:attach},
-              React.createElement(Icon.layers,{s:12}),"Attach reference"))))),
+            React.createElement("button",{className:"sheet-edit-apply"+(pickedAttachment?" danger":""),disabled:!picked,onClick:pickedAttachment?detach:attach},
+              pickedAttachment?React.createElement(Icon.x,{s:12}):React.createElement(Icon.layers,{s:12}),
+              pickedAttachment?"Detach reference":"Attach reference"))))),
     ), document.body);
 }
 
@@ -2593,6 +2807,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
   // photos/designs and/or this entity's prop sheets (incl. CARRIED props). They ride
   // as editRefImages on the edit generation; cleared on apply, cancel or close.
   const [editRefs, setEditRefs] = React.useState([]);   // [{url, note}]
+  const [editDependencyIds, setEditDependencyIds] = React.useState([]);
   const [editAddOpen, setEditAddOpen] = React.useState(false);   // the "+" input-source menu
   const [editAddPos, setEditAddPos] = React.useState(null);      // anchor: above the Describe-changes input, centered on it
   const editFileRef = React.useRef(null);
@@ -2620,7 +2835,8 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
       opts.editRefImages = editRefs.map(r=>r.url);
       opts.editRefMeta = editRefs.slice();   // {url, note} — recorded in Details › Reference images used
     }
-    generate(opts); setEditRefs([]); };
+    if(editDependencyIds.length) opts.propDependencyIds=editDependencyIds.slice();
+    generate(opts); setEditRefs([]); setEditDependencyIds([]); };
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [regionEditOpen, setRegionEditOpen] = React.useState(false);
@@ -2709,7 +2925,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
               onClick:()=>{ setMenuOpen(false); m.onClick&&m.onClick(); }},
               React.createElement(m.icon||Icon.sparkles,{s:13}), m.label)),
           genUrl && React.createElement("button",{className:"sheet-tools-item "+(editMode?"on":""),
-            onClick:()=>{ setEditMode(m=>!m); setEditText(""); setMenuOpen(false); }},
+            onClick:()=>{ setEditMode(m=>!m); setEditText(""); setEditRefs([]); setEditDependencyIds([]); setMenuOpen(false); }},
             React.createElement(Icon.wand,{s:13}),editMode?"Close edit":"Edit "+editNounLabel),
           genUrl && React.createElement("button",{className:"sheet-tools-item",disabled:gening,
             title:"Draw a rectangle on the image, write a localized edit prompt, and optionally attach a prop sheet or uploaded reference image.",
@@ -2768,7 +2984,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
         placeholder:"Describe changes\u2026  e.g. "+(noun==="prop sheet"?"make the metal brushed steel":"change jacket to black, add glasses"),
         value:editText,onChange:e=>setEditText(e.target.value),
         onKeyDown:e=>{ if(e.key==="Enter"&&editText.trim()) runEdit();
-                       if(e.key==="Escape"){ setEditMode(false); setEditText(""); setEditRefs([]); } }}),
+                       if(e.key==="Escape"){ setEditMode(false); setEditText(""); setEditRefs([]); setEditDependencyIds([]); } }}),
       // caller-supplied one-click instructions (e.g. a location's set-dressing
       // fixtures). Two modes per chip: the label inserts the ready instruction
       // (prompt-only), the clip ALSO attaches the fixture's generated sheet as a
@@ -2776,8 +2992,9 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
       (editSuggestions && editSuggestions.length>0) && React.createElement("div",{className:"sheet-edit-suggests"},
         React.createElement("span",{className:"sheet-edit-suggests-lab"},"Set dressing"),
         editSuggestions.map((s,i)=>{
-          const insert = (extra)=> setEditText(t=>{ const base = t.trim() ? (t.trim().replace(/\.\s*$/,"")+". "+s.text) : s.text;
-            return extra ? (base.replace(/\.\s*$/,"")+". "+extra) : base; });
+          const insert = (extra)=>{ if(s.refId) setEditDependencyIds(ids=>ids.includes(s.refId)?ids:[...ids,s.refId]);
+            setEditText(t=>{ const base = t.trim() ? (t.trim().replace(/\.\s*$/,"")+". "+s.text) : s.text;
+              return extra ? (base.replace(/\.\s*$/,"")+". "+extra) : base; }); };
           return React.createElement("span",{key:i,className:"sheet-edit-suggest-group"},
             React.createElement("button",{className:"sheet-edit-suggest",title:s.title,onClick:()=>insert("")},
               s.raw ? s.label : ("+ "+s.label)),
@@ -2787,7 +3004,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
                 let url=""; try{ url = await s.getRef(); }catch(e){}
                 if(!url){ insert(""); if(window.appToast) window.appToast("No sheet for "+s.label+" yet \u2014 generate it on the Props tab to attach it. The text instruction still works."); return; }
                 insert("Match the attached reference image of \""+s.label+"\" EXACTLY \u2014 its design (shape, materials, construction), never its studio lighting or background.");
-                setEditRefs(rs=> rs.some(r=>r.url===url) ? rs : [...rs, { url, note:(s.label||"fixture")+" \u2014 prop sheet" }]);
+                setEditRefs(rs=> rs.some(r=>r.url===url) ? rs : [...rs, { url, note:(s.label||"fixture")+" \u2014 prop sheet", refId:s.refId }]);
               }},
               React.createElement(Icon.image,{s:11})));
         })),
@@ -2848,7 +3065,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
           React.createElement("input",{ref:editFileRef,type:"file",accept:"image/*",multiple:true,style:{display:"none"},
             onChange:e=>{ addEditFiles(e.target.files); e.target.value=""; }})),
         React.createElement("button",{className:"sheet-edit-cancel",
-          onClick:()=>{ setEditMode(false); setEditText(""); setEditRefs([]); setEditAddOpen(false); }},"Cancel")),
+          onClick:()=>{ setEditMode(false); setEditText(""); setEditRefs([]); setEditDependencyIds([]); setEditAddOpen(false); }},"Cancel")),
       layers>0 && React.createElement("div",{className:"sheet-edit-layers"},
         React.createElement(Icon.history,{s:10}),
         layers+" earlier version"+(layers!==1?"s":"")+" \u00b7 see all in the \u2026 menu \u203a Details")),
@@ -2944,11 +3161,10 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
             React.createElement("span",{className:"sheet-meta-item",title:"Aspect ratio"},
               React.createElement(Icon.image,{s:10,sw:1.8}),genMeta.aspect),
             React.createElement("span",{className:"sheet-meta-item",title:"Resolution"},
-              React.createElement(Icon.monitor,{s:10,sw:1.8}),resLabel),
-            // Quality (GPT Image only: low/medium/high) replaces the generated-date chip.
-            // Uploads and Nano Banana carry no quality, so the chip is simply absent there.
-            genMeta.quality && React.createElement("span",{className:"sheet-meta-item",title:"Quality",style:{textTransform:"capitalize"}},
-              React.createElement((Icon.diamond||Icon.sparkles),{s:10,sw:1.8}),genMeta.quality),
+              React.createElement(Icon.monitor,{s:10,sw:1.8}),
+              (genMeta.uploaded || genMeta.modelId==="uploaded") ? String(resLabel).split(" · ")[0] : resLabel),
+            // Encoder quality is technical provenance, not compact-card information.
+            // It remains available consistently in the shared Details view.
             // generation DATE — shown on every sheet card (Lookbook, Characters,
             // Props, Locations, Shots). Prefer the stored short date; else derive it
             // from the iso timestamp. Time (when present) rides the tooltip.
@@ -2963,7 +3179,7 @@ function SheetFrame({ gen, slotId, name, avatarColor, initials, drafted, draftin
        covering the viewport (broken/clipped on small screens). */
     detailsOpen && ReactDOM.createPortal(React.createElement(SheetDetails,{ gen, name, noun, extraMeta,
       onClose:()=>setDetailsOpen(false), onView:(url)=>onView&&onView(url, entity) }), document.body),
-    regionEditOpen && genUrl && React.createElement(RegionEditModal,{url:genUrl,name,noun,editPropRefs,
+    regionEditOpen && genUrl && React.createElement(RegionEditModal,{url:genUrl,name,noun,entity,editPropRefs,
       onClose:()=>setRegionEditOpen(false),
       onApply:({ instruction, refs })=> generate({
         editInstruction:instruction,
@@ -3142,9 +3358,25 @@ function CardFold({ label, count, defaultOpen, children }){
    locations / shots (each kept with its scenes, full spec and generated sheet) with Restore and
    Delete-forever. Collapsed by default; renders nothing when the bin is empty. Shared by
    Art Room tabs via window.RecentlyDeleted. */
-function RecentlyDeleted({ items, kind, onRestore, onPurge }){
+function RecentlyDeleted({ items, kind, onRestore, onPurge, compact }){
   const [open, setOpen] = React.useState(false);
-  if(!items || !items.length) return null;
+  const rootRef = React.useRef(null);
+  const itemCount = (items||[]).length;
+  React.useEffect(()=>{
+    if(!compact || !open || !itemCount) return;
+    const dismiss = (e)=>{
+      if(e.type==="keydown" && e.key!=="Escape") return;
+      if(e.type==="pointerdown" && rootRef.current && rootRef.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown",dismiss);
+    document.addEventListener("keydown",dismiss);
+    return ()=>{
+      document.removeEventListener("pointerdown",dismiss);
+      document.removeEventListener("keydown",dismiss);
+    };
+  },[compact,open,itemCount]);
+  if(!itemCount) return null;
   const noun = kind==="character" ? "character" : kind==="location" ? "location" : kind==="shot" ? "shot" : "prop";
   const labelFor = (it)=>{
     if(!it) return "Untitled "+noun;
@@ -3160,25 +3392,36 @@ function RecentlyDeleted({ items, kind, onRestore, onPurge }){
   const rel = (iso)=>{ if(!iso) return ""; const ms=Date.now()-new Date(iso).getTime();
     const m=Math.round(ms/60000); if(m<1) return "just now"; if(m<60) return m+"m ago";
     const h=Math.round(m/60); if(h<24) return h+"h ago"; return Math.round(h/24)+"d ago"; };
-  return React.createElement("div",{className:"recently-deleted"+(open?" open":"")},
+  const rows = React.createElement("div",{className:"rd-list"},
+    items.map(it=>React.createElement("div",{key:it.id,className:"rd-row"},
+      React.createElement("span",{className:"rd-name",title:labelFor(it)}, labelFor(it)),
+      it._deletedAt && React.createElement("span",{className:"rd-when"}, rel(it._deletedAt)),
+      React.createElement("button",{className:"rd-restore",onClick:()=>onRestore&&onRestore(it.id),
+        title:"Restore this "+noun+" with its scenes & spec"},
+        React.createElement(Icon.undo,{s:12}),"Restore"),
+      React.createElement("button",{className:"rd-purge",title:"Delete forever",
+        onClick:async ()=>{ const ok=await window.appConfirm({ title:"Delete “"+labelFor(it)+"” forever?",
+          body:"This permanently removes it and its reference sheet from the project. This can't be undone.",
+          confirmLabel:"Delete forever", danger:true });
+          if(ok && onPurge) onPurge(it.id); }},
+        React.createElement(Icon.x,{s:12})))));
+  if(compact) return React.createElement("div",{ref:rootRef,className:"recently-deleted rd-compact"+(open?" open":"")},
+    React.createElement("button",{className:"rd-trigger",onClick:()=>setOpen(o=>!o),
+      title:"Recently deleted "+noun+"s", "aria-label":"Recently deleted "+noun+"s", "aria-expanded":open},
+      React.createElement(Icon.trash,{s:14}),
+      React.createElement("span",{className:"rd-count"},itemCount)),
+    open && React.createElement("div",{className:"rd-popover",role:"dialog","aria-label":"Recently deleted "+noun+"s"},
+      React.createElement("div",{className:"rd-popover-head"},
+        React.createElement("span",null,"Recently deleted"),
+        React.createElement("span",{className:"rd-count"},itemCount)),
+      rows));
+  return React.createElement("div",{ref:rootRef,className:"recently-deleted"+(open?" open":"")},
     React.createElement("button",{className:"rd-head",onClick:()=>setOpen(o=>!o)},
       React.createElement(Icon.trash,{s:12}),
       React.createElement("span",null,"Recently deleted"),
-      React.createElement("span",{className:"rd-count"}, items.length),
+      React.createElement("span",{className:"rd-count"},itemCount),
       React.createElement("span",{className:"rd-chev"}, React.createElement(open?Icon.chevD:Icon.chevR,{s:12}))),
-    open && React.createElement("div",{className:"rd-list"},
-      items.map(it=>React.createElement("div",{key:it.id,className:"rd-row"},
-        React.createElement("span",{className:"rd-name",title:labelFor(it)}, labelFor(it)),
-        it._deletedAt && React.createElement("span",{className:"rd-when"}, rel(it._deletedAt)),
-        React.createElement("button",{className:"rd-restore",onClick:()=>onRestore&&onRestore(it.id),
-          title:"Restore this "+noun+" with its scenes & spec"},
-          React.createElement(Icon.undo,{s:12}),"Restore"),
-        React.createElement("button",{className:"rd-purge",title:"Delete forever",
-          onClick:async ()=>{ const ok=await window.appConfirm({ title:"Delete “"+labelFor(it)+"” forever?",
-            body:"This permanently removes it and its reference sheet from the project. This can't be undone.",
-            confirmLabel:"Delete forever", danger:true });
-            if(ok && onPurge) onPurge(it.id); }},
-          React.createElement(Icon.x,{s:12}))))));
+    open && rows);
 }
 window.RecentlyDeleted = RecentlyDeleted;
 
@@ -3262,10 +3505,8 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
   // part as its own labelled line, re-composed back into c.role on every edit.
   const roleParts = parseRole(c.role);
   const setRolePart = (patch)=> onUpdate(c.id, { role: composeRole({ ...roleParts, ...patch }) });
-  // Role, Archetype and Identity are all always shown, in that order. Archetype
-  // sits before Identity; an empty one reveals its placeholder only on focus (CSS).
-  const [roleOpen, setRoleOpen] = React.useState(false);   // collapsed by default to keep the card compact
-  const roleSummary = composeRole({ ...roleParts, identity: capFirst(roleParts.identity) }) || "Role";
+  // Narrative role fields are rendered inside the physical Identity fold so the
+  // header stays compact and the character definition lives in one place.
   const v = charVisualDefaults(c);
   const promptText = buildCharRefPrompt(c, project, props);
   const finalPrompt = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project, props) : promptText;
@@ -3284,6 +3525,15 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
   // permanent look). CARRIED props (phone, gun, pills) are situational, so they're
   // attached at the SHOT level instead, never baked into the neutral turnaround.
   const wornProps = ownedProps.filter(p=> p.kind!=="carried");
+  const wornExclusionIds = Array.isArray(c.wornReferenceExclusions) ? c.wornReferenceExclusions : [];
+  const wornExclusionKey = wornExclusionIds.slice().sort().join(",");
+  const wornExclusions = React.useMemo(()=>new Set(wornExclusionIds),[wornExclusionKey]);
+  const includedWornProps = wornProps.filter(p=>!wornExclusions.has(p.id));
+  const setWornReferenceIncluded = (propId, included)=>{
+    const next = new Set(wornExclusionIds);
+    if(included) next.delete(propId); else next.add(propId);
+    onUpdate(c.id,{ wornReferenceExclusions:Array.from(next) });
+  };
   /* "orphans" = prop cards that were DERIVED from the cast (fromCast) but whose name
      no longer matches any worn/carried bullet above — i.e. leftovers from an old bad
      text-split like "Aud" or "Possessive)". Curated / hand-added props (fromCast not
@@ -3347,7 +3597,7 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
   const orphanProps = linkInfo.orphans;
   const collectAttachments = async ()=>{
     const out = [];
-    for(const p of wornProps){
+    for(const p of includedWornProps){
       let url = (typeof nbGetImage==="function") ? nbGetImage(p.id) : "";
       if(!url && typeof nbLoadImage==="function"){ try{ url = await nbLoadImage(p.id); }catch(e){} }
       if(url) out.push({ url, note: p.name+(p.kind?(" ("+p.kind+")"):""), refId:p.id });
@@ -3369,7 +3619,7 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
       for(const p of ownedProps){
         let url=(typeof nbGetImage==="function")?nbGetImage(p.id):"";
         if(!url && typeof nbLoadImage==="function"){ try{ url=await nbLoadImage(p.id);}catch(e){} }
-        m[p.id]=!!url;
+        m[p.id]=url||"";
       }
       if(alive) setOwnedSheetMap(m);
     })();
@@ -3378,10 +3628,9 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
   /* legit linked props (excluding orphan cards) that have NO generated sheet yet —
      used to warn before generating a character that would miss those references. */
   const orphanIds = React.useMemo(()=> new Set(orphanProps.map(p=>p.id)), [orphanProps]);
-  // WORN items no longer demand their own sheets — the CHARACTER SHEET is their canon
-  // (they render on the body, composed with fit and light). A separately generated worn
-  // sheet just creates a second, conflicting design. So the "generate props first"
-  // gate is retired for worn items; existing worn sheets still attach if present.
+  // A worn item can remain text-only while its prop design is still unresolved. Once a
+  // prop sheet exists it becomes an optional visual lock; generation never blocks on a
+  // missing sheet and never pulls carried props into the neutral character master.
   const missingPropSheets = [];
   /* refresh prop-readiness when one of THIS character's props finishes generating
      (e.g. the inline "generate props first" flow completing after a tab switch). */
@@ -3468,11 +3717,29 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
     relatedClearIds: ()=> (c.states||[]).map(s=> c.id+":"+s.id),
     buildFinal: ()=> finalPrompt,
     buildFromPhoto: ()=> buildRefFromPhotoPrompt(c, project),
+    buildFromBase: ()=> "Update this existing master character sheet for "+(c.name||"the character")+". "
+      +"Preserve the EXACT same face, hair, skin tone, age, build, body proportions, identity, panel layout, framing and render style from the base sheet. "
+      +"Apply the current production specification and worn-reference designs below without re-casting or re-imagining the character. "
+      +finalPrompt,
     buildSimple: ()=> (typeof buildSimpleCharPrompt==="function") ? buildSimpleCharPrompt(c) : finalPrompt,
     attachments: wornProps.length ? collectAttachments : null,
+    attachmentsText: (attach)=> "The additional reference image"+(attach.length>1?"s are":" is")
+      +" APPROVED worn-prop design"+(attach.length>1?"s":"")+". Lock "
+      +attach.map(a=>a.note||"the item").join(", ")+" onto the character exactly, preserving each object's shape, material, colour, wear and scale. "
+      +"Worn items without an attached image remain governed by the textual specification.",
     // record WHICH worn-prop text was baked into this sheet — the card's stale badge
     // compares it against the current cards (edits after generation desync the canon)
-    metaExtra: ()=>({ wornSig: (typeof wornPropsSig==="function") ? wornPropsSig(wornProps, c.id) : "" }),
+    metaExtra: async ({refsUsed})=>{
+      const usedIds = new Set((refsUsed||[]).map(r=>r&&r.refId).filter(Boolean));
+      const wornReferences = await loadWornReferenceSnapshot(c, wornProps, usedIds);
+      const visual = wornReferences.filter(r=>r.mode==="visual").length;
+      return {
+        specPrompt:finalPrompt,
+        wornSig:(typeof wornPropsSig==="function") ? wornPropsSig(wornProps, c.id) : "",
+        wornReferences,
+        wornRefSummary:{ total:wornReferences.length, visual, text:wornReferences.length-visual },
+      };
+    },
     /* warn-and-confirm: if any linked prop has no sheet, it'll be drawn from text
        only (not a locked reference). Three choices: generate the missing prop sheets
        inline first (no tab switch), continue without, or cancel. */
@@ -3532,6 +3799,9 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
     buildEdit: (instr)=> "Edit this height/scale chart. Apply ONLY this change: "+instr+". Keep the figure, the vertical ruler and its markings otherwise identical.",
   });
   const scaleGenWrapped = Object.assign({}, scaleSheetGen, { generate:(o)=>scaleSheetGen.generate({ aspectRatio:"9:16", ...(o||{}) }) });
+  const storedSpecPrompt = gen.genMeta && (gen.genMeta.specPrompt || gen.genMeta.prompt) || "";
+  const promptStale = !!(gen.genUrl && storedSpecPrompt
+    && storedSpecPrompt!==finalPrompt && !storedSpecPrompt.startsWith(finalPrompt+" "));
 
   // batch generation: when this card is the active queue member, fire one generate
   // and report back when it settles (mirrors the Props/Locations cards).
@@ -3558,20 +3828,30 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
   // sheet are out of date (the canon desynced): say so and offer a re-bake regenerate.
   // NOTE: must live BELOW `const gen = useImageGen(...)` — a deps-array read of
   // gen.genUrl before that const initializes is a TDZ crash on every card render.
-  const [wornStale, setWornStale] = React.useState(false);
+  const [wornSync, setWornSync] = React.useState({stale:false,reasons:[],total:wornProps.length,visual:0});
   React.useEffect(()=>{
     let live = true;
-    if(!gen.genUrl || typeof nbLoadDetailsAsset!=="function" || typeof wornPropsSig!=="function"){ setWornStale(false); return; }
+    if(!gen.genUrl || typeof nbLoadDetailsAsset!=="function"){
+      setWornSync({stale:false,reasons:[],total:wornProps.length,visual:0}); return;
+    }
     (async ()=>{
       try{
         const d = await nbLoadDetailsAsset(c.id);
-        const baked = d && d.meta && d.meta.wornSig;
-        if(!baked){ if(live) setWornStale(false); return; }
-        if(live) setWornStale(baked !== wornPropsSig(wornProps, c.id));
-      }catch(e){ if(live) setWornStale(false); }
+        const meta = d && d.meta || {};
+        const current = await loadWornReferenceSnapshot(c,wornProps);
+        let reasons = compareWornReferenceSnapshots(meta.wornReferences||[],current);
+        if(meta.wornSig && meta.wornSig!==wornPropsSig(wornProps,c.id)) reasons.push("The worn-item specification changed");
+        /* Legacy sheets pre-date dependency snapshots. Any ready, included sheet is a
+           newly available visual lock and should prompt one clean master update. */
+        if(!Array.isArray(meta.wornReferences) && current.some(r=>r.mode==="visual"))
+          reasons = current.filter(r=>r.mode==="visual").map(r=>r.name+" is ready to lock");
+        reasons = Array.from(new Set(reasons));
+        if(live) setWornSync({stale:reasons.length>0,reasons,total:current.length,
+          visual:current.filter(r=>r.mode==="visual").length});
+      }catch(e){ if(live) setWornSync({stale:false,reasons:[],total:wornProps.length,visual:0}); }
     })();
     return ()=>{ live=false; };
-  },[c.id, gen.genUrl, wornPropsSig(wornProps, c.id)]);   // recompute on ANY worn-card change (rename included)
+  },[c.id, gen.genUrl, gen.genMeta&&gen.genMeta.version, sheetTick, wornExclusionKey, wornPropsSig(wornProps, c.id)]);
 
   return React.createElement("div",{className:"sheet-card"+(batchActiveId===c.id?" batch-on":""),"data-char-card":c.id},
     React.createElement(SheetFrame,{ gen, slotId:"charref-"+c.id, name:c.name, avatarColor:c.color,
@@ -3580,10 +3860,11 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
       // The empty slot is also the finished-image importer (full resolution, like the Locations
       // plate), so the separate "Upload a finished sheet" button is intentionally omitted.
       dropToImport:true,
-      specGate:{ ready:(drafted || !c.manual), hint:"Draft the design spec first \u2014 look & wardrobe are what the sheet is built from." },
       // "Update a prop" chips in the sheet-edit panel: THIS character's own props
       // (worn or carried) that already have a locked prop sheet
       editPropRefs: ownedProps.filter(p=>ownedSheetMap[p.id]).map(p=>({id:p.id, name:p.name, kind:p.kind})),
+      referenceControls: React.createElement(SheetReferenceStrip,{ gen, loadRefs:collectAttachments, onView,
+        refreshKey:[c.id,wornProps.map(p=>p.id).join(","),wornExclusionKey,sheetTick].join("|") }),
       onDelete:onDelete?(()=>onDelete(c.id)):null, deleteLabel:"Delete character" }),
     React.createElement("div",{className:"sheet-body"},
       (drafting && !drafted) && React.createElement("div",{className:"char-drafting-strip"},
@@ -3591,6 +3872,14 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
       prepProps && React.createElement("div",{className:"char-drafting-strip"},
         React.createElement("span",{className:"ns-spin"}),
         "Generating prop sheet "+(prepProps.done+1)+"/"+prepProps.total+"\u2026 "+(prepProps.name||"")),
+      c.wornPropBootstrap && c.wornPropBootstrap.status==="running" && React.createElement("div",{className:"char-drafting-strip"},
+        React.createElement("span",{className:"ns-spin"}),
+        "Building worn prop references in background \u00b7 "+(c.wornPropBootstrap.done||0)+"/"+(c.wornPropBootstrap.total||0)),
+      c.wornPropBootstrap && c.wornPropBootstrap.status==="attention" && React.createElement("div",{
+        className:"char-drafting-strip warn",role:"status",
+        title:(c.wornPropBootstrap.failedNames||[]).join(", ")},
+        React.createElement(Icon.alert,{s:12}),
+        (c.wornPropBootstrap.failedNames||[]).length+" worn prop reference"+((c.wornPropBootstrap.failedNames||[]).length===1?" needs":"s need")+" attention \u00b7 open Props & accessories"),
       React.createElement("div",{className:"sheet-head"},
         React.createElement("div",{className:"sheet-head-top"},
           React.createElement("div",{className:"sheet-name",title:c.name||""},c.name),
@@ -3603,58 +3892,22 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
               onClick:()=>setVoiceOpen(true),
               title:voiceLocked?("Voice locked: "+((c.voiceLock&&c.voiceLock.voiceName)||"voice")+" \u2014 test or relock"):"Cast a voice \u2014 lock how this character sounds"},
               React.createElement(Icon.mic,{s:12}), "Voice"),
-            React.createElement("button",{className:"char-draft-btn"+(drafting?" busy":""),disabled:drafting,onClick:()=>onDraft(c)},
-              React.createElement(Icon.sparkles,{s:12}), drafting?"Drafting\u2026":"Draft details"),
             React.createElement(QaCheckButton,{ gen, name:c.name, noun:"character sheet",
               specFields:()=>({ body:(c.coreBody||""), wardrobe:(c.wardrobeMask||c.wardrobe||""), accessories:(c.accessories||"") }),
               onApplySpec:(patch)=>{ const up={};
                 if(patch.body!=null) up.coreBody=patch.body;
                 if(patch.wardrobe!=null){ if((c.wardrobeMask||"").trim()) up.wardrobeMask=patch.wardrobe; else up.wardrobe=patch.wardrobe; }
                 if(patch.accessories!=null) up.accessories=patch.accessories;
-                onUpdate(c.id, up); } }))),
-        React.createElement("div",{className:"sheet-role-block"+(roleOpen?" open":"")},
-          React.createElement("button",{className:"role-toggle",onClick:()=>setRoleOpen(o=>!o),
-            title:roleOpen?"Collapse":"Expand role details"},
-            React.createElement(Icon[roleOpen?"chevD":"chevR"],{s:12}),
-            roleOpen
-              ? React.createElement("span",{className:"role-toggle-lab"},"Role & scenes")
-              : React.createElement("span",{className:"role-summary"},roleSummary)),
-          roleOpen && React.createElement("div",{className:"role-fields"},
-          // ROLE (function) — always shown
-          React.createElement("div",{className:"role-line"},
-            React.createElement("span",{className:"role-lab"},"Role"),
-            React.createElement("div",{className:"sheet-role"},
-              React.createElement(EditText,{value:roleParts.role,placeholder:"Function\u2014e.g. Antagonist",
-                onCommit:val=>setRolePart({role:val})}))),
-          // ARCHETYPE (the "·" aspect) — always shown, before Identity
-          React.createElement("div",{className:"role-line"},
-            React.createElement("span",{className:"role-lab"},"Archetype"),
-            React.createElement("div",{className:"sheet-role-desc"},
-              React.createElement(EditText,{value:roleParts.archetype,multiline:true,
-                placeholder:"What they embody \u2014 e.g. ideology, the system\u2026",onCommit:val=>setRolePart({archetype:val})}))),
-          // IDENTITY (who they are) — always shown
-          React.createElement("div",{className:"role-line"},
-            React.createElement("span",{className:"role-lab"},"Identity"),
-            React.createElement("div",{className:"sheet-role-desc"},
-              React.createElement(EditText,{value:capFirst(roleParts.identity),multiline:true,
-                placeholder:"Who they are \u2014 e.g. A Somali-British trauma nurse\u2026",onCommit:val=>setRolePart({identity:val})}))),
-          // PRONOUNS \u2014 canonical, fed into the scene drafter so the script never drifts
-          // from the sheet's gender. Defaults to the value inferred from the bible; editable.
-          React.createElement("div",{className:"role-line"},
-            React.createElement("span",{className:"role-lab"},"Pronouns"),
-            React.createElement("select",{className:"char-pronoun-sel",
-              value:((c.pronouns==="he/him"||c.pronouns==="she/her") ? c.pronouns : ((typeof window.charPronouns==="function"?window.charPronouns(c):"") || "")),
-              onChange:e=>onUpdate(c.id,{pronouns:e.target.value})},
-              [["","set pronouns\u2026"],["he/him","he/him"],["she/her","she/her"]].map(function(o){return React.createElement("option",{key:o[0]||"unset",value:o[0],disabled:!o[0]},o[1]);}))))),
-        // ALWAYS-VISIBLE scenes row — ONE line, paged 4 chips at a time with ‹ ›
-        // arrows (a lead who appears in 12+ scenes was wrapping the card header)
-        React.createElement("div",{className:"sheet-scenes"},
-          React.createElement("span",{className:"sheet-scenes-lab",title:"Every scene this character appears in (drives or is named in). Filled chips = scenes they DRIVE."},"Appears in"),
-          React.createElement(SceneChipPager,{ none:"none yet",
-            items: appearsScenes.map(s=>({ key:s.id, label:String(s.no).padStart(2,"0"),
-              className:"sheet-scene-chip"+(drivenIds.has(s.id)?" driven":""),
-              title:(s.title||("Scene "+s.no))+(drivenIds.has(s.id)?" \u00b7 drives this scene":" \u00b7 appears") })) }))),
-
+                onUpdate(c.id, up); } })))),
+      (promptStale || wornSync.stale) && React.createElement("div",{className:"prompt-drift-banner continuity-update-banner",role:"status"},
+        React.createElement(Icon.alert,{s:14}),
+        React.createElement("span",{className:"prompt-drift-copy"},
+          React.createElement("b",null,"Reference out of date"),
+          " · "+(wornSync.reasons[0] || "The character specification changed")+".",
+          wornSync.reasons.length>1 && React.createElement("small",null," +"+(wornSync.reasons.length-1)+" more continuity change"+(wornSync.reasons.length>2?"s":""))),
+        React.createElement("button",{className:"continuity-update-action",disabled:gen.gening,
+          title:"Preserve the current identity and update this master with the latest selected worn references",
+          onClick:()=>gen.generate({deriveFromCurrent:true})},gen.gening?"Updating…":"Update master")),
       cameoMeta && React.createElement("div",{className:"sheet-cameo-status"},
         React.createElement(Icon.userScan,{s:13}),
         React.createElement("span",{className:"scs-t"},"Likeness locked"),
@@ -3668,13 +3921,9 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
         React.createElement("button",{className:"scs-act",onClick:()=>setCameoOpen(true)},"Recapture"),
         React.createElement("button",{className:"scs-act danger",onClick:removeCameo},"Remove")),
 
-      wornStale && React.createElement("div",{className:"prompt-drift-note"},
-        "A worn item's prop card changed since this sheet was generated \u2014 its baked accessories are out of date. Regenerate to re-bake them."),
-
       !drafted && !gen.genUrl && React.createElement("div",{className:"sheet-undrafted"},
         React.createElement(Icon.alert,{s:13}),
-        React.createElement("span",null,"Visuals not drafted yet \u2014 click ",
-          React.createElement("b",null,"Draft details")," to fill the physical identity.")),
+        React.createElement("span",null,"Visuals not drafted yet \u2014 Generate sheet will draft the physical identity first.")),
 
       // render-style picker — the visual language the sheet is drawn in (always visible)
       React.createElement("div",{className:"char-style-row"},
@@ -3691,7 +3940,36 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
         (!styling && unlockVisible && window.turnIsUserStyle && window.turnIsUserStyle(c.renderStyleKey)) &&
           React.createElement("span",{className:"char-style-name char-style-locked",title:"Your saved style — reusable everywhere. Click to unlock.",onClick:unlockCurrent},"🔒 saved · unlock")),
 
+      React.createElement("div",{className:"sheet-scenes character-scenes"},
+        React.createElement("span",{className:"sheet-scenes-lab",title:"Every scene this character appears in (drives or is named in). Filled chips = scenes they drive."},"Scenes"),
+        React.createElement(SceneChipPager,{ none:"none yet",
+          items: appearsScenes.map(s=>({ key:s.id, label:String(s.no).padStart(2,"0"),
+            className:"sheet-scene-chip"+(drivenIds.has(s.id)?" driven":""),
+            title:(s.title||("Scene "+s.no))+(drivenIds.has(s.id)?" \u00b7 drives this scene":" \u00b7 appears") })) })),
+
       React.createElement(CardFold,{label:"Identity",defaultOpen:false},
+        React.createElement("div",{className:"role-fields identity-role-fields"},
+          React.createElement("div",{className:"role-line"},
+            React.createElement("span",{className:"role-lab"},"Role"),
+            React.createElement("div",{className:"sheet-role"},
+              React.createElement(EditText,{value:roleParts.role,placeholder:"Function\u2014e.g. Antagonist",
+                onCommit:val=>setRolePart({role:val})}))),
+          React.createElement("div",{className:"role-line"},
+            React.createElement("span",{className:"role-lab"},"Archetype"),
+            React.createElement("div",{className:"sheet-role-desc"},
+              React.createElement(EditText,{value:roleParts.archetype,multiline:true,
+                placeholder:"What they embody \u2014 e.g. ideology, the system\u2026",onCommit:val=>setRolePart({archetype:val})}))),
+          React.createElement("div",{className:"role-line"},
+            React.createElement("span",{className:"role-lab"},"Narrative identity"),
+            React.createElement("div",{className:"sheet-role-desc"},
+              React.createElement(EditText,{value:capFirst(roleParts.identity),multiline:true,
+                placeholder:"Who they are \u2014 e.g. A Somali-British trauma nurse\u2026",onCommit:val=>setRolePart({identity:val})}))),
+          React.createElement("div",{className:"role-line"},
+            React.createElement("span",{className:"role-lab"},"Pronouns"),
+            React.createElement("select",{className:"char-pronoun-sel",
+              value:((c.pronouns==="he/him"||c.pronouns==="she/her") ? c.pronouns : ((typeof window.charPronouns==="function"?window.charPronouns(c):"") || "")),
+              onChange:e=>onUpdate(c.id,{pronouns:e.target.value})},
+              [["","set pronouns\u2026"],["he/him","he/him"],["she/her","she/her"]].map(function(o){return React.createElement("option",{key:o[0]||"unset",value:o[0],disabled:!o[0]},o[1]);})))),
         // physical identity as a clean LABELLED LIST (each field editable), instead of one
         // run-on paragraph. Edits update the structured `physique` (the source the prompt
         // reads) AND recompose `coreBody` so downstream/legacy readers stay in sync.
@@ -3751,6 +4029,13 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
         React.createElement("div",{className:"sheet-props-note"},
           React.createElement(Icon.sparkles,{s:11}),
           "Continuity objects \u2014 worn or carried items that recur across scenes."),
+        wornProps.length>0 && React.createElement("div",{className:"worn-lock-summary"},
+          React.createElement(Icon.layers,{s:12}),
+          React.createElement("span",null,
+            React.createElement("b",null,wornProps.filter(p=>ownedSheetMap[p.id]&&!wornExclusions.has(p.id)).length+" of "+wornProps.length),
+            " worn design"+(wornProps.length===1?"":"s")+" visually locked"),
+          React.createElement("span",{className:"worn-lock-fallback"},
+            wornProps.filter(p=>!ownedSheetMap[p.id]||wornExclusions.has(p.id)).length+" text-only")),
         React.createElement("div",{className:"sheet-2col"},
           React.createElement(SheetField,{label:"Accessories \u2014 worn",value:c.accessories,list:true,ownerName:c.name,
             onItemRemoved: onRemoveOwnedItem ? (txt=>onRemoveOwnedItem(c.id,txt)) : null,
@@ -3793,23 +4078,33 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
               // the shot level, so show them as deferred rather than "missing".
               const carried = !!(row.prop && row.prop.kind==="carried");
               const ready = row.prop ? !!ownedSheetMap[row.prop.id] : false;
+              const included = !!(row.prop && !carried && ready && !wornExclusions.has(row.prop.id));
               // carried props stay neutral (they bind at the shot, not here) but still
               // show whether their sheet has been generated \u2014 a green tick when ready,
               // so a generated and an ungenerated carried prop don't look identical.
-              const cls = "linked-prop "+(carried?("shot"+(ready?" genned":"")):(ready?"ready":"missing"))+(row.orphan?" orphan":"");
+              const cls = "linked-prop "+(carried?("shot"+(ready?" genned":"")):(included?"ready":(ready?"available":"missing")))+(row.orphan?" orphan":"");
               const status = carried
                 ? (ready ? "sheet ready \u2713 \u00b7 at shot" : "no sheet yet \u00b7 at shot")
-                : (ready ? "sheet ready \u2713" : "no sheet yet");
+                : (included ? "visual lock \u2713" : (ready ? "sheet ready \u00b7 text-only" : "text-only \u00b7 no sheet"));
               return React.createElement("div",{key:row.key,className:cls,
                 title: carried
                   ? (ready ? "Reference sheet generated \u2014 it attaches at the shot, not on this character sheet."
                            : "No reference sheet generated yet \u2014 it will attach at the shot once you generate it in the Props tab.")
-                  : (ready ? "Reference sheet generated and attached to this character sheet."
+                  : (ready ? (included
+                                ? "Reference sheet generated and included as a visual lock in the next character master."
+                                : "Reference sheet is ready, but this item is currently text-only in the character master.")
                            : "No reference sheet generated yet \u2014 generate it in the Props tab.")},
-                React.createElement(Icon.box,{s:12}),
-                React.createElement("span",{className:"linked-prop-name"},row.name),
-                row.orphan && React.createElement("span",{className:"linked-prop-orphan-tag",
-                  title:"Not in the worn/carried lists above \u2014 likely a leftover. Use \u201cRemove orphaned\u201d to clean up."},"not listed"),
+                React.createElement("div",{className:"linked-prop-title"},
+                  React.createElement("span",{className:"linked-prop-name"},row.name),
+                  row.orphan && React.createElement("span",{className:"linked-prop-orphan-tag",
+                    title:"Not in the worn/carried lists above \u2014 likely a leftover. Use \u201cRemove orphaned\u201d to clean up."},"not listed")),
+                React.createElement("div",{className:"linked-prop-controls"},
+                (ready && row.prop)
+                  ? React.createElement("button",{className:"linked-prop-thumb",type:"button",
+                      title:"Preview "+(row.name||"prop")+" reference sheet",
+                      onClick:(e)=>{ e.stopPropagation(); onView&&onView(ownedSheetMap[row.prop.id],row.prop); }},
+                      React.createElement("img",{src:ownedSheetMap[row.prop.id],alt:""}))
+                  : React.createElement(Icon.box,{s:12}),
                 // NO CARD YET (e.g. a character added after "Design all props" ran):
                 // one free press derives the prop card in place — then this same row
                 // offers Draft details / Generate.
@@ -3862,7 +4157,12 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
                     lab,
                     (pDrafted && !busy && typeof window.nbCostChip==="function") ? window.nbCostChip(1) : null);
                 })(),
-                React.createElement("span",{className:"linked-prop-status"},status));
+                (row.prop && !carried && ready && !row.orphan) && React.createElement("label",{
+                  className:"worn-lock-toggle",title:included?"Included as an exact visual reference in the next character master":"Keep this prop text-only in the character master"},
+                  React.createElement("input",{type:"checkbox",checked:included,
+                    onChange:(e)=>setWornReferenceIncluded(row.prop.id,e.target.checked)}),
+                  React.createElement("span",null,"Visual lock")),
+                React.createElement("span",{className:"linked-prop-status"},status)));
             })))),
 
       React.createElement(CardFold,{label:"Continuity \u00b7 appearance states",count:states.length||null,defaultOpen:false},
@@ -3906,16 +4206,15 @@ function CharacterSheet({ c, project, scenes, props, drafts, speaks, onUpdate, o
           React.createElement(QaCheckButton,{ gen:scaleGenWrapped, name:(c.name||"")+" \u00b7 scale", noun:"scale sheet" }))),
 
       React.createElement(CardFold,{label:"Master reference prompt",defaultOpen:false},
-        React.createElement(CopyBox,{label:"4-panel casting sheet \u2014 feed to your image tool",text:promptText}),
+        React.createElement(CopyBox,{label:"Reference-Guided Textual Character Sheet",text:promptText}),
         React.createElement(SheetField,{label:"Negative prompt \u2014 exclude",value:c.negativePrompt||v.negativePrompt,multiline:true,
           onCommit:val=>onUpdate(c.id,{negativePrompt:val})}),
-        // the FINAL box always holds the prompt that generated the CURRENT sheet
+        // The hybrid box always holds the prompt that generated the CURRENT sheet
         // (stored per version, so restoring an older version restores its prompt
         // here too); before any sheet exists it previews the next generation.
-        React.createElement(CopyBox,{label:(gen.genUrl && gen.genMeta && gen.genMeta.prompt)
-            ? "Final prompt \u2014 generated the CURRENT sheet" : "Final prompt \u2014 master + negative (sent at generation)",
+        React.createElement(CopyBox,{label:"Reference-Guided Hybrid Character Sheet (Text + Images)",
           text:(gen.genUrl && gen.genMeta && gen.genMeta.prompt) || finalPrompt}),
-        (gen.genUrl && gen.genMeta && gen.genMeta.prompt && gen.genMeta.prompt!==finalPrompt) &&
+        promptStale &&
           React.createElement("div",{className:"prompt-drift-note"},
             "The spec has changed since this sheet was generated \u2014 Regenerate to bring the sheet back in step with it.")),
 
@@ -4482,6 +4781,8 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
               text:((typeof roomCopy==="function" && roomCopy(project,"characters").tip) ||
                 "A canonical visual reference for every character \u2014 the consistency anchor you feed into each shot so they look identical in every frame. 'Design the cast' runs the Casting Director agent: on its own it drafts each character's look, finds their appearance changes (wounds, dirt, costume shifts), then generates the master sheet (pulling in their prop sheets + any cameo) and every appearance-state variant. 'Draft all' + 'Generate all characters' stay as the manual paths.\n\nTHE CAST DERIVES FROM THE STORY \u2014 there's no hand-adding here: add a character in the Writers' Room (Cast +), write them into scenes, and they appear here ready to design.")}))),
         React.createElement("div",{className:"art-intro-actions"},
+          window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{
+            items:trashItems,kind:"character",onRestore,onPurge,compact:true}),
           cameoCount>0 && React.createElement("button",{className:"art-cameo-mgr",onClick:()=>setMgrOpen(true),
             title:"Review & manage locked likenesses"},
             React.createElement(Icon.userScan,{s:14}),"Cameos \u00b7 "+cameoCount),
@@ -4539,8 +4840,7 @@ function CharacterSheets({ project, characters, scenes, props, drafts, shots, be
         drafting:draftingId===c.id||(draftingIds||[]).indexOf(c.id)>=0,onView:(url,ch)=>setView({url,character:ch}),
         batchActiveId,onBatchDone:batch.advance,onDelete:onDelete,
         onSuggestStates,suggestingStates:suggestingStatesId===c.id,onRemoveOwnedItem,onRenameOwnedItem,onDraftProp,onCreateOwnedProp}))),
-    React.createElement(PagerBar,{pager:charPager,noun:"character"}),
-    window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{items:trashItems,kind:"character",onRestore,onPurge}));
+    React.createElement(PagerBar,{pager:charPager,noun:"character"}));
 }
 
 /* ---- pre-production readiness — ONE shared status model, used by the overview
@@ -4706,7 +5006,7 @@ function ArtComingSoon({ tab }){
 function ArtRoom({ artView, setArtView, project, characters, scenes, props, drafts, trash, onRestoreChar, onPurgeChar, onRestoreProp, onPurgeProp, onRestoreLoc, onPurgeLoc, onRestoreShot, onPurgeShot, onEnsureOwner, onUpdateChar, onDraftVisuals, onDraftAllVisuals, draftingVisualId, draftingAllVisuals, draftingVisualIds, onCreateOwnedProp,
   onSuggestStates, suggestingStatesId, onRemoveOwnedItem, onRenameOwnedItem, onAddCharacter, onDeleteCharacter,
   onUpdateProp, onDraftProp, onDraftAllProps, onAddProp, onDeleteProp, draftingPropIds, draftingPropId, draftingAllProps, onMergeProps, onSeedFromCast, castHasProps, onTagScenes, taggingScenes, onTagOne, taggingSceneId,
-  locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocIds, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onSetWorldScale, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId, sluglineUnits, onUpdateUnit, onRemoveUnit,
+  locations, onUpdateLocation, onDraftLocation, onDraftAllLocs, onAddLocation, onDeleteLocation, draftingLocIds, draftingAllLocs, onPullFromScript, scriptHasLocs, onScout, onAssignStyles, assigningStyles, onSetStyleRefs, onSetScenePreset, onAddStyleRefImages, onRemoveStyleRefImage, onDraftStaging, draftingStageId, sluglineUnits, onUpdateUnit, onRemoveUnit,
   shots, beatsMap, onUpdateShot, onAddShot, onDeleteShot, onSplitBeat, splittingBeat, onRefineBeat, refiningBeat, onDraftSceneShots, draftingSceneShots, onDraftAllShots, draftingAllShots, onDirectScene, onColorist, onShoot, onCast, onPropsMaster,
   lookbook, lookbookNote, onUpdateLookbook, onAddLookbook, onDeleteLookbook, onSetLookbookNote, onResearch, onClearLookbook,
   staleTabs, onApplyLookbook }){
@@ -4760,7 +5060,7 @@ function ArtRoom({ artView, setArtView, project, characters, scenes, props, draf
           lookbookStale:!!_stale.props,onApplyLookbook:()=>onApplyLookbook&&onApplyLookbook("props"),
           onApplyLookbookDraftOnly:()=>onApplyLookbook&&onApplyLookbook("props","draft")})
     : artView==="locations" && LocationSheets
-      ? React.createElement(LocationSheets,{project,locations,scenes,drafts,onUpdate:onUpdateLocation,onDraft:onDraftLocation,onSetWorldScale,sluglineUnits,onUpdateUnit,onRemoveUnit,
+      ? React.createElement(LocationSheets,{project,locations,scenes,drafts,onUpdate:onUpdateLocation,onDraft:onDraftLocation,sluglineUnits,onUpdateUnit,onRemoveUnit,
           onDraftAll:onDraftAllLocs,onAdd:onAddLocation,onDelete:onDeleteLocation,draftingIds:draftingLocIds,draftingAll:draftingAllLocs,
           trashItems:(trash&&trash.locations)||[],onRestore:onRestoreLoc,onPurge:onPurgeLoc,
           onPullFromScript,scriptHasLocs,onDraftStaging,draftingStageId,onScout,

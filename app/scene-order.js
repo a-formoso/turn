@@ -31,6 +31,7 @@ function screenplayBeatRevision(draft, beatN){
 }
 const SHOT_SPEC_FIELDS = ["beatN","size","angle","move","lens","composition","subjects","props",
   "action","dialogue","purpose","covers","beatPlan","locationId","locationSide","priority",
+  "referenceLocationsSet","referenceLocationIds","referenceCharactersSet","referenceCharacterIds",
   "negativePrompt","directives","camera","cameraHeight","cameraRoll","focus","aperture","shutter",
   "focalDistance","movementSpeed"];
 function shotSpecFingerprint(shot){

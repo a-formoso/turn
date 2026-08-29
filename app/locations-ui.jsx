@@ -10,7 +10,7 @@ function locSwatch(intExt){
     : "linear-gradient(135deg,#4a5a78,#222c3e)";     // interior — slate
 }
 
-function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage, onIeClick, sluglineUnits, onUpdateUnit, onRemoveUnit }){
+function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft, drafting, onView, batchActiveId, onBatchDone, onChipClick, onDraftStaging, draftingStage, sluglineUnits, onUpdateUnit, onRemoveUnit }){
   const d = locVisualDefaults(l);
   const scenePresets = (typeof locScenePresets==="function") ? locScenePresets(l, project) : [];
   const finalPrompt = combinedLocationPrompt(l, project, {});
@@ -140,6 +140,15 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
       +"across all panels. Keep the same multi-angle grid of the same empty space. "
       +"Do not redesign or re-imagine the location.",
   });
+  const promptStale = !!(gen.genUrl && gen.genMeta && gen.genMeta.prompt && gen.genMeta.prompt!==finalPrompt);
+  const [propDependencyTick,setPropDependencyTick]=React.useState(0);
+  React.useEffect(()=>{ const onDone=e=>{ const id=e&&e.detail&&e.detail.id;
+      if(id&&((gen.genMeta&&gen.genMeta.propDependencies)||[]).some(r=>r&&r.propId===id)) setPropDependencyTick(t=>t+1); };
+    window.addEventListener("nb-gen-done",onDone); return ()=>window.removeEventListener("nb-gen-done",onDone);
+  },[gen.genMeta&&gen.genMeta.version]);
+  const changedPropDependencies=(typeof propReferenceDependenciesChanged==="function")
+    ? propReferenceDependenciesChanged((gen.genMeta&&gen.genMeta.propDependencies)||[],window.turnContinuity||{}) : [];
+  const propReferencesStale=changedPropDependencies.length>0;
 
   // this location's set-dressing props — offered as one-click edit instructions in
   // the plate's Edit panel.
@@ -201,7 +210,7 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
   const updateVariant = (vid,patch)=> onUpdate(l.id,{ variants:(l.variants||[]).map(v=>v.id===vid?{...v,...patch}:v) });
   const removeVariant = (vid)=> onUpdate(l.id,{ variants:(l.variants||[]).filter(v=>v.id!==vid) });
 
-  return React.createElement("div",{className:"sheet-card"+(batchActiveId===l.id?" batch-on":"")},
+  return React.createElement("div",{className:"sheet-card"+(batchActiveId===l.id?" batch-on":""),"data-location-card":l.id},
     React.createElement(SheetFrame,{ gen, slotId:"locref-"+l.id, name:l.name, avatarColor:locSwatch(l.intExt),
       initials, drafted, drafting, onDraft:()=>onDraft(l), entity:l, onView,
       slotPlaceholder:"Drop a photo of the place", noun:"location plate",
@@ -212,7 +221,7 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
       // Chip label = prompt-only (built from the prop's spec); the clip button ALSO
       // attaches the fixture's generated sheet (if any) as an edit reference image.
       editSuggestions: [
-        ...dressProps.map(p=>({ label:p.name||"fixture",
+        ...dressProps.map(p=>({ label:p.name||"fixture", refId:p.id,
           text:(typeof locDressingEditText==="function") ? locDressingEditText(p) : ("Add "+(p.name||"the fixture")+" into the space."),
           title:"Insert the ready edit instruction for this fixture — built from its prop card's spec (form, material, size). Apply edit paints it into the plate, matching the plate's look. Use the clip button beside it to also attach the fixture's sheet as a reference.",
           getRef: sheetRefOf(p) })),
@@ -245,10 +254,8 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
       React.createElement("div",{className:"sheet-head"},
         React.createElement("div",{style:{flex:1,minWidth:0}},
           React.createElement("div",{className:"sheet-name loc-name-row",title:l.name||""},
-            React.createElement("span",{className:"loc-intext-badge clickable "+(/EXT/.test(l.intExt||"")?"ext":"int"),
-              role:"button",tabIndex:0,title:"Show only "+(l.intExt||"INT")+" locations",
-              onClick:()=> onIeClick && onIeClick(l.intExt||"INT"),
-              onKeyDown:(e)=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); onIeClick && onIeClick(l.intExt||"INT"); } }},
+            React.createElement("span",{className:"loc-intext-badge "+(/EXT/.test(l.intExt||"")?"ext":"int"),
+              title:(l.intExt||"INT")+" location"},
               l.intExt||"INT"),
             // resolved WORLD SCALE badge — makes the Auto derivation legible per card
             // (hidden at plain human scale; tooltip says what set it)
@@ -256,19 +263,10 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
               const cls = locationScaleClass(l, project||{});
               if(cls==="A") return null;
               const M = ({B:["\ud83d\udc01","Critter world"],C:["\ud83d\uddff","Giant world"],D:["\ud83d\udd2c","Microscopic world"]})[cls]||["",("Class "+cls)];
-              const forced = String((project||{}).worldScale||"").trim();
               return React.createElement("span",{className:"loc-scale-badge",
-                title:M[1]+" (Class "+cls+") \u2014 "+((forced && !/^auto$/i.test(forced))
-                  ? "forced project-wide by the World scale control."
-                  : "derived automatically from the characters who drive this place's scenes.")
-                  +" Plates here render at this scale."},
+                title:M[1]+" (Class "+cls+") \u2014 derived automatically from the characters who drive this place's scenes. Plates here render at this scale."},
                 M[0]+" "+cls); })(),
             React.createElement(EditText,{value:l.name,placeholder:"Location name\u2026",onCommit:val=>onUpdate(l.id,{name:val})})),
-          React.createElement("div",{className:"prop-scenes"},
-            React.createElement("span",{className:"prop-scenes-lab"},"Scenes"),
-            React.createElement(SceneChipPager,{ none:"No scenes reference this place",
-              items: locScenes.map(s=>({ key:s.id, label:String(s.no).padStart(2,"0"), className:"prop-scene-chip",
-                title:s.title||("Scene "+s.no), onClick:()=>onChipClick&&onChipClick(s.id) })) })),
           null),
         // one flex row (like Props' head actions) \u2014 otherwise .sheet-head's column
         // layout stacks each button on its own full-width line
@@ -278,6 +276,14 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
           window.QaCheckButton && React.createElement(window.QaCheckButton,{ gen, name:l.name, noun:"location plate",
             specFields:()=>({ architecture:(l.architecture||""), materials:(l.materials||""), lighting:(l.lighting||"") }),
             onApplySpec:(patch)=>onUpdate(l.id, patch) }))),
+
+      (promptStale||propReferencesStale) && React.createElement("div",{className:"prompt-drift-banner",role:"status"},
+        React.createElement(Icon.alert,{s:14}),
+        React.createElement("span",null,
+          React.createElement("b",null,"Reference out of date"),
+          propReferencesStale
+            ? (" · "+changedPropDependencies.map(r=>r.name||"A set-dressing prop").join(", ")+" changed after being used in this plate. The approved plate stays pinned until you intentionally update it.")
+            : " · The location spec changed after this plate was generated. Use Regenerate location plate above to update it.")),
 
       React.createElement("div",{className:"char-style-row"},
         React.createElement("span",{className:"char-style-lab"},"Render style"),
@@ -292,6 +298,12 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
           React.createElement("button",{className:"char-style-lock",title:"Lock this style \u2014 keep it and reuse it across Characters, Props & Locations",onClick:lockSurprise},"\ud83d\udd12 Lock this style"),
         (!styling && unlockVisible && window.turnIsUserStyle && window.turnIsUserStyle(l.renderStyleKey)) &&
           React.createElement("span",{className:"char-style-name char-style-locked",title:"Your saved style \u2014 reusable everywhere. Click to unlock.",onClick:unlockCurrent},"\ud83d\udd12 saved \u00b7 unlock")),
+
+      React.createElement("div",{className:"prop-scenes location-scenes"},
+        React.createElement("span",{className:"prop-scenes-lab"},"SCENES"),
+        React.createElement(SceneChipPager,{ none:"No scenes reference this place",
+          items: locScenes.map(s=>({ key:s.id, label:String(s.no).padStart(2,"0"), className:"prop-scene-chip",
+            title:s.title||("Scene "+s.no), onClick:()=>onChipClick&&onChipClick(s.id) })) })),
 
       !drafted && !gen.genUrl && React.createElement("div",{className:"sheet-undrafted"},
         React.createElement(Icon.alert,{s:13}),
@@ -353,7 +365,7 @@ function LocationSheet({ l, project, scenes, drafts, onUpdate, onDelete, onDraft
         React.createElement(CopyBox,{label:(gen.genUrl && gen.genMeta && gen.genMeta.prompt)
             ? "Final prompt \u2014 generated the CURRENT plate" : "Final prompt \u2014 sent to the image model",
           text:(gen.genUrl && gen.genMeta && gen.genMeta.prompt) || finalPrompt}),
-        (gen.genUrl && gen.genMeta && gen.genMeta.prompt && gen.genMeta.prompt!==finalPrompt) &&
+        promptStale &&
           React.createElement("div",{className:"prompt-drift-note"},
             "The spec has changed since this plate was generated \u2014 Regenerate to bring it back in step."),
         React.createElement(SheetField,{label:"Negative prompt \u2014 exclude",value:l.negativePrompt||d.negativePrompt,multiline:true,
@@ -745,11 +757,10 @@ function UnitDressing({ u, onUpdateUnit }){
         title:"Mentioned in this unit's action prose \u2014 click to add",onClick:()=>add(x)},"+ "+x))));
 }
 
-function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingIds, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, onSetWorldScale, sluglineUnits, onUpdateUnit, onRemoveUnit }){
+function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft, onDraftAll, onAdd, onDelete, draftingId, draftingIds, draftingAll, onPullFromScript, scriptHasLocs, onDraftStaging, draftingStageId, onScout, trashItems, onRestore, onPurge, lookbookStale, onApplyLookbook, onApplyLookbookDraftOnly, sluglineUnits, onUpdateUnit, onRemoveUnit }){
   const [view, setView] = React.useState(null);
   if(window.useRenderStyleVersion) window.useRenderStyleVersion();   // re-render dropdowns when a style is locked/unlocked
   const [sceneFilter, setSceneFilter] = React.useState("");
-  const [ieFilter, setIeFilter] = React.useState("");   // "" | INT | EXT | INT/EXT
   const [query, setQuery] = React.useState("");               // free-text name search
   const [searchOpen, setSearchOpen] = React.useState(false);  // collapsible search: icon-only until clicked
   const searchRef = React.useRef(null);
@@ -789,9 +800,7 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
   const inScene = (l, sid)=> Array.isArray(l.scenes) && l.scenes.indexOf(sid)>=0;
   const q = query.trim().toLowerCase();
   const matchesQuery = (l)=> (typeof searchWordMatch==="function") ? searchWordMatch((l.name||"")+" "+(l.intExt||""), q) : (!q || (l.name||"").toLowerCase().indexOf(q)>=0);
-  const ieOf = (l)=> (l && l.intExt) || "INT";
-  const ieCountBase = (sceneFilter ? list.filter(l=>inScene(l, sceneFilter)) : list).filter(matchesQuery);
-  const shown = ieCountBase.filter(l=> !ieFilter || ieOf(l)===ieFilter);
+  const shown = (sceneFilter ? list.filter(l=>inScene(l, sceneFilter)) : list).filter(matchesQuery);
   // 9-up pagination; suspended while a batch runs so the queue can reach every card
   const pager = usePager(shown.length, !!batchActiveId);
   const sceneNoOf = (sid)=>{ const s=(scenes||[]).find(x=>x.id===sid); return s?s.no:sid; };
@@ -801,7 +810,6 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
   const draftedIds = (subset)=> subset.filter(l=> (typeof locVisualsDrafted==="function") ? locVisualsDrafted(l) : true).map(l=>l.id);
   const startSceneBatch = ()=>{
     if(!sceneFilter || batchActiveId) return;
-    if(ieFilter) setIeFilter("");   // the scene batch covers INT and EXT alike
     const eligible = draftedIds(shown);
     if(!eligible.length){ batch.setMsg("Draft these locations first \u2014 nothing in this scene is ready to generate."); return; }
     batch.begin(eligible, shown.length - eligible.length);
@@ -814,7 +822,6 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
     // when the target CARD is mounted, so a batch whose first target was filtered out
     // by a search box never generated anything and hung until Cancel
     if(sceneFilter) setSceneFilter("");
-    if(ieFilter) setIeFilter("");
     if(query) setQuery("");
     batch.begin(eligible, list.length - eligible.length);
   };
@@ -831,9 +838,16 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
             React.createElement(window.InfoTip,{label:"About Locations",
               text:"Every place the film stages gets a multi-angle coverage plate so any shot set there matches its geometry, materials and light. Scene headings and secondary headings anchor the master location cards; the screenplay body can imply additional INT / EXT sides, rooms, booths, thresholds or views, and those become screenplay coverage sheets using full-scene page snapshots as image references.\n\nLOCATIONS DERIVE FROM THE SCREENPLAY \u2014 there's no arbitrary hand-adding here: write the place or implied space into the Writers' Room scene, and 'Design all locations' pulls the staged geography into the Art Room."}))),
         React.createElement("div",{className:"art-intro-actions"},
+          window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{
+            items:trashItems,kind:"location",onRestore,onPurge,compact:true}),
           // NO arbitrary hand-adding: master cards anchor to screenplay headings, while
           // implied side spaces (booths, rooms, interiors seen through glass, etc.) are
           // derived as coverage sheets from screenplay body text + page snapshots.
+          React.createElement("label",{className:"char-style-all",
+            title:"Read only. Each location's plate scale is derived automatically from the characters who drive its scenes."},
+            React.createElement("span",{className:"char-style-all-lab"},"World scale"),
+            React.createElement("select",{className:"char-style-select",value:"",disabled:true,"aria-label":"World scale (read only)"},
+              React.createElement("option",{value:""},"\u2728 Auto (by occupant)"))),
           React.createElement("button",{className:"art-draftall ghost",disabled:draftingAll||(!list.length&&!scriptHasLocs),onClick:onDraftAll,
             title:"Build every location from the screenplay in one pass \u2014 pull missing master places from scene headings, derive implied INT/EXT coverage from scene text, draft each spec, and stage its depth grid"},
             React.createElement(Icon.sparkles,{s:14}), draftingAll?"Designing\u2026":"Design all locations"),
@@ -842,7 +856,6 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
             React.createElement(Icon.sparkles,{s:14}), batchActiveId?"Generating\u2026":"Generate all locations", typeof window.nbCostChip==="function" && window.nbCostChip(1)))),),
     window.LookbookStaleNotice && React.createElement(window.LookbookStaleNotice,{stale:lookbookStale,onApply:onApplyLookbook,onDraftOnly:onApplyLookbookDraftOnly,label:"these locations",dept:"locations"}),
     BatchBar && React.createElement(BatchBar,{batch,noun:"location"}),
-    window.RecentlyDeleted && React.createElement(window.RecentlyDeleted,{items:trashItems,kind:"location",onRestore,onPurge}),
     list.length>0 && React.createElement("div",{className:"prop-toolbar"},
       React.createElement("div",{className:"prop-searchbar collapsible"+((searchOpen||q)?" open":""),
         title:(searchOpen||q)?"":"Search locations",
@@ -855,34 +868,13 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
           onKeyDown:e=>{ if(e.key==="Escape"){ setQuery(""); setSearchOpen(false); if(searchRef.current) searchRef.current.blur(); } }}),
         q && React.createElement("span",{className:"prop-search-count"}, shown.length+" of "+list.length),
         q && React.createElement("button",{className:"prop-search-clear",title:"Clear search",onClick:(e)=>{ e.stopPropagation(); setQuery(""); setSearchOpen(false); }},React.createElement(Icon.x,{s:13}))),
-      // render-style + world-scale controls live beside the search bar (moved out of the header)
+      // Render style stays editable; world scale is always resolved from the scene's occupants.
       React.createElement("div",{className:"char-style-all",
         title:"Apply one render style to ALL locations at once. Each location can still be overridden on its own card."},
         React.createElement("span",{className:"char-style-all-lab"},
           allStyling ? ("Inventing… "+allStyling.i+"/"+allStyling.total) : "Style · all locations"),
         React.createElement(window.RenderStylePicker,{value:allStyleKey,disabled:!!allStyling,
           placeholderLabel:"Mixed — per location",onPick:applyStyleAll})),
-      onSetWorldScale && React.createElement("label",{className:"char-style-all",
-        title:"Render every location's plate at this scale. 'Auto' derives each place's scale from the characters who drive its scenes — so critter or microscopic casts make the world render at their scale automatically."},
-        React.createElement("span",{className:"char-style-all-lab"},"World scale"),
-        React.createElement("select",{className:"char-style-select",value:(project&&project.worldScale)||"",
-          onChange:e=>onSetWorldScale(e.target.value)},
-          React.createElement("option",{value:""},"\u2728 Auto (by occupant)"),
-          React.createElement("option",{value:"A"},"\ud83e\uddcd Human scale (Class A)"),
-          React.createElement("option",{value:"B"},"\ud83d\udc01 Critter scale (Class B)"),
-          React.createElement("option",{value:"C"},"\ud83d\uddff Giant scale (Class C)"),
-          React.createElement("option",{value:"D"},"\ud83d\udd2c Microscopic scale (Class D)"))),
-      list.length>1 && React.createElement("div",{className:"kind-filterbar"},
-        React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Show"),
-        [["","All"],["INT","INT"],["EXT","EXT"],["INT/EXT","INT/EXT"]].map(kv=>{
-          const k=kv[0], lab=kv[1];
-          if(k && !list.some(l=>ieOf(l)===k)) return null;
-          const n = k ? ieCountBase.filter(l=>ieOf(l)===k).length : ieCountBase.length;
-          return React.createElement("button",{key:k||"all",
-            className:"kind-chip"+(k?(k==="INT/EXT"?" intext":(k==="EXT"?" ext":" int")):"")+(ieFilter===k?" on":"")+(n?"":" empty"),
-            title: k ? ("Show only "+lab+" locations"+(sceneFilter?" in this scene":"")) : ("Show every location"+(sceneFilter?" in this scene":"")),
-            onClick:()=>setIeFilter(k)}, lab, React.createElement("i",null,n));
-        })),
       sceneList.length>0 && React.createElement("div",{className:"prop-scenebar"},
         React.createElement("span",{className:"prop-scenebar-lab"},React.createElement(Icon.layers,{s:13}),"Focus a scene"),
         React.createElement("select",{className:"prop-select prop-scenebar-select",value:sceneFilter,
@@ -902,15 +894,14 @@ function LocationSheets({ project, locations, scenes, drafts, onUpdate, onDraft,
           ? React.createElement(React.Fragment,null,
               React.createElement("div",{className:"sheet-grid"},
                 pager.slice(shown).map(l=>React.createElement(LocationSheet,{key:l.id,l,project,scenes,drafts,onUpdate,onDelete,onDraft,
-                  onIeClick:(k)=>setIeFilter(x=>x===k?"":k),
                   drafting:draftingId===l.id||(draftingIds||[]).indexOf(l.id)>=0||draftingAll,onView:(url,pr)=>setView({url,character:pr}),
                   batchActiveId,onBatchDone:batch.advance,onChipClick:(sid)=>setSceneFilter(sid),
                   onDraftStaging,draftingStage:draftingStageId===l.id,sluglineUnits,onUpdateUnit,onRemoveUnit}))),
               React.createElement(PagerBar,{pager,noun:"location"}))
           : React.createElement("div",{className:"prop-empty"},
-              React.createElement("div",{className:"art-soon-t"}, sceneFilter ? "No locations in this scene" : ("No "+ieFilter+" locations")),
+              React.createElement("div",{className:"art-soon-t"}, sceneFilter ? "No locations in this scene" : "No matching locations"),
               React.createElement("button",{className:"art-draftall",style:{marginTop:16},
-                onClick:()=>{ setSceneFilter(""); setIeFilter(""); }},"Show all locations")))
+                onClick:()=>{ setSceneFilter(""); setQuery(""); }},"Show all locations")))
       : React.createElement("div",{className:"prop-empty"},
           React.createElement("div",{className:"art-soon-ic"},React.createElement(Icon.layers,{s:30})),
           React.createElement("div",{className:"art-soon-t"},"No locations yet"),

@@ -443,32 +443,6 @@ function locWeightForSize(sizeId){
 }
 window.locWeightForSize = locWeightForSize;
 
-/* PANEL-SPLIT LOCATION REFERENCE (user idea 2026-07-23): a 2x2 master plate can
-   confuse the image model, so when the master is the only usable source we attach
-   one cropped panel chosen by shot grammar. Full slugline-unit / coverage plates
-   supersede this crop path because they are already one full-resolution frame. */
-function shotLocPanel(sh){
-  const size=String((sh&&sh.size)||"").toUpperCase();
-  const angle=String((sh&&sh.angle)||"").toLowerCase();
-  if(angle==="high"||angle==="top") return { q:1, label:"high-angle three-quarter overview" };
-  if(["MCU","CU","ECU","INSERT"].indexOf(size)>=0) return { q:2, label:"key-station close view" };
-  return { q:0, label:"wide establishing front view" };
-}
-window.shotLocPanel = shotLocPanel;
-async function shotLocPanelCrop(url, q){
-  try{
-    const im=await new Promise((res,rej)=>{ const i=new Image(); i.crossOrigin="anonymous";
-      i.onload=()=>res(i); i.onerror=()=>rej(new Error("plate load")); i.src=url; });
-    const w=im.naturalWidth, h=im.naturalHeight; if(!w||!h) return "";
-    const ar=w/h; if(ar<1.55||ar>2.1) return "";   // not a standard 16:9 sheet — ride whole
-    const tw=Math.floor(w/2), th=Math.floor(h/2);
-    const c=document.createElement("canvas"); c.width=tw; c.height=th;
-    c.getContext("2d").drawImage(im,(q%2)*tw,Math.floor(q/2)*th,tw,th,0,0,tw,th);
-    return c.toDataURL("image/jpeg",0.92);
-  }catch(e){ return ""; }
-}
-window.shotLocPanelCrop = shotLocPanelCrop;
-
 async function shotGrabImage(id){
   if(!id) return "";
   let u = (typeof nbGetImage==="function") ? nbGetImage(id) : "";
@@ -483,28 +457,11 @@ window.shotGrabImage = shotGrabImage;
 
 async function shotLoadLocationSpecImage(spec, grab, opts){
   if(!spec || typeof grab!=="function") return null;
-  let u = await grab(spec.id);
-  let note = spec.note;
-  let refId = spec.id;
-  let q = spec.locPanelQ;
-  let assetRole = spec.assetRole || (q!=null ? "crop_fallback" : "master_reference");
-  let assetSourceQuality = spec.assetSourceQuality || (q!=null ? "cropped_master_panel" : "master_full_frame");
-  if(!u && spec.fallbackId && !(opts && opts.noFallback)){
-    u = await grab(spec.fallbackId);
-    note = spec.fallbackNote || note;
-    refId = spec.fallbackId;
-    q = spec.fallbackLocPanelQ;
-    assetRole = spec.fallbackAssetRole || (q!=null ? "crop_fallback" : "master_reference");
-    assetSourceQuality = spec.fallbackAssetSourceQuality || (q!=null ? "cropped_master_panel" : "master_full_frame");
-  }
-  if(u && q!=null && typeof shotLocPanelCrop==="function"){
-    const cu = await shotLocPanelCrop(u, q);
-    if(cu){
-      u = cu;
-      assetRole = "crop_fallback";
-      assetSourceQuality = "cropped_master_panel";
-    }
-  }
+  const u = await grab(spec.id);
+  const note = spec.note;
+  const refId = spec.id;
+  const assetRole = spec.assetRole || "derived_reference";
+  const assetSourceQuality = spec.assetSourceQuality || "full_frame";
   const label = (typeof nbAssetRoleLabel==="function") ? nbAssetRoleLabel(assetRole) : assetRole;
   const priority = (typeof nbAssetRolePriority==="function") ? nbAssetRolePriority(assetRole) : 0;
   return u ? { url:u, note, refId, assetRole, assetRoleLabel:label, assetRolePriority:priority, assetSourceQuality } : null;
@@ -523,17 +480,7 @@ async function shotResolveLocationSpecImages(specs, grab){
     const r = await shotLoadLocationSpecImage(s, grab, { noFallback:true });
     if(r) direct.push(r);
   }
-  // If any full-frame unit/coverage source resolves, suppress crop fallbacks. A
-  // cropped master panel only exists to bridge missing derived plates.
-  const full = direct.filter(r=>r.assetSourceQuality!=="cropped_master_panel" && r.assetRole!=="crop_fallback");
-  if(full.length) return dedupe(full);
-  if(direct.length) return dedupe(direct);
-  const fallbacks = [];
-  for(const s of list){
-    const r = await shotLoadLocationSpecImage(s, grab);
-    if(r) fallbacks.push(r);
-  }
-  return dedupe(fallbacks);
+  return dedupe(direct);
 }
 window.shotResolveLocationSpecImages = shotResolveLocationSpecImages;
 
@@ -671,21 +618,24 @@ function shotLocationSide(sh, loc, scene, drafts){
   if(/^(INT|EXT|BOTH)$/.test(explicit)) return explicit;
   const text = shotLocationText(sh).toLowerCase();
   const intHit = /\b(inside|interior|within|booth|room|office|desk|terminal|console|counter|window|glass)\b/.test(text);
-  const extHit = /\b(outside|exterior|yard|street|facade|rain|pavement|road|parking|approach)\b/.test(text);
+  // Weather alone does not move an INT scene outside. "Rain hammers the roof" is
+  // often heard/seen from inside a car; only an explicit exterior/geography cue
+  // should override the scene's slugline side.
+  const extHit = /\b(outside|exterior|yard|street|facade|pavement|road|parking|approach)\b/.test(text)
+    || /\b(?:whole|entire)\s+(?:cab|car|vehicle)\b/.test(text);
   if(intHit && extHit) return "BOTH";
   if(intHit) return "INT";
   if(extHit) return "EXT";
-  const side = String(loc&&loc.intExt||"").toUpperCase();
+  let side = String(loc&&loc.intExt||"").toUpperCase();
+  if(!/^(INT|EXT)$/.test(side) && scene&&scene.loc){
+    const parsed=(typeof parseSlugline==="function")?parseSlugline(scene.loc):null;
+    side=String((parsed&&parsed.intExt)||"").toUpperCase();
+  }
   if(side==="INT" || side==="EXT") return side;
   return "";
 }
 function shotLocationCoverageSpecs(loc, sh, scene, drafts){
   if(!loc) return [];
-  const _locPanel = (typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
-  const base = { id:loc.id, locPanelQ:(_locPanel?_locPanel.q:null), role:loc.intExt||"",
-    assetRole:(_locPanel?"crop_fallback":"master_reference"),
-    assetSourceQuality:(_locPanel?"cropped_master_panel":"master_full_frame"),
-    note:(loc.name||"location")+" — master location plate seen as its "+(_locPanel?_locPanel.label:"coverage view")+" (one full-frame view)" };
   const text = shotLocationText(sh).toLowerCase();
   const side = shotLocationSide(sh, loc, scene, drafts);
   const crossBoundary = side==="BOTH" || /\b(through|across|behind|beyond)\s+(?:the\s+)?(glass|window|door|threshold)\b/i.test(text);
@@ -715,34 +665,64 @@ function shotLocationCoverageSpecs(loc, sh, scene, drafts){
     const unitName = u.name || loc.name || "location";
     return { id:unitIdFor(u), role, locPanelQ:null, source:"slugline-unit",
       assetRole:"derived_reference", assetSourceQuality:"slugline_unit_full_frame",
-      fallbackId:base.id, fallbackLocPanelQ:base.locPanelQ, fallbackNote:base.note,
-      fallbackAssetRole:base.assetRole, fallbackAssetSourceQuality:base.assetSourceQuality,
       note:unitName+" — slugline-unit "+(role||"location")+" coverage plate"
         +(u.time?(" at "+u.time):"")+" (full-resolution unit anchor)" };
   });
-  const sheets = (Array.isArray(loc.coverageSheets) && loc.coverageSheets.length)
-    ? loc.coverageSheets
-    : ((typeof deriveLocationCoverageSheets==="function") ? deriveLocationCoverageSheets(loc, scene?[scene]:[], drafts||((window.turnContinuity||{}).drafts)||{}) : []);
-  const matches = sheets.filter(v=>{
+  const C=(window.turnContinuity||{});
+  const persistedSheets=Array.isArray(loc.coverageSheets)?loc.coverageSheets:[];
+  // Always re-derive for this scene as well as reading persisted metadata. A screenplay
+  // edit can introduce a coverage sheet before the Locations tab has been reopened and
+  // synced; the Add-shot picker must still discover it immediately.
+  const derivedSheets=(typeof deriveLocationCoverageSheets==="function")
+    ? deriveLocationCoverageSheets(loc,scene?[scene]:[],drafts||C.drafts||{},C.locations||[],C.sluglineUnits||[])
+    : [];
+  const sheets=[...persistedSheets];
+  derivedSheets.forEach(v=>{ const i=sheets.findIndex(x=>x&&x.id===v.id); if(i>=0) sheets[i]={...sheets[i],...v}; else sheets.push(v); });
+  const sameSceneNo=(a,b)=> Number.isFinite(Number(a))&&Number.isFinite(Number(b))
+    ? Number(a)===Number(b)
+    : String(a||"")===String(b||"");
+  const sceneSheets = sheets.filter(v=>!scene || scene.no==null || !Array.isArray(v.sceneNos) || !v.sceneNos.length || v.sceneNos.some(no=>sameSceneNo(no,scene.no)));
+  const sheetSpecs = sceneSheets.map(v=>({ id:loc.id+"-"+v.id, role:v.role||"", locPanelQ:null,
+    source:"screenplay-coverage",
+    assetRole:"derived_reference", assetSourceQuality:"screenplay_coverage_full_frame",
+    triggerWords:(v.triggerWords||[]).map(w=>String(w||"").toLowerCase()).filter(Boolean),
+    note:(v.name||loc.name||"location")+" — screenplay-derived "+(v.role||"INT")+" coverage sheet (one full-frame view)" }));
+  const matches = sheetSpecs.filter(v=>{
     const role = String(v.role||"").toUpperCase();
     if(side==="BOTH") return true;
     if(side && role && role!==side) return false;
-    const words = (v.triggerWords||[]).map(w=>String(w||"").toLowerCase()).filter(Boolean);
+    const words = v.triggerWords||[];
     return !words.length || words.some(w=>text.indexOf(w)>=0);
-  }).map(v=>({ id:loc.id+"-"+v.id, role:v.role||"", locPanelQ:null,
-    assetRole:"derived_reference", assetSourceQuality:"screenplay_coverage_full_frame",
-    note:(v.name||loc.name||"location")+" — screenplay-derived "+(v.role||"INT")+" coverage sheet (one full-frame view)" }));
+  });
+  const allHigh = [...unitSpecs, ...sheetSpecs].filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i);
+  // The new-shot reference picker needs every valid derived plate for this beat's
+  // location, not only the automatically inferred side. It never offers a master
+  // 2x2 plate or a cropped quadrant.
+  if(sh && sh.referencePickerAll) return allHigh;
+  // A director-selected list is authoritative, including an intentionally empty
+  // selection. This lets a manually added shot use exactly the chosen location
+  // anchors instead of silently re-introducing an automatic reference.
+  if(sh && sh.referenceLocationsSet){
+    const wanted = new Set(Array.isArray(sh.referenceLocationIds)?sh.referenceLocationIds:[]);
+    return allHigh.filter(s=>wanted.has(s.id));
+  }
   if(unitSpecs.length){
-    if((side==="INT" || side==="EXT") && !crossBoundary) return unitSpecs;
-    const unitRoles = new Set(unitSpecs.map(s=>String(s.role||"").toUpperCase()).filter(Boolean));
-    return [...unitSpecs, ...matches.filter(m=>!unitRoles.has(String(m.role||"").toUpperCase()))]
+    // Keep matching screenplay coverage behind the preferred slugline units. If a
+    // unit record exists but its image has not been generated, the resolver can
+    // still use a ready full-frame coverage sheet without degrading to a crop.
+    if((side==="INT" || side==="EXT") && !crossBoundary) return [...unitSpecs,...matches]
+      .filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i);
+    return [...unitSpecs, ...matches]
       .filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i);
   }
-  if(!sheets.length) return [base];
-  if(!matches.length) return [base];
+  // Beat-shot frames deliberately do not fall back to the master location plate or
+  // one of its cropped quadrants. A missing high-quality source is visible in the UI
+  // and leaves the render prompt-only for location until a unit/coverage plate exists.
+  if(!sheets.length) return [];
+  if(!matches.length) return [];
   if(side==="INT" && !crossBoundary) return matches;
-  if(side==="EXT" && !crossBoundary) return [base, ...matches.filter(m=>String(m.role).toUpperCase()==="EXT")].filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i);
-  return [base, ...matches].filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i);
+  if(side==="EXT" && !crossBoundary) return matches.filter(m=>String(m.role).toUpperCase()==="EXT");
+  return matches.filter((x,i,a)=>a.findIndex(y=>y.id===x.id)===i);
 }
 window.shotLocationSide = shotLocationSide;
 window.shotLocationCoverageSpecs = shotLocationCoverageSpecs;
@@ -869,18 +849,21 @@ function propPhysicalScaleLabel(p){
    no two-designs conflict, no wasted reference slot. Worn/carried props are untouched.
    Used by buildShotPrompt (image-map labels), collectShotRefs and generateShotFrame
    (real attachments) — all three MUST apply it identically or labels mislabel files. */
-function shotPropAttachable(p, sh){
+function shotPropAttachable(p, sh, scene){
   if(!p) return false;
+  const resolved=(typeof propStateAt==="function")
+    ? propStateAt(p,(scene&&scene.id)||(sh&&sh.sceneId),sh&&sh.beatN,sh&&sh.microBeatId,sh&&sh.id,window.turnContinuity||{}) : null;
+  const binding=(resolved&&resolved.bindingMode)||p.bindingMode||p.kind||"carried";
   // WORN items: the owner's character sheet is their canon in wides/mediums (they
   // ride as TEXT there). An optional per-card CLOSE-UP sheet attaches ONLY when the
   // item reads large (CU/MCU/ECU/INSERT) AND that sheet has actually been generated.
   // Existence is checked on the SYNC cache so the prompt's numbered image map and
   // the async attach paths always agree (cold cache = consistently skipped).
-  if(p.kind==="worn"){
+  if(binding==="worn"){
     if(!/^(CU|MCU|ECU|INSERT)$/i.test(String((sh&&sh.size)||""))) return false;
     try{ return !!(typeof nbGetImage==="function" && nbGetImage(p.id)); }catch(e){ return false; }
   }
-  if(p.kind!=="dressing") return true;
+  if(binding!=="dressing") return true;
   // TIGHT SHOTS keep the dressing sheet: at CU/MCU magnification a background object
   // reads LARGE, and the plate's small distant depiction can't hold its design — the
   // sheet's detail is needed. Wides rely on the plate (it renders dressing in place).
@@ -1043,6 +1026,10 @@ window.buildScaleSheetPrompt = buildScaleSheetPrompt;
 
 /* props that appear in a scene (their scene chips include this scene) */
 function propsForScene(props, sceneId){
+  if(typeof propStateAt==="function"){
+    const C={...(window.turnContinuity||{}),props:props||[]};
+    return (props||[]).filter(p=>{ const s=propStateAt(p,sceneId,null,null,null,C); return s&&s.active; });
+  }
   return (props||[]).filter(p=> Array.isArray(p.scenes) && p.scenes.indexOf(sceneId)>=0);
 }
 window.propsForScene = propsForScene;
@@ -1246,8 +1233,11 @@ function buildShotPrompt(sh, ctx){
   // — numbering them once produced prompts naming "Image 5..13" with 4 files
   // attached). EXCEPTION: a worn item with a generated CLOSE-UP sheet on a tight
   // shot IS attached — shotPropAttachable owns that rule for prompt + attach alike.
-  const wornProps = propsAll.filter(p=> p.kind==="worn" && !shotPropAttachable(p, sh));
-  const props    = propsAll.filter(p=> shotPropAttachable(p, sh));
+  const wornProps = propsAll.filter(p=> {
+    const rs=(typeof propStateAt==="function")?propStateAt(p,scene.id,sh.beatN,sh.microBeatId,sh.id,window.turnContinuity||{}):null;
+    return ((rs&&rs.bindingMode)||p.bindingMode||p.kind)==="worn" && !shotPropAttachable(p, sh, scene);
+  });
+  const props    = propsAll.filter(p=> shotPropAttachable(p, sh, scene));
   const size = sizeOf(sh.size), angle = angleOf(sh.angle), move = moveOf(sh.move), lens = lensOf(sh.lens);
   const locWeight = (typeof locWeightForSize==="function") ? locWeightForSize(sh.size) : "primary";
 
@@ -1388,17 +1378,23 @@ function buildShotPrompt(sh, ctx){
     return " — passed to "+co.name+(hoSc && hoSc.no!=null ? (" at Sc "+hoSc.no) : "")+"; keep its established design and accumulated wear"; };
   const _propLabels = props.filter(p=>_refOff.indexOf(p.id)<0).map(p=> {
     const scale = (typeof propPhysicalScaleLabel==="function") ? propPhysicalScaleLabel(p) : (p.name||"prop");
-    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, scene, _storyScenes) : { id:p.id, state:null };
+    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, scene, _storyScenes, sh.beatN, sh.microBeatId, sh.id, ctx) : { id:p.id, state:null };
     const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, scene, _storyScenes) : { name:p.ownerName, handover:null };
-    const holder = co.name || p.ownerName;
-    return "the "+p.name+" (prop sheet"+(so.state?(", "+so.state.label+" state"):"")+(holder?(", "+((p.kind==="worn")?"worn by ":"carried by ")+holder):"")+")"+_custodyBit(p, co)+" — match it exactly as designed; physical scale: "+scale;
+    const rs=(typeof propStateAt==="function")?propStateAt(p,scene.id,sh.beatN,sh.microBeatId,sh.id,window.turnContinuity||{}):null;
+    const holder=(rs&&rs.holderName)||co.name||p.ownerName;
+    const binding=(rs&&rs.bindingMode)||p.bindingMode||p.kind||"carried";
+    const placement=rs&&rs.placement&&rs.placement.note ? ", placed "+rs.placement.note : "";
+    const condition=rs&&rs.condition&&rs.condition!=="intact" ? ", "+rs.condition : "";
+    return "the "+p.name+" (prop sheet"+(so.state?(", "+so.state.label+" state"):"")+(holder?(", "+(binding==="worn"?"worn by ":"held by ")+holder):"")+placement+condition+")"+_custodyBit(p, co)+" — match it exactly as designed; physical scale: "+scale;
   });
   const _carriedLabels = (ctx.carriedForward||[]).filter(p=>_refOff.indexOf(p.id)<0).map(p=> {
     const scale = (typeof propPhysicalScaleLabel==="function") ? propPhysicalScaleLabel(p) : (p.name||"prop");
-    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, scene, _storyScenes) : { id:p.id, state:null };
+    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, scene, _storyScenes, sh.beatN, sh.microBeatId, sh.id, ctx) : { id:p.id, state:null };
     const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, scene, _storyScenes) : { name:p.ownerName, handover:null };
-    const holder = co.name || p.ownerName;
-    return "the "+p.name+" (prop sheet"+(so.state?(", "+so.state.label+" state"):"")+(holder?(", "+((p.kind==="worn")?"worn by ":"carried by ")+holder):"")+")"+_custodyBit(p, co)+" — still in frame from an earlier beat; keep it present, matching its sheet; physical scale: "+scale;
+    const rs=(typeof propStateAt==="function")?propStateAt(p,scene.id,sh.beatN,sh.microBeatId,sh.id,window.turnContinuity||{}):null;
+    const holder=(rs&&rs.holderName)||co.name||p.ownerName;
+    const binding=(rs&&rs.bindingMode)||p.bindingMode||p.kind||"carried";
+    return "the "+p.name+" (prop sheet"+(so.state?(", "+so.state.label+" state"):"")+(holder?(", "+(binding==="worn"?"worn by ":"held by ")+holder):"")+")"+_custodyBit(p, co)+" — still in frame from an earlier beat; keep it present, matching its sheet; physical scale: "+scale;
   });
   if(locWeight==="ambient"){ _castLabels.forEach(l=>imgs.push(l)); _locLabels.forEach(l=>imgs.push(l)); }
   else { _locLabels.forEach(l=>imgs.push(l)); _castLabels.forEach(l=>imgs.push(l)); }
@@ -1522,29 +1518,29 @@ async function generateShotFrame(sh, sceneShots, ctx, opts){
   try{ const ledger = sceneContinuityLedger(ctx.scene, sceneShots, ctx.charById, ctx.propById);
     carried = (ledger[sh.id]||[]).filter(pid=> inPr.indexOf(pid)<0); }catch(e){}
   // build the sheet-reference specs, then ORDER by location weight
-  const _locPanel = (ctx.location && typeof shotLocPanel==="function") ? shotLocPanel(sh) : null;
   const locSpec  = ctx.location
     ? ((typeof shotLocationCoverageSpecs==="function")
       ? shotLocationCoverageSpecs(ctx.location, sh, ctx.scene, (window.turnContinuity||{}).drafts||{})
-      : [{ id:ctx.location.id, locPanelQ:(_locPanel?_locPanel.q:null),
-        note:(ctx.location.name||"location")+" — the set seen as its "+(_locPanel?_locPanel.label:"coverage view")+" (one full-frame view)" }])
+      : [])
     : [];
   const castSpec = inCast.map(id=>{ const c=(ctx.charById||{})[id]; return c?{ id, note:c.name+" character sheet" }:null; }).filter(Boolean);
   // same dressing gate as buildShotPrompt/collectShotRefs — labels must match files
   const propSpec = inPr.map(id=>{ const p=(ctx.propById||{})[id];
-    if(!p || !shotPropAttachable(p, sh)) return null;   // worn attach only on tight shots WITH a generated close-up sheet
+    if(!p || !shotPropAttachable(p, sh, ctx.scene)) return null;   // worn attach only on tight shots WITH a generated close-up sheet
     // STATE-AWARE: attach the active appearance-state variant when one exists (baseId
     // keeps the user's refOff untick working against the prop's own id). CUSTODY-AWARE:
     // the note names the scene's actual holder after a handover.
     const _scs = (ctx.scenes || ((window.turnContinuity||{}).scenes) || []);
-    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, ctx.scene, _scs) : { id:p.id, state:null };
+    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, ctx.scene, _scs, sh.beatN, sh.microBeatId, sh.id, ctx) : { id:p.id, state:null };
     const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, ctx.scene, _scs) : { name:p.ownerName, handover:null };
-    return { id:so.id, baseId:p.id, note:p.name+" prop sheet"+(so.state?(" \u2014 "+so.state.label):"")+(co.handover&&co.name?(" \u2014 "+co.name+" holds it now"):"") }; }).filter(Boolean);
+    const rs=(typeof propStateAt==="function")?propStateAt(p,ctx.scene&&ctx.scene.id,sh.beatN,sh.microBeatId,sh.id,window.turnContinuity||{}):null;
+    return { id:so.id, baseId:p.id, note:p.name+" prop sheet"+(so.state?(" \u2014 "+so.state.label):"")+(rs&&rs.holderName?(" \u2014 held by "+rs.holderName):"")+(rs&&rs.condition&&rs.condition!=="intact"?(" \u2014 "+rs.condition):"") }; }).filter(Boolean);
   const carrySpec= carried.map(id=>{ const p=(ctx.propById||{})[id]; if(!p) return null;
     const _scs = (ctx.scenes || ((window.turnContinuity||{}).scenes) || []);
-    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, ctx.scene, _scs) : { id:p.id, state:null };
+    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, ctx.scene, _scs, sh.beatN, sh.microBeatId, sh.id, ctx) : { id:p.id, state:null };
     const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, ctx.scene, _scs) : { name:p.ownerName, handover:null };
-    return { id:so.id, baseId:p.id, note:p.name+" prop sheet (carried over from an earlier beat)"+(so.state?(" \u2014 "+so.state.label):"")+(co.handover&&co.name?(" \u2014 "+co.name+" holds it now"):"") }; }).filter(Boolean);
+    const rs=(typeof propStateAt==="function")?propStateAt(p,ctx.scene&&ctx.scene.id,sh.beatN,sh.microBeatId,sh.id,window.turnContinuity||{}):null;
+    return { id:so.id, baseId:p.id, note:p.name+" prop sheet (carried over from an earlier beat)"+(so.state?(" \u2014 "+so.state.label):"")+(rs&&rs.holderName?(" \u2014 held by "+rs.holderName):"") }; }).filter(Boolean);
   // user-unticked sheets (sh.refOff) drop out here AND in buildShotPrompt's image
   // map together — the numbered labels always match the attached files
   const _refOff = Array.isArray(sh.refOff) ? sh.refOff : [];
@@ -1689,10 +1685,13 @@ window.scanTextForChars = scanTextForChars;
    under-tagged shot can no longer drop a character's identity anchor — nor over-attach a
    character who isn't in the frame. */
 function inFrameCast(sh, scene, characters){
+  const valid = id=>(characters||[]).some(c=>c.id===id);
+  if(sh && sh.referenceCharactersSet)
+    return Array.from(new Set((Array.isArray(sh.referenceCharacterIds)?sh.referenceCharacterIds:[]).filter(valid)));
   const named = scanTextForChars(((sh&&sh.action)||"")+" "+((sh&&sh.composition)||""), characters);
   if(named.length) return named;
-  if(scene && scene.driver && (characters||[]).some(c=>c.id===scene.driver)) return [scene.driver];
-  return ((sh&&sh.subjects)||[]).filter(id=>(characters||[]).some(c=>c.id===id));
+  if(scene && scene.driver && valid(scene.driver)) return [scene.driver];
+  return ((sh&&sh.subjects)||[]).filter(valid);
 }
 window.inFrameCast = inFrameCast;
 
@@ -1731,10 +1730,18 @@ function inFrameProps(sh, scene, charById, propById){
   const castIds = (typeof inFrameCast==="function") ? inFrameCast(sh, scene, Object.values(charById||{})) : ((sh&&sh.subjects)||[]);
   const t = " "+(((sh&&sh.action)||"")+" "+((sh&&sh.composition)||"")).toLowerCase().replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ")+" ";
   const out = [];
+  // Manual shot-level picks are true overrides: a director can deliberately include an
+  // off-camera or soon-to-enter object without changing its canonical continuity state.
+  const selected = [].concat((sh&&sh.props)||[],(sh&&sh.referencePropIds)||[]).filter(Boolean);
+  selected.forEach(id=>{ if(propById&&propById[id]&&out.indexOf(id)<0) out.push(id); });
   props.forEach(p=>{
-    const ownerIn = !!(p.ownerId && castIds.indexOf(p.ownerId)>=0);
-    // worn items ride with their in-frame owner
-    if((p.kind||"carried")==="worn" && ownerIn){ out.push(p.id); return; }
+    if(out.indexOf(p.id)>=0) return;
+    const resolved=(typeof propStateAt==="function") ? propStateAt(p,scene&&scene.id,sh&&sh.beatN,sh&&sh.microBeatId,sh&&sh.id,window.turnContinuity||{}) : null;
+    if(resolved && !resolved.active) return;
+    const holderId=(resolved&&resolved.holderId)||p.ownerId||"";
+    const holderIn=!!(holderId && castIds.indexOf(holderId)>=0);
+    // Worn items follow the resolved holder, not the canonical owner.
+    if(((resolved&&resolved.bindingMode)||(p.kind||"carried"))==="worn" && holderIn){ out.push(p.id); return; }
     const words = Array.from(new Set(String(p.name||"").toLowerCase().replace(/[^a-z0-9 ]+/g," ")
       .split(/\s+/).filter(w=>w.length>=4 && !/^[0-9]+$/.test(w))));
     if(!words.length) return;
@@ -1746,7 +1753,10 @@ function inFrameProps(sh, scene, charById, propById){
     // OTHER scenes is NOT global — it must not leak in here just because its name matches.
     const mappedHere = !!(scene && Array.isArray(p.scenes) && p.scenes.indexOf(scene.id)>=0);
     const globalDressing = !p.ownerId && !(Array.isArray(p.scenes) && p.scenes.length);
-    if(ownerIn || mappedHere || globalDressing) out.push(p.id);
+    const placedHere=!!(resolved&&resolved.placement&&scene&&resolved.placement.locationId
+      && typeof locationForScene==="function"
+      && ((locationForScene(((window.turnContinuity||{}).locations)||[],scene.id)||{}).id===resolved.placement.locationId));
+    if(holderIn || mappedHere || globalDressing || placedHere) out.push(p.id);
   });
   return out;
 }
@@ -1783,13 +1793,16 @@ function sceneContinuityLedger(scene, sceneShots, charById, propById){
     const cf = [];
     cast.forEach(cid=>{ const s=held[cid]; if(s) Array.from(s).forEach(pid=>{
       const p = (propById||{})[pid];
-      if(propLeavesFrameInText(p, text)){ s.delete(pid); return; }
+      const rs=(typeof propStateAt==="function")?propStateAt(p,scene&&scene.id,sh&&sh.beatN,sh&&sh.microBeatId,sh&&sh.id,window.turnContinuity||{}):null;
+      if(rs && (!rs.active || (rs.holderId && rs.holderId!==cid))){ s.delete(pid); return; }
+      if(!(p&&Array.isArray(p.continuityEvents)&&p.continuityEvents.length) && propLeavesFrameInText(p, text)){ s.delete(pid); return; }
       if(here.indexOf(pid)<0 && cf.indexOf(pid)<0) cf.push(pid);
     }); });
     ledger[sh.id] = cf;
-    here.forEach(pid=>{ const p=(propById||{})[pid]; const owner=p&&p.ownerId; if(owner){ (held[owner]=held[owner]||new Set()).add(pid); } });
+    here.forEach(pid=>{ const p=(propById||{})[pid]; const rs=(typeof propStateAt==="function")?propStateAt(p,scene&&scene.id,sh&&sh.beatN,sh&&sh.microBeatId,sh&&sh.id,window.turnContinuity||{}):null;
+      const holder=(rs&&rs.holderId)||(p&&p.ownerId); if(holder){ (held[holder]=held[holder]||new Set()).add(pid); } });
     here.forEach(pid=>{ const p=(propById||{})[pid]; const owner=p&&p.ownerId; const s=owner&&held[owner];
-      if(s && propLeavesFrameInText(p, text)) s.delete(pid);
+      if(s && !(p&&Array.isArray(p.continuityEvents)&&p.continuityEvents.length) && propLeavesFrameInText(p, text)) s.delete(pid);
     });
   });
   return ledger;
@@ -1895,13 +1908,19 @@ function normalizeShot(raw, scene, idx, locations, props, characters, beats){
     locationId: loc?loc.id:"",
     props: resolveProps(raw.props),
     locationSide: /^(INT|EXT|BOTH)$/.test(sideRaw) ? sideRaw : undefined,
+    referenceLocationsSet: !!raw.referenceLocationsSet,
+    referenceLocationIds: Array.isArray(raw.referenceLocationIds) ? raw.referenceLocationIds.filter(Boolean) : [],
+    referenceCharactersSet: !!raw.referenceCharactersSet,
+    referenceCharacterIds: Array.isArray(raw.referenceCharacterIds) ? raw.referenceCharacterIds.filter(Boolean) : [],
     action: action,
     dialogue: specText(raw.dialogue,200),
     // micro-beat mapping (pre-production layer): which of the beat's discrete
     // filmable actions this shot covers, why it exists, and whether it carries
     // the beat's protected emotional core. The per-beat plan (micro list +
     // protect line) rides denormalized on every shot of its beat.
-    covers: Array.isArray(raw.covers) ? raw.covers.map(Number).filter(n=>Number.isFinite(n)&&n>0&&n<=20).slice(0,12) : [],
+    // Canonical contract: one screenplay micro-beat becomes one shot. Keep only
+    // this shot's single moment number if legacy/model data supplies several.
+    covers: Array.isArray(raw.covers) ? raw.covers.map(Number).filter(n=>Number.isFinite(n)&&n>0&&n<=20).slice(0,1) : [],
     purpose: specText(raw.purpose,160),
     priority: !!raw.priority,
     beatPlan: (raw.beatPlan && Array.isArray(raw.beatPlan.micro) && raw.beatPlan.micro.length)

@@ -271,9 +271,16 @@ function buildFilmBible(doc){
       sheet_id: c.id,
     })),
     props: props.map(p=>{
-      const o = { id:p.id, name:p.name, type:(p.kind||"carried") };
-      if(p.ownerName||p.ownerId){ o[(p.kind==="worn")?"worn_by":"carried_by"] = p.ownerName || (charById[p.ownerId]||{}).name || p.ownerId; }
+      const identity=(typeof propIdentityOf==="function")?propIdentityOf(p):{};
+      const o = { id:p.id, name:p.name, default_binding:(p.bindingMode||p.kind||"carried") };
+      if(p.ownerName||p.ownerId){ o.owner_origin = p.ownerName || (charById[p.ownerId]||{}).name || p.ownerId; }
       else { const L = p.locationId ? locations.find(x=>x.id===p.locationId) : null; if(L) o.fixture_of_location = L.name; }
+      o.custodian=undef(p.custodianName||((charById[p.custodianId]||{}).name));
+      o.design_association=undef(identity.associationName||identity.associationId);
+      o.default_placement=undef(p.placement||((locations.find(x=>x.id===(p.placementLocationId||p.locationId))||{}).name));
+      o.continuity_events=(p.continuityEvents||[]).map(e=>({type:e.type,scene:e.sceneId,beat:e.beatId||e.beatN,
+        micro_beat:e.microBeatId||e.microBeatN,shot:e.shotId,holder:e.holderName||e.toCharacterName,
+        placement:e.placement||e.note,condition:e.condition}));
       o.form = undef(p.form); o.material = undef(p.material);
       // a worn prop with no stored map is present wherever its owner is — resolve it here
       // so the bible is complete even for props seeded before worn-mapping existed.
@@ -300,7 +307,8 @@ function buildFilmBible(doc){
         driver: s.driver ? ((charById[s.driver]||{}).name || s.driver) : undefined,
         characters: charsInScene(s).map(id=>(charById[id]||{}).name||id),
         cast_authored: (Array.isArray(s.cast) && s.cast.length) ? true : undefined,
-        props: props.filter(p=>Array.isArray(p.scenes)&&p.scenes.indexOf(s.id)>=0).map(p=>p.name),
+        props: props.filter(p=>{ const rs=(typeof propStateAt==="function")?propStateAt(p,s.id,null,null,null,doc):null;
+          return rs ? rs.active : (Array.isArray(p.scenes)&&p.scenes.indexOf(s.id)>=0); }).map(p=>p.name),
         location: loc ? loc.name : undefined,
         preset: preset ? preset.name : undefined,
         summary: undef(s.summary),
@@ -743,7 +751,10 @@ function App(){
       setProps(ps=>ps.map(p=>{
         if(!p || p.id!==propId) return p;
         const refs = Array.isArray(p.referenceImages) ? p.referenceImages : [];
-        const next = [{ ...ref }, ...refs.filter(r=>r && r.id!==ref.id && r.url!==ref.url)].slice(0,8);
+        const next = [{ ...ref }, ...refs.filter(r=>r
+          && r.id!==ref.id
+          && r.url!==ref.url
+          && (!ref.sourceEntityId || r.sourceEntityId!==ref.sourceEntityId))].slice(0,8);
         return { ...p, referenceImages: next };
       }));
       return true;
@@ -766,7 +777,8 @@ function App(){
     window.turnRemovePropReference = (propId, refId)=>{
       if(!propId || !refId) return false;
       setProps(ps=>ps.map(p=> p && p.id===propId
-        ? { ...p, referenceImages:(Array.isArray(p.referenceImages)?p.referenceImages:[]).filter(r=>r && r.id!==refId) }
+        ? { ...p, referenceImages:(Array.isArray(p.referenceImages)?p.referenceImages:[]).filter(r=>r
+            && r.id!==refId && r.sourceEntityId!==refId && r.url!==refId) }
         : p));
       return true;
     };
@@ -1742,7 +1754,16 @@ function App(){
   };
 
   // ---- Art Room: LOOKBOOK (References) ----
-  const updateLookbookCard = (id,patch)=>setLookbook(ls=>ls.map(c=>c.id===id?{...c,...patch}:c));
+  const updateLookbookCard = (id,patch)=>setLookbook(ls=>ls.map(c=>{
+    if(c.id!==id) return c;
+    const next={...c,...patch};
+    if(c.autoNamed && !Object.prototype.hasOwnProperty.call(patch,"source")
+      && (Object.prototype.hasOwnProperty.call(patch,"category") || Object.prototype.hasOwnProperty.call(patch,"note"))){
+      next.source = (typeof window.lookbookDefaultName==="function")
+        ? window.lookbookDefaultName(next) : ((next.category||"Visual")+" study");
+    }
+    return next;
+  }));
   // create ONE owned prop card from a character-card item bullet that never got a
   // card derived (e.g. a character added after "Design all props" ran) — same shape
   // derivePropsFromCast builds, so the linked-prop row claims it by exact name.
@@ -1759,7 +1780,8 @@ function App(){
   };
   const addLookbookCard = ()=>{
     const id = "look-"+Date.now().toString(36);
-    setLookbook(ls=>[...ls, { id, source:"New reference", category:"Palette", note:"", negativePrompt:"", manual:true }]);
+    setLookbook(ls=>[...ls, { id, source:"Palette study", category:"Palette", note:"", negativePrompt:"", manual:true, autoNamed:true }]);
+    return id;
   };
   const deleteLookbookCard = (id)=>{
     setLookbook(ls=>ls.filter(c=>c.id!==id));
@@ -1976,6 +1998,94 @@ function App(){
     if(props.length) { setPropsSeeded(true); return; }   // user already has props -> don't auto-pull
     if(typeof castHasProps==="function" && castHasProps(characters)) seedPropsFromCast();
   },[room, artView, propsSeeded, props.length, characters, seedPropsFromCast, hydrationTick]);
+
+  /* INITIAL CHARACTER -> WORN PROP BOOTSTRAP
+     The first committed identity sheet is the best visual seed for accessories that
+     belong on that character. Build those prop sheets in the background immediately,
+     then let the existing dependency snapshot mark the character master out of date.
+     Carried props are deliberately excluded: they bind at the shot where they appear. */
+  React.useEffect(()=>{
+    window.__turnWornPropBootstrap = window.__turnWornPropBootstrap || {};
+    const onCharacterSheetDone = async (e)=>{
+      const charId = e && e.detail && e.detail.id;
+      const character = (characters||[]).find(c=>c && c.id===charId);
+      if(!character || !canMutateSharedFilm()) return;
+      // nb-gen-done also announces clears/restores. Start only after a real identity
+      // image has committed, never from an empty completion event.
+      const identityUrl = (e && e.detail && e.detail.url) || await _imgOf(charId);
+      if(!identityUrl) return;
+      const prior = character.wornPropBootstrap || {};
+      if(prior.status==="complete" || window.__turnWornPropBootstrap[charId]) return;
+      // A persisted running flag from an interrupted browser session may retry later.
+      if(prior.status==="running" && prior.startedAt
+        && Date.now()-new Date(prior.startedAt).getTime()<30*60*1000) return;
+
+      const derived = (typeof propsFromCast==="function")
+        ? propsFromCast(characters, props, scenes, drafts)
+          .filter(p=>p && p.ownerId===charId && p.kind==="worn") : [];
+      const worn = [...(props||[]).filter(p=>p && p.ownerId===charId && p.kind==="worn"), ...derived]
+        .filter((p,i,all)=>all.findIndex(x=>x.id===p.id)===i);
+      const startedAt = new Date().toISOString();
+      const setBootstrap = (patch)=>setCharacters(cs=>cs.map(c=>c.id===charId
+        ? { ...c, wornPropBootstrap:{ ...(c.wornPropBootstrap||{}), ...patch } } : c));
+
+      window.__turnWornPropBootstrap[charId] = true;
+      if(derived.length){
+        setProps(ps=>{
+          const have = new Set(ps.map(p=>p.id));
+          return [...ps, ...derived.filter(p=>!have.has(p.id))];
+        });
+        setPropsSeeded(true);
+      }
+      setBootstrap({ status:"running", startedAt, completedAt:"", total:worn.length,
+        done:0, failedNames:[], source:"initial-character-sheet" });
+
+      if(!worn.length){
+        setBootstrap({ status:"complete", completedAt:new Date().toISOString(), total:0, done:0, failedNames:[] });
+        delete window.__turnWornPropBootstrap[charId];
+        return;
+      }
+
+      if(typeof window.appToast==="function") window.appToast(
+        "Building "+worn.length+" worn prop reference"+(worn.length===1?"":"s")+" for "+(character.name||"this character")+" in the background.","info");
+      let done=0, draftedAny=false;
+      const failed=[];
+      for(const original of worn){
+        try{
+          if(window.__nbGenInflight && window.__nbGenInflight[original.id]) throw new Error("Already generating");
+          if(await _imgOf(original.id)){ done++; setBootstrap({done}); continue; }
+          let prop = original;
+          const drafted = !!(String(prop.form||"").trim() && String(prop.material||"").trim());
+          if(!drafted){
+            const visualPatch = (typeof aiPropVisuals==="function")
+              ? await aiPropVisuals(prop, characters, lbProject("props")) : null;
+            if(!visualPatch) throw new Error("Could not derive the prop specification");
+            const keptPatch = keepPickedStyle(prop, visualPatch);
+            prop = { ...prop, ...keptPatch };
+            draftedAny = true;
+            setProps(ps=>ps.map(p=>p.id===prop.id ? { ...p, ...keptPatch } : p));
+          }
+          if(typeof window.generatePropSheet!=="function") throw new Error("Prop generator unavailable");
+          const ok = await window.generatePropSheet(prop, lbProject("props"));
+          if(!ok) throw new Error("Prop generation did not complete");
+          done++;
+          setBootstrap({done});
+        }catch(err){ failed.push(original.name||"Worn prop"); }
+      }
+      if(draftedAny) markApplied("props");
+      setBootstrap({ status:failed.length?"attention":"complete", completedAt:new Date().toISOString(),
+        total:worn.length, done, failedNames:failed });
+      delete window.__turnWornPropBootstrap[charId];
+      if(typeof window.appToast==="function") window.appToast(
+        failed.length
+          ? (done+" of "+worn.length+" worn prop references were built. The remaining item"+(failed.length===1?" needs":"s need")+" attention.")
+          : ("Worn prop references are ready for "+(character.name||"this character")+". Update the master when you are ready to lock them in."),
+        failed.length?"error":"info");
+    };
+    window.addEventListener("nb-gen-done",onCharacterSheetDone);
+    return ()=>window.removeEventListener("nb-gen-done",onCharacterSheetDone);
+  },[characters, props, scenes, drafts, project, lookbook, lookbookNote]);
+
   // auto-draft the cast once per story: the FIRST time the Art Room opens (any tab),
   // silently fill the spec for any undrafted character so the user can go straight
   // to Props → generate → Characters → generate without a manual "Draft all" step.
@@ -2018,8 +2128,8 @@ function App(){
     setTaggingSceneId(null);
   };
 
-  /* AUTO RE-MAP — a screenplay change (any path that lands in `drafts`: scene
-     edits, polish, undo/redo, scene delete, import) silently stales every PINNED
+  /* AUTO RE-MAP — a screenplay or scene-list change (edits, polish, undo/redo,
+     scene add/delete/reorder, import) silently stales every PINNED
      prop→scene map, and those maps decide what rides into shots and how states
      and custody resolve. Debounced re-derivation of pinned maps ONLY — unmapped
      props derive live (effMap: owner presence / name-matching) and never go
@@ -2089,7 +2199,7 @@ function App(){
       finally{ autoRetagRef.current = false; }
     }, 2500);
     return ()=> clearTimeout(t);
-  },[drafts]);
+  },[drafts, scenes]);
 
   // ---- Art Room: LOCATIONS ----
   const updateLocation = (id,patch)=>setLocations(ls=>ls.map(l=>l.id===id?{...l,...patch}:l));
@@ -2348,9 +2458,6 @@ function App(){
     setAssigningStyles(false);
   };
   // the user's free-text visual references that steer bespoke palette design
-  // project-wide WORLD SCALE — "" / "auto" derives each location's scale from its occupants;
-  // "A"/"B"/"C" forces every location's plate to render at that scale (e.g. a bug's-world film).
-  const setWorldScale = (cls)=> setProject(p=>({ ...p, worldScale: String(cls||"") }));
   const setStyleRefs = (refs)=> setProject(p=>({ ...p, styleBible:{ ...((p.styleBible)||{}), refs:String(refs||"") } }));
   // uploaded reference images (palette sampled client-side); capped to keep state light
   const addStyleRefImages = (imgs)=> setProject(p=>{ const sb=(p.styleBible)||{};
@@ -2367,7 +2474,7 @@ function App(){
   });
 
   // ---- Art Room: SHOT LIST ----
-  // A shot = one beat. "Draft all shots" derives the shot breakdown for every scene
+  // A shot = one micro-beat moment inside a beat. "Draft all shots" derives the shot breakdown for every scene
   // that doesn't have one yet (non-destructive); per-scene re-draft replaces one scene.
   const updateShot = (id,patch)=> setShots(ss=>ss.map(s=>{
     if(s.id!==id) return s;
@@ -2470,10 +2577,19 @@ function App(){
       : (Number(beatN)>0 ? (bN-1) : peers.length);
     // seed (optional): pre-fill from an UNCOVERED micro-beat — the action text is
     // that discrete action and covers slots the shot into its checklist row.
+    const explicitCharacters=!!(seed&&seed.referenceCharactersSet);
+    const referenceCharacterIds=explicitCharacters&&Array.isArray(seed.referenceCharacterIds)
+      ? seed.referenceCharacterIds.filter(Boolean) : [];
+    const inheritedPlan=inBeat.map(x=>x.beatPlan).find(Boolean);
     setShots(ss=>[...ss, { id, sceneId, beatN:bN, order,
       size:"MS", angle:"eye", move:"static", lens:"50", composition:"",
-      subjects:(sc&&sc.driver)?[sc.driver]:[], locationId:loc?loc.id:"", props:[],
+      subjects:explicitCharacters?referenceCharacterIds:((sc&&sc.driver)?[sc.driver]:[]), locationId:loc?loc.id:"", props:[],
       action:(seed&&seed.action)||"", covers:(seed&&Array.isArray(seed.covers))?seed.covers:[],
+      beatPlan:inheritedPlan||undefined,
+      referenceLocationsSet:!!(seed&&seed.referenceLocationsSet),
+      referenceLocationIds:(seed&&Array.isArray(seed.referenceLocationIds))?seed.referenceLocationIds.filter(Boolean):[],
+      referenceCharactersSet:explicitCharacters,
+      referenceCharacterIds,
       dialogue:"", negativePrompt:"", manual:true, specRev:1,
       specHash:"" }].map(s=>({...s,specHash:(typeof shotSpecFingerprint==="function")?shotSpecFingerprint(s):""})));
   };
@@ -2481,7 +2597,7 @@ function App(){
     const bm = (beatsMap||{})[scene.id] || {};
     const rows = Array.isArray(bm.rows) ? bm.rows : [];
     if(!rows.length || !Array.isArray(list) || !list.length) return list;
-    const made = list.slice();
+    const made = list.map(sh=>({ ...sh, covers:Array.isArray(sh.covers)?sh.covers.slice():[] }));
     const clean = (s,n)=> (typeof clipWords==="function")
       ? clipWords(String(s||"").replace(/\s+/g," ").trim(), n||160)
       : String(s||"").replace(/\s+/g," ").trim().slice(0,n||160);
@@ -2506,27 +2622,49 @@ function App(){
       const beatNo = Number(row.n)||idx+1;
       const beatShots = made.filter(sh=>Number(sh.beatN)===beatNo);
       if(!beatShots.length){
-        made.push(normalizeShot(rawFor(row, idx), scene, made.length, locations, props, characters, beatsMap));
+        const derived = typeof window.deriveBeatMicroPlan==="function"
+          ? window.deriveBeatMicroPlan(scene.id, beatNo, row)
+          : null;
+        if(derived && Array.isArray(derived.micro) && derived.micro.length){
+          derived.micro.forEach((moment, mi)=>{
+            const sh = normalizeShot(rawFor(row, idx, moment, [mi+1], derived), scene, made.length, locations, props, characters, beatsMap);
+            sh.id = "shot-"+scene.id+"-b"+beatNo+"m"+(mi+1)+"-fill";
+            made.push(sh);
+          });
+        }else{
+          made.push(normalizeShot(rawFor(row, idx), scene, made.length, locations, props, characters, beatsMap));
+        }
         return;
       }
-      const plan = beatShots.map(sh=>sh.beatPlan).find(p=>p && Array.isArray(p.micro) && p.micro.length);
+      const storedPlan = beatShots.map(sh=>sh.beatPlan).find(p=>p && Array.isArray(p.micro) && p.micro.length);
+      const derivedPlan = typeof window.deriveBeatMicroPlan==="function"
+        ? window.deriveBeatMicroPlan(scene.id, beatNo, row)
+        : null;
+      let plan = typeof window.resolveBeatMicroPlan==="function"
+        ? window.resolveBeatMicroPlan(storedPlan,derivedPlan)
+        : (storedPlan||derivedPlan);
+      // Older films can have screenplay and designed shots but no persisted beatPlan.
+      // Legacy sentence-split plans also resolve to the composed screenplay plan,
+      // then persist so Art Room and Stage read the same ordered moment chain.
       if(!plan || typeof microCoverage!=="function") return;
+      beatShots.forEach(sh=>{ sh.beatPlan=plan; });
       /* microCoverage returns { map, mapped }. Read it defensively: this call site once
          treated the return value AS the map, so after the shape changed every lookup was
          undefined, every micro-beat read "uncovered", and this pass injected a backstop
          shot for each one — then setShots re-ran the effect and it injected them again,
          forever (thousands of junk shots). Never inject off a coverage result we can't
          positively understand. */
-      const _mc = microCoverage(beatShots, plan.micro.map(t=>String(t).replace(/^\s*\d+[\.\)]\s*/,"")));
+      const _mc = microCoverage(beatShots, plan.micro.map(t=>String(t).replace(/^\s*\d+[\.\)]\s*/,"")), { force:true });
       const cov = (_mc && _mc.map) ? _mc.map : null;
       if(!cov) return;
-      // a beat with NO explicit coverage data isn't "uncovered" — it's unknown. Injecting
-      // against unknown is what made this runaway; leave those beats alone.
-      if(_mc.mapped === false) return;
+      const usedShots = new Set();
       plan.micro.forEach((m, mi)=>{
         const n = mi+1;
-        const covered = beatShots.some(sh=>cov[sh.id] && cov[sh.id].has(n));
-        if(covered) return;
+        // One moment must own one distinct shot. Never let a legacy covers:[1,2]
+        // shot satisfy two moments; keep it for its earliest matching moment.
+        const owner = beatShots.find(sh=>!usedShots.has(sh.id) && Array.isArray(sh.covers) && sh.covers.map(Number).includes(n))
+          || beatShots.find(sh=>!usedShots.has(sh.id) && cov[sh.id] && cov[sh.id].has(n));
+        if(owner){ owner.covers=[n]; usedShots.add(owner.id); return; }
         // deterministic id (no timestamp): a re-run can only ever REPLACE this backstop,
         // never stack another copy of it
         const bid = "shot-"+scene.id+"-b"+beatNo+"m"+n+"-fill";
@@ -2535,9 +2673,16 @@ function App(){
         sh.id = bid;
         made.push(sh);
       });
+      // A legacy alternative that did not match a micro-beat stays in the beat, but it
+      // must not claim primary coverage. Users can keep or redesign it deliberately.
+      beatShots.filter(sh=>!usedShots.has(sh.id)).forEach(sh=>{
+        sh.covers=[];
+        sh.beatPlan=plan;
+      });
     });
     const orderOf = {}; rows.forEach((r,i)=>{ orderOf[Number(r.n)||i+1]=i; });
-    return made.sort((a,b)=>(orderOf[Number(a.beatN)]??999)-(orderOf[Number(b.beatN)]??999) || (a.order||0)-(b.order||0))
+    const momentOf = sh=>Array.isArray(sh.covers)&&sh.covers.length===1 ? Number(sh.covers[0]) : (1000+(Number(sh.order)||0));
+    return made.sort((a,b)=>(orderOf[Number(a.beatN)]??999)-(orderOf[Number(b.beatN)]??999) || momentOf(a)-momentOf(b))
       .map((sh,i)=>({ ...sh, order:i }));
   };
   /* ONE-TIME REPAIR for the runaway-injection incident.
@@ -2581,22 +2726,23 @@ function App(){
       if(!sceneShots.length) return;
       if(sceneShots.length > SANE_SHOTS_PER_SCENE) return;      // refuse to compound a mess
       const fixed = completeDraftedShotCoverage(scene, sceneShots);
-      if(fixed.length <= sceneShots.length) return;
-      if(fixed.length > SANE_SHOTS_PER_SCENE) return;           // and refuse to create one
+      if(fixed.length > SANE_SHOTS_PER_SCENE) return;           // refuse to create a mess
+      const sig = arr=>arr.map(sh=>sh.id+":"+(sh.order||0)+":"+(Array.isArray(sh.covers)?sh.covers.join(","):"")+":"+
+        (sh.beatPlan&&Array.isArray(sh.beatPlan.micro)?sh.beatPlan.micro.join("~"):"")).join("|");
+      if(sig(fixed)===sig(sceneShots)) return;
       changed = true;
       next = next.filter(sh=>sh.sceneId!==scene.id).concat(fixed);
     });
     if(changed) setShots(next);
   },[(shots||[]).length,(scenes||[]).length,Object.keys(beatsMap||{}).length]);
-  // SPLIT A BEAT INTO COVERAGE — MUSE designs 2-3 shots for ONE beat (one per
-  // distinct visual event); the beat's current shot(s) are replaced (confirmed
+  // REBUILD A BEAT'S MICRO-BEAT SHOTS — MUSE derives the ordered moments and creates
+  // exactly one shot for each; the beat's current shot(s) are replaced (confirmed
   // first). Writing-model credits only; frames render separately in chain order.
   const [splittingBeat, setSplittingBeat] = React.useState(null);
   const [refiningBeat, setRefiningBeat] = React.useState(null);
   // SCREENPLAY → MICRO-BEATS: re-read one screenplay section and update that
-  // beat's plan/shot specs without replacing shot ids. Generated frames and video
-  // takes are keyed by those ids, so they remain intact; newly exposed actions
-  // with no mapped shot appear as "uncovered — add shot" in the beat card.
+  // beat's one-to-one micro-beat shots. Existing IDs are matched back to the same
+  // moment wherever possible, preserving generated frames and takes.
   const refineBeatFromScreenplay = async (scene, beatN)=>{
     const key=scene&&scene.id+"#"+beatN;
     if(!scene || refiningBeat || splittingBeat) return;
@@ -2609,42 +2755,64 @@ function App(){
     let ok=true;
     if(typeof window.appConfirm==="function") ok=await window.appConfirm({
       title:"Refine beat "+beatN+" from its screenplay?",
-         body:"This re-derives the beat's ordered micro-beats and remaps its existing shot specifications. Logical shot IDs and Director notes stay in place, but frames and takes rendered from the old specification will be marked stale. Any newly exposed action without a shot will be marked uncovered.",
+         body:"This re-derives the beat's ordered micro-beats and creates exactly one shot for each moment. Existing shot IDs and media are matched back to the same moments wherever possible; changed specifications are marked stale.",
       confirmLabel:"Refine micro-beats",cancelLabel:"Cancel"});
     if(!ok) return;
     setRefiningBeat(key);
     try{
       const raw=typeof aiDraftShots==="function"
         ? await aiDraftShots(scene,beatsMap,drafts,locations,props,characters,lbProject("shots"),{beatN,refine:true}) : null;
-      const rows=(raw||[]).filter(r=>Number(r.beat)===Number(beatN));
-      const plan=(rows.map(r=>r.beatPlan).find(p=>p&&Array.isArray(p.micro))||null);
+      let rows=(raw||[]).filter(r=>Number(r.beat)===Number(beatN));
+      let plan=(rows.map(r=>r.beatPlan).find(p=>p&&Array.isArray(p.micro))||null);
+      // A clipped model reply can still contain useful JSON and aiDraftShots repairs
+      // that first. If the plan remains incomplete, derive the authored composed
+      // moments directly from this beat's screenplay instead of failing the task or
+      // touching unrelated beats.
+      if((!rows.length||!plan||!plan.micro.length) && window.__lastShotDraftTruncated){
+        const beatRow=((beatsMap[scene.id]&&beatsMap[scene.id].rows)||[])
+          .find(r=>Number(r.n)===Number(beatN));
+        const derived=(typeof window.deriveBeatMicroPlan==="function")
+          ? window.deriveBeatMicroPlan(scene.id,beatN,beatRow) : null;
+        if(derived&&Array.isArray(derived.micro)&&derived.micro.length){
+          plan=derived;
+          rows=derived.micro.map((moment,idx)=>{
+            const prior=existing[Math.min(idx,Math.max(0,existing.length-1))]||{};
+            return { ...prior,beat:Number(beatN),covers:[idx+1],beatPlan:derived,
+              action:String(moment||"").trim(),
+              purpose:String(prior.purpose||"").trim()||("film micro-beat "+(idx+1)) };
+          });
+        }
+      }
       if(!rows.length||!plan||!plan.micro.length) throw new Error("The screenplay refinement returned no usable micro-beat plan.");
       const oldPlan=existing.map(s=>s.beatPlan).find(Boolean)||{};
       const finalPlan={ micro:plan.micro, protect:plan.protect||oldPlan.protect||"" };
-      // Preserve the current number/order/ids of setups, but update their specs from
-      // the screenplay-derived coverage. Then ask the ONE canonical coverage matcher
-      // to remap those preserved setups onto the new micro-plan; anything it cannot
-      // justify remains uncovered in the existing add-shot UI.
-       const sourceScreenplayRev=(typeof screenplayBeatRevision==="function")?screenplayBeatRevision(draft,beatN):"";
-       const remapped=existing.map((sh,idx)=>{
-        const ri=Math.min(rows.length-1,Math.floor(idx*rows.length/existing.length));
-        const n=normalizeShot(rows[ri],scene,idx,locations,props,characters,beatsMap);
-         const next={ ...sh, size:n.size,angle:n.angle,move:n.move,lens:n.lens,
-          composition:n.composition,subjects:n.subjects,props:n.props,action:n.action,
-          dialogue:n.dialogue,locationSide:n.locationSide,covers:[],
-           purpose:n.purpose,priority:n.priority,beatPlan:finalPlan,sourceScreenplayRev };
-         const changed=(typeof shotSpecFingerprint==="function")&&shotSpecFingerprint(sh)!==shotSpecFingerprint(next);
-         next.specRev=(typeof shotSpecRevision==="function"?shotSpecRevision(sh):(Number(sh.specRev)||1))+(changed?1:0);
-         next.specHash=(typeof shotSpecFingerprint==="function")?shotSpecFingerprint(next):"";
-         return next;
+      // Match each new moment to the old shot that already owned it; otherwise use
+      // the next unused ID. New moments receive new IDs. This protects existing art
+      // while making the stored order and covers arrays unambiguous.
+      const sourceScreenplayRev=(typeof screenplayBeatRevision==="function")?screenplayBeatRevision(draft,beatN):"";
+      const used=new Set(), baseOrder=existing.length?Math.min(...existing.map(s=>Number(s.order)||0)):(Number(beatN)-1);
+      const remapped=rows.map((row,idx)=>{
+        const moment=idx+1;
+        let sh=existing.find(s=>!used.has(s.id)&&Array.isArray(s.covers)&&s.covers.map(Number).includes(moment));
+        if(!sh) sh=existing.find(s=>!used.has(s.id));
+        if(sh) used.add(sh.id);
+        const n=normalizeShot({ ...row, covers:[moment], beatPlan:finalPlan },scene,idx,locations,props,characters,beatsMap);
+        const id=sh?sh.id:("shot-"+scene.id+"-b"+beatN+"m"+moment+"-"+Date.now().toString(36));
+        const next={ ...(sh||{}), ...n, id, beatN:Number(beatN), order:baseOrder+idx*0.01,
+          covers:[moment],beatPlan:finalPlan,sourceScreenplayRev };
+        const changed=sh&&typeof shotSpecFingerprint==="function"&&shotSpecFingerprint(sh)!==shotSpecFingerprint(next);
+        next.specRev=sh?((typeof shotSpecRevision==="function"?shotSpecRevision(sh):(Number(sh.specRev)||1))+(changed?1:0)):1;
+        next.specHash=(typeof shotSpecFingerprint==="function")?shotSpecFingerprint(next):"";
+        return next;
       });
-      const coverage=(typeof window.microCoverage==="function")
-        ? window.microCoverage(remapped,finalPlan.micro,{force:true}) : {map:{}};
-      setShots(ss=>ss.map(sh=>{
-        const n=remapped.find(x=>x.id===sh.id); if(!n) return sh;
-        return { ...n, covers:Array.from((coverage.map&&coverage.map[sh.id])||[]) };
-      }));
-       if(window.appToast) window.appToast("Beat "+beatN+" refined. Logical shot IDs were preserved; media from changed shot specifications is now marked stale.","ok");
+      // Preserve surplus hand-made/legacy alternatives after the canonical moment
+      // shots, but detach them from the one-to-one micro-beat map.
+      const extras=existing.filter(s=>!used.has(s.id)).map((s,i)=>({ ...s,covers:[],order:baseOrder+(rows.length+i)*0.01 }));
+      const oldIds=new Set(existing.map(s=>s.id));
+      setShots(ss=>ss.filter(s=>!oldIds.has(s.id)).concat(remapped,extras));
+       if(window.appToast) window.appToast(window.__lastShotDraftTruncated
+         ? "Beat "+beatN+" refined from its screenplay. TURN recovered the shortened reply without discarding existing media."
+         : "Beat "+beatN+" refined. Logical shot IDs were preserved; media from changed shot specifications is now marked stale.","ok");
     }catch(e){ if(window.appToast) window.appToast(String((e&&e.message)||"Beat refinement failed."),"error"); }
     setRefiningBeat(null);
   };
@@ -2653,9 +2821,9 @@ function App(){
     const existing = shots.filter(x=>x.sceneId===scene.id && x.beatN===beatN);
     let ok = true;
     if(typeof window.appConfirm==="function")
-      ok = await window.appConfirm({ title:"Break beat "+beatN+" into shots?",
-        body:"MUSE designs 2\u20134 shots for this beat \u2014 one per distinct visual event, in cut order. The beat's current "+existing.length+" shot"+(existing.length===1?"":"s")+" (including any generated frame's place in the chain) will be REPLACED; other beats are untouched. Writing-model credits only \u2014 frames render separately.",
-        confirmLabel:"Break into shots", cancelLabel:"Cancel" });
+      ok = await window.appConfirm({ title:"Build beat "+beatN+"'s micro-beat shots?",
+        body:"MUSE derives this beat's ordered micro-beat moments and creates exactly one shot for each. The beat's current "+existing.length+" shot"+(existing.length===1?"":"s")+" (including any generated frame's place in the chain) will be REPLACED; other beats are untouched. Writing-model credits only \u2014 frames render separately.",
+        confirmLabel:"Build micro-beat shots", cancelLabel:"Cancel" });
     if(!ok) return;
     setSplittingBeat(scene.id+"#"+beatN);
     try{
@@ -2665,7 +2833,7 @@ function App(){
       if(rows.length && typeof normalizeShot==="function"){
         const baseOrder = existing.length ? Math.min(...existing.map(x=>x.order||0)) : (beatN-1);
         const stamp = Date.now().toString(36);
-        const made = rows.slice(0,4).map((r,i)=>({
+        const made = rows.map((r,i)=>({
           ...normalizeShot(r, scene, i, locations, props, characters, beatsMap),
           id:"shot-"+scene.id+"-b"+beatN+String.fromCharCode(97+i)+"-"+stamp,
           beatN, order: baseOrder + i*0.01 }));
@@ -3220,14 +3388,20 @@ function App(){
     const _modelFor = (c)=>{ const m=(typeof nbGetMeta==="function")?nbGetMeta(c.id):null;
       return (m&&m.modelId) || (_gpt2m&&_gpt2m.id) || ((typeof nbGetModel==="function")?nbGetModel():undefined); };
     const _genCharImage = async (slotId, prompt, opts)=>{
-      const gopts = { aspectRatio:"16:9", ...(opts||{}) };
+      const { commitRefs=[], metaExtra=null, ...generateOpts } = opts||{};
+      const gopts = { aspectRatio:"16:9", ...generateOpts };
       let url;
       try{ url = await window.nbGenerate(prompt, gopts); }
       catch(e){ if(/no image/i.test(String((e&&e.message)||e))){ url = await window.nbGenerate(prompt, gopts); } else throw e; }
+      let priorVersion = 0;
+      if(typeof nbLoadDetailsAsset==="function"){
+        try{ const d=await nbLoadDetailsAsset(slotId); priorVersion=Number(d&&d.meta&&d.meta.version)||0; }catch(e){}
+      }
       const meta = { modelId: gopts.model || ((typeof nbGetModel==="function")?nbGetModel():undefined), aspect:"16:9",
-        iso:new Date().toISOString(), prompt, agent:"Casting Director" };
+        iso:new Date().toISOString(), prompt, agent:"Casting Director", version:priorVersion+1,
+        ...(metaExtra||{}) };
       const kind = (typeof slotAssetKind==="function") ? slotAssetKind("charref-"+slotId) : "character";
-      await window.nbCommit(slotId, url, meta, [], kind);
+      await window.nbCommit(slotId, url, meta, commitRefs, kind);
       try{ window.dispatchEvent(new CustomEvent("nb-gen-done",{ detail:{ id:slotId, url } })); }catch(e){}
       return url;
     };
@@ -3247,15 +3421,35 @@ function App(){
         const merged = adds.length ? [...existing, ...adds] : existing;
         if(adds.length) updateCharacter(c.id, { states: merged });
         return merged; },
-      generateMaster: async (c)=>{
+      generateMaster: async (c, generateOpts)=>{
+        generateOpts = generateOpts||{};
         let prompt = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project, props) : "";
-        const refs=[];
-        for(const p of (props||[]).filter(p=>p.ownerId===c.id && p.kind!=="carried")){ const u=await _grabImg(p.id); if(u) refs.push(u); }
+        const excluded = new Set(Array.isArray(c.wornReferenceExclusions)?c.wornReferenceExclusions:[]);
+        const worn = (props||[]).filter(p=>p.ownerId===c.id && p.kind!=="carried");
+        const refs=[]; const commitRefs=[];
+        for(const p of worn.filter(p=>!excluded.has(p.id))){ const u=await _grabImg(p.id); if(u){
+          refs.push(u); commitRefs.push({kind:"prop",label:p.name||"Worn prop",url:u,refId:p.id});
+        } }
         const cameo = await _cameoOf(c.id);
-        if(refs.length) prompt += " The additional prop reference image(s) show items this character wears/carries — match them EXACTLY.";
+        if(refs.length) prompt += " The additional prop reference image(s) are APPROVED worn-prop designs. Lock their exact shape, material, colour, wear and scale onto the character. Worn items without an attached image remain governed by the textual specification.";
         if(cameo.length) prompt += " Keep the FACE, bone structure and skin tone identical to the locked-likeness reference; only wardrobe and condition change.";
+        let referenceImage="";
+        if(generateOpts.deriveFromCurrent){ referenceImage=await _grabImg(c.id);
+          if(referenceImage){
+            prompt = "Update this existing master character sheet. Preserve the EXACT same identity, face, hair, skin tone, age, build, body proportions, panel layout, framing and render style from the base sheet. Apply the current production specification and approved worn-prop designs without re-casting the character. "+prompt;
+            commitRefs.unshift({kind:"base",label:"Previous master character sheet",url:referenceImage,refId:c.id});
+          }
+        }
         const extra=[...refs, ...cameo];
-        return _genCharImage(c.id, prompt, { model:_modelFor(c), ...(extra.length?{ extraImages:extra }:{}) }); },
+        const usedIds=new Set(commitRefs.filter(r=>r.kind==="prop").map(r=>r.refId));
+        const wornReferences = typeof window.loadWornReferenceSnapshot==="function"
+          ? await window.loadWornReferenceSnapshot(c,worn,usedIds) : [];
+        const visual=wornReferences.filter(r=>r.mode==="visual").length;
+        return _genCharImage(c.id, prompt, { model:_modelFor(c),
+          ...(referenceImage?{referenceImage}:{}), ...(extra.length?{ extraImages:extra }:{}),
+          commitRefs, metaExtra:{ specPrompt:(typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project, props) : prompt,
+            wornSig:(typeof window.wornPropsSig==="function")?window.wornPropsSig(worn,c.id):"",
+            wornReferences, wornRefSummary:{total:wornReferences.length,visual,text:wornReferences.length-visual} } }); },
       generateState: async (c, st, baseUrl)=>{
         const base = (typeof combinedImagePrompt==="function") ? combinedImagePrompt(c, project, props) : "";
         const prompt = base + " APPEARANCE STATE — "+(st.label||"variant")+": "+(st.change||"")
@@ -3268,9 +3462,16 @@ function App(){
       // worn props of this character that ALREADY have a generated sheet — the trigger for
       // the Coordinator's "wear props" pass (re-generate the master so it wears them exactly).
       wornPropsWithSheets: async (c)=>{
+        const excluded=new Set(Array.isArray(c.wornReferenceExclusions)?c.wornReferenceExclusions:[]);
         const worn = (props||[]).filter(p=>p && p.ownerId===c.id && p.kind!=="carried");
-        const out=[]; for(const p of worn){ const u=await _grabImg(p.id); if(u) out.push(p); }
-        return out; },
+        const out=[]; for(const p of worn){ const u=await _grabImg(p.id); if(u&&!excluded.has(p.id)) out.push(p); }
+        if(!out.length) return [];
+        if(typeof window.loadWornReferenceSnapshot!=="function" || typeof window.compareWornReferenceSnapshots!=="function") return out;
+        let meta=null; try{ const d=await nbLoadDetailsAsset(c.id); meta=d&&d.meta; }catch(e){}
+        const current=await window.loadWornReferenceSnapshot(c,worn);
+        const reasons=window.compareWornReferenceSnapshots(meta&&meta.wornReferences||[],current);
+        return reasons.length ? out : [];
+      },
     };
 
     // ---- Props Master surface (Props tab agent): derive → draft → dedup → generate ----
@@ -3622,6 +3823,10 @@ function App(){
   const draftSceneNow = drafting ? scenes[Math.min(drafting.i||0, Math.max(0, scenes.length-1))] : null;
   const draftSceneNo = draftSceneNow && draftSceneNow.no!=null ? String(draftSceneNow.no).padStart(2,"0") : "";
   const busyShotSceneNo = sceneByBusyShot && sceneByBusyShot.no!=null ? String(sceneByBusyShot.no).padStart(2,"0") : "";
+  const refiningBeatParts = refiningBeat ? String(refiningBeat).split("#") : [];
+  const refiningBeatScene = refiningBeatParts.length ? scenes.find(s=>String(s.id)===refiningBeatParts[0]) : null;
+  const refiningBeatNo = refiningBeatParts.length>1 ? refiningBeatParts[1] : "";
+  const refiningBeatSceneNo = refiningBeatScene&&refiningBeatScene.no!=null ? String(refiningBeatScene.no).padStart(2,"0") : "";
   const draftingProgress = drafting && (drafting.total||scenes.length)
     ? ((Number(drafting.i||0) + (drafting.one ? 0.35 : 1)) / Math.max(1, Number(drafting.total||scenes.length))) * 100
     : null;
@@ -3662,6 +3867,10 @@ function App(){
     (room==="art" && taggingScenes) ? {
       title:"MUSE is mapping props to scenes",
       detail:"Checking where each prop appears so downstream shots attach the right references."
+    } :
+    (room==="art" && refiningBeat) ? {
+      title:"MUSE is refining Beat "+refiningBeatNo+" in Scene "+refiningBeatSceneNo,
+      detail:"Grouping the screenplay into composed dramatic moments, then designing one shot for each while preserving reusable frames."
     } :
     (room==="art" && draftingSceneShots) ? {
       title:"MUSE is designing shots for Scene "+busyShotSceneNo,
@@ -3876,7 +4085,6 @@ function App(){
             onPullFromScript:pullLocationsFromScript,scriptHasLocs:(typeof scriptHasLocations==="function" && scriptHasLocations(scenes)),
             sluglineUnits,onUpdateUnit:updateSlugUnitOverlay,onRemoveUnit:removeSlugUnitOverlay,
             onAssignStyles:assignSceneStyles,assigningStyles,onSetStyleRefs:setStyleRefs,onSetScenePreset:setScenePreset,
-            onSetWorldScale:setWorldScale,
             onAddStyleRefImages:addStyleRefImages,onRemoveStyleRefImage:removeStyleRefImage,
             onDraftStaging:draftLocationStaging,draftingStageId,
             shots,beatsMap,onUpdateShot:updateShot,onAddShot:addShot,onDeleteShot:deleteShot,onSplitBeat:splitBeatCoverage,splittingBeat,

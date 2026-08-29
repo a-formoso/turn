@@ -40,6 +40,15 @@ window.dedupeLookbookCards = dedupeLookbookCards;
 function lookbookCardDrafted(c){ return !!((c && (c.note||"")).trim()); }
 window.lookbookCardDrafted = lookbookCardDrafted;
 
+function lookbookDefaultName(c){
+  const category = String((c&&c.category)||"Visual").trim();
+  const note = String((c&&c.note)||"").trim().replace(/\s+/g," ");
+  if(!note) return category+" study";
+  const words = note.split(" ").slice(0,5).join(" ").replace(/[.,;:!?]+$/,"");
+  return category+" study — "+words;
+}
+window.lookbookDefaultName = lookbookDefaultName;
+
 /* Mood-frame prompt: an ORIGINAL frame that captures the reference's visual LANGUAGE only
    (palette / lighting / lens / texture) — deliberately NOT a depiction of any named film,
    scene, character or logo, so it stays copyright-clean (same principle as the Colorist). */
@@ -49,11 +58,13 @@ function buildLookbookPrompt(c, project){
   const cat = (c.category||"Palette");
   const period = P.setting && P.setting.period ? P.setting.period.split(/[—,]/)[0].trim() : "";
   const tone = [P.genre, period].filter(Boolean).join(", ");
-  let s = "Cinematic visual-reference frame — a "+cat.toLowerCase()+" study. ";
-  s += note ? (note+". ") : "";
-  if(tone) s += tone+" tone. ";
-  s += "An ORIGINAL frame that captures this visual LANGUAGE only — palette, lighting, lens, texture, atmosphere. ";
-  s += "Do NOT depict any specific recognizable film, scene, character, real person, logo or on-screen text; no words in the image. ";
+  let s = "Cinematic visual-reference frame.\n";
+  s += "CATEGORY FOCUS: "+cat+".\n";
+  if(note) s += "VISUAL QUALITY TO BORROW: "+note+".\n";
+  if(tone) s += "PROJECT TONE: "+tone+".\n";
+  s += "Create an ORIGINAL frame that expresses the selected category and visual quality above. ";
+  s += "Translate the reference language only — palette, lighting, lens, texture and atmosphere — never its story content.\n";
+  s += "Do NOT depict any specific recognizable film, scene, character, real person, logo or on-screen text; no words in the image.\n";
   s += "Photoreal, evocative, filmic, shallow depth of field. --ar 16:9";
   return s;
 }
@@ -237,16 +248,10 @@ function LookbookCard({ c, project, onUpdate, onDelete, onView, batchActiveId, o
       React.createElement("div",{className:"sheet-head"},
         React.createElement("div",{style:{flex:1,minWidth:0}},
           React.createElement("div",{className:"sheet-name"},
-            React.createElement(EditText,{value:c.source,placeholder:"Reference — film, cinematographer, palette…",onCommit:val=>onUpdate(c.id,{source:val})})),
-          React.createElement("div",{className:"sheet-role"}, c.category||"Palette"))),
-
-      // always rendered (showWhenEmpty): the lookbook grid mixes rendered and unrendered
-      // cards side by side, so a vanishing QA button read as inconsistent — frameless
-      // cards now show it disabled with the unlock reason instead
-      window.QaCheckButton && React.createElement("div",{className:"card-qa-row"},
-        React.createElement(window.QaCheckButton,{ gen, name:c.source||"Reference", noun:"mood frame", showWhenEmpty:true,
-          specFields:()=>({ category:(c.category||""), note:(c.note||"") }),
-          onApplySpec:(patch)=>onUpdate(c.id, patch) })),
+            React.createElement(EditText,{value:c.source||lookbookDefaultName(c),placeholder:"Reference — film, cinematographer, palette…",
+              onCommit:val=>{ const clean=String(val||"").trim(); onUpdate(c.id,clean
+                ? {source:clean,autoNamed:false}
+                : {source:lookbookDefaultName(c),autoNamed:true}); }})))),
 
       !drafted && !gen.genUrl && React.createElement("div",{className:"sheet-undrafted"},
         React.createElement(Icon.alert,{s:13}),
@@ -274,6 +279,20 @@ function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSe
   const batch = useBatchGen();
   const batchActiveId = batch.activeId;
   const list = dedupeLookbookCards(lookbook || []);
+  const pendingAddedId = React.useRef("");
+  const addReference = ()=>{
+    const id = onAdd && onAdd();
+    if(id) pendingAddedId.current=id;
+  };
+  React.useEffect(()=>{
+    const id=pendingAddedId.current;
+    if(!id || !list.some(c=>c.id===id)) return;
+    pendingAddedId.current="";
+    requestAnimationFrame(()=>{
+      const card=document.querySelector('[data-look-card="'+id+'"]');
+      if(card) card.scrollIntoView({behavior:"smooth",block:"center"});
+    });
+  },[list.map(c=>c.id).join("|")]);
   const draftedIds = (subset)=> subset.filter(c=>lookbookCardDrafted(c)).map(c=>c.id);
   const eligibleAll = list.filter(c=>lookbookCardDrafted(c)).length;
   const startAllBatch = ()=>{
@@ -294,7 +313,7 @@ function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSe
             React.createElement(window.InfoTip,{label:"About the Lookbook",
               text:"The film's visual north star, built first so it can steer everything downstream. A short visual statement plus reference touchstones — palette, lighting, lens, texture — each can have a mood frame in that visual language (original frames, never copies of the named films). 'Research the look' writes the statement and gathers/dedupes the references. 'Generate all frames' renders the mood frames afterwards."}))),
         React.createElement("div",{className:"art-intro-actions"},
-          React.createElement("button",{className:"art-draftall ghost",onClick:onAdd,title:"Add a reference by hand"},
+          React.createElement("button",{className:"art-draftall ghost",onClick:addReference,title:"Add a reference by hand"},
             React.createElement(Icon.plus,{s:14})),
           onResearch && React.createElement("button",{className:"art-draftall ghost",onClick:onResearch,
             title:"Visual Researcher — writes the look statement and gathers reference touchstones. Use Generate all frames when you want to render the mood frames."},
@@ -324,7 +343,7 @@ function LookbookView({ project, lookbook, note, onUpdate, onAdd, onDelete, onSe
           React.createElement("div",{style:{display:"flex",gap:8,marginTop:16}},
             onResearch && React.createElement("button",{className:"art-draftall",onClick:onResearch},
               React.createElement(Icon.robot,{s:14}),"Research the look"),
-            React.createElement("button",{className:"art-draftall ghost",onClick:onAdd},
+            React.createElement("button",{className:"art-draftall ghost",onClick:addReference},
               React.createElement(Icon.plus,{s:14}),"Add by hand"))));
 }
 window.LookbookView = LookbookView;

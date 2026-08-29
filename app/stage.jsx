@@ -413,10 +413,25 @@ function buildClipData(scene, g, ctx, maxSec){
   const clipProps = propIds.map(id=>{
     const p = ctx.propById[id];
     if(!p || !p.name) return null;
-    const so = (typeof shotPropSheetId==="function") ? shotPropSheetId(p, scene, _storyScenes) : { id:p.id, state:null };
+    // A clip may cross several micro-beats. Resolve every member shot and attach the
+    // prop only when it is active in at least one of those precise moments; do not let
+    // the first shot's state erase a later pickup/placement.
+    const resolvedStates = (shots||[]).map(sh=>(typeof propStateAt==="function")
+      ? propStateAt(p,scene&&scene.id,sh&&sh.beatN,sh&&sh.microBeatId,sh&&sh.id,ctx) : null).filter(Boolean);
+    const activeResolved = resolvedStates.filter(x=>x.active);
+    const rs = activeResolved.slice().reverse().find(x=>x.referenceAssetId)
+      || activeResolved[0]
+      || resolvedStates[0]
+      || null;
+    if(resolvedStates.length && !resolvedStates.some(x=>x.active)) return null;
+    const stateAsset=rs&&rs.referenceAssetId;
+    const so = stateAsset ? {id:stateAsset,state:{label:(rs.event&&rs.event.referenceStateLabel)||rs.condition||"changed condition"}}
+      : ((typeof shotPropSheetId==="function") ? shotPropSheetId(p, scene, _storyScenes) : { id:p.id, state:null });
     const co = (typeof custodyOwnerAt==="function") ? custodyOwnerAt(p, scene, _storyScenes) : { name:p.ownerName, handover:null };
-    return { id:p.id, sheetId:so.id||p.id, name:p.name, kind:p.kind||"",
-      stateLabel:(so.state&&so.state.label)||"", holder:co.name||p.ownerName||"", handover:co.handover||null };
+    return { id:p.id, sheetId:so.id||p.id, name:p.name, kind:(rs&&rs.bindingMode)||p.kind||"",
+      stateLabel:(so.state&&so.state.label)||((rs&&rs.condition&&rs.condition!=="intact")?rs.condition:""),
+      holder:(rs&&rs.holderName)||co.name||p.ownerName||"", placement:rs&&rs.placement||null,
+      visibility:(rs&&rs.visibility)||"visible", handover:co.handover||null };
   }).filter(Boolean);
   const loc = (typeof locationForScene==="function") ? locationForScene(ctx.locations, scene.id) : null;
   // coverage-sheet resolution: the screenplay-derived unit/coverage sheet (e.g. "Minicab
@@ -504,6 +519,15 @@ function buildClipData(scene, g, ctx, maxSec){
   return { shots, first, cast, props:clipProps, loc, locSheet, preset, camera, cameraProfile, lighting, lead, prompt, chips, setting, panelLines, protect, beatDialogues,
     dur:_clipDur(g, maxSec), lineShots };
 }
+
+function stageClipPropDependencySignature(clipData, sceneId, context){
+  if(typeof propDependencySignature!=="function") return "";
+  const C=context||window.turnContinuity||{};
+  return ((clipData&&clipData.shots)||[]).map(sh=>
+    String(sh.id||"")+"="+propDependencySignature(C.props||[],sceneId,sh.beatN,sh.microBeatId,sh.id,C)
+  ).join("||");
+}
+window.stageClipPropDependencySignature = stageClipPropDependencySignature;
 
 /* beat-boundary page geometry for a scene — the SAME source of truth as the
    Storyboards tab (window.sbPageRanges); falls back to fixed 4-shot chunks when the
@@ -1779,16 +1803,20 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
       (sceneClips||[]).forEach(sc=>((sc&&sc.data&&sc.data.props)||[]).forEach(p=>p&&p.id&&scenePropIds.add(p.id)));
       (ctx.props||[]).forEach(p=>{
         if(!p||!p.id) return;
-        if((Array.isArray(p.scenes)&&p.scenes.indexOf(scene.id)>=0) || (p.ownerId&&rosterSet.has(p.ownerId))) scenePropIds.add(p.id);
+        const rs=(typeof propStateAt==="function") ? propStateAt(p,scene.id,activeShot&&activeShot.beatN,activeShot&&activeShot.microBeatId,activeShot&&activeShot.id,ctx) : null;
+        if((rs&&rs.active) || (!rs&&((Array.isArray(p.scenes)&&p.scenes.indexOf(scene.id)>=0) || (p.ownerId&&rosterSet.has(p.ownerId))))) scenePropIds.add(p.id);
       });
       scenePropIds.forEach(id=>{
         const p=(ctx.propById||{})[id]; if(!p) return;
-        const so=(typeof shotPropSheetId==="function") ? shotPropSheetId(p,scene,ctx.scenes||[]) : {id:p.id,state:null};
+        const rs=(typeof propStateAt==="function") ? propStateAt(p,scene.id,activeShot&&activeShot.beatN,activeShot&&activeShot.microBeatId,activeShot&&activeShot.id,ctx) : null;
+        if(rs && !rs.active) return;
+        const so=(typeof shotPropSheetId==="function") ? shotPropSheetId(p,scene,ctx.scenes||[],activeShot&&activeShot.beatN,activeShot&&activeShot.microBeatId,activeShot&&activeShot.id,ctx) : {id:p.id,state:null};
         const co=(typeof custodyOwnerAt==="function") ? custodyOwnerAt(p,scene,ctx.scenes||[]) : {name:p.ownerName||""};
         const sid=so.id||p.id, u=imgs[sid];
         if(u) addSceneAsset({ key:"p:"+p.id, kind:"image", group:"Props", label:(p.name||"Prop")
             +(so.state&&so.state.label?(" — "+so.state.label):"")
-            +(co.name?(" · "+((p.kind||"")==="worn"?"worn by ":"carried by ")+co.name):""),
+            +((rs&&rs.holderName)||co.name?(" · "+(((rs&&rs.bindingMode)||p.kind||"")==="worn"?"worn by ":"carried by ")+((rs&&rs.holderName)||co.name)):"")
+            +(rs&&rs.placement&&rs.placement.locationId?(" · placed in "+(((ctx.locations||[]).find(l=>l.id===rs.placement.locationId)||{}).name||"location")):""),
           url:u, ready:true, id:sid, assetRole:sid===p.id?"master_reference":"derived_reference",
           assetSourceQuality:sid===p.id?"prop_master_sheet":"prop_state_sheet" });
       });
@@ -2462,7 +2490,9 @@ function ClipConsole({ clip, selectedShot, sceneClips, ctx, imgs, auds, beatsMap
 	        cameraProfile:cameraProfile, cameraProfileLabel:(cameraProfile!=="auto" ? ((stageCameraProfiles.find(x=>x.id===cameraProfile)||{}).label||cameraProfile) : ""),
 	        audio: hasDialogue ? (voiceLocked ? "voice" : "native") : (nativeAudio ? "native" : "silent"),
 	        inputs: counts.text+" text · "+counts.images+" img · "+counts.videos+" vid · "+counts.audio+" aud",
-	        durationSec: duration, references: takeReferences, shotSources },
+	        durationSec: duration, references: takeReferences, shotSources,
+	        propDependencies:(typeof stageClipPropDependencySignature==="function")
+	          ? stageClipPropDependencySignature(d,scene&&scene.id,window.turnContinuity||{}) : "" },
       // start→end transitions render on the dedicated i2v endpoint, which needs BOTH
       // frames — with the start frame excluded, the end frame quietly stands down
       endImageUrl: (frameUrl ? endFrameUrl : "") || undefined, force:true };
@@ -3554,6 +3584,10 @@ function StageVersionsView({ clip, stageModel, onBack, onReuse }){
     ? shotSourcesStatus(((clip&&clip.data&&clip.data.shots)||[]),
         ((window.turnContinuity||{}).drafts||{}),(t&&t.meta)||{}) : "unverified";
   const selSourceStatus=sel?versionSourceStatus(sel):"";
+  const currentPropDependencies=(typeof stageClipPropDependencySignature==="function")
+    ? stageClipPropDependencySignature((clip&&clip.data)||{},clip&&clip.scene&&clip.scene.id,window.turnContinuity||{}) : "";
+  const propDependenciesStale=(t)=>!!(t&&t.meta&&t.meta.propDependencies!=null
+    && t.meta.propDependencies!==currentPropDependencies);
   const versionEditorialStatus = (t)=> typeof shotSourcesEditorialStatus==="function"
     ? shotSourcesEditorialStatus(((clip&&clip.data&&clip.data.shots)||[]),
         ((window.turnContinuity||{}).drafts||{}),(t&&t.meta)||{}) : versionSourceStatus(t);
@@ -3613,6 +3647,7 @@ function StageVersionsView({ clip, stageModel, onBack, onReuse }){
     if(editorialStatus==="override") out.push(_stEl("span",{key:"o",className:"stage2-vbadge override"},"Source override"));
     else if(sourceStatus!=="current") out.push(_stEl("span",{key:"s",className:"stage2-vbadge "+sourceStatus},
       sourceStatus==="stale"?"Stale source":"Source unverified"));
+    if(propDependenciesStale(t)) out.push(_stEl("span",{key:"p",className:"stage2-vbadge stale"},"Prop reference changed"));
     return out;
   };
   const detailRows = sel ? [
@@ -3674,6 +3709,10 @@ function StageVersionsView({ clip, stageModel, onBack, onReuse }){
           sel ? _stEl("video",{key:sel.url,className:"stage2-versions-video",src:sel.url,controls:true,playsInline:true,
             title:"Double-click for full screen",onDoubleClick:(e)=>_stageVideoFullscreen(e.currentTarget)}) : null,
           sel && _stEl("div",{className:"stage2-versions-details"},
+            propDependenciesStale(sel) && _stEl("div",{className:"stage2-source-warning stale"},
+              selApproved
+                ? "A prop used by this take has changed. This approved take remains pinned; update it only when you intentionally render a new version."
+                : "A prop used by this take has changed in the Art Room. Render a new version to use the current prop state and reference sheet."),
             selEditorialStatus!=="current" && _stEl("div",{className:"stage2-source-warning "+selEditorialStatus},
               selEditorialStatus==="override"
                 ?"Explicit source override: this historical take is approved for the current shot sources. Any later shot or screenplay change invalidates the override."
@@ -4270,7 +4309,8 @@ function StageView({ project, scenes, shots, characters, locations, props, beats
   const propSig = JSON.stringify((props||[]).map(p=>[p.id,p.name,
     (p.states||[]).map(st=>[st.id,st.sceneId,st.label]).join("|"),
     (p.custody||[]).map(cu=>[cu.charId,cu.charName,cu.fromSceneId]).join("|"),
-    p.ownerId||p.ownerName||""]));
+    (p.continuityEvents||[]).map(e=>[e.type,e.sceneId,e.beatId,e.microBeatId,e.shotId,e.holderId,e.locationId,e.condition,e.visibility,e.note]).join("|"),
+    p.kind||p.bindingMode||"",p.ownerId||p.ownerName||"",p.custodianId||"",p.associationId||"",p.locationId||p.placementLocationId||""]));
   const locSig = JSON.stringify((locations||[]).map(l=>[l.id,l.name,(l.scenes||[]).join("|"),
     (l.coverageSheets||[]).map(v=>[v.id,v.role,v.name,(v.triggerWords||[]).join("~")]).join("|")]));
   const draftSig = JSON.stringify(Object.entries(drafts||{}).map(([id,d])=>[id,(d&&d.version)||"",((d&&d.blocks)||[]).map(b=>[b.beat,b.type,b.text]).join("|")]));
